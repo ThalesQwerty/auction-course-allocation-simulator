@@ -32,6 +32,10 @@ def test_price_is_second_highest_unsuccessful_bid():
     # eq. (25): consumo do vencedor é o preço de mercado, não o próprio lance
     assert result.consumption[("a1", "x1")] == 50
     assert result.remaining_budget["a1"] == 50
+    # eq. (14): capacidade restante = W_a - peso do bem recebido (10 - 1)
+    assert result.remaining_capacity["a1"] == 9
+    assert result.remaining_capacity["a2"] == 10
+    assert result.remaining_capacity["a3"] == 10
 
 
 def test_price_defaults_to_one_when_no_unsuccessful_bids():
@@ -105,6 +109,7 @@ def test_no_bids_returns_empty_result():
     result = run_auction(auction_input)
     assert result.allocation == {}
     assert result.remaining_budget == {"a1": 100}
+    assert result.remaining_capacity == {"a1": 10}
 
 
 def test_deterministic_given_same_seed():

@@ -43,6 +43,7 @@ class RunResponse(BaseModel):
     prices: dict[str, int]
     consumption: dict[str, int]
     remaining_budget: dict[str, int]
+    remaining_capacity: dict[str, float]
 
     @staticmethod
     def from_result(result: AuctionResult) -> "RunResponse":
@@ -51,4 +52,5 @@ class RunResponse(BaseModel):
             prices=result.prices,
             consumption={f"{a}|{g}": v for (a, g), v in result.consumption.items()},
             remaining_budget=result.remaining_budget,
+            remaining_capacity=result.remaining_capacity,
         )

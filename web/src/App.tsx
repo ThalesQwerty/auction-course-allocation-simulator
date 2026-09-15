@@ -353,12 +353,22 @@ function ResultsPanel({ scenario, result }: { scenario: RunRequest; result: RunR
         </tbody>
       </table>
 
-      <h2 style={{ marginTop: 20 }}>Orçamento restante por aluno</h2>
+      <h2 style={{ marginTop: 20 }}>Orçamento e carga horária restantes por aluno</h2>
       <table>
-        <thead><tr><th>Aluno</th><th>Créditos restantes</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Aluno</th>
+            <th>Créditos restantes</th>
+            <th>Carga horária restante (<Var base="W" sub="a" />)</th>
+          </tr>
+        </thead>
         <tbody>
           {Object.entries(result.remaining_budget).map(([agent_id, remaining]) => (
-            <tr key={agent_id}><td>{agent_id}</td><td>{remaining}</td></tr>
+            <tr key={agent_id}>
+              <td>{agent_id}</td>
+              <td>{remaining}</td>
+              <td>{result.remaining_capacity[agent_id]}</td>
+            </tr>
           ))}
         </tbody>
       </table>

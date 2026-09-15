@@ -47,9 +47,10 @@ def main() -> None:
     for (agent_id, good_id), consumed in result.consumption.items():
         print(f"  {agent_id:6s} pagou {consumed} créditos por {good_id}")
 
-    print("\n=== Orçamento restante por aluno ===")
+    print("\n=== Orçamento e carga horária restantes por aluno ===")
     for agent_id, remaining in result.remaining_budget.items():
-        print(f"  {agent_id:6s}: {remaining} créditos restantes")
+        remaining_capacity = result.remaining_capacity[agent_id]
+        print(f"  {agent_id:6s}: {remaining} créditos restantes, {remaining_capacity} de carga horária restante")
 
 
 if __name__ == "__main__":

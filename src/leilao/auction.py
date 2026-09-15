@@ -83,6 +83,7 @@ class AuctionResult:
     # também é.
     consumption: dict[tuple[str, str], int]  # delta_{a,x} — eq. (25)
     remaining_budget: dict[str, int]  # C_a - Delta_a — eq. (27)
+    remaining_capacity: dict[str, float]  # W_a - soma dos w_x recebidos — eq. (14)
 
 
 def _compute_prices(
@@ -115,8 +116,9 @@ def _compute_consumption(
 def run_auction(auction_input: AuctionInput) -> AuctionResult:
     """Executa uma rodada de leilão: resolve o WDP e liquida preços/consumo."""
     bids = {(b.agent_id, b.good_id): b.credits for b in auction_input.bids}
+    initial_capacity = {a.id: a.capacity for a in auction_input.agents}
     if not bids:
-        return AuctionResult({}, {}, {}, {}, dict(auction_input.budgets))
+        return AuctionResult({}, {}, {}, {}, dict(auction_input.budgets), initial_capacity)
 
     # Preferências finais: lance + viés + desempate + perturbação — eq. (22)
     rectified_bias = rectify_bias(auction_input.bias)
@@ -150,9 +152,12 @@ def run_auction(auction_input: AuctionInput) -> AuctionResult:
     prices = _compute_prices(goods=auction_input.goods, bids=bids, allocation=allocation)
     consumption = _compute_consumption(bids=bids, allocation=allocation, prices=prices)
 
+    weight_by_good = {g.id: g.weight for g in auction_input.goods}
     remaining_budget = dict(auction_input.budgets)
-    for (agent_id, _good_id), consumed in consumption.items():
+    remaining_capacity = dict(initial_capacity)
+    for (agent_id, good_id), consumed in consumption.items():
         remaining_budget[agent_id] -= consumed
+        remaining_capacity[agent_id] -= weight_by_good[good_id]
 
     return AuctionResult(
         bids=bids,
@@ -160,4 +165,5 @@ def run_auction(auction_input: AuctionInput) -> AuctionResult:
         prices=prices,
         consumption=consumption,
         remaining_budget=remaining_budget,
+        remaining_capacity=remaining_capacity,
     )

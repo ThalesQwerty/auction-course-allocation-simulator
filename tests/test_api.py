@@ -38,6 +38,9 @@ def test_run_returns_allocation_prices_and_consumption(client):
     assert payload["consumption"]["ana|calc1"] == 40
     assert payload["remaining_budget"]["ana"] == 60
     assert payload["remaining_budget"]["bia"] == 100
+    # ana venceu calc1 (peso 4) e tinha capacidade 10 -> restam 6; bia perdeu e mantém 10
+    assert payload["remaining_capacity"]["ana"] == 6
+    assert payload["remaining_capacity"]["bia"] == 10
     # créditos são sempre inteiros (eq. 18) — a API não deve devolver casas decimais
     assert isinstance(payload["prices"]["calc1"], int)
     assert isinstance(payload["remaining_budget"]["ana"], int)

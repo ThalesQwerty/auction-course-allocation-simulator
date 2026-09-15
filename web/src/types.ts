@@ -31,6 +31,7 @@ export interface RunResponse {
   prices: Record<string, number>; // good_id -> preço (sempre inteiro: créditos são inteiros)
   consumption: Record<string, number>; // "agent_id|good_id" -> créditos consumidos (inteiro)
   remaining_budget: Record<string, number>; // agent_id -> créditos restantes (inteiro)
+  remaining_capacity: Record<string, number>; // agent_id -> carga horária restante (W_a - Σw_x)
 }
 
 export function emptyScenario(): RunRequest {
