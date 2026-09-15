@@ -78,35 +78,37 @@ class AuctionInput:
 class AuctionResult:
     bids: dict[tuple[str, str], int]
     allocation: Allocation  # z — eq. (1)
-    prices: dict[str, float]  # pi_x — eq. (24)
-    consumption: dict[tuple[str, str], float]  # delta_{a,x} — eq. (25)
-    remaining_budget: dict[str, float]  # C_a - Delta_a — eq. (27)
+    prices: dict[str, int]  # pi_x — eq. (24). Sempre inteiro: lances (eq. 18) e o
+    # valor-padrão de 1 crédito já são inteiros, então o maior lance mal-sucedido
+    # também é.
+    consumption: dict[tuple[str, str], int]  # delta_{a,x} — eq. (25)
+    remaining_budget: dict[str, int]  # C_a - Delta_a — eq. (27)
 
 
 def _compute_prices(
     *, goods: list[Good], bids: dict[tuple[str, str], int], allocation: Allocation
-) -> dict[str, float]:
+) -> dict[str, int]:
     """Preço de mercado por bem — eq. (24): maior lance mal-sucedido, ou 1."""
-    prices: dict[str, float] = {}
+    prices: dict[str, int] = {}
     for good in goods:
         unsuccessful_bids = [
             credits
             for (agent_id, good_id), credits in bids.items()
             if good_id == good.id and allocation.get((agent_id, good_id), 0) == 0
         ]
-        prices[good.id] = float(max(unsuccessful_bids)) if unsuccessful_bids else 1.0
+        prices[good.id] = max(unsuccessful_bids) if unsuccessful_bids else 1
     return prices
 
 
 def _compute_consumption(
-    *, bids: dict[tuple[str, str], int], allocation: Allocation, prices: dict[str, float]
-) -> dict[tuple[str, str], float]:
+    *, bids: dict[tuple[str, str], int], allocation: Allocation, prices: dict[str, int]
+) -> dict[tuple[str, str], int]:
     """Consumo de créditos por demanda vencedora — eq. (25)."""
-    consumption: dict[tuple[str, str], float] = {}
+    consumption: dict[tuple[str, str], int] = {}
     for (agent_id, good_id), credits in bids.items():
         if allocation.get((agent_id, good_id), 0):
             price = prices[good_id]
-            consumption[(agent_id, good_id)] = price if credits >= price else float(credits)
+            consumption[(agent_id, good_id)] = price if credits >= price else credits
     return consumption
 
 

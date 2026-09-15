@@ -34,10 +34,13 @@ def test_run_returns_allocation_prices_and_consumption(client):
 
     assert payload["allocation"]["ana|calc1"] == 1
     assert payload["allocation"]["bia|calc1"] == 0
-    assert payload["prices"]["calc1"] == 40.0
-    assert payload["consumption"]["ana|calc1"] == 40.0
-    assert payload["remaining_budget"]["ana"] == 60.0
-    assert payload["remaining_budget"]["bia"] == 100.0
+    assert payload["prices"]["calc1"] == 40
+    assert payload["consumption"]["ana|calc1"] == 40
+    assert payload["remaining_budget"]["ana"] == 60
+    assert payload["remaining_budget"]["bia"] == 100
+    # créditos são sempre inteiros (eq. 18) — a API não deve devolver casas decimais
+    assert isinstance(payload["prices"]["calc1"], int)
+    assert isinstance(payload["remaining_budget"]["ana"], int)
 
 
 def test_run_respects_mutual_exclusion(client):

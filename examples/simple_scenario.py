@@ -41,15 +41,15 @@ def main() -> None:
 
     print("\n=== Preços de mercado (2º preço por bem) ===")
     for good_id, price in result.prices.items():
-        print(f"  {good_id:6s}: {price:.1f} créditos")
+        print(f"  {good_id:6s}: {price} créditos")
 
     print("\n=== Consumo de créditos (só quem ganhou paga) ===")
     for (agent_id, good_id), consumed in result.consumption.items():
-        print(f"  {agent_id:6s} pagou {consumed:.1f} créditos por {good_id}")
+        print(f"  {agent_id:6s} pagou {consumed} créditos por {good_id}")
 
     print("\n=== Orçamento restante por aluno ===")
     for agent_id, remaining in result.remaining_budget.items():
-        print(f"  {agent_id:6s}: {remaining:.1f} créditos restantes")
+        print(f"  {agent_id:6s}: {remaining} créditos restantes")
 
 
 if __name__ == "__main__":

@@ -28,9 +28,9 @@ export interface RunRequest {
 
 export interface RunResponse {
   allocation: Record<string, number>; // "agent_id|good_id" -> 0/1
-  prices: Record<string, number>; // good_id -> preço
-  consumption: Record<string, number>; // "agent_id|good_id" -> créditos consumidos
-  remaining_budget: Record<string, number>; // agent_id -> créditos restantes
+  prices: Record<string, number>; // good_id -> preço (sempre inteiro: créditos são inteiros)
+  consumption: Record<string, number>; // "agent_id|good_id" -> créditos consumidos (inteiro)
+  remaining_budget: Record<string, number>; // agent_id -> créditos restantes (inteiro)
 }
 
 export function emptyScenario(): RunRequest {

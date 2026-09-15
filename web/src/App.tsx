@@ -333,7 +333,7 @@ function ResultsPanel({ scenario, result }: { scenario: RunRequest; result: RunR
                 <td>{b.good_id}</td>
                 <td>{b.credits}</td>
                 <td className={won ? "status-won" : "status-lost"}>{won ? "GANHOU" : "perdeu"}</td>
-                <td>{paid !== undefined ? paid.toFixed(1) : "—"}</td>
+                <td>{paid !== undefined ? paid : "—"}</td>
               </tr>
             );
           })}
@@ -348,7 +348,7 @@ function ResultsPanel({ scenario, result }: { scenario: RunRequest; result: RunR
         <thead><tr><th>Disciplina</th><th>Preço (2º maior lance)</th></tr></thead>
         <tbody>
           {Object.entries(result.prices).map(([good_id, price]) => (
-            <tr key={good_id}><td>{good_id}</td><td>{price.toFixed(1)}</td></tr>
+            <tr key={good_id}><td>{good_id}</td><td>{price}</td></tr>
           ))}
         </tbody>
       </table>
@@ -358,7 +358,7 @@ function ResultsPanel({ scenario, result }: { scenario: RunRequest; result: RunR
         <thead><tr><th>Aluno</th><th>Créditos restantes</th></tr></thead>
         <tbody>
           {Object.entries(result.remaining_budget).map(([agent_id, remaining]) => (
-            <tr key={agent_id}><td>{agent_id}</td><td>{remaining.toFixed(1)}</td></tr>
+            <tr key={agent_id}><td>{agent_id}</td><td>{remaining}</td></tr>
           ))}
         </tbody>
       </table>

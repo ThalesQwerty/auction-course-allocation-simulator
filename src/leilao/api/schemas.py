@@ -40,9 +40,9 @@ class RunResponse(BaseModel):
     """Chaves de pares (agente, bem) são serializadas como "agent_id|good_id"."""
 
     allocation: dict[str, int]
-    prices: dict[str, float]
-    consumption: dict[str, float]
-    remaining_budget: dict[str, float]
+    prices: dict[str, int]
+    consumption: dict[str, int]
+    remaining_budget: dict[str, int]
 
     @staticmethod
     def from_result(result: AuctionResult) -> "RunResponse":

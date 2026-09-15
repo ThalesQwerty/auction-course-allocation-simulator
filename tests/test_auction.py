@@ -43,8 +43,9 @@ def test_price_defaults_to_one_when_no_unsuccessful_bids():
         seed=1,
     )
     result = run_auction(auction_input)
-    assert result.prices["x1"] == 1.0
-    assert result.consumption[("a1", "x1")] == 1.0
+    assert result.prices["x1"] == 1
+    assert result.consumption[("a1", "x1")] == 1
+    assert isinstance(result.prices["x1"], int)
 
 
 def test_capacity_constraint_prevents_overload():
