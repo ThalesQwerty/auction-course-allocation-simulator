@@ -3,6 +3,17 @@ import { runAuction } from "./api";
 import type { AgentInput, BidInput, GoodInput, RunRequest, RunResponse } from "./types";
 import { emptyScenario } from "./types";
 
+/** Renderiza uma variável matemática com subscrito (ex.: W com subscrito a),
+ * em vez da notação em texto plano W_a — mais legível na interface. */
+function Var({ base, sub }: { base: string; sub: string }) {
+  return (
+    <>
+      {base}
+      <sub>{sub}</sub>
+    </>
+  );
+}
+
 function exampleScenario(): RunRequest {
   return {
     agents: [
@@ -77,8 +88,8 @@ export default function App() {
           <thead>
             <tr>
               <th>id</th>
-              <th>Carga horária máx. (W_a)</th>
-              <th>Orçamento de créditos (C_a)</th>
+              <th>Carga horária máx. (<Var base="W" sub="a" />)</th>
+              <th>Orçamento de créditos (<Var base="C" sub="a" />)</th>
               <th />
             </tr>
           </thead>
@@ -117,8 +128,8 @@ export default function App() {
           <thead>
             <tr>
               <th>id</th>
-              <th>Vagas (q_x)</th>
-              <th>Carga horária (w_x)</th>
+              <th>Vagas (<Var base="q" sub="x" />)</th>
+              <th>Carga horária (<Var base="w" sub="x" />)</th>
               <th />
             </tr>
           </thead>

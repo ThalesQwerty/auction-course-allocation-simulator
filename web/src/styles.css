@@ -104,6 +104,10 @@ th, td {
   text-align: left;
 }
 
+th sub, td sub {
+  font-size: 0.75em;
+}
+
 input, select {
   background: var(--bg);
   color: var(--text);
