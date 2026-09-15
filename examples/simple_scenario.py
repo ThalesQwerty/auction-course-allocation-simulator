@@ -36,7 +36,7 @@ def main() -> None:
 
     print("=== Alocação (quem ganhou o quê) ===")
     for (agent_id, good_id), won in sorted(result.allocation.items()):
-        status = "GANHOU" if won else "perdeu"
+        status = "DEFERIDO" if won else "INDEFERIDO"
         print(f"  {agent_id:6s} x {good_id:6s} -> {status}")
 
     print("\n=== Preços de mercado (2º preço por bem) ===")

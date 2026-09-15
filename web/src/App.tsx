@@ -306,8 +306,8 @@ function ResultsPanel({ scenario, result }: { scenario: RunRequest; result: RunR
           <label>Resultado</label>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
             <option value="all">todos</option>
-            <option value="won">ganhou</option>
-            <option value="lost">perdeu</option>
+            <option value="won">deferido</option>
+            <option value="lost">indeferido</option>
           </select>
         </div>
       </div>
@@ -332,7 +332,7 @@ function ResultsPanel({ scenario, result }: { scenario: RunRequest; result: RunR
                 <td>{b.agent_id}</td>
                 <td>{b.good_id}</td>
                 <td>{b.credits}</td>
-                <td className={won ? "status-won" : "status-lost"}>{won ? "GANHOU" : "perdeu"}</td>
+                <td className={won ? "status-won" : "status-lost"}>{won ? "DEFERIDO" : "INDEFERIDO"}</td>
                 <td>{paid !== undefined ? paid : "—"}</td>
               </tr>
             );
