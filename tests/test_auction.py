@@ -1,112 +1,122 @@
-from leilao.auction import AuctionAgent, AuctionConfig, AuctionDemand, AuctionGood, run_auction
-from leilao.entities import MutualExclusion
+import pytest
+
+from leilao.auction import AuctionInput, Bid, run_auction
+from leilao.entities import Agent, Good, MutualExclusion
 
 
 def test_higher_bidder_wins_single_good():
-    config = AuctionConfig(
-        agents=[AuctionAgent("a1", capacity=10, budget=100), AuctionAgent("a2", capacity=10, budget=100)],
-        goods=[AuctionGood("x1", quantity=1, weight=1)],
-        demands=[
-            AuctionDemand("a1", "x1", utility=1.0),
-            AuctionDemand("a2", "x1", utility=0.2),
-        ],
-        num_rounds=1,
+    auction_input = AuctionInput(
+        agents=[Agent("a1", capacity=10), Agent("a2", capacity=10)],
+        goods=[Good("x1", quantity=1, weight=1)],
+        budgets={"a1": 100, "a2": 100},
+        bids=[Bid("a1", "x1", 80), Bid("a2", "x1", 20)],
         seed=42,
     )
-    result = run_auction(config)
-    # a1 concentra toda utilidade em x1 (u=1.0) enquanto a2 só destina 0.2 do
-    # orçamento a esse bem -> a1 dá um lance maior e vence.
-    assert result.final_allocation[("a1", "x1")] == 1
-    assert result.final_allocation.get(("a2", "x1"), 0) == 0
+    result = run_auction(auction_input)
+    assert result.allocation[("a1", "x1")] == 1
+    assert result.allocation.get(("a2", "x1"), 0) == 0
 
 
 def test_price_is_second_highest_unsuccessful_bid():
-    config = AuctionConfig(
-        agents=[AuctionAgent("a1", 10, 100), AuctionAgent("a2", 10, 100), AuctionAgent("a3", 10, 100)],
-        goods=[AuctionGood("x1", quantity=1, weight=1)],
-        demands=[
-            AuctionDemand("a1", "x1", 1.0),
-            AuctionDemand("a2", "x1", 0.5),
-            AuctionDemand("a3", "x1", 0.1),
-        ],
-        num_rounds=1,
+    auction_input = AuctionInput(
+        agents=[Agent("a1", 10), Agent("a2", 10), Agent("a3", 10)],
+        goods=[Good("x1", quantity=1, weight=1)],
+        budgets={"a1": 100, "a2": 100, "a3": 100},
+        bids=[Bid("a1", "x1", 90), Bid("a2", "x1", 50), Bid("a3", "x1", 10)],
         seed=1,
     )
-    result = run_auction(config)
-    round0 = result.rounds[0]
-    winner = next(a for (a, x) in round0.allocation if round0.allocation[(a, x)] == 1)
-    assert winner == "a1"
-    # preço deve ser o maior lance mal-sucedido: o de a2 (50 creditos)
-    assert round0.prices["x1"] == round0.bids[("a2", "x1")]
-    # consumo do vencedor é o preço de mercado, não o próprio lance (2o preço)
-    assert result.final_consumption[("a1", "x1")] == round0.prices["x1"]
+    result = run_auction(auction_input)
+    assert result.allocation[("a1", "x1")] == 1
+    # eq. (24): preço = maior lance mal-sucedido (o de a2, 50 créditos)
+    assert result.prices["x1"] == 50
+    # eq. (25): consumo do vencedor é o preço de mercado, não o próprio lance
+    assert result.consumption[("a1", "x1")] == 50
+    assert result.remaining_budget["a1"] == 50
 
 
-def test_budget_constraint_respected_across_bids():
-    config = AuctionConfig(
-        agents=[AuctionAgent("a1", capacity=10, budget=10)],
-        goods=[AuctionGood("x1", 1, 1), AuctionGood("x2", 1, 1)],
-        demands=[
-            AuctionDemand("a1", "x1", 0.5),
-            AuctionDemand("a1", "x2", 0.5),
-        ],
-        num_rounds=1,
-        seed=7,
+def test_price_defaults_to_one_when_no_unsuccessful_bids():
+    auction_input = AuctionInput(
+        agents=[Agent("a1", 10)],
+        goods=[Good("x1", quantity=1, weight=1)],
+        budgets={"a1": 100},
+        bids=[Bid("a1", "x1", 30)],
+        seed=1,
     )
-    result = run_auction(config)
-    round0 = result.rounds[0]
-    total_bid = sum(round0.bids.values())
-    # eq. (19): soma dos lances não pode ultrapassar o orçamento do agente
-    assert total_bid <= 10
+    result = run_auction(auction_input)
+    assert result.prices["x1"] == 1.0
+    assert result.consumption[("a1", "x1")] == 1.0
+
+
+def test_capacity_constraint_prevents_overload():
+    auction_input = AuctionInput(
+        agents=[Agent("a1", capacity=6)],
+        goods=[Good("x1", 1, weight=6), Good("x2", 1, weight=6)],
+        budgets={"a1": 100},
+        bids=[Bid("a1", "x1", 40), Bid("a1", "x2", 60)],
+        seed=1,
+    )
+    result = run_auction(auction_input)
+    # capacidade só comporta um dos dois bens -> vence o de maior lance (x2)
+    assert result.allocation[("a1", "x2")] == 1
+    assert result.allocation[("a1", "x1")] == 0
 
 
 def test_mutual_exclusion_prevents_both_goods_winning():
-    config = AuctionConfig(
-        agents=[AuctionAgent("a1", capacity=100, budget=20)],
-        goods=[AuctionGood("x1", 1, 1), AuctionGood("x2", 1, 1)],
-        demands=[
-            AuctionDemand("a1", "x1", 0.5),
-            AuctionDemand("a1", "x2", 0.5),
-        ],
+    auction_input = AuctionInput(
+        agents=[Agent("a1", capacity=100)],
+        goods=[Good("x1", 1, 1), Good("x2", 1, 1)],
+        budgets={"a1": 100},
+        bids=[Bid("a1", "x1", 30), Bid("a1", "x2", 30)],
         exclusions=[MutualExclusion(frozenset({"x1", "x2"}))],
-        num_rounds=1,
-        seed=3,
+        seed=1,
     )
-    result = run_auction(config)
-    total_won = sum(result.final_allocation.values())
-    assert total_won <= 1
+    result = run_auction(auction_input)
+    assert sum(result.allocation.values()) == 1
 
 
-def test_multi_round_frees_up_capacity_for_losers():
-    # Rodada 1: a1 vence x1 (orçamento maior). Rodada 2: x1 já não existe mais
-    # para a1 (eq. 15) e a2 ainda compete pelos bens remanescentes.
-    config = AuctionConfig(
-        agents=[AuctionAgent("a1", 10, 100), AuctionAgent("a2", 10, 100)],
-        goods=[AuctionGood("x1", quantity=1, weight=1)],
-        demands=[
-            AuctionDemand("a1", "x1", 1.0),
-            AuctionDemand("a2", "x1", 0.9),
-        ],
-        num_rounds=2,
-        seed=5,
+def test_budget_overspend_raises_before_solving():
+    with pytest.raises(ValueError, match="excedem o orçamento"):
+        AuctionInput(
+            agents=[Agent("a1", capacity=10)],
+            goods=[Good("x1", 1, 1), Good("x2", 1, 1)],
+            budgets={"a1": 10},
+            bids=[Bid("a1", "x1", 6), Bid("a1", "x2", 6)],
+        )
+
+
+def test_missing_budget_raises():
+    with pytest.raises(ValueError, match="sem orçamento"):
+        AuctionInput(
+            agents=[Agent("a1", capacity=10)],
+            goods=[Good("x1", 1, 1)],
+            budgets={},
+            bids=[Bid("a1", "x1", 5)],
+        )
+
+
+def test_no_bids_returns_empty_result():
+    auction_input = AuctionInput(
+        agents=[Agent("a1", 10)],
+        goods=[Good("x1", 1, 1)],
+        budgets={"a1": 100},
+        bids=[],
     )
-    result = run_auction(config)
-    assert result.final_allocation[("a1", "x1")] == 1
-    # a2 nunca pode vencer x1 pois a quantidade já foi esgotada na rodada 1
-    assert result.final_allocation.get(("a2", "x1"), 0) == 0
-    assert len(result.rounds) <= 2
+    result = run_auction(auction_input)
+    assert result.allocation == {}
+    assert result.remaining_budget == {"a1": 100}
 
 
 def test_deterministic_given_same_seed():
-    def build():
-        return AuctionConfig(
-            agents=[AuctionAgent("a1", 10, 50), AuctionAgent("a2", 10, 50)],
-            goods=[AuctionGood("x1", 1, 1)],
-            demands=[AuctionDemand("a1", "x1", 0.5), AuctionDemand("a2", "x1", 0.5)],
-            num_rounds=1,
+    def build() -> AuctionInput:
+        return AuctionInput(
+            agents=[Agent("a1", 10), Agent("a2", 10)],
+            goods=[Good("x1", 1, 1)],
+            budgets={"a1": 50, "a2": 50},
+            bids=[Bid("a1", "x1", 25), Bid("a2", "x1", 25)],
             seed=99,
         )
 
     result_a = run_auction(build())
     result_b = run_auction(build())
-    assert result_a.final_allocation == result_b.final_allocation
+    assert result_a.allocation == result_b.allocation
+    assert result_a.prices == result_b.prices
