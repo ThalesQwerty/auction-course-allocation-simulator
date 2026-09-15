@@ -262,10 +262,56 @@ export default function App() {
   );
 }
 
+type StatusFilter = "all" | "won" | "lost";
+
 function ResultsPanel({ scenario, result }: { scenario: RunRequest; result: RunResponse }) {
+  const [agentFilter, setAgentFilter] = useState("all");
+  const [goodFilter, setGoodFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  const agentIds = Array.from(new Set(scenario.bids.map((b) => b.agent_id))).sort();
+  const goodIds = Array.from(new Set(scenario.bids.map((b) => b.good_id))).sort();
+
+  const filteredBids = scenario.bids.filter((b) => {
+    if (agentFilter !== "all" && b.agent_id !== agentFilter) return false;
+    if (goodFilter !== "all" && b.good_id !== goodFilter) return false;
+    if (statusFilter !== "all") {
+      const won = result.allocation[`${b.agent_id}|${b.good_id}`] === 1;
+      if (statusFilter === "won" && !won) return false;
+      if (statusFilter === "lost" && won) return false;
+    }
+    return true;
+  });
+
   return (
     <div className="panel">
       <h2>Resultado do leilão</h2>
+
+      <div className="field-row">
+        <div className="field">
+          <label>Aluno</label>
+          <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
+            <option value="all">todos</option>
+            {agentIds.map((id) => <option key={id} value={id}>{id}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Disciplina</label>
+          <select value={goodFilter} onChange={(e) => setGoodFilter(e.target.value)}>
+            <option value="all">todas</option>
+            {goodIds.map((id) => <option key={id} value={id}>{id}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Resultado</label>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
+            <option value="all">todos</option>
+            <option value="won">ganhou</option>
+            <option value="lost">perdeu</option>
+          </select>
+        </div>
+      </div>
+
       <table>
         <thead>
           <tr>
@@ -277,7 +323,7 @@ function ResultsPanel({ scenario, result }: { scenario: RunRequest; result: RunR
           </tr>
         </thead>
         <tbody>
-          {scenario.bids.map((b, i) => {
+          {filteredBids.map((b, i) => {
             const key = `${b.agent_id}|${b.good_id}`;
             const won = result.allocation[key] === 1;
             const paid = result.consumption[key];
@@ -291,6 +337,9 @@ function ResultsPanel({ scenario, result }: { scenario: RunRequest; result: RunR
               </tr>
             );
           })}
+          {filteredBids.length === 0 && (
+            <tr><td colSpan={5} className="empty-state">Nenhum lance corresponde aos filtros.</td></tr>
+          )}
         </tbody>
       </table>
 
