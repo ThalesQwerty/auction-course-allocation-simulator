@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Node / front-end
+web/node_modules/
+web/dist/
+*.tsbuildinfo
+
+# Dados gerados em tempo de execução (cenários e resultados salvos localmente)
+data/scenarios/*.json
+data/results/*.json
+
+# Editor / SO
+.vscode/
+.DS_Store
