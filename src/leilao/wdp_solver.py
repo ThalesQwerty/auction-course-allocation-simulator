@@ -39,50 +39,49 @@ def solve_wdp(problem: Problem, *, msg: bool = False) -> Allocation:
 
     lp = pulp.LpProblem("WDP", pulp.LpMaximize)
 
+    # Variáveis nomeadas por índice, e não pelos ids: ids de domínio podem
+    # conter espaços e acentos (ex.: "Cálculo I"), que não sobrevivem ao
+    # formato LP lido pelo CBC.
     z: dict[tuple[str, str], pulp.LpVariable] = {
-        (d.agent_id, d.good_id): pulp.LpVariable(
-            f"z_{d.agent_id}_{d.good_id}", cat="Binary"
-        )
-        for d in problem.demands
+        (d.agent_id, d.good_id): pulp.LpVariable(f"z_{i}", cat="Binary")
+        for i, d in enumerate(problem.demands)
     }
 
     # Função objetivo — eq. (8)
     lp += pulp.lpSum(d.preference * z[(d.agent_id, d.good_id)] for d in problem.demands)
 
+    vars_by_good: dict[str, list[pulp.LpVariable]] = {}
+    vars_by_agent: dict[str, list[tuple[str, pulp.LpVariable]]] = {}
+    for d in problem.demands:
+        var = z[(d.agent_id, d.good_id)]
+        vars_by_good.setdefault(d.good_id, []).append(var)
+        vars_by_agent.setdefault(d.agent_id, []).append((d.good_id, var))
+
     # Restrição de disponibilidade dos bens — eq. (3)
-    for good in problem.goods:
-        vars_for_good = [
-            z[(d.agent_id, d.good_id)]
-            for d in problem.demands
-            if d.good_id == good.id
-        ]
+    for i, good in enumerate(problem.goods):
+        vars_for_good = vars_by_good.get(good.id)
         if vars_for_good:
-            lp += pulp.lpSum(vars_for_good) <= good.quantity, f"quantity_{good.id}"
+            lp += pulp.lpSum(vars_for_good) <= good.quantity, f"quantity_{i}"
 
     # Restrição de capacidade dos agentes — eq. (4)
     weight_by_good = {g.id: g.weight for g in problem.goods}
-    for agent in problem.agents:
+    for i, agent in enumerate(problem.agents):
         terms = [
-            weight_by_good[d.good_id] * z[(d.agent_id, d.good_id)]
-            for d in problem.demands
-            if d.agent_id == agent.id
+            weight_by_good[good_id] * var for good_id, var in vars_by_agent.get(agent.id, [])
         ]
         if terms:
-            lp += pulp.lpSum(terms) <= agent.capacity, f"capacity_{agent.id}"
+            lp += pulp.lpSum(terms) <= agent.capacity, f"capacity_{i}"
 
     # Restrição de exclusão mútua — eq. (5)
-    for agent in problem.agents:
-        for i, excl in enumerate(problem.exclusions):
+    for i, agent in enumerate(problem.agents):
+        for j, excl in enumerate(problem.exclusions):
             vars_in_clique = [
                 z[(agent.id, good_id)]
                 for good_id in excl.goods
                 if (agent.id, good_id) in z
             ]
             if len(vars_in_clique) > 1:
-                lp += (
-                    pulp.lpSum(vars_in_clique) <= 1,
-                    f"exclusion_{agent.id}_{i}",
-                )
+                lp += pulp.lpSum(vars_in_clique) <= 1, f"exclusion_{i}_{j}"
 
     status = lp.solve(pulp.PULP_CBC_CMD(msg=msg))
     status_name = pulp.LpStatus[status]

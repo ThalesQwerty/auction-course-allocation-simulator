@@ -43,6 +43,10 @@ class AuctionInput:
 
     `bias` mapeia (agent_id, good_id) -> viés bruto beta_{a,x} (eq. 21).
     Pares ausentes são tratados como 0 (sem viés).
+
+    `epsilon` permite injetar a matriz de perturbações estocástica já sorteada.
+    Numa simulação multi-rodada ela precisa ser a mesma em todas as rodadas
+    (Seção 7.1.2); omitida, é sorteada a partir de `seed` para esta rodada.
     """
 
     agents: list[Agent]
@@ -52,6 +56,7 @@ class AuctionInput:
     exclusions: list[MutualExclusion] = field(default_factory=list)
     tie_break_order: dict[str, list[str]] = field(default_factory=dict)
     bias: dict[tuple[str, str], int] = field(default_factory=dict)
+    epsilon: dict[tuple[str, str], float] | None = None
     seed: int = 0
 
     def __post_init__(self) -> None:
@@ -90,15 +95,12 @@ def _compute_prices(
     *, goods: list[Good], bids: dict[tuple[str, str], int], allocation: Allocation
 ) -> dict[str, int]:
     """Preço de mercado por bem — eq. (24): maior lance mal-sucedido, ou 1."""
-    prices: dict[str, int] = {}
-    for good in goods:
-        unsuccessful_bids = [
-            credits
-            for (agent_id, good_id), credits in bids.items()
-            if good_id == good.id and allocation.get((agent_id, good_id), 0) == 0
-        ]
-        prices[good.id] = max(unsuccessful_bids) if unsuccessful_bids else 1
-    return prices
+    highest_unsuccessful: dict[str, int] = {}
+    for (agent_id, good_id), credits in bids.items():
+        if allocation.get((agent_id, good_id), 0) == 0:
+            if credits > highest_unsuccessful.get(good_id, 0):
+                highest_unsuccessful[good_id] = credits
+    return {good.id: highest_unsuccessful.get(good.id, 1) for good in goods}
 
 
 def _compute_consumption(
@@ -122,20 +124,30 @@ def run_auction(auction_input: AuctionInput) -> AuctionResult:
 
     # Preferências finais: lance + viés + desempate + perturbação — eq. (22)
     rectified_bias = rectify_bias(auction_input.bias)
-    epsilon = stochastic_perturbations(
-        list(bids.keys()),
-        num_agents=len(auction_input.agents),
-        num_goods=len(auction_input.goods),
-        seed=auction_input.seed,
-    )
+    epsilon = auction_input.epsilon
+    if epsilon is None:
+        epsilon = stochastic_perturbations(
+            list(bids.keys()),
+            num_agents=len(auction_input.agents),
+            num_goods=len(auction_input.goods),
+            seed=auction_input.seed,
+        )
+
+    # A ordem de desempate pode cobrir mais agentes do que os presentes nesta
+    # rodada (numa simulação multi-período, alpha é fixo para a população
+    # inteira), então alpha_hat é normalizado pelo tamanho da própria ordem.
+    default_order = sorted(a.id for a in auction_input.agents)
+    ranks: dict[str, dict[str, int]] = {}
+    for good in auction_input.goods:
+        order = auction_input.tie_break_order.get(good.id) or default_order
+        ranks[good.id] = {agent_id: i + 1 for i, agent_id in enumerate(order)}
 
     demands: list[Demand] = []
     for (agent_id, good_id), credits in bids.items():
-        order = auction_input.tie_break_order.get(good_id) or sorted(
-            a.id for a in auction_input.agents
-        )
-        rank = order.index(agent_id) + 1 if agent_id in order else len(order)
-        alpha_hat = tie_break_factor(rank, len(auction_input.agents))
+        order_ranks = ranks.get(good_id) or {}
+        order_size = len(order_ranks) or len(auction_input.agents)
+        rank = order_ranks.get(agent_id, order_size)
+        alpha_hat = tie_break_factor(rank, order_size)
         beta_hat = rectified_bias.get((agent_id, good_id), 0)
         pref = credits + beta_hat + alpha_hat + epsilon.get((agent_id, good_id), 0.0)
         demands.append(Demand(agent_id, good_id, pref))

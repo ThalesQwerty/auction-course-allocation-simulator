@@ -8,7 +8,10 @@
   --accent: #2f6fed;
   --accent-contrast: #ffffff;
   --danger: #c8402c;
-  --win: #1c7c3f;
+  --win: #23934c;
+  --sidebar: #ffffff;
+  --sidebar-w: 248px;
+  --rail-w: 264px;
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -19,6 +22,8 @@
     --border: #35373d;
     --text: #eceef1;
     --muted: #9a9ea6;
+    --sidebar: #1c1d21;
+    --win: #4fb972;
   }
 }
 
@@ -32,14 +37,39 @@ body {
   color: var(--text);
 }
 
+/* Barra lateral fixa + área de conteúdo rolável. */
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  min-height: 100vh;
+}
+
 .main {
   padding: 24px;
-  max-width: 900px;
+  max-width: 1200px;
   margin: 0 auto;
+  width: 100%;
+  min-width: 0;
 }
 
 h1 {
   font-size: 20px;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.page-head h1 {
+  margin-bottom: 0;
+}
+
+.page-head .note {
+  margin-top: 4px;
 }
 
 button.primary {
@@ -137,6 +167,11 @@ input, select {
   color: var(--muted);
 }
 
+.field-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -159,11 +194,729 @@ input, select {
   padding: 8px 0;
 }
 
-.status-won {
-  color: var(--win);
+.note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+
+.field.grow {
+  flex: 1;
+  min-width: 220px;
+}
+
+input.invalid {
+  border-color: var(--danger);
+}
+
+.invalid-text {
+  color: var(--danger);
+}
+
+.subpanel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.sticky-actions {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding: 12px 0;
+  z-index: 2;
+}
+
+/* Grade curricular e filtros: cada chip é um alternador de três estados. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip.required {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
   font-weight: 600;
 }
 
-.status-lost {
+.chip.elective {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip.on {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+.chip.off {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+  flex: none;
+}
+
+.chart-section {
+  margin-bottom: 24px;
+}
+
+/* Cabeçalho do grupo: mesma tipografia do <h2> dos painéis, sem a moldura —
+   ele separa os gráficos sem competir com os títulos de cada card. */
+.chart-section-head {
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chart-section-head h2 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--muted);
+}
+
+.chart-section-head p {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.chart-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin: 0;
+}
+
+.chart-card figcaption h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.chart-card figcaption p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tooltip {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+}
+
+.tooltip-title {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tooltip-label {
+  flex: 1;
+  color: var(--text);
+}
+
+.tooltip-value {
+  font-variant-numeric: tabular-nums;
+}
+
+td, th {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- sidebar */
+
+.sidebar {
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 12px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.sidebar-brand {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 4px 10px 14px;
+}
+
+.sidebar-brand span {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  font-size: 13px;
+  gap: 2px;
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.nav-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.nav-item.current {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.nav-item.run {
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-item span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-item.danger {
+  color: var(--danger);
+}
+
+/* Cada execução no histórico carrega um botão de apagar que só aparece ao
+   passar o mouse (ou ao receber foco pelo teclado). */
+.nav-row {
+  position: relative;
+}
+
+.nav-row .nav-item.run {
+  padding-right: 30px;
+}
+
+.nav-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  opacity: 0;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+}
+
+/* `opacity` em vez de `display: none` para que o botão continue alcançável
+   pelo teclado — um elemento escondido sai da ordem de tabulação. */
+.nav-row:hover .nav-delete,
+.nav-delete:focus-visible {
+  opacity: 1;
+}
+
+.nav-delete:hover,
+.nav-delete:focus-visible {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.sidebar-section {
+  margin-top: 18px;
+  min-height: 0;
+}
+
+.sidebar-section h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 6px;
+  padding: 0 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.sidebar-empty {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+  padding: 2px 10px 0;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.menu-toggle {
+  display: none;
+}
+
+/* Abaixo de 900px a barra vira um painel deslizante sobre o conteúdo. */
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--sidebar-w);
+    z-index: 10;
+    transform: translateX(-100%);
+    transition: transform 0.15s ease-out;
+    box-shadow: 0 0 24px rgb(0 0 0 / 18%);
+  }
+
+  .menu-open .sidebar {
+    transform: none;
+  }
+
+  .menu-toggle {
+    display: block;
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 11;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    padding: 6px 12px;
+  }
+
+  .main {
+    padding-top: 52px;
+  }
+}
+
+/* ------------------------------------------------------------ página Projeto */
+
+.prose {
+  max-width: 68ch;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.prose h2 {
+  font-size: 15px;
+  margin: 32px 0 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.prose p,
+.prose li {
+  color: var(--text);
+}
+
+.prose .lead {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.prose code {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12.5px;
+  padding: 1px 5px;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 20px;
+}
+
+.prose li {
+  margin-bottom: 6px;
+}
+
+.metric-list {
+  margin: 12px 0 0;
+}
+
+.metric-list > div {
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+  margin-bottom: 14px;
+}
+
+.metric-list dt {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.metric-list dd {
+  margin: 2px 0 0;
+  color: var(--muted);
+}
+
+/* ------------------- barra lateral direita (presets e alunos) */
+
+.main.wide {
+  max-width: 1520px;
+}
+
+.rail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--rail-w);
+  gap: 20px;
+  align-items: start;
+}
+
+.rail-layout-main {
+  min-width: 0;
+}
+
+.rail {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - 48px);
+  position: sticky;
+  top: 24px;
+}
+
+.rail-head {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+.rail-head h2 {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.rail-filters {
+  display: flex;
+  gap: 6px;
+}
+
+.rail-filters select {
+  font-size: 12px;
+  min-width: 0;
+}
+
+.rail-count {
+  align-items: baseline;
+  color: var(--muted);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  justify-content: space-between;
+  margin: 2px 0 0;
+}
+
+.rail-list {
+  list-style: none;
+  margin: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.rail-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 10px;
+}
+
+.rail-item {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  gap: 1px;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.rail-item:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.rail-item.current {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.rail-item-name {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-item-stats {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding-left: 16px;
+}
+
+.rail-item-hint {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.rail-item:disabled {
+  cursor: default;
+}
+
+/* O preset carregado fica em destaque, não apagado como um botão desabilitado. */
+.rail-item:disabled:not(.current) {
+  opacity: 0.55;
+}
+
+.rail-item.current .rail-item-name {
+  font-weight: 600;
+}
+
+.rail-item:disabled:hover {
+  background: transparent;
+}
+
+.rail-item.current:hover,
+.rail-item.current:disabled:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.badge {
+  background: color-mix(in srgb, var(--win) 16%, transparent);
+  border-radius: 4px;
+  color: var(--win);
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+
+button.link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+button.link:hover {
+  text-decoration: underline;
+}
+
+/* A barra de alunos não cabe ao lado do conteúdo em tela estreita. */
+@media (max-width: 1100px) {
+  .rail-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rail {
+    max-height: 420px;
+    order: -1;
+    position: static;
+  }
+}
+
+/* --------------------------------------------- visualização de um aluno */
+
+.student-head {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+  justify-content: space-between;
+}
+
+.student-head h1 {
+  margin: 0;
+}
+
+.student-head .note {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+}
+
+.stat-row dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.stat-row dd {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0 0;
+}
+
+/* O marcador de abrir/fechar só existe com o `display: list-item` padrão do
+   <summary>, então o flex fica num wrapper interno. */
+.period-panel > summary {
+  cursor: pointer;
+  margin-left: 14px;
+}
+
+.period-summary-row {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: space-between;
+}
+
+.period-panel > summary h2 {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  margin: 0;
+}
+
+.period-summary {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.period-panel table {
+  margin-top: 12px;
+}
+
+.muted-cell {
+  color: var(--muted);
+}
+
+.outcome.won {
+  color: var(--win);
+}
+
+.outcome.refused {
+  color: var(--danger);
+}
+
+.outcome.unbid {
+  color: var(--muted);
+}
+
+td.approved {
+  color: var(--win);
+}
+
+td.failed {
+  color: var(--danger);
 }
