@@ -1,8 +1,9 @@
 """Os alunos da simulação — o conjunto A (Seção 7.2) e seu estado ao longo dos períodos.
 
-Os alunos não são configurados um a um: o usuário diz quantos alunos cada
-curso tem e a população inteira é gerada a partir da `seed` (nomes, aptidão
-acadêmica e, a cada período, a matriz de utilidades).
+Os alunos não são configurados um a um: o usuário diz quantos ingressam por
+período e a população inteira é gerada a partir da `seed` (nomes, aptidão
+acadêmica e, a cada período, a matriz de utilidades). Não há curso: todo aluno
+é da universidade e cursa a mesma grade.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .config import SimulationConfig
+from .config import AffinityProfile, AptitudeProfile, SimulationConfig
 from .names import sample_names
 
 
@@ -18,28 +19,25 @@ from .names import sample_names
 class Student:
     """Um aluno a in A e todo o seu histórico acadêmico.
 
-    `ability` é uma aptidão latente em [0, 1] que determina a distribuição das
-    notas do aluno. Não consta no anteprojeto: foi acrescentada porque sem
-    heterogeneidade de desempenho o CR vira ruído e a correlação entre CR e
-    satisfação (eq. 57) não mede coisa alguma.
+    Os dois perfis são o que o distingue dos colegas, e nenhum deles consta no
+    anteprojeto. `aptitude` dá a distribuição das notas de primeira tentativa:
+    sem heterogeneidade de desempenho o CR vira ruído e a correlação entre CR e
+    satisfação (eq. 57) não mede coisa alguma. `affinity` diz o quanto ele
+    concentra a preferência, que é justamente a informação que o leilão diz
+    captar e a ordenação por CR não.
     """
 
     id: str
     name: str
-    course: str
-    ability: float
+    aptitude: AptitudeProfile
+    affinity: AffinityProfile
     credits: int  # C_a^{(t,1)} — orçamento no início do período, eq. (36)/(37)
     entry_period: int = 1  # t_a — período em que ingressa, eq. (31)
     grades: dict[str, float] = field(default_factory=dict)  # n_{a,x} — maior nota obtida
     attempts: dict[str, int] = field(default_factory=dict)  # quantas vezes cursou cada disciplina
-    graduated_at: int | None = None  # período em que concluiu o curso — eq. (40)
-    # Período em que foi desligado por decurso de prazo (jubilamento), tendo
-    # permanecido `SimulationConfig.max_residence` períodos sem concluir (0
-    # desliga a regra e este campo nunca sai de `None`). Sai
-    # do conjunto ativo como quem se forma, e é essa saída que faz o
-    # jubilamento ser modelagem e não filtro de relatório: um a menos
-    # disputando alivia a concorrência de quem fica.
-    dismissed_at: int | None = None
+    # Período em que concluiu o curso — eq. (40). É a **única** porta de saída:
+    # quem não concluiu continua disputando até o fim do horizonte.
+    graduated_at: int | None = None
 
     @property
     def taken(self) -> set[str]:
@@ -72,35 +70,35 @@ def generate_students(config: SimulationConfig, rng: np.random.Generator) -> lis
     """Cria a população inteira a partir da seed: nomes, aptidão e período de
     ingresso. Todos começam com o orçamento base (eq. 37).
 
-    O ingresso (t_a, eq. 31) é escalonado: cada curso recebe uma geração nova
-    a cada período letivo, do primeiro ao L-ésimo (`config.entry_span`), com
-    exatamente `students_per_generation` alunos — como numa universidade, que
-    abre vestibular todo semestre em vez de matricular toda a população de uma
-    vez. Quando L < |T| os períodos seguintes não recebem ninguém: é a fase de
-    drenagem, em que a população só diminui.
+    O ingresso (t_a, eq. 31) é escalonado: entra uma geração nova a cada período
+    letivo, do primeiro ao L-ésimo (`config.entry_span`), com exatamente
+    `students_per_period` alunos — como numa universidade, que abre vestibular
+    todo semestre em vez de matricular toda a população de uma vez. Quando
+    L < |T| os períodos seguintes não recebem ninguém: é a fase de drenagem, em
+    que a população só diminui.
 
-    A geração de cada aluno é determinística; da seed vem só quem ele é (nome e
-    aptidão). Antes o tamanho das gerações saía de uma divisão que podia ser
-    inexata; agora é dado direto, e todas as gerações têm o mesmo tamanho por
-    construção.
+    Nem o período de ingresso nem o perfil vêm da seed: os dois são repartições
+    exatas (`config.generation_profiles`), idênticas em toda geração. Da seed
+    vem só o nome. Isso importa para comparar cenários — duas execuções com
+    seeds diferentes têm a mesma composição de perfis, então a diferença entre
+    elas não é a sorte de quem entrou.
     """
     total = config.total_students()
     names = sample_names(total, rng)
-    abilities = rng.uniform(0.0, 1.0, size=total)
+    mix = config.generation_profiles()
 
     students: list[Student] = []
-    for course in config.courses:
-        for entry_period in range(1, config.entry_span + 1):
-            for _ in range(course.students_per_generation):
-                index = len(students)
-                students.append(
-                    Student(
-                        id=f"a{index:05d}",
-                        name=names[index],
-                        course=course.name,
-                        ability=float(abilities[index]),
-                        credits=config.base_credits,
-                        entry_period=entry_period,
-                    )
+    for entry_period in range(1, config.entry_span + 1):
+        for aptitude, affinity in mix:
+            index = len(students)
+            students.append(
+                Student(
+                    id=f"a{index:05d}",
+                    name=names[index],
+                    aptitude=aptitude,
+                    affinity=affinity,
+                    credits=config.base_credits,
+                    entry_period=entry_period,
                 )
+            )
     return students

@@ -1,60 +1,42 @@
 import numpy as np
 import pytest
 
-from leilao.config import Course, Discipline, SimulationConfig
+from leilao.config import AffinityProfile, Discipline, SimulationConfig
 from leilao.grading import credit_return
 from leilao.metrics import demand_per_seat, jain_index, pearson, semestralization
 from leilao.population import generate_students
-from leilao.simulation import run_simulation
+from leilao.simulation import GUARANTEED_ROUND, run_simulation
+
+# Grade de três períodos, duas disciplinas por período: D1 e D2 sem
+# pré-requisito (a matrícula garantida de quem ingressa), D3 e D4 atrás delas,
+# D5 e D6 atrás dessas. A cadeia tem três elos, então ninguém conclui em menos
+# de três períodos por mais folgada que seja a oferta.
+GRADE = [
+    Discipline("D1", seats=6, hours=60),
+    Discipline("D2", seats=6, hours=60),
+    Discipline("D3", seats=6, hours=60, prerequisites=("D1",)),
+    Discipline("D4", seats=6, hours=60, prerequisites=("D2",)),
+    Discipline("D5", seats=6, hours=60, prerequisites=("D3",)),
+    Discipline("D6", seats=6, hours=60, prerequisites=("D3", "D4")),
+]
+
+
+# W_a é do perfil de afinidade: 180 h deixa o aluno cursar três disciplinas de
+# 60 h por período, que é o aperto que os testes de escassez pressupõem.
+WORKLOAD = 180
+NEUTRAL = AffinityProfile("Padrão", "concentrated", 1, WORKLOAD, 100)
 
 
 def make_config(**overrides) -> SimulationConfig:
-    disciplines = [Discipline(f"D{i}", seats=6, hours=60) for i in range(1, 9)]
     base = dict(
-        disciplines=disciplines,
-        courses=[
-            Course(
-                "Computação",
-                students_per_generation=2,
-                hours_to_graduate=300,
-                required=("D1", "D2", "D3", "D4"),
-                electives=("D5", "D6"),
-            ),
-            Course(
-                "Matemática",
-                students_per_generation=1,
-                hours_to_graduate=240,
-                required=("D1", "D2", "D7"),
-                electives=("D8",),
-            ),
-        ],
+        disciplines=GRADE,
         periods=5,
+        students_per_period=3,
         rounds=2,
-        max_hours=180,
+        affinity_profiles=[NEUTRAL],
         seed=11,
     )
     return SimulationConfig(**{**base, **overrides})
-
-
-def test_scenario_with_unreachable_graduation_is_rejected():
-    # eq. (39): S_k não pode passar da carga de obrigatórias + optativas
-    with pytest.raises(ValueError, match="horas para conclusão"):
-        SimulationConfig(
-            disciplines=[Discipline("D1", seats=1, hours=60)],
-            courses=[
-                Course("Curso", students_per_generation=1, hours_to_graduate=600, required=("D1",))
-            ],
-        )
-
-
-def test_course_referencing_unknown_discipline_is_rejected():
-    with pytest.raises(ValueError, match="disciplinas inexistentes"):
-        SimulationConfig(
-            disciplines=[Discipline("D1", seats=1, hours=60)],
-            courses=[
-                Course("Curso", students_per_generation=1, hours_to_graduate=0, electives=("D9",))
-            ],
-        )
 
 
 def test_same_seed_produces_the_same_simulation():
@@ -76,16 +58,18 @@ def test_seats_are_never_oversubscribed():
     for period in result.periods:
         for snapshot in period.disciplines:
             assert snapshot.filled <= snapshot.seats
+            assert snapshot.granted <= snapshot.filled
 
 
 def test_students_never_exceed_the_period_workload():
     config = make_config()
     result = run_simulation(config)
     hours = config.hours_by_discipline()
-    max_disciplines = config.max_hours // min(hours.values())
+    max_disciplines = WORKLOAD // min(hours.values())
     for period in result.periods:
-        for snapshot in period.aggregate.by_course:
-            assert snapshot.metrics.allocations_per_student <= max_disciplines
+        for snapshot in period.aggregate.by_cohort:
+            if snapshot.metrics:
+                assert snapshot.metrics.allocations_per_student <= max_disciplines
 
 
 def test_students_graduate_and_leave_the_simulation():
@@ -98,7 +82,7 @@ def test_students_graduate_and_leave_the_simulation():
     # no último período, menos ativos do que gente que já ingressou.
     last = result.periods[-1]
     entered = len([s for s in result.students if s.entry_period <= last.period])
-    assert last.aggregate.overall.students < entered
+    assert last.aggregate.overall.active < entered
 
     # E ninguém reaparece depois de concluir.
     by_id = {s.id: s for s in result.students}
@@ -108,23 +92,43 @@ def test_students_graduate_and_leave_the_simulation():
             assert max(r.period for r in history.periods) <= student.graduated_at
 
 
-def test_graduates_approved_every_required_discipline():
+def test_graduating_means_approving_the_whole_curriculum():
+    """Toda disciplina é obrigatória: concluir é aprovar em todas, e a carga
+    aprovada do concluinte é a grade inteira."""
     config = make_config(periods=12)
     result = run_simulation(config)
-    courses = {c.name: c for c in config.courses}
-    hours = config.hours_by_discipline()
+    total_hours = config.hours_to_graduate()
+    done = [s for s in result.students if s.graduated_at is not None]
+    assert done, "ninguém concluiu o curso"
+    for student in done:
+        assert student.approved_hours == total_hours
+        assert student.approvals == len(config.disciplines)
+    # E quem não concluiu não aprovou tudo — senão a eq. (40) teria falhado.
     for student in result.students:
         if student.graduated_at is None:
-            continue
-        course = courses[student.course]
-        assert student.approved_hours >= sum(hours[name] for name in course.required)
+            assert student.approvals < len(config.disciplines)
+
+
+def test_nobody_graduates_faster_than_the_prerequisite_chain():
+    """A cadeia impõe um piso que a oferta não compra: a disciplina do n-ésimo
+    período da grade não pode ser cursada antes do n-ésimo período do aluno."""
+    config = make_config(periods=12, disciplines=[
+        Discipline(d.name, seats=200, hours=d.hours, prerequisites=d.prerequisites)
+        for d in GRADE
+    ])
+    assert config.minimum_periods_to_graduate() == 3  # três elos
+    result = run_simulation(config)
+    for student in result.students:
+        if student.graduated_at is not None:
+            assert student.graduated_at - student.entry_period + 1 >= 3
 
 
 def test_metrics_stay_within_their_theoretical_ranges():
     result = run_simulation(make_config())
     for period in result.periods:
         for report in [*period.rounds, period.aggregate]:
-            for metrics in [report.overall, *(s.metrics for s in report.by_course)]:
+            groups = [report.overall, *report.by_cohort]
+            for metrics in [g.metrics for g in groups if g.metrics]:
                 assert 0 <= metrics.efficiency <= 1  # eq. (53)
                 assert 0 <= metrics.fairness <= 1  # eq. (55)
                 assert 0 <= metrics.occupancy <= 1  # eq. (54)
@@ -172,23 +176,27 @@ def test_scarcity_and_contention_are_means_over_students_not_sums():
     for period in result.periods:
         for report in [*period.rounds, period.aggregate]:
             for field in ("scarcity", "contention"):
-                parts = [s for s in report.by_course if s.metrics]
-                total = sum(getattr(s.metrics, field) * s.metrics.students for s in parts)
-                assert total / report.overall.students == pytest.approx(
-                    getattr(report.overall, field)
+                parts = [c for c in report.by_cohort if c.metrics]
+                total = sum(getattr(c.metrics, field) * c.metrics.students for c in parts)
+                assert total / report.overall.metrics.students == pytest.approx(
+                    getattr(report.overall.metrics, field)
                 )
 
 
-def test_scarcity_counts_every_student_still_able_to_take_the_discipline():
-    """No primeiro período ninguém aprovou nada: todo aluno é elegível a tudo,
-    então cada disciplina tem a população inteira disputando as suas vagas."""
+def test_scarcity_only_counts_who_can_actually_take_the_discipline():
+    """No primeiro período ninguém aprovou nada: só as disciplinas sem
+    pré-requisito são elegíveis, e cada uma tem a população inteira disputando
+    as suas vagas. As demais não entram na conta de ninguém."""
     config = make_config(periods=1)
     result = run_simulation(config)
-    overall = result.periods[0].aggregate.overall
-    expected = sum(overall.students / d.seats for d in config.disciplines) / len(
-        config.disciplines
-    )
+    overall = result.periods[0].aggregate.overall.metrics
+    first = config.first_period_disciplines()
+    seats = config.hours_by_discipline()  # só para ter o dict de nomes
+    assert set(first) == {"D1", "D2"}
+    by_name = {d.name: d for d in config.disciplines}
+    expected = sum(overall.students / by_name[name].seats for name in first) / len(first)
     assert overall.scarcity == pytest.approx(expected)
+    assert seats.keys() == by_name.keys()
 
 
 def test_scarcity_measures_potential_demand_and_contention_the_realized_one():
@@ -196,7 +204,7 @@ def test_scarcity_measures_potential_demand_and_contention_the_realized_one():
     uma fração da potencial — e é a razão entre as duas que diz quanta."""
     result = run_simulation(make_config(periods=6))
     for period in result.periods:
-        overall = period.aggregate.overall
+        overall = period.aggregate.overall.metrics
         assert 0 < overall.contention <= overall.scarcity
 
 
@@ -204,13 +212,16 @@ def test_scarcity_ignores_disciplines_with_no_seats_on_offer():
     """Uma disciplina sem vaga não é oferta: entra como elegível (o aluno não a
     aprovou) mas fica fora da razão, que seria divisão por zero."""
     config = make_config(
-        disciplines=[Discipline("D1", seats=6, hours=60), *[
-            Discipline(f"D{i}", seats=0, hours=60) for i in range(2, 9)
-        ]],
+        disciplines=[
+            Discipline("D1", seats=6, hours=60),
+            # Sem vaga, mas elegíveis assim que D1 sair: ficam fora da razão.
+            Discipline("D2", seats=0, hours=60, prerequisites=("D1",)),
+            Discipline("D3", seats=0, hours=60, prerequisites=("D1",)),
+        ],
         periods=1,
     )
     result = run_simulation(config)
-    overall = result.periods[0].aggregate.overall
+    overall = result.periods[0].aggregate.overall.metrics
     # Sobra uma única disciplina com vaga, disputada por todo mundo.
     assert overall.scarcity == pytest.approx(overall.students / 6)
 
@@ -221,8 +232,8 @@ def test_contention_does_not_move_between_rounds():
     result = run_simulation(make_config(periods=3, rounds=3))
     for period in result.periods:
         for report in period.rounds:
-            assert report.overall.contention == pytest.approx(
-                period.aggregate.overall.contention
+            assert report.overall.metrics.contention == pytest.approx(
+                period.aggregate.overall.metrics.contention
             )
 
 
@@ -231,11 +242,10 @@ def test_semestralization_follows_the_entry_period_not_the_calendar():
     config = make_config(periods=6)
     result = run_simulation(config)
     entry = {s.id: s.entry_period for s in generate_students(config, np.random.default_rng(config.seed))}
-    hours = config.hours_by_discipline()
     for record in result.histories:
         for row in record.periods:
             age = row.period - entry[record.student_id] + 1
-            assert row.approved_hours <= config.max_hours * age
+            assert row.approved_hours <= WORKLOAD * age
 
 
 def test_credits_per_seat_is_the_price_a_seat_would_fetch_if_every_credit_were_spent():
@@ -243,12 +253,15 @@ def test_credits_per_seat_is_the_price_a_seat_would_fetch_if_every_credit_were_s
     result = run_simulation(config)
     total_seats = sum(d.seats for d in config.disciplines)
     for period in result.periods:
-        snapshots = [s for s in period.aggregate.by_course if s.active > 0]
-        # Oferta do curso = por aluno x alunos; dividida pelas vagas de toda a
-        # universidade dá o preço esperado, cuja soma entre cursos é global.
-        for snapshot in snapshots:
+        for snapshot in period.aggregate.by_cohort:
+            if snapshot.active == 0:
+                continue
+            # Oferta da geração = por aluno x alunos; dividida pelas vagas de
+            # toda a universidade dá o preço esperado, cuja soma é global.
             supply = snapshot.credits_per_student * snapshot.active
             assert snapshot.credits_per_seat == pytest.approx(supply / total_seats)
+        cohorts = [c.credits_per_seat for c in period.aggregate.by_cohort if c.active]
+        assert period.aggregate.overall.credits_per_seat == pytest.approx(sum(cohorts))
 
 
 def test_jain_index_is_one_when_everyone_is_equally_satisfied():
@@ -289,16 +302,32 @@ def test_history_matches_the_aggregate_summary():
         assert marked == ([summary.graduated_at] if summary.graduated_at else [])
         # Carga horária obtida no período respeita W_a — eq. (14).
         for record in history.periods:
-            assert record.enrolled_hours <= config.max_hours
+            assert record.enrolled_hours <= WORKLOAD
             assert record.enrolled_hours == sum(
                 hours[r.discipline] for r in record.requests if r.won_round is not None
             )
 
 
 def test_history_separates_refused_requests_from_unbid_ones():
-    """As três saídas de um pedido — atendido, recusado e sem lance — precisam
-    aparecer distintas, que é o que a tela de depuração mostra."""
-    result = run_simulation(make_config())
+    """As saídas de um pedido — atendido, recusado e sem lance — precisam
+    aparecer distintas, que é o que a tela de depuração mostra.
+
+    Cenário montado para produzir as três: D1 tem exatamente as vagas de uma
+    geração, então os ingressantes a esgotam e quem precisa recursá-la não
+    encontra oferta — é o "sem lance". D3, com uma vaga só, produz o
+    "recusada".
+    """
+    result = run_simulation(
+        make_config(
+            periods=8,
+            disciplines=[
+                Discipline("D1", seats=3, hours=60),
+                Discipline("D2", seats=6, hours=60),
+                Discipline("D3", seats=1, hours=60, prerequisites=("D1",)),
+                Discipline("D4", seats=6, hours=60, prerequisites=("D2",)),
+            ],
+        )
+    )
     requests = [r for h in result.histories for p in h.periods for r in p.requests]
 
     won = [r for r in requests if r.won_round is not None]
@@ -322,11 +351,11 @@ def test_same_seed_produces_the_same_history():
     assert first.histories == second.histories
 
 
-def utilities_by_student(result) -> dict[tuple[str, int], dict[str, tuple[str, float]]]:
-    """u_{a,x}^(t) como o histórico individual registrou, com o grupo da grade."""
+def utilities_by_student(result) -> dict[tuple[str, int], dict[str, float]]:
+    """u_{a,x}^(t) como o histórico individual registrou."""
     return {
         (history.student_id, record.period): {
-            r.discipline: (r.kind, r.utility) for r in record.requests
+            r.discipline: r.utility for r in record.requests
         }
         for history in result.histories
         for record in history.periods
@@ -339,14 +368,19 @@ def test_utilities_come_from_the_seed_not_from_the_simulation_path():
     entre dois cenários deixa de ser atribuível ao mecanismo.
 
     O sorteio é um peso por disciplina; a utilidade é esse peso normalizado
-    sobre o que ainda falta cursar. Então o que tem de bater entre cenários é:
+    sobre o conjunto elegível. Então o que tem de bater entre cenários é:
     utilidade idêntica quando o aluno chega com o mesmo conjunto elegível, e
-    razão entre disciplinas do mesmo grupo sempre — a razão cancela a
+    razão entre duas disciplinas quaisquer sempre — a razão cancela a
     normalização e expõe o peso sorteado.
     """
     scarce = run_simulation(make_config())
     roomy = run_simulation(
-        make_config(disciplines=[Discipline(f"D{i}", seats=60, hours=60) for i in range(1, 9)])
+        make_config(
+            disciplines=[
+                Discipline(d.name, seats=60, hours=d.hours, prerequisites=d.prerequisites)
+                for d in GRADE
+            ]
+        )
     )
 
     a, b = utilities_by_student(scarce), utilities_by_student(roomy)
@@ -358,32 +392,27 @@ def test_utilities_come_from_the_seed_not_from_the_simulation_path():
                 b[key], rel=1e-9
             ), f"{key}: utilidade mudou com o número de vagas"
             identical += 1
-        by_kind: dict[str, list[str]] = {}
-        for name in set(a[key]) & set(b[key]):
-            if a[key][name][0] == b[key][name][0]:
-                by_kind.setdefault(a[key][name][0], []).append(name)
-        for names in by_kind.values():
-            for x, y in zip(sorted(names), sorted(names)[1:]):
-                assert a[key][x][1] / a[key][y][1] == pytest.approx(
-                    b[key][x][1] / b[key][y][1]
-                ), f"{key}: a razão {x}/{y} mudou — o sorteio não é o mesmo"
-                ratios += 1
+        shared = sorted(set(a[key]) & set(b[key]))
+        for x, y in zip(shared, shared[1:]):
+            assert a[key][x] / a[key][y] == pytest.approx(
+                b[key][x] / b[key][y]
+            ), f"{key}: a razão {x}/{y} mudou — o sorteio não é o mesmo"
+            ratios += 1
 
     assert identical > 20, "deveria haver vários períodos com o mesmo conjunto elegível"
-    assert ratios > 50, "a comparação deveria cobrir várias razões dentro do grupo"
+    assert ratios > 20, "a comparação deveria cobrir várias razões"
 
 
 def test_students_enter_in_equal_generations_one_per_period():
-    """Cada curso recebe uma geração por período, todas do mesmo tamanho: o
-    cenário diz quantos alunos por geração, e não um total a repartir."""
+    """Entra uma geração por período, todas do mesmo tamanho: o cenário diz
+    quantos alunos por período, e não um total a repartir."""
     config = make_config(periods=5)
     result = run_simulation(config)
 
     assert len(result.students) == config.total_students()
-    for course in config.courses:
-        members = [s.entry_period for s in result.students if s.course == course.name]
-        counts = [members.count(period) for period in range(1, config.periods + 1)]
-        assert counts == [course.students_per_generation] * config.periods
+    entries = [s.entry_period for s in result.students]
+    counts = [entries.count(period) for period in range(1, config.periods + 1)]
+    assert counts == [config.students_per_period] * config.periods
 
     # Ninguém aparece antes do próprio ingresso.
     by_id = {s.id: s for s in result.students}
@@ -393,12 +422,11 @@ def test_students_enter_in_equal_generations_one_per_period():
             assert first >= by_id[history.student_id].entry_period
 
     # Os ativos crescem enquanto as gerações vão entrando.
-    active = [period.aggregate.overall.students for period in result.periods]
+    active = [period.aggregate.overall.active for period in result.periods]
     assert active[0] < active[3], "os ativos deveriam crescer a cada geração"
 
-    # O escalonamento deixou de vir da seed: é o mesmo com qualquer uma. O que
-    # a seed sorteia são as pessoas, não o período em que entram.
-    entries = [s.entry_period for s in result.students]
+    # O escalonamento não vem da seed: é o mesmo com qualquer uma. O que a seed
+    # sorteia são as pessoas, não o período em que entram.
     other = run_simulation(make_config(periods=5, seed=99))
     assert entries == [s.entry_period for s in other.students]
     assert [s.name for s in result.students] != [s.name for s in other.students]
@@ -408,121 +436,198 @@ def test_every_reported_period_has_at_least_one_student():
     """Invariante dos relatórios: nenhum período é publicado sem aluno, e a
     numeração não tem buraco. Um período vazio só renderia zeros, que num
     gráfico se leem como queda e numa média puxam o valor para baixo."""
-    for config in (
-        make_config(),
-        make_config(periods=8),
-        make_config(periods=1),
-    ):
+    for config in (make_config(), make_config(periods=8), make_config(periods=1)):
         result = run_simulation(config)
         assert result.periods, "a simulação deveria publicar ao menos um período"
         assert [p.period for p in result.periods] == list(range(1, len(result.periods) + 1))
         for period in result.periods:
-            assert period.aggregate.overall.students >= 1
+            assert period.aggregate.overall.metrics.students >= 1
             for report in period.rounds:
-                assert report.overall.students >= 1
+                assert report.overall.metrics.students >= 1
 
 
-def test_empty_course_reports_no_metrics_instead_of_zeros():
-    """Um curso sem aluno não tem métrica — tem `None`. Zero seria um ponto
-    falso: 'ninguém satisfeito' em vez de 'não havia ninguém'.
+# --- matrícula garantida de quem ingressa ---------------------------------
 
-    Com uma geração entrando todo período, um curso só fica vazio se não
-    receber ninguém — é o cenário de `students_per_generation = 0`. O caso de
-    um recorte que esvazia *depois* de ter tido gente é o das gerações, em
-    `test_cohort_without_active_students_still_reports_its_graduates`.
-    """
-    config = SimulationConfig(
-        disciplines=[Discipline(f"D{i}", seats=20, hours=60) for i in range(1, 6)],
-        courses=[
-            Course(
-                "Vazio",
-                students_per_generation=0,
-                hours_to_graduate=120,
-                required=("D1", "D2"),
-                electives=("D3",),
-            ),
-            Course(
-                "Cheio",
-                students_per_generation=1,
-                hours_to_graduate=300,
-                required=("D1", "D2", "D3", "D4", "D5"),
-            ),
-        ],
-        periods=8,
-        rounds=1,
-        max_hours=120,
-        seed=3,
-    )
-    result = run_simulation(config)
 
-    empty = [
-        snapshot
-        for period in result.periods
-        for snapshot in period.aggregate.by_course
-        if snapshot.course == "Vazio"
+def first_period_records(result, students):
+    """O registro do período de ingresso de cada aluno."""
+    entry = {s.id: s.entry_period for s in students}
+    return [
+        (history.student_id, record)
+        for history in result.histories
+        for record in history.periods
+        if record.period == entry[history.student_id]
     ]
-    assert empty, "o curso sem alunos deveria aparecer em todo período"
-    for snapshot in empty:
-        assert snapshot.active == 0
-        assert snapshot.metrics is None
-        assert snapshot.mean_credits is None
-        assert snapshot.mean_approved_hours is None
-        assert snapshot.credits_per_student is None
-        assert snapshot.credits_per_seat is None
-        assert snapshot.mean_credit_return is None
-        assert snapshot.graduated == 0
-
-    for snapshot in (
-        s for p in result.periods for s in p.aggregate.by_course if s.active > 0
-    ):
-        assert snapshot.metrics is not None and snapshot.metrics.students == snapshot.active
 
 
-def test_cohorts_partition_each_course_by_entry_period():
-    """`by_cohort` é o mesmo recorte de `by_course`, só que fatiado por geração:
-    somar as fatias reproduz o curso, em toda rodada e todo período."""
+def test_entrants_get_every_first_period_discipline_without_bidding():
+    config = make_config(periods=6)
+    result = run_simulation(config)
+    first = set(config.first_period_disciplines())
+    assert first == {"D1", "D2"}
+
+    records = first_period_records(result, result.students)
+    assert records, "toda geração deveria ter um período de ingresso registrado"
+    for student_id, record in records:
+        granted = {r.discipline for r in record.requests if r.won_round == GUARANTEED_ROUND}
+        assert granted == first, f"{student_id} não recebeu a matrícula garantida inteira"
+        # Nada mais é elegível para quem acabou de entrar, então o pedido é
+        # exatamente a matrícula garantida.
+        assert {r.discipline for r in record.requests} == first
+        # E a satisfação é plena: ele obteve tudo que podia querer — eq. (51).
+        assert record.satisfaction == pytest.approx(1.0)
+
+
+def test_the_system_charges_the_entrant_an_equal_share_of_the_budget():
+    """"Gastaram seus créditos igualmente", com o resto da divisão no saldo."""
+    config = make_config(periods=4, base_credits=10)
+    result = run_simulation(config)
+    first = config.first_period_disciplines()
+    share = config.base_credits // len(first)  # 10 // 2 = 5
+
+    for _, record in first_period_records(result, result.students):
+        assert record.credits_start == config.base_credits
+        assert all(r.paid == share for r in record.requests)
+        assert record.credits_spent == share * len(first)
+        # O remanescente continua no saldo, somado ao Gamma_min do período.
+        remainder = config.base_credits - share * len(first)
+        assert record.credits_end == remainder + config.base_credits + record.credits_returned
+
+
+def test_an_indivisible_budget_leaves_the_remainder_with_the_entrant():
+    """Divisão inteira: com 7 créditos e 2 disciplinas, 3 em cada e 1 de sobra."""
+    config = make_config(periods=2, base_credits=7)
+    result = run_simulation(config)
+    for _, record in first_period_records(result, result.students):
+        assert record.credits_spent == 6
+        assert record.credits_end == 1 + 7 + record.credits_returned
+
+
+def test_the_entrant_share_feeds_the_credit_return():
+    """O que a matrícula garantida entrega ao f_gamma da eq. (34): o valor
+    lançado é o `paid` da disciplina, e é sobre ele que a política trabalha."""
+    config = make_config(periods=4, credit_return="full", base_credits=10)
+    result = run_simulation(config)
+    share = config.base_credits // len(config.first_period_disciplines())
+    returned = [
+        r
+        for _, record in first_period_records(result, result.students)
+        for r in record.requests
+        if r.approved
+    ]
+    assert returned, "alguém deveria aprovar na matrícula garantida"
+    assert all(r.returned == share for r in returned)
+
+
+def test_guaranteed_seats_leave_the_market_before_the_first_round():
+    """A vaga entregue ao ingressante não é ofertada: ela já saiu do estoque
+    quando a primeira rodada abre, e é isso que a coluna `granted` mostra."""
+    config = make_config(periods=5)
+    result = run_simulation(config)
+    first = set(config.first_period_disciplines())
+    per_period = config.students_per_period
+
+    for period in result.periods:
+        for snapshot in period.disciplines:
+            if snapshot.name in first and period.period <= config.entry_span:
+                assert snapshot.granted == per_period
+            else:
+                assert snapshot.granted == 0
+
+
+def test_a_generation_larger_than_the_smallest_first_period_offer_is_rejected():
+    """A garantia só é garantia se couber: o ritmo de ingresso não pode passar
+    da menor oferta entre as disciplinas de 1º período."""
+    with pytest.raises(ValueError, match="menor oferta"):
+        SimulationConfig(
+            disciplines=[
+                Discipline("D1", seats=5, hours=60),
+                Discipline("D2", seats=3, hours=60),
+            ],
+            students_per_period=4,
+        )
+    # Exatamente no teto passa — e não sobra vaga nenhuma para quem recursa.
+    assert SimulationConfig(
+        disciplines=[Discipline("D1", seats=4, hours=60), Discipline("D2", seats=4, hours=60)],
+        students_per_period=4,
+    ).students_per_period == 4
+
+
+def test_a_first_period_heavier_than_the_workload_cap_is_rejected():
+    """O ingressante cursa as de 1º período todas de uma vez: a carga somada
+    delas tem de caber em W_a, senão a eq. (4) seria violada na entrada."""
+    with pytest.raises(ValueError, match="não cabem na carga horária máxima"):
+        SimulationConfig(
+            disciplines=[
+                Discipline("D1", seats=5, hours=60),
+                Discipline("D2", seats=5, hours=60),
+            ],
+            students_per_period=2,
+            affinity_profiles=[AffinityProfile("Apertado", "concentrated", 1, 100, 100)],
+        )
+
+
+def test_retaking_a_first_period_discipline_goes_through_the_auction():
+    """A garantia vale só no ingresso: quem reprova em D1 disputa a vaga como
+    qualquer outro, no leilão."""
+    config = make_config(periods=8)
+    result = run_simulation(config)
+    first = set(config.first_period_disciplines())
+    entry = {s.id: s.entry_period for s in result.students}
+
+    retakes = [
+        r
+        for history in result.histories
+        for record in history.periods
+        if record.period > entry[history.student_id]
+        for r in record.requests
+        if r.discipline in first
+    ]
+    assert retakes, "alguém deveria reprovar numa disciplina de 1º período"
+    assert all(r.won_round != GUARANTEED_ROUND for r in retakes)
+
+
+# --- recorte por geração ---------------------------------------------------
+
+
+def test_cohorts_partition_the_university():
+    """`by_cohort` é o mesmo recorte de `overall`, fatiado por geração: somar as
+    fatias reproduz a universidade, em toda rodada e todo período."""
     result = run_simulation(make_config())
     reports = [r for p in result.periods for r in (*p.rounds, p.aggregate)]
     assert reports
 
     for report in reports:
-        for course in report.by_course:
-            assert course.entry_period is None, "o recorte do curso inteiro não tem geração"
-            cohorts = [c for c in report.by_cohort if c.course == course.course]
-            assert sum(c.active for c in cohorts) == course.active
-            assert sum(c.graduated for c in cohorts) == course.graduated
-            # uma geração só aparece uma vez por curso
-            entries = [c.entry_period for c in cohorts]
-            assert len(set(entries)) == len(entries)
+        assert report.overall.group is None, "o agregado não tem geração"
+        assert sum(c.active for c in report.by_cohort) == report.overall.active
+        assert sum(c.graduated for c in report.by_cohort) == report.overall.graduated
+        assert sum(c.population for c in report.by_cohort) == report.overall.population
+        # uma geração só aparece uma vez
+        entries = [c.group for c in report.by_cohort]
+        assert len(set(entries)) == len(entries)
+        assert all(entry is not None for entry in entries)
 
 
 def test_a_student_never_changes_cohort():
     """É o que distingue a geração da idade: o aluno nasce numa geração e fica
     nela até sair, então uma série sempre fala do mesmo conjunto de alunos."""
     result = run_simulation(make_config())
-    entries_by_course: dict[str, set[int]] = {}
-    for student in result.students:
-        entries_by_course.setdefault(student.course, set()).add(student.entry_period)
+    entries = {s.entry_period for s in result.students}
 
     for period in result.periods:
         for cohort in period.aggregate.by_cohort:
-            assert cohort.entry_period is not None
-            # a geração existe no curso e já ingressou
-            assert cohort.entry_period in entries_by_course[cohort.course]
-            assert cohort.entry_period <= period.period
-            if cohort.active:
-                members = [
-                    s
-                    for s in result.students
-                    if s.course == cohort.course and s.entry_period == cohort.entry_period
-                ]
-                assert cohort.active <= len(members)
+            entry = int(cohort.group)
+            assert entry in entries
+            assert entry <= period.period
+            members = [s for s in result.students if s.entry_period == entry]
+            assert cohort.population == len(members)
+            assert cohort.active <= len(members)
 
 
-def test_cohort_without_active_students_still_reports_its_graduates():
-    """Uma geração que já esvaziou continua na lista enquanto tiver concluintes —
-    senão a série dela sumiria justamente ao terminar de contar."""
-    result = run_simulation(make_config(periods=8))
+def test_an_emptied_cohort_stays_in_the_series_with_its_graduates():
+    """Uma geração que já esvaziou continua na lista enquanto a simulação
+    correr — senão a série dela sumiria justamente ao terminar de contar."""
+    result = run_simulation(make_config(periods=10, entry_periods=2))
     emptied = [
         cohort
         for period in result.periods
@@ -538,21 +643,22 @@ def test_cohort_without_active_students_still_reports_its_graduates():
 
 
 def test_graduates_are_counted_in_the_cohort_they_entered():
-    result = run_simulation(make_config(periods=8))
-    expected: dict[tuple[str, int], int] = {}
+    result = run_simulation(make_config(periods=10))
+    expected: dict[int, int] = {}
     for student in result.students:
         if student.graduated_at is not None:
-            key = (student.course, student.entry_period)
-            expected[key] = expected.get(key, 0) + 1
+            expected[student.entry_period] = expected.get(student.entry_period, 0) + 1
     assert expected, "neste cenário alguém deveria se formar"
 
-    last = result.periods[-1].aggregate
     final = {
-        (c.course, c.entry_period): c.graduated
-        for c in last.by_cohort
-        if c.graduated and c.entry_period is not None
+        int(c.group): c.graduated
+        for c in result.periods[-1].aggregate.by_cohort
+        if c.graduated
     }
     assert final == expected
+
+
+# --- retorno de créditos ---------------------------------------------------
 
 
 def test_credit_return_policies_follow_their_definitions():
@@ -585,7 +691,8 @@ def test_credit_return_is_added_to_the_budget_of_the_next_period():
     """eq. (36): C_a^(t+1,1) = C_a^(t,1) - gasto + Gamma_min + soma gamma_{a,x}.
 
     O histórico individual é a única tela em que essa conta aparece aberta,
-    então ela tem de fechar exatamente — em todas as políticas.
+    então ela tem de fechar exatamente — em todas as políticas, inclusive no
+    período de ingresso, em que o gasto é o que o sistema lançou.
     """
     for policy in ("none", "unit", "full", "ratio"):
         config = make_config(credit_return=policy)
@@ -636,25 +743,25 @@ def test_each_policy_returns_what_it_promises_inside_a_full_simulation():
 
 
 def test_credit_return_is_reported_only_at_the_end_of_the_period():
-    """Durante as rodadas as notas ainda não saíram: o recorte por curso traz
-    `None`, não 0,0 — zero ali se leria como 'a política não devolveu nada'."""
+    """Durante as rodadas as notas ainda não saíram: o recorte traz `None`, não
+    0,0 — zero ali se leria como 'a política não devolveu nada'."""
     config = make_config(credit_return="full")
     result = run_simulation(config)
     for period in result.periods:
         for report in period.rounds:
-            assert all(s.mean_credit_return is None for s in report.by_course)
-        for snapshot in period.aggregate.by_course:
+            assert report.overall.mean_credit_return is None
+            assert all(c.mean_credit_return is None for c in report.by_cohort)
+        for snapshot in period.aggregate.by_cohort:
             assert (snapshot.mean_credit_return is None) == (snapshot.active == 0)
 
-    # E o recorte por curso é a média do que os alunos daquele curso receberam.
-    entry = {h.student_id: h for h in result.histories}
-    course_of = {s.id: s.course for s in result.students}
+    # E o recorte é a média do que os alunos daquela geração receberam.
+    entry_of = {s.id: s.entry_period for s in result.students}
     for period in result.periods:
-        for snapshot in period.aggregate.by_course:
+        for snapshot in period.aggregate.by_cohort:
             received = [
                 record.credits_returned
-                for student_id, history in entry.items()
-                if course_of[student_id] == snapshot.course
+                for history in result.histories
+                if entry_of[history.student_id] == int(snapshot.group)
                 for record in history.periods
                 if record.period == period.period
             ]
@@ -664,20 +771,18 @@ def test_credit_return_is_reported_only_at_the_end_of_the_period():
                 )
 
 
+# --- validação do cenário --------------------------------------------------
+
+
 def test_scenario_without_students_or_disciplines_is_rejected():
     """Garantia de que todo período tem aluno começa na entrada: um cenário sem
     ninguém não produziria período algum, e toda métrica sairia indefinida."""
     with pytest.raises(ValueError, match="pelo menos um aluno"):
         SimulationConfig(
-            disciplines=[Discipline("D1", seats=5, hours=60)],
-            courses=[
-                Course("Curso", students_per_generation=0, hours_to_graduate=60, required=("D1",))
-            ],
+            disciplines=[Discipline("D1", seats=5, hours=60)], students_per_period=0
         )
-    with pytest.raises(ValueError, match="pelo menos um aluno"):
-        SimulationConfig(disciplines=[Discipline("D1", seats=5, hours=60)])
     with pytest.raises(ValueError, match="pelo menos uma disciplina"):
-        SimulationConfig(courses=[Course("Curso", students_per_generation=5, hours_to_graduate=0)])
+        SimulationConfig(students_per_period=5)
 
 
 def test_entry_periods_limits_how_many_generations_enter():
@@ -685,8 +790,7 @@ def test_entry_periods_limits_how_many_generations_enter():
     deixa de crescer com o horizonte."""
     config = make_config(periods=10, entry_periods=4)
     assert config.entry_span == 4
-    # 3 alunos por geração (2 + 1) em 4 gerações, não em 10.
-    assert config.total_students() == 12
+    assert config.total_students() == 12  # 3 por geração em 4 gerações
     result = run_simulation(config)
     assert {s.entry_period for s in result.students} == {1, 2, 3, 4}
 
@@ -697,8 +801,7 @@ def test_entry_periods_beyond_the_horizon_is_rejected():
 
 
 def test_without_entry_periods_every_period_receives_a_generation():
-    """O default preserva o comportamento anterior: `None` = ingresso em todos
-    os períodos."""
+    """O default: `None` = ingresso em todos os períodos."""
     config = make_config(periods=7)
     assert config.entry_periods is None
     assert config.entry_span == 7
@@ -719,136 +822,71 @@ def test_the_drain_phase_lets_late_generations_reach_the_end_of_the_course():
     assert [s for s in drained.students if s.entry_period == 4 and s.graduated_at]
 
 
-def test_dismissal_removes_the_student_after_the_deadline():
-    config = make_config(periods=8, entry_periods=3, max_residence=3)
-    result = run_simulation(config)
-    dismissed = [s for s in result.students if s.dismissed_at is not None]
-    assert dismissed, "ninguém foi jubilado com prazo de 3 períodos"
-
-    for student in dismissed:
-        # Permaneceu exatamente T_max períodos: nem um a mais, nem a menos.
-        assert student.dismissed_at - student.entry_period + 1 == config.max_residence
-        # Jubilado não se formou — as duas portas de saída são exclusivas.
-        assert student.graduated_at is None
-
-    # E não reaparece em período nenhum depois de desligado.
-    by_id = {s.id: s for s in result.students}
-    for history in result.histories:
-        student = by_id[history.student_id]
-        if student.dismissed_at is not None and history.periods:
-            assert max(r.period for r in history.periods) <= student.dismissed_at
 
 
-def test_graduating_on_the_last_allowed_period_beats_dismissal():
-    """A conclusão (eq. 40) é decidida antes do prazo: quem fecha o curso no
-    último período a que tem direito se forma, não é jubilado."""
-    result = run_simulation(make_config(periods=8, entry_periods=3, max_residence=3))
-    on_the_wire = [
-        s
-        for s in result.students
-        if s.graduated_at is not None and s.graduated_at - s.entry_period + 1 == 3
-    ]
-    assert on_the_wire, "ninguém concluiu exatamente no prazo — teste sem objeto"
-    for student in on_the_wire:
-        assert student.dismissed_at is None
-
-
-def test_a_deadline_closes_every_generation():
-    """|T| = L - 1 + T_max: todo aluno sai por uma das duas portas antes do fim
-    do horizonte, então nenhuma geração fica em aberto — é o que torna a série
-    por geração comparável entre si."""
-    entry_periods, max_residence = 4, 5
-    result = run_simulation(
-        make_config(
-            periods=entry_periods - 1 + max_residence,
-            entry_periods=entry_periods,
-            max_residence=max_residence,
-        )
-    )
-    for student in result.students:
-        assert (student.graduated_at is None) != (student.dismissed_at is None)
-
-
-def test_dismissal_frees_the_contention_of_whoever_stays():
-    """O que faz o jubilamento ser modelagem e não filtro de relatório: o aluno
-    sai do conjunto ativo, e um a menos disputando é menos concorrência para
-    quem fica."""
-    base = dict(periods=9, entry_periods=4)
-    without = run_simulation(make_config(**base))
-    with_deadline = run_simulation(make_config(**base, max_residence=3))
-
-    # Os dois horizontes têm comprimentos diferentes — a corrida com prazo
-    # esvazia antes —, então a comparação é no último período que ambos têm.
-    common = min(len(without.periods), len(with_deadline.periods)) - 1
-    thinned = with_deadline.periods[common].aggregate.overall
-    full = without.periods[common].aggregate.overall
-    assert thinned.students < full.students
-    assert thinned.contention < full.contention
 
 
 def test_population_counts_everyone_who_entered_the_cut():
-    """`population` é o denominador das frações de saída: quem já ingressou no
-    recorte, tenha saído ou não."""
-    config = make_config(periods=8, entry_periods=3, max_residence=4)
+    """`population` é o denominador da fração de formados: quem já ingressou no
+    recorte, tenha concluído ou não."""
+    config = make_config(periods=8, entry_periods=3)
     result = run_simulation(config)
     for period in result.periods:
-        for snapshot in period.aggregate.by_course + period.aggregate.by_cohort:
+        for snapshot in [period.aggregate.overall, *period.aggregate.by_cohort]:
             entered = [
                 s
                 for s in result.students
-                if s.course == snapshot.course
-                and snapshot.entry_period in (None, s.entry_period)
+                if snapshot.group in (None, str(s.entry_period))
                 and s.entry_period <= period.period
             ]
             assert snapshot.population == len(entered)
 
 
-def test_population_is_not_the_sum_of_active_and_the_two_exits():
-    """A soma ingênua conta duas vezes quem sai ao fim do período: ele disputou
-    o período inteiro, então está em `active` *e* já no acumulado. Tirar a
-    fração dela daria um denominador inflado."""
-    result = run_simulation(make_config(periods=8, entry_periods=3, max_residence=4))
+def test_population_is_not_active_plus_graduated():
+    """A soma ingênua conta duas vezes quem se forma ao fim do período: ele
+    disputou o período inteiro, então está em `active` *e* já no acumulado.
+    Tirar a fração dela daria um denominador inflado."""
+    result = run_simulation(make_config(periods=8, entry_periods=3))
     naive = [
-        (snapshot.active + snapshot.graduated + snapshot.dismissed, snapshot.population)
+        (snapshot.active + snapshot.graduated, snapshot.population)
         for period in result.periods
-        for snapshot in period.aggregate.by_course
+        for snapshot in period.aggregate.by_cohort
     ]
     # Nunca menor que a população, e em algum período estritamente maior.
     assert all(total >= population for total, population in naive)
     assert any(total > population for total, population in naive)
 
 
-def test_minimum_periods_to_graduate_is_the_floor_for_the_deadline():
-    """ceil(S_k / W_a) do curso mais longo: nem quem nunca reprova nem perde uma
-    vaga fecha o curso antes disso. Um prazo abaixo jubila todo mundo."""
-    config = make_config(max_hours=180)  # S_k = 300 e 240 h
-    assert config.minimum_periods_to_graduate() == 2  # ceil(300 / 180)
+def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
+    """São dois pisos — a carga horária e a cadeia de pré-requisitos — e vale o
+    maior. Um prazo abaixo dele jubila todo mundo."""
+    # Grade de 360 h em 3 elos: com W_a = 180 a carga pede 2 e a cadeia pede 3,
+    # então manda a cadeia.
+    config = make_config()
+    assert config.hours_to_graduate() == 360
+    assert config.minimum_periods_to_graduate() == 3  # max(ceil(360/180), 3)
 
-    doomed = run_simulation(make_config(periods=6, entry_periods=3, max_residence=1))
+    # Grade rasa e larga: 2 elos só, mas 300 h que não cabem num período. Aqui
+    # manda a carga horária.
+    wide = SimulationConfig(
+        disciplines=[
+            Discipline("A", seats=5, hours=60),
+            *[
+                Discipline(name, seats=5, hours=60, prerequisites=("A",))
+                for name in ("B", "C", "D", "E")
+            ],
+        ],
+        students_per_period=5,
+        affinity_profiles=[AffinityProfile("Estreito", "concentrated", 1, 60, 100)],
+    )
+    assert wide.hours_to_graduate() == 300
+    assert max(wide.curriculum_periods().values()) == 2
+    assert wide.minimum_periods_to_graduate() == 5  # max(ceil(300/60), 2)
+
+    # Horizonte abaixo do piso: ninguém chega ao fim, por construção.
+    doomed = run_simulation(make_config(periods=2, entry_periods=1))
     assert all(s.graduated_at is None for s in doomed.students)
-    assert all(s.dismissed_at is not None for s in doomed.students)
 
 
-def test_zero_disables_the_deadline():
-    """O jubilamento é opcional: 0 desliga a regra, e permanecer zero períodos
-    não significaria nada, então o valor fica livre para servir de sentinela."""
-    config = make_config(periods=8, entry_periods=3, max_residence=0)
-    assert config.max_residence == 0
-    result = run_simulation(config)
-    assert all(s.dismissed_at is None for s in result.students)
-    assert all(p.dismissed_now == 0 for p in result.periods)
-    # O contraste: o mesmo cenário com prazo apertado desliga gente, então o
-    # que 0 faz é desligar a regra, não escapar por sorte do cenário.
-    with_deadline = run_simulation(make_config(periods=8, entry_periods=3, max_residence=2))
-    assert [s for s in with_deadline.students if s.dismissed_at is not None]
-
-    # É também o padrão: quem não configura prazo não tem jubilamento.
-    assert SimulationConfig(
-        disciplines=[Discipline("D1", seats=1, hours=60)],
-        courses=[Course("Curso", students_per_generation=1, hours_to_graduate=60, required=("D1",))],
-    ).max_residence == 0
 
 
-def test_a_negative_deadline_is_rejected():
-    with pytest.raises(ValueError, match="tempo máximo de permanência"):
-        make_config(max_residence=-1)

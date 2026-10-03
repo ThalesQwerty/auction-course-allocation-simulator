@@ -1,4 +1,9 @@
-import type { CourseInput, DisciplineInput, SimulateRequest } from "./types";
+import type {
+  AffinityProfileInput,
+  AptitudeProfileInput,
+  DisciplineInput,
+  SimulateRequest,
+} from "./types";
 
 /** Um cenário pronto. `hint` diz para que ele serve — a lista existe para
  * poupar a montagem manual de cenários que se repetem na pesquisa. */
@@ -9,142 +14,173 @@ export interface Preset {
   build: () => SimulateRequest;
 }
 
-/** [nome, carga horária (w_x), vagas (q_x)].
+/** As seis combinações de oferta que se repetem a partir do 2º período: três
+ * tamanhos de turma × duas cargas horárias.
  *
- * As cargas horárias seguem a distribuição pedida: 60 h é a maioria; 45 h e
- * 75 h são a minoria; 30 h (laboratórios e disciplinas curtas) e 90 h (as
- * pesadas) ficam no meio.
+ * Essa regularidade é o que torna os gráficos por disciplina legíveis. Do 2º
+ * período em diante, agrupar por carga horária dá duas séries com 15
+ * disciplinas cada e agrupar por período dá cinco com 6 — e em qualquer um dos
+ * recortes os outros eixos estão igualmente distribuídos dentro de cada grupo.
+ * Então uma diferença entre séries é da grandeza em tela, não de um
+ * desequilíbrio de composição.
  *
- * As vagas são escassas também no agregado: a oferta total fica muito abaixo
- * da carga horária que os alunos conseguiriam consumir, então o leilão raciona
- * em toda disciplina, não só nas obrigatórias disputadas por mais de um
- * curso. */
-type Entry = [string, number, number];
+ * As 40 vagas são o gargalo do cenário e as de 120 nunca apertam; é essa
+ * gradação que o recorte por vagas mede. O **1º período é a exceção**: ali tudo
+ * tem 120 vagas, porque a geração inteira entra de uma vez por matrícula
+ * garantida e ainda precisa sobrar lugar para quem recursa. Isso desequilibra o
+ * recorte por vagas (o grupo de 120 fica com 16 disciplinas contra 10 dos
+ * outros dois), e é de propósito: a alternativa seria um 1º período que
+ * estrangula a entrada antes de o mecanismo ter o que alocar. */
+const SEATS = [40, 80, 120] as const;
+const ENTRY_SEATS = 120;
+const HOURS = [60, 90] as const;
 
-/** Matemática básica — obrigatória nos três cursos. */
-const BASIC_MATH: Entry[] = [
-  ["Cálculo I", 90, 36],
-  ["Cálculo II", 90, 30],
-  ["Geometria Analítica", 60, 30],
-  ["Álgebra Linear", 75, 30],
-  ["Matemática Discreta", 60, 26],
+/** [nome, carga horária (w_x), vagas (q_x), pré-requisitos].
+ *
+ * O período de cada disciplina **não** é declarado: sai por indução dos
+ * pré-requisitos (`curriculum.ts`). A grade abaixo está agrupada por período só
+ * para ser legível — o que a põe no 3º período é cada uma delas depender de
+ * alguma do 2º, não a posição na lista.
+ *
+ * Cada período soma 450 h, que é a carga horária máxima dos dois perfis de
+ * afinidade (W_a): o aluno em dia cursa as seis disciplinas do seu período e
+ * nada mais. Isso importa duas vezes. Faz a disputa ser por *quais* seis, e não
+ * por quantas — quem fica para trás tem de escolher entre recuperar o atraso e
+ * avançar. E deixa a matrícula garantida do ingressante caber em W_a: ele entra
+ * nas seis do 1º período de uma vez, e a eq. (4) tem de continuar valendo. */
+type Entry = [string, number, number, string[]];
+
+const P1: Entry[] = [
+  ["Cálculo I", 90, ENTRY_SEATS, []],
+  ["Programação I", 90, ENTRY_SEATS, []],
+  ["Matemática Discreta", 90, ENTRY_SEATS, []],
+  ["Geometria Analítica", 60, ENTRY_SEATS, []],
+  ["Laboratório de Programação", 60, ENTRY_SEATS, []],
+  ["Introdução à Computação", 60, ENTRY_SEATS, []],
 ];
 
-/** Matemática intermediária — Matemática e Engenharia. */
-const INTERMEDIATE_MATH: Entry[] = [
-  ["Cálculo III", 60, 20],
-  ["Equações Diferenciais", 60, 20],
-  ["Probabilidade e Estatística", 60, 22],
-  ["Cálculo Numérico", 45, 16],
+const P2: Entry[] = [
+  ["Cálculo II", 90, 40, ["Cálculo I"]],
+  ["Estruturas de Dados", 90, 80, ["Programação I", "Matemática Discreta"]],
+  ["Álgebra Linear", 90, 120, ["Geometria Analítica"]],
+  ["Circuitos Digitais", 60, 40, ["Introdução à Computação"]],
+  ["Programação II", 60, 80, ["Programação I"]],
+  ["Laboratório de Programação II", 60, 120, ["Laboratório de Programação"]],
 ];
 
-/** Matemática avançada — só o curso de Matemática. */
-const ADVANCED_MATH: Entry[] = [
-  ["Análise Real", 90, 12],
-  ["Álgebra Abstrata", 90, 12],
-  ["Variáveis Complexas", 60, 10],
-  ["Topologia", 60, 10],
+const P3: Entry[] = [
+  ["Algoritmos", 90, 40, ["Estruturas de Dados"]],
+  ["Arquitetura de Computadores", 90, 80, ["Circuitos Digitais"]],
+  ["Cálculo Numérico", 90, 120, ["Cálculo II", "Álgebra Linear"]],
+  ["Banco de Dados", 60, 40, ["Estruturas de Dados"]],
+  ["Paradigmas de Programação", 60, 80, ["Programação II"]],
+  ["Probabilidade e Estatística", 60, 120, ["Cálculo II"]],
 ];
 
-/** Código — obrigatórias da Computação. */
-const CODE: Entry[] = [
-  ["Programação I", 60, 30],
-  ["Programação II", 60, 24],
-  ["Estrutura de Dados", 60, 22],
-  ["Algoritmos", 60, 20],
-  ["Banco de Dados", 60, 18],
-  ["Sistemas Operacionais", 60, 18],
-  ["Redes de Computadores", 60, 18],
-  ["Engenharia de Software", 60, 18],
-  ["Compiladores", 75, 14],
-  ["Inteligência Artificial", 60, 16],
-  ["Laboratório de Programação", 30, 20],
+const P4: Entry[] = [
+  ["Teoria da Computação", 90, 40, ["Algoritmos"]],
+  ["Sistemas Operacionais", 90, 80, ["Arquitetura de Computadores"]],
+  ["Inteligência Artificial", 90, 120, ["Algoritmos", "Probabilidade e Estatística"]],
+  ["Redes de Computadores", 60, 40, ["Arquitetura de Computadores"]],
+  ["Engenharia de Software", 60, 80, ["Banco de Dados", "Paradigmas de Programação"]],
+  ["Computação Gráfica", 60, 120, ["Cálculo Numérico", "Paradigmas de Programação"]],
 ];
 
-/** Física, eletrônica e hardware — obrigatórias da Engenharia. */
-const HARDWARE: Entry[] = [
-  ["Física I — Mecânica", 90, 26],
-  ["Física II — Eletromagnetismo", 60, 24],
-  ["Física III — Ondas e Termodinâmica", 60, 20],
-  ["Circuitos Elétricos", 60, 20],
-  ["Circuitos Digitais", 60, 20],
-  ["Eletrônica Analógica", 75, 16],
-  ["Arquitetura de Computadores", 60, 20],
-  ["Microcontroladores", 45, 16],
-  ["Sistemas Embarcados", 45, 14],
-  ["Processamento de Sinais", 60, 14],
-  ["Laboratório de Circuitos Digitais", 30, 18],
+const P5: Entry[] = [
+  ["Compiladores", 90, 40, ["Teoria da Computação"]],
+  ["Sistemas Distribuídos", 90, 80, ["Sistemas Operacionais", "Redes de Computadores"]],
+  ["Aprendizado de Máquina", 90, 120, ["Inteligência Artificial"]],
+  ["Segurança Computacional", 60, 40, ["Redes de Computadores"]],
+  ["Qualidade e Teste de Software", 60, 80, ["Engenharia de Software"]],
+  ["Projeto de Pesquisa", 60, 120, ["Engenharia de Software", "Probabilidade e Estatística"]],
 ];
 
-/** Disciplinas de serviço — optativas em todos os cursos. */
-const GENERAL: Entry[] = [
-  ["Metodologia Científica", 30, 24],
-  ["Introdução à Engenharia", 30, 20],
-  ["Economia", 60, 18],
+const P6: Entry[] = [
+  ["Trabalho de Conclusão de Curso", 90, 40, ["Projeto de Pesquisa"]],
+  ["Processamento de Linguagem Natural", 90, 80, ["Aprendizado de Máquina"]],
+  ["Computação em Nuvem", 90, 120, ["Sistemas Distribuídos"]],
+  ["Otimização de Código", 60, 40, ["Compiladores"]],
+  ["Criptografia Aplicada", 60, 80, ["Segurança Computacional"]],
+  ["Gerência de Projetos de Software", 60, 120, ["Qualidade e Teste de Software"]],
 ];
 
-const CATALOG = [
-  ...BASIC_MATH, ...INTERMEDIATE_MATH, ...ADVANCED_MATH, ...CODE, ...HARDWARE, ...GENERAL,
+const GRADE = [P1, P2, P3, P4, P5, P6];
+
+/** Carga horária máxima por período, igual nos dois perfis de afinidade. É
+ * exatamente a soma de um período da grade. */
+const MAX_HOURS = HOURS.reduce((sum, h) => sum + h * SEATS.length, 0); // 450
+
+/** Alunos que ingressam por período. O teto formal é a menor oferta de 1º
+ * período (120), mas quem dimensiona o cenário é o gargalo seguinte: as
+ * disciplinas de 40 vagas, que a partir do 2º período servem toda a população
+ * em dia. Acima disso a fila nelas cresce sem nunca drenar e ninguém chega ao
+ * fim da grade; bem abaixo, nada aperta e não há escassez a alocar.
+ *
+ * Calibrado rodando o cenário. Com 60, ψ̄ anda entre 0,82 e 1,00 ao longo dos
+ * períodos e ~28% concluem em 12, com a conclusão mais rápida em 6 — o piso da
+ * cadeia. O recorte por vagas fica legível: as de 40 chegam a 1,3 candidato por
+ * vaga e preço 2,5, enquanto as de 120 ficam em 0,4 e no piso de 1 crédito. Com
+ * 30 a universidade inteira fica frouxa (ψ̄ = 1,00, preço sempre 1); com 70 a
+ * fila nas de 40 vagas passa de 1,7 e a conclusão cai para 22%. */
+const STUDENTS_PER_PERIOD = 60;
+
+/** Perfis de aptidão: a normal das notas de primeira tentativa. As médias e os
+ * desvios separam três populações de desempenho bem distintas — o Exemplar
+ * quase nunca reprova, o Instável reprova com frequência e varia muito de uma
+ * disciplina para outra. As fatias são escolha de calibragem (o enunciado fixa
+ * os parâmetros, não a proporção): metade da população no perfil do meio e um
+ * quarto em cada extremo, que é a forma usual de uma turma.
+ *
+ * O incremento por recursada é igual nos três, para que a diferença entre eles
+ * seja só a distribuição das notas — é o eixo que o cenário quer isolar. */
+const APTITUDE: AptitudeProfileInput[] = [
+  { name: "Exemplar", mean: 8, stddev: 1, learning_gain: 2.5, share: 25 },
+  { name: "Regular", mean: 6.5, stddev: 1.5, learning_gain: 2.5, share: 50 },
+  { name: "Instável", mean: 5, stddev: 2, learning_gain: 2.5, share: 25 },
 ];
 
-const names = (...groups: Entry[][]) => groups.flat().map(([name]) => name);
-const totalHours = (...groups: Entry[][]) => groups.flat().reduce((sum, [, w]) => sum + w, 0);
+/** Perfis de afinidade: o quanto o aluno concentra a preferência. Metade a
+ * metade, porque é a comparação que interessa — o leilão deveria servir melhor
+ * quem concentra, já que é exatamente essa informação que a ordenação por CR
+ * não capta, e com fatias iguais a diferença entre os dois é lida direto.
+ *
+ * A carga horária máxima é igual nos dois, pelo mesmo motivo do incremento:
+ * isolar o eixo. Variá-la é o jeito de perguntar o que acontece quando quem
+ * concentra também carrega menos por período. */
+const AFFINITY: AffinityProfileInput[] = [
+  { name: "Focados", kind: "concentrated", intensity: 2, max_hours: MAX_HOURS, share: 50 },
+  { name: "Dispersos", kind: "diluted", intensity: 2, max_hours: MAX_HOURS, share: 50 },
+];
 
-/** S_k tem de ficar entre a carga das obrigatórias e a das obrigatórias +
- * optativas — eq. (39). Exige-se as obrigatórias inteiras mais uma fração das
- * optativas, que é o que força o aluno a escolher entre elas. */
-function course(
-  name: string,
-  studentsPerGeneration: number,
-  required: Entry[][],
-  electives: Entry[][],
-  electiveShare: number
-): CourseInput {
-  const required_hours = totalHours(...required);
-  const elective_hours = totalHours(...electives);
-  return {
+const toDisciplines = (groups: Entry[][]): DisciplineInput[] =>
+  groups.flat().map(([name, hours, seats, prerequisites]) => ({
     name,
-    students_per_generation: studentsPerGeneration,
-    // arredondado para múltiplo de 15, que é o passo das cargas do catálogo
-    hours_to_graduate: required_hours + Math.round((elective_hours * electiveShare) / 15) * 15,
-    required: names(...required),
-    electives: names(...electives),
-  };
-}
+    hours,
+    seats,
+    prerequisites,
+  }));
 
 export const PRESETS: Preset[] = [
   {
-    id: "campus",
-    name: "Campus",
-    hint: "Três cursos com grades que se cruzam; 150 ingressantes por período em 5 períodos, 750 alunos, e mais 5 períodos de drenagem.",
+    id: "computacao",
+    name: "Computação",
+    hint: "Grade de 6 períodos com 6 disciplinas cada, encadeadas por pré-requisitos; do 2º período em diante repetem-se as combinações de 40/80/120 vagas × 60/90 h. 60 ingressantes por período em 6 períodos, 360 alunos, e mais 6 períodos de drenagem.",
     build: (): SimulateRequest => ({
-      disciplines: CATALOG.map(([name, hours, seats]): DisciplineInput => ({ name, hours, seats })),
-      courses: [
-        // Os números são por geração: com 5 períodos de ingresso dão 300, 200 e 250 alunos.
-        // Matemática básica + código.
-        course("Computação", 60, [BASIC_MATH, CODE], [INTERMEDIATE_MATH, HARDWARE, GENERAL], 0.2),
-        // Toda a matemática.
-        course("Matemática", 40, [BASIC_MATH, INTERMEDIATE_MATH, ADVANCED_MATH], [CODE, GENERAL], 0.2),
-        // Física/eletrônica inteira + matemática até o nível intermediário.
-        course("Engenharia", 50, [BASIC_MATH, INTERMEDIATE_MATH, HARDWARE], [CODE, GENERAL], 0.2),
-      ],
-      periods: 10,
-      // Ingresso nos 5 primeiros e drenagem nos 5 últimos. Sem a drenagem as
+      disciplines: toDisciplines(GRADE),
+      aptitude_profiles: APTITUDE,
+      affinity_profiles: AFFINITY,
+      periods: 12,
+      // Ingresso nos 6 primeiros e drenagem nos 6 últimos. Sem a drenagem as
       // últimas gerações eram cortadas pelo horizonte antes de poderem se
-      // formar — a geração 10 vivia um período só —, e a série por geração
-      // media quanto tempo de simulação sobrou, não o mecanismo.
-      entry_periods: 5,
-      // 0 = sem jubilamento. Este cenário é deliberadamente escasso (a oferta
-      // fica muito abaixo do que os alunos consumiriam), e em 10 períodos só
-      // ~6% concluem. Qualquer prazo aqui desligaria quase toda a população, o
-      // que mede a calibragem do cenário e não o mecanismo. Para experimentar
-      // o jubilamento, afrouxe a escassez ou alongue |T| antes.
-      max_residence: 0,
+      // formar — a última geração vivia um período só —, e a série por geração
+      // media quanto tempo de simulação sobrou, não o mecanismo. Seis é o piso
+      // teórico da grade: a cadeia de pré-requisitos tem seis elos, então
+      // ninguém conclui em menos que isso nem no melhor dos casos.
+      entry_periods: 6,
+      students_per_period: STUDENTS_PER_PERIOD,
       rounds: 2,
       min_grade: 5,
       base_credits: 10,
-      max_hours: 360,
-      learning_gain: 2.5,
       credit_return: "none",
       seed: 42,
     }),

@@ -6,77 +6,95 @@ tal e qual), e ao fim do período saem as notas, o retorno de créditos e as
 conclusões de curso.
 
     para cada período t:
-        u^(t)                                      eqs. (41)-(43), (47)-(48)
+        u^(t)                                      eqs. (41)-(43)
+        matrícula garantida dos ingressantes       (fora do leilão)
         para cada rodada r:
             c^(t,r) <- u^(t), C^(t,r), B_a^(t,r)   eqs. (44)-(46)
             z^(t,r) <- leilão(c^(t,r))             eqs. (22)-(25)
             q, W, C                                eqs. (13), (14), (27)
         notas, retorno de créditos                 eqs. (33)-(36)
         conclusão de curso                         eq. (40)
-        jubilamento                                `SimulationConfig.max_residence`
 
-O aluno sai do conjunto ativo por duas portas: concluindo o curso (eq. 40) ou
-sendo desligado por decurso de prazo. O jubilamento não está no anteprojeto —
-foi acrescentado porque sem ele quem nunca consegue vaga permanece disputando
-para sempre, e porque a taxa de desligamento é o que distingue de forma mais
-legível um mecanismo que serve mal os mesmos alunos período após período.
+Não há cursos: a universidade inteira cursa a mesma grade, e toda disciplina é
+obrigatória — concluir é aprovar em todas. Os relatórios recortam a população
+por três eixos (`_Axis`), que são a mesma gente partida de formas diferentes: a
+**geração** (quem ingressou num mesmo período, t_a da eq. 31) e os dois perfis
+do aluno, **aptidão** e **afinidade**. Somar qualquer um deles reproduz o
+agregado.
+
+**Quem ingressa não disputa.** O aluno novo recebe vaga garantida em todas as
+disciplinas de 1º período — as sem pré-requisito — e fica de fora do leilão
+naquele período. O sistema lança na conta dele o gasto correspondente,
+repartindo o orçamento igualmente entre essas disciplinas (o resto da divisão
+continua no saldo), e é esse valor que alimenta o retorno de créditos da
+eq. (34). Vale só no período de ingresso: recursar uma dessas disciplinas é
+disputá-la no leilão como qualquer outra.
+
+O aluno sai do conjunto ativo por uma única porta: concluindo o curso (eq. 40).
+Quem não concluiu continua disputando até o fim do horizonte, e é a fase de
+drenagem que dá às gerações tardias tempo de chegar lá.
 """
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from .auction import AuctionInput, Bid, run_auction
 from .behavior import compute_bids, draw_utilities, utility_matrix
-from .config import Course, SimulationConfig
+from .config import SimulationConfig
 from .entities import Agent, Good
 from .grading import credit_return, grade_for_attempt, initial_grades
 from .metrics import Metrics, compute_metrics, demand_per_seat, satisfaction, semestralization
 from .population import Student, generate_students
 from .tie_breaking import stochastic_perturbations
 
+# `RequestRecord.won_round` quando a vaga não veio de rodada nenhuma: é a
+# matrícula garantida do ingressante, concedida antes do leilão abrir.
+GUARANTEED_ROUND = 0
+
 
 @dataclass(frozen=True)
-class CourseSnapshot:
-    """Recorte de um curso num instante da simulação — a unidade dos gráficos.
+class GroupSnapshot:
+    """Recorte de alunos num instante da simulação — a unidade dos gráficos.
 
-    Quando o curso não tem nenhum aluno no período (`active == 0`), as médias
-    são `None` em vez de 0,0: não havia ninguém, o que é diferente de ninguém
-    ter ficado satisfeito. Zero ali seria um ponto falso no gráfico e puxaria
-    para baixo qualquer média feita sobre os períodos.
+    Quando o recorte não tem ninguém no período (`active == 0`), as médias são
+    `None` em vez de 0,0: não havia ninguém, o que é diferente de ninguém ter
+    ficado satisfeito. Zero ali seria um ponto falso no gráfico e puxaria para
+    baixo qualquer média feita sobre os períodos.
     """
 
-    course: str
-    # `None` no recorte do curso inteiro (`RoundReport.by_course`); em
-    # `RoundReport.by_cohort`, o periodo de ingresso (t_a, eq. 31) da geracao
-    # agregada ali -- a geracao e identificada pelo periodo em que entrou. Os dois recortes tem os mesmos campos de proposito: trocar
-    # a agregacao de um grafico e trocar de lista, nada mais.
-    entry_period: int | None
+    # Quem é este recorte: `None` na universidade inteira
+    # (`RoundReport.overall`), o período de ingresso (t_a, eq. 31) em
+    # `by_cohort`, e o nome do perfil em `by_aptitude` e `by_affinity`. É texto
+    # porque os três eixos dividem a mesma estrutura — trocar a agregação de um
+    # gráfico é trocar de lista, nada mais —, e só a lista de origem diz como
+    # ler a chave.
+    group: str | None
     metrics: Metrics | None
-    active: int  # |A_k^(t)| no início do período
-    # Alunos do recorte que já ingressaram, tenham saído ou não. Não é
-    # `active + graduated + dismissed`: quem sai ao fim de t conta nos dois
-    # lados dessa soma, porque disputou o período inteiro antes de sair. É
-    # sobre este número que se tira a fração de formados ou de jubilados.
+    active: int  # |A^(t)| do recorte no início do período
+    # Alunos do recorte que já ingressaram, tenham concluído ou não. Não é
+    # `active + graduated`: quem se forma ao fim de t conta nos dois lados dessa
+    # soma, porque disputou o período inteiro antes de sair. É sobre este número
+    # que se tira a fração de formados.
     population: int
     graduated: int  # concluintes acumulados até aqui
-    # Jubilados acumulados até aqui. Junto com `active` e `graduated` fecha a
-    # população do recorte que já ingressou, então a fração de jubilados do
-    # recorte sai dos três sem precisar do tamanho da geração.
-    dismissed: int
     mean_credits: float | None  # orçamento médio C_a ao fim do recorte
     mean_approved_hours: float | None
-    # Economia de créditos do curso, medida sobre a oferta do início do período
-    # (C_a^(t,1), antes de qualquer lance) — distinta de `mean_credits`, que é
-    # o que sobrou. `credits_per_seat` divide essa oferta pelas vagas de toda a
-    # universidade: é o preço que uma vaga teria se todo o crédito em mãos
-    # fosse gasto, e a soma dos cursos dá o preço esperado global.
+    # Economia de créditos do recorte, medida sobre a oferta do início do
+    # período (C_a^(t,1), antes de qualquer lance) — distinta de `mean_credits`,
+    # que é o que sobrou. `credits_per_seat` divide essa oferta pelas vagas de
+    # toda a universidade: é o preço que uma vaga teria se todo o crédito em
+    # mãos fosse gasto, e a soma das gerações dá o preço esperado global.
     credits_per_student: float | None
     credits_per_seat: float | None
     # Créditos apostados no período por aluno ativo, somando as rodadas. Pode
     # passar do orçamento: lance perdido não consome nada (eq. 25), então o
-    # crédito que não virou vaga volta a ser apostado na rodada seguinte.
+    # crédito que não virou vaga volta a ser apostado na rodada seguinte. A
+    # matrícula garantida do ingressante entra aqui pelo valor que o sistema
+    # lançou na conta dele, para que lance e gasto continuem na mesma régua.
     mean_bids: float | None
     # Retorno de créditos do período (soma de gamma_{a,x}, eq. 34), por aluno
     # ativo. Só existe no recorte de fim de período: em plena rodada as notas
@@ -86,11 +104,22 @@ class CourseSnapshot:
 
 
 @dataclass(frozen=True)
+class _Axis:
+    """Um eixo de recorte: como rotular cada aluno e em que ordem as séries
+    saem. Os três (geração, aptidão, afinidade) particionam a mesma população,
+    então o relatório os trata pela mesma estrutura — o que muda de um para o
+    outro é só a chave e a ordem."""
+
+    key: Callable[[Student], str]
+    order: list[str]
+
+
+@dataclass(frozen=True)
 class PriceStats:
     """Dispersão de pi_x (eq. 24) entre as disciplinas num instante.
 
-    O preço não é grandeza de aluno nem de curso: é do mercado. O que se lê dele
-    ao longo do tempo é a faixa — a disciplina mais cara, a média e a mais
+    O preço não é grandeza de aluno nem de geração: é do mercado. O que se lê
+    dele ao longo do tempo é a faixa — a disciplina mais cara, a média e a mais
     barata —, porque uma média sozinha esconde se o crédito está concentrado em
     poucas disputas ou espalhado por todas.
     """
@@ -123,13 +152,19 @@ class RoundReport:
 
     period: int  # t
     round: int  # r; 0 identifica o agregado (t, *)
-    overall: Metrics
-    by_course: list[CourseSnapshot]
-    # O mesmo instante agregado por curso x geracao. So aparecem as geracoes
-    # que ja ingressaram, entao a serie de uma geracao comeca no periodo do seu
-    # ingresso -- e o aluno fica na mesma geracao do inicio ao fim, que e o que
-    # torna essa leitura mais estavel que a idade.
-    by_cohort: list[CourseSnapshot]
+    # A universidade inteira (`group is None`).
+    overall: GroupSnapshot
+    # O mesmo instante agregado por geração. Só aparecem as gerações que já
+    # ingressaram, então a série de uma geração começa no período do seu
+    # ingresso — e o aluno fica na mesma geração do início ao fim, que é o que
+    # torna essa leitura mais estável que a idade.
+    by_cohort: list[GroupSnapshot]
+    # E pelos dois eixos de perfil, na ordem em que o cenário os declara. Os
+    # três recortes particionam a mesma população de formas diferentes: somar
+    # qualquer um deles reproduz `overall`, e é por isso que dá para trocar de
+    # eixo sem trocar de gráfico.
+    by_aptitude: list[GroupSnapshot]
+    by_affinity: list[GroupSnapshot]
     # Preço das disciplinas no instante. `None` quando nenhuma estava no
     # mercado — sem oferta não há preço, e 0 ali se leria como "de graça".
     prices: PriceStats | None
@@ -138,10 +173,23 @@ class RoundReport:
 @dataclass(frozen=True)
 class DisciplineSnapshot:
     name: str
+    # Período da disciplina na grade, induzido dos pré-requisitos: 1 quando não
+    # tem nenhum, senão o maior período entre eles mais um.
+    curriculum_period: int
+    hours: int  # w_x — repetido aqui para o recorte por carga horária
     seats: int  # q_x no início do período
-    filled: int  # vagas preenchidas no período
+    filled: int  # vagas preenchidas no período, contando as garantidas
+    # Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
+    # Só é diferente de zero nas disciplinas de 1º período — e é o que explica
+    # uma disciplina chegar à primeira rodada já quase cheia.
+    granted: int
+    # Quantos alunos pediram a disciplina no período — deram lance em alguma
+    # rodada, ou a receberam na matrícula garantida. Dividido por `seats` dá a
+    # concorrência da disciplina, que é a forma de ler a pressão sobre ela.
+    requests: int
     # Média de pi_x entre as rodadas em que a disciplina ainda tinha vaga.
-    # `None` quando ela nunca esteve no mercado (q_x = 0).
+    # `None` quando ela nunca esteve no mercado (q_x = 0, ou esgotada pelos
+    # ingressantes antes da primeira rodada).
     mean_price: float | None
     approvals: int  # aprovações ao fim do período
 
@@ -153,7 +201,6 @@ class PeriodReport:
     aggregate: RoundReport
     disciplines: list[DisciplineSnapshot]
     graduated_now: int  # concluintes neste período
-    dismissed_now: int  # jubilados neste período
 
 
 @dataclass(frozen=True)
@@ -167,10 +214,11 @@ class RequestRecord:
     """
 
     discipline: str
-    kind: str  # "required" (M_k), "elective" (O_k) ou "free" (L_k)
     utility: float  # u_{a,x}^(t) — eq. (41)
     bids: list[int]  # c_{a,x}^(t,r) por rodada; 0 = não pediu naquela rodada
-    won_round: int | None  # rodada em que obteve a vaga; None = recusada
+    # Rodada em que obteve a vaga; `None` = recusada. `GUARANTEED_ROUND` (0) é a
+    # matrícula garantida do ingressante, que não passou por rodada nenhuma.
+    won_round: int | None
     paid: int  # créditos efetivamente consumidos — eq. (27)
     attempt: int | None  # tentativa (1 = primeira vez cursando)
     grade: float | None  # n_{a,x} obtida ao fim do período — eq. (33)
@@ -193,7 +241,6 @@ class StudentPeriodRecord:
     enrolled_hours: int  # carga horária obtida neste período
     requests: list[RequestRecord]
     graduated: bool  # concluiu o curso neste período — eq. (40)
-    dismissed: bool  # foi jubilado ao fim deste período
 
 
 @dataclass(frozen=True)
@@ -210,17 +257,17 @@ class StudentHistory:
 class StudentSummary:
     id: str
     name: str
-    course: str
     entry_period: int  # t_a — eq. (31)
+    aptitude: str  # nome do perfil de aptidão
+    affinity: str  # nome do perfil de afinidade
     grade_average: float  # N_a — eq. (49)
     approved_hours: int
-    hours_to_graduate: int
+    hours_to_graduate: int  # S — a carga da grade inteira, igual para todos
     credits: int
     enrollments: int
     approvals: int
     mean_satisfaction: float  # média de psi_a^(t,*) nos períodos cursados
     graduated_at: int | None
-    dismissed_at: int | None
 
 
 @dataclass(frozen=True)
@@ -228,17 +275,12 @@ class SimulationResult:
     periods: list[PeriodReport] = field(default_factory=list)
     students: list[StudentSummary] = field(default_factory=list)
     histories: list[StudentHistory] = field(default_factory=list)
-    courses: list[str] = field(default_factory=list)
     disciplines: list[str] = field(default_factory=list)
-
-
-def _curriculum_kind(course: Course, discipline: str) -> str:
-    """Em que grupo da grade do curso a disciplina cai — M_k, O_k ou L_k."""
-    if discipline in course.required:
-        return "required"
-    if discipline in course.electives:
-        return "elective"
-    return "free"
+    # Período de cada disciplina na grade, induzido dos pré-requisitos.
+    curriculum_periods: dict[str, int] = field(default_factory=dict)
+    # Os perfis do cenário, na ordem em que `by_aptitude` e `by_affinity` saem.
+    aptitude_profiles: list[str] = field(default_factory=list)
+    affinity_profiles: list[str] = field(default_factory=list)
 
 
 def _price_stats(prices: list[int] | list[float]) -> PriceStats | None:
@@ -254,8 +296,7 @@ def _price_stats(prices: list[int] | list[float]) -> PriceStats | None:
 
 def _snapshot_group(
     *,
-    course: str,
-    entry_period: int | None,
+    group: str | None,
     members: list[Student],
     satisfactions: dict[str, float],
     grade_averages: dict[str, float],
@@ -267,22 +308,20 @@ def _snapshot_group(
     total_seats: int,
     population: int,
     graduated: int,
-    dismissed: int,
     credits: dict[str, int],
     supply: dict[str, int],
     bids: dict[str, int],
     credit_returns: dict[str, int] | None,
-) -> CourseSnapshot:
-    """Um recorte qualquer de alunos: um curso inteiro ou uma coorte dele."""
+) -> GroupSnapshot:
+    """Um recorte qualquer de alunos: a universidade inteira, uma geração ou um
+    perfil."""
     if not members:
-        return CourseSnapshot(
-            course=course,
-            entry_period=entry_period,
+        return GroupSnapshot(
+            group=group,
             metrics=None,
             active=0,
             population=population,
             graduated=graduated,
-            dismissed=dismissed,
             mean_credits=None,
             mean_approved_hours=None,
             credits_per_student=None,
@@ -291,9 +330,8 @@ def _snapshot_group(
             mean_credit_return=None,
         )
     group_supply = sum(supply[s.id] for s in members)
-    return CourseSnapshot(
-        course=course,
-        entry_period=entry_period,
+    return GroupSnapshot(
+        group=group,
         metrics=compute_metrics(
             satisfactions=[satisfactions[s.id] for s in members],
             grade_averages=[grade_averages[s.id] for s in members],
@@ -306,7 +344,6 @@ def _snapshot_group(
         active=len(members),
         population=population,
         graduated=graduated,
-        dismissed=dismissed,
         mean_credits=sum(credits[s.id] for s in members) / len(members),
         mean_approved_hours=sum(approved_hours[s.id] for s in members) / len(members),
         credits_per_student=group_supply / len(members),
@@ -320,66 +357,63 @@ def _snapshot_group(
     )
 
 
-def _snapshot_courses(
+def _snapshot_groups(
     *,
     config: SimulationConfig,
     active: list[Student],
+    students: list[Student],
+    period: int,
+    axes: list[_Axis],
     satisfactions: dict[str, float],
     grade_averages: dict[str, float],
     scarcities: dict[str, float],
     contentions: dict[str, float],
     won: dict[str, set[str]],
     total_seats: int,
-    entered: dict[tuple[str, int | None], int],
-    graduated_so_far: dict[str, int],
-    graduated_by_entry: dict[tuple[str, int], int],
-    dismissed_so_far: dict[str, int],
-    dismissed_by_entry: dict[tuple[str, int], int],
     credits: dict[str, int],
     supply: dict[str, int],
     bids: dict[str, int],
     ages: dict[str, int],
     hours: dict[str, int],
     credit_returns: dict[str, int] | None = None,
-) -> tuple[Metrics, list[CourseSnapshot], list[CourseSnapshot]]:
+) -> tuple[GroupSnapshot, list[list[GroupSnapshot]]]:
+    """O agregado da universidade e um recorte por eixo, no mesmo instante.
+
+    A contagem de concluintes sai de varrer `students`, não de um livro-caixa
+    mantido à parte: `graduated_at` só é preenchido ao fim do período, então uma
+    varredura durante as rodadas de t dá exatamente "quem já se formou antes de
+    t", e a mesma varredura depois delas dá "quem já se formou contando t". É a
+    diferença que os dois instantes precisam, de graça — e sem um livro por eixo
+    que pudesse divergir do estado real.
+    """
     approved_hours = {s.id: s.approved_hours(hours, config.min_grade) for s in active}
     # A idade vem do chamador porque ela acompanha o instante do recorte: nas
     # rodadas de t o aluno completou t - t_a períodos, ao fim de t completou um
     # a mais — e é esse intervalo que `approved_hours` acabou de cobrir.
+    # W_a é do perfil de afinidade do aluno, então a semestralização mede cada
+    # um contra o que *ele* poderia ter cursado — comparar todos com o mesmo
+    # teto penalizaria quem carrega menos por período.
     semestralizations = {
         s.id: semestralization(
             approved_hours=approved_hours[s.id],
-            max_hours=config.max_hours,
+            max_hours=s.affinity.max_hours,
             periods_completed=ages[s.id],
         )
         for s in active
     }
 
-    overall = compute_metrics(
-        satisfactions=[satisfactions[s.id] for s in active],
-        grade_averages=[grade_averages[s.id] for s in active],
-        semestralizations=[semestralizations[s.id] for s in active],
-        scarcities=[scarcities[s.id] for s in active],
-        contentions=[contentions[s.id] for s in active],
-        allocated=sum(len(won[s.id]) for s in active),
-        total_seats=total_seats,
-    )
-
     def snapshot(
         *,
-        course: str,
-        entry_period: int | None,
+        group: str | None,
         members: list[Student],
+        population: int,
         graduated: int,
-        dismissed: int,
-    ) -> CourseSnapshot:
+    ) -> GroupSnapshot:
         return _snapshot_group(
-            course=course,
-            entry_period=entry_period,
+            group=group,
             members=members,
-            population=entered.get((course, entry_period), 0),
+            population=population,
             graduated=graduated,
-            dismissed=dismissed,
             satisfactions=satisfactions,
             grade_averages=grade_averages,
             semestralizations=semestralizations,
@@ -394,52 +428,52 @@ def _snapshot_courses(
             credit_returns=credit_returns,
         )
 
-    by_course: list[CourseSnapshot] = []
-    by_cohort: list[CourseSnapshot] = []
-    for course in config.courses:
-        members = [s for s in active if s.course == course.name]
-        by_course.append(
-            snapshot(
-                course=course.name,
-                entry_period=None,
-                members=members,
-                graduated=graduated_so_far.get(course.name, 0),
-                dismissed=dismissed_so_far.get(course.name, 0),
-            )
-        )
-        by_entry: dict[int, list[Student]] = {}
-        for student in members:
-            by_entry.setdefault(student.entry_period, []).append(student)
-        # Uma geracao ja sem aluno ativo continua aparecendo enquanto tiver
-        # concluintes ou jubilados: senao a serie dela sumiria justamente
-        # quando termina de contar por onde cada um saiu. Vale sobretudo na
-        # fase de drenagem, em que toda geracao acaba esvaziando.
-        left = {
-            entry
-            for ledger in (graduated_by_entry, dismissed_by_entry)
-            for (name, entry) in ledger
-            if name == course.name
-        }
-        for entry in sorted(set(by_entry) | left):
-            by_cohort.append(
+    entered = [s for s in students if s.entry_period <= period]
+    overall = snapshot(
+        group=None,
+        members=active,
+        population=len(entered),
+        graduated=sum(1 for s in entered if s.graduated_at is not None),
+    )
+
+    # Todo grupo do eixo aparece em todo período, tenha ou não aluno ativo:
+    # senão a série dele sumiria justamente quando termina de contar por onde
+    # cada um saiu. Vale sobretudo na fase de drenagem, em que toda geração
+    # acaba esvaziando.
+    by_axis: list[list[GroupSnapshot]] = []
+    for axis in axes:
+        members: dict[str, list[Student]] = {key: [] for key in axis.order}
+        for student in active:
+            members[axis.key(student)].append(student)
+        population = Counter(axis.key(s) for s in entered)
+        graduated = Counter(axis.key(s) for s in entered if s.graduated_at is not None)
+        by_axis.append(
+            [
                 snapshot(
-                    course=course.name,
-                    entry_period=entry,
-                    members=by_entry.get(entry, []),
-                    graduated=graduated_by_entry.get((course.name, entry), 0),
-                    dismissed=dismissed_by_entry.get((course.name, entry), 0),
+                    group=key,
+                    members=members[key],
+                    population=population[key],
+                    graduated=graduated[key],
                 )
-            )
-    return overall, by_course, by_cohort
+                for key in axis.order
+            ]
+        )
+    return overall, by_axis
 
 
 def run_simulation(config: SimulationConfig) -> SimulationResult:
     """Roda a simulação inteira. Determinística: mesma config, mesmo resultado."""
     rng = np.random.default_rng(config.seed)
     students = generate_students(config, rng)
-    course_by_name = {c.name: c for c in config.courses}
     hours = config.hours_by_discipline()
     total_seats = sum(d.seats for d in config.disciplines)
+    curriculum = config.curriculum_periods()
+    # As disciplinas sem pré-requisito: a matrícula garantida de quem ingressa.
+    first_period = config.first_period_disciplines()
+    # Conclusão (eq. 40): toda disciplina é obrigatória, então concluir é
+    # aprovar na grade inteira — não há mais carga horária mínima a somar.
+    curriculum_set = {d.name for d in config.disciplines}
+    hours_to_graduate = config.hours_to_graduate()
 
     base_grades = initial_grades(students, config.disciplines, rng)
     # u^(t) inteira, sorteada aqui e não dentro do loop: é parâmetro de
@@ -464,71 +498,62 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     satisfaction_history: dict[str, list[float]] = {s.id: [] for s in students}
     history: dict[str, list[StudentPeriodRecord]] = {s.id: [] for s in students}
     enrollments: dict[str, int] = {s.id: 0 for s in students}
-    graduated_so_far: dict[str, int] = {course.name: 0 for course in config.courses}
-    # Concluintes por (curso, periodo de ingresso) -- quantos da geracao que
-    # entrou em t_a ja concluiram, que e o que o recorte por geracao mostra.
-    graduated_by_entry: dict[tuple[str, int], int] = {}
-    # Mesmos dois livros para a outra porta de saída, o jubilamento.
-    dismissed_so_far: dict[str, int] = {course.name: 0 for course in config.courses}
-    dismissed_by_entry: dict[tuple[str, int], int] = {}
-    # Tamanho de cada geração (fixo) e do curso inteiro (cresce a cada ingresso
-    # até L e estaciona). Sai da população de fato, não de
-    # `students_per_generation`, para não repetir a regra de geração aqui.
-    cohort_size: dict[tuple[str, int], int] = {}
-    for student in students:
-        key = (student.course, student.entry_period)
-        cohort_size[key] = cohort_size.get(key, 0) + 1
+    # Os dois eixos de perfil são fixos: a ordem das séries é a ordem em que o
+    # cenário declara os perfis, e todo perfil aparece em todo período, mesmo
+    # sem aluno ativo. O eixo das gerações muda de período para período — uma
+    # geração só entra na lista depois do seu t_a — e é montado lá dentro.
+    aptitude_axis = _Axis(
+        key=lambda s: s.aptitude.name, order=[p.name for p in config.aptitude_profiles]
+    )
+    affinity_axis = _Axis(
+        key=lambda s: s.affinity.name, order=[p.name for p in config.affinity_profiles]
+    )
+    entry_periods = sorted({s.entry_period for s in students})
     periods: list[PeriodReport] = []
 
     # Invariante dos relatórios: todo período publicado tem pelo menos um aluno
-    # ativo, e a numeração vai de 1 a len(periods) sem buraco. Vale porque as
+    # ativo, e a numeração vai de 1 a len(periods) sem buraco. Vale porque os
     # ingressos ocorrem em períodos consecutivos a partir do primeiro e, passado o
     # último ingresso (L = `config.entry_span`), a população só diminui — então o
     # primeiro período vazio, se houver, só é seguido de períodos vazios. A
     # simulação para ali: um período sem ninguém não produz métrica nenhuma, só
     # zeros enganosos. Com L < |T| essa parada é o fim natural da drenagem.
     for period in range(1, config.periods + 1):
-        # Matriculados: já ingressaram (t_a, eq. 31) e ainda não saíram, nem
-        # concluindo o curso nem jubilados.
+        # Matriculados: já ingressaram (t_a, eq. 31) e ainda não concluíram.
         enrolled = [
-            s
-            for s in students
-            if s.entry_period <= period
-            and s.graduated_at is None
-            and s.dismissed_at is None
+            s for s in students if s.entry_period <= period and s.graduated_at is None
         ]
         if not enrolled:
             break
         active = enrolled
 
-        # Quem já ingressou até aqui, por recorte — o denominador das frações
-        # de formados e de jubilados. Uma geração só entra depois do seu t_a.
-        entered: dict[tuple[str, int | None], int] = {}
-        for (course_name, entry), size in cohort_size.items():
-            if entry > period:
-                continue
-            entered[(course_name, entry)] = size
-            entered[(course_name, None)] = entered.get((course_name, None), 0) + size
+        # Os três eixos de recorte do período. As gerações que já ingressaram
+        # entram na ordem em que entraram — a série de uma geração começa no
+        # período do seu t_a e não some mais; os perfis são fixos.
+        axes = [
+            _Axis(
+                key=lambda s: str(s.entry_period),
+                order=[str(entry) for entry in entry_periods if entry <= period],
+            ),
+            aptitude_axis,
+            affinity_axis,
+        ]
 
         utilities = {
-            s.id: utility_matrix(
-                draw=utility_draws[(s.id, period)],
-                student=s,
-                course=course_by_name[s.course],
-                config=config,
-            )
+            s.id: utility_matrix(draw=utility_draws[(s.id, period)], student=s, config=config)
             for s in active
         }
-        # U_a^(t) — eq. (42). Quem não tem mais nenhuma disciplina elegível não
-        # consegue dar lance e fica de fora do período, mas continua matriculado
-        # em `enrolled`: o prazo de jubilamento corre para ele também.
+        # U_a^(t) — eq. (42), a soma das utilidades do conjunto elegível.
+        #
+        # O filtro abaixo deixou de ter caso: com a utilidade zerada fora do
+        # elegível, U_a só é zero quando nada é elegível, e nada é elegível só
+        # para quem aprovou a grade inteira — que já saiu por `graduated_at` e
+        # nem chega aqui. (A disciplina não aprovada de menor período tem todos
+        # os pré-requisitos aprovados por minimalidade, então sempre há ao menos
+        # uma elegível.) Fica como guarda: sem ela, uma grade degenerada
+        # dividiria por zero no lugar de simplesmente não publicar o período.
         spend_fraction = {s.id: sum(utilities[s.id].values()) for s in active}
         active = [s for s in active if spend_fraction[s.id] > 0]
-        # Ninguém pode dar lance: não há leilão nem métrica a publicar, e a
-        # simulação acaba aqui. Quem ainda estivesse matriculado fica sem
-        # desligamento registrado — é o único caso em que isso acontece, e só
-        # ocorre no período degenerado em que a universidade inteira esgotou as
-        # disciplinas elegíveis de uma vez.
         if not active:
             break
 
@@ -544,8 +569,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         # entre as rodadas de propósito, porque descreve o cenário que o aluno
         # encontrou, não o que o leilão fez com ele.
         # e_x: quantos alunos ativos são elegíveis a cada disciplina. Conta toda
-        # a universidade, como o n_x da concorrência: quem disputa uma vaga com
-        # o aluno não é só quem está no curso dele.
+        # a universidade, como o n_x da concorrência.
         eligible = {s.id: [n for n in utilities[s.id] if config_seats[n] > 0] for s in active}
         eligible_count: dict[str, int] = {}
         for student in active:
@@ -557,7 +581,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             )
             for s in active
         }
-        capacity = {s.id: float(config.max_hours) for s in active}  # W_a^(t,1)
+        capacity = {s.id: float(s.affinity.max_hours) for s in active}  # W_a^(t,1)
         budget = {s.id: s.credits for s in active}  # C_a^(t,1)
         won: dict[str, set[str]] = {s.id: set() for s in active}
         paid: dict[tuple[str, str], int] = {}
@@ -578,6 +602,30 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         bid_total: dict[str, int] = {s.id: 0 for s in active}
         won_round: dict[tuple[str, str], int] = {}
 
+        # Matrícula garantida: quem ingressa neste período entra direto em todas
+        # as disciplinas de 1º período, antes de o leilão abrir. Não dá lance —
+        # o sistema reparte o orçamento dele igualmente entre elas e lança o
+        # gasto, ficando com o resto da divisão no saldo. É esse valor que o
+        # retorno de créditos (eq. 34) tem para trabalhar. A validação do
+        # cenário garante que a geração cabe na menor dessas ofertas e que a
+        # carga somada respeita W_a (eq. 4).
+        granted: dict[str, int] = {d.name: 0 for d in config.disciplines}
+        guaranteed: dict[str, list[str]] = {s.id: [] for s in active}
+        for student in (s for s in active if s.entry_period == period):
+            share = budget[student.id] // len(first_period)
+            for name in first_period:
+                guaranteed[student.id].append(name)
+                won[student.id].add(name)
+                won_round[(student.id, name)] = GUARANTEED_ROUND
+                seats[name] -= 1  # eq. (13)
+                granted[name] += 1
+                capacity[student.id] -= hours[name]  # eq. (14)
+                budget[student.id] -= share  # eq. (27)
+                spent[student.id] += share
+                paid[(student.id, name)] = share
+                bid_log[student.id].setdefault(name, [0] * config.rounds)[0] = share
+                bid_total[student.id] += share
+
         # As rodadas guardam só o que muda nelas; o relatório de cada uma é
         # montado depois do laço, quando a concorrência do período (que depende
         # dos lances de *todas* as rodadas) já existe. O saldo de créditos entra
@@ -585,13 +633,16 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         round_states: list[_RoundState] = []
         for round_number in range(1, config.rounds + 1):
             # Quem está no mercado nesta rodada, antes de a alocação consumir
-            # vaga: só essas disciplinas têm preço com leitura.
+            # vaga: só essas disciplinas têm preço com leitura. As vagas já
+            # entregues aos ingressantes saíram do mercado antes da rodada 1.
             offered = [d.name for d in config.disciplines if seats[d.name] > 0]
             bids: list[Bid] = []
             for student in active:
                 # B_a^(t,r): disciplinas em que ainda é possível obter vaga —
                 # há vaga livre, cabe na carga horária restante e o aluno ainda
-                # não a conquistou neste período (eq. 15).
+                # não a conquistou neste período (eq. 15). O ingressante já
+                # conquistou tudo que lhe é elegível, então sai daqui vazio e
+                # não dá lance nenhum.
                 available = [
                     name
                     for name in utilities[student.id]
@@ -612,7 +663,12 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 bid_total[student.id] += sum(student_bids.values())
                 bids.extend(Bid(student.id, name, credits) for name, credits in student_bids.items())
 
-            won_now: dict[str, list[str]] = {s.id: [] for s in active}
+            # A vaga garantida entra como conquista da rodada 1: é ali que ela
+            # passa a valer, e sem isso o ingressante apareceria com satisfação
+            # zero na primeira rodada e plena só no agregado do período.
+            won_now: dict[str, list[str]] = {
+                s.id: list(guaranteed[s.id]) if round_number == 1 else [] for s in active
+            }
             # pi_x da rodada — eq. (24). O piso de 1 crédito é o valor da
             # equação quando não houve lance mal-sucedido, inclusive quando não
             # houve lance nenhum e o leilão nem chegou a rodar.
@@ -669,16 +725,17 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
 
         # Concorrência: candidatos por vaga nas disciplinas que o aluno de
         # fato pediu — aquelas em que deu lance em alguma rodada (`bid_log`
-        # guarda zero nas rodadas em que não pediu). Como a escassez, é do
+        # guarda zero nas rodadas em que não pediu). A matrícula garantida conta
+        # como pedido: o ingressante não disputou, mas ocupa a vaga, e para quem
+        # recursa a disciplina a pressão é a mesma. Como a escassez, é do
         # período inteiro e usa a oferta do início dele, então também não anda
         # entre as rodadas.
         requested = {
-            s.id: {name for name, log in bid_log[s.id].items() if any(log)} for s in active
+            s.id: {name for name, log in bid_log[s.id].items() if any(log)}
+            | set(guaranteed[s.id])
+            for s in active
         }
-        # n_x: quantos pediram cada disciplina. Conta toda a universidade, não o
-        # recorte — a disputa por uma vaga não respeita a fronteira do curso, e
-        # é justamente isso que distingue dois cursos que pedem o mesmo bem de
-        # dois que pedem bens diferentes.
+        # n_x: quantos pediram cada disciplina. Conta toda a universidade.
         demand: dict[str, int] = {}
         for student in active:
             for name in requested[student.id]:
@@ -694,20 +751,18 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
 
         round_reports: list[RoundReport] = []
         for state in round_states:
-            overall, by_course, by_cohort = _snapshot_courses(
+            overall, (by_cohort, by_aptitude, by_affinity) = _snapshot_groups(
                 config=config,
                 active=active,
+                students=students,
+                period=period,
+                axes=axes,
                 satisfactions=state.satisfaction,
                 grade_averages=grade_averages,
                 scarcities=scarcities,
                 contentions=contentions,
                 won=state.won,
                 total_seats=total_seats,
-                entered=entered,
-                graduated_so_far=graduated_so_far,
-                graduated_by_entry=graduated_by_entry,
-                dismissed_so_far=dismissed_so_far,
-                dismissed_by_entry=dismissed_by_entry,
                 credits=state.budget,
                 supply=credits_start,
                 bids=state.bids,
@@ -721,8 +776,9 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                     period=period,
                     round=state.number,
                     overall=overall,
-                    by_course=by_course,
                     by_cohort=by_cohort,
+                    by_aptitude=by_aptitude,
+                    by_affinity=by_affinity,
                     prices=state.prices,
                 )
             )
@@ -732,7 +788,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         approvals: dict[str, int] = {d.name: 0 for d in config.disciplines}
         attempt_log: dict[tuple[str, str], tuple[int, float]] = {}
         # gamma_{a,x}^(t) por disciplina (para o histórico) e sua soma por aluno
-        # (para o recorte por curso).
+        # (para o recorte por geração).
         returned_by_discipline: dict[tuple[str, str], int] = {}
         credits_returned: dict[str, int] = {}
         graduated_now = 0
@@ -743,7 +799,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 attempt = student.attempts.get(name, 0) + 1
                 student.attempts[name] = attempt
                 grade = grade_for_attempt(
-                    base_grades[(student.id, name)], attempt, config.learning_gain
+                    base_grades[(student.id, name)], attempt, student.aptitude.learning_gain
                 )
                 student.grades[name] = max(student.grades.get(name, 0.0), grade)
                 attempt_log[(student.id, name)] = (attempt, student.grades[name])
@@ -762,47 +818,11 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             # retorno total Gamma_a^(t) = Gamma_min + soma gamma_{a,x} (eq. 35).
             student.credits = student.credits - spent[student.id] + config.base_credits + returned
 
-            course = course_by_name[student.course]
-            counts_for_graduation = set(course.required) | set(course.electives)
-            approved = student.approved(config.min_grade)
-            curriculum_hours = sum(hours[name] for name in approved & counts_for_graduation)
-            # Conclusão — eq. (40): aprovado em todas as obrigatórias e com a
-            # carga horária curricular exigida. Disciplinas livres não contam.
-            if set(course.required) <= approved and curriculum_hours >= course.hours_to_graduate:
+            # Conclusão — eq. (40): toda disciplina é obrigatória, então conclui
+            # quem aprovou na grade inteira.
+            if curriculum_set <= student.approved(config.min_grade):
                 student.graduated_at = period
-                graduated_so_far[course.name] += 1
-                entry = student.entry_period
-                graduated_by_entry[(course.name, entry)] = (
-                    graduated_by_entry.get((course.name, entry), 0) + 1
-                )
                 graduated_now += 1
-
-        # Jubilamento: quem completou `max_residence` períodos desde o ingresso
-        # sem concluir sai do conjunto ativo. Percorre `enrolled`, não `active`:
-        # quem ficou sem nenhuma disciplina elegível não deu lance neste período
-        # mas continua cumprindo prazo — e é justamente ele que, sem isto,
-        # ficaria disputando para sempre sem nunca sair.
-        #
-        # A ordem importa: a conclusão (eq. 40) já foi decidida acima, então
-        # quem se forma no último período a que tem direito se forma, não é
-        # jubilado. O desligamento vale a partir do fim de t, de modo que a
-        # satisfação do aluno em t ainda entra nas métricas do período — contar
-        # só os que ficam faria o mecanismo parecer melhor por ter expulsado
-        # justamente quem servia pior.
-        dismissed_now = 0
-        if config.max_residence > 0:
-            for student in enrolled:
-                if student.graduated_at is not None:
-                    continue
-                if period - student.entry_period + 1 < config.max_residence:
-                    continue
-                student.dismissed_at = period
-                dismissed_so_far[student.course] += 1
-                entry = student.entry_period
-                dismissed_by_entry[(student.course, entry)] = (
-                    dismissed_by_entry.get((student.course, entry), 0) + 1
-                )
-                dismissed_now += 1
 
         period_satisfaction = {
             s.id: satisfaction(
@@ -814,7 +834,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         }
         for student in active:
             satisfaction_history[student.id].append(period_satisfaction[student.id])
-            course = course_by_name[student.course]
             requests = []
             for name, utility in sorted(
                 utilities[student.id].items(), key=lambda item: -item[1]
@@ -823,7 +842,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 requests.append(
                     RequestRecord(
                         discipline=name,
-                        kind=_curriculum_kind(course, name),
                         utility=utility,
                         bids=bid_log[student.id].get(name, [0] * config.rounds),
                         won_round=won_round.get((student.id, name)),
@@ -847,27 +865,24 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                     enrolled_hours=sum(hours[name] for name in won[student.id]),
                     requests=requests,
                     graduated=student.graduated_at == period,
-                    dismissed=student.dismissed_at == period,
                 )
             )
 
         # `grade_averages` é o CR vigente no início do período — o que estava
         # valendo durante os leilões. As notas deste período só entram no CR do
         # período seguinte, como acontece numa matrícula de verdade.
-        overall, by_course, by_cohort = _snapshot_courses(
+        overall, (by_cohort, by_aptitude, by_affinity) = _snapshot_groups(
             config=config,
             active=active,
+            students=students,
+            period=period,
+            axes=axes,
             satisfactions=period_satisfaction,
             grade_averages=grade_averages,
             scarcities=scarcities,
             contentions=contentions,
             won=won,
             total_seats=total_seats,
-            entered=entered,
-            graduated_so_far=graduated_so_far,
-            graduated_by_entry=graduated_by_entry,
-            dismissed_so_far=dismissed_so_far,
-            dismissed_by_entry=dismissed_by_entry,
             credits=budget,
             supply=credits_start,
             bids=bid_total,
@@ -891,22 +906,26 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                     period=period,
                     round=0,
                     overall=overall,
-                    by_course=by_course,
                     by_cohort=by_cohort,
+                    by_aptitude=by_aptitude,
+                    by_affinity=by_affinity,
                     prices=_price_stats(list(period_prices.values())),
                 ),
                 disciplines=[
                     DisciplineSnapshot(
                         name=d.name,
+                        curriculum_period=curriculum[d.name],
+                        hours=d.hours,
                         seats=d.seats,
                         filled=d.seats - seats[d.name],
+                        granted=granted[d.name],
+                        requests=demand.get(d.name, 0),
                         mean_price=period_prices.get(d.name),
                         approvals=approvals[d.name],
                     )
                     for d in config.disciplines
                 ],
                 graduated_now=graduated_now,
-                dismissed_now=dismissed_now,
             )
         )
 
@@ -916,11 +935,12 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             StudentSummary(
                 id=s.id,
                 name=s.name,
-                course=s.course,
                 entry_period=s.entry_period,
+                aptitude=s.aptitude.name,
+                affinity=s.affinity.name,
                 grade_average=s.grade_average(hours),
                 approved_hours=s.approved_hours(hours, config.min_grade),
-                hours_to_graduate=course_by_name[s.course].hours_to_graduate,
+                hours_to_graduate=hours_to_graduate,
                 credits=s.credits,
                 enrollments=enrollments[s.id],
                 approvals=len(s.approved(config.min_grade)),
@@ -930,13 +950,14 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                     else 0.0
                 ),
                 graduated_at=s.graduated_at,
-                dismissed_at=s.dismissed_at,
             )
             for s in students
         ],
         histories=[
             StudentHistory(student_id=s.id, periods=history[s.id]) for s in students
         ],
-        courses=[c.name for c in config.courses],
         disciplines=[d.name for d in config.disciplines],
+        curriculum_periods=curriculum,
+        aptitude_profiles=[p.name for p in config.aptitude_profiles],
+        affinity_profiles=[p.name for p in config.affinity_profiles],
     )

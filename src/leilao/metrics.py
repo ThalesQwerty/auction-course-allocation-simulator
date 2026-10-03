@@ -7,7 +7,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Metrics:
-    """Métricas de um recorte (toda a universidade ou um curso) numa rodada/período."""
+    """Métricas de um recorte (a universidade, uma geração ou um perfil) numa
+    rodada/período."""
 
     students: int  # |A^(t)| do recorte
     allocated: int  # total de vagas obtidas pelo recorte
@@ -28,7 +29,15 @@ class Metrics:
 def satisfaction(
     *, utilities: dict[str, float], spend_fraction: float, allocated: list[str]
 ) -> float:
-    """psi_a = (1/U_a) * soma_x u_{a,x} * z_{a,x} — eq. (51), em [0, 1]."""
+    """psi_a = (1/U_a) * soma_x u_{a,x} * z_{a,x} — eq. (51), em [0, 1].
+
+    `utilities` traz só o conjunto elegível (`behavior.utility_matrix`), e U_a é
+    a soma dele — eq. (43). A razão é então a fração do que o aluno **podia**
+    cursar e de fato cursou, e não a fração de um desejo que incluía disciplinas
+    fora do alcance dele: psi = 1 é atingível, e é o que o ingressante com
+    matrícula garantida obtém. A escala de U_a se cancela na divisão, então o
+    valor não depende de quanto do orçamento o aluno pretendia gastar.
+    """
     if spend_fraction <= 0:
         return 0.0
     return sum(utilities.get(name, 0.0) for name in allocated) / spend_fraction
@@ -57,9 +66,9 @@ def demand_per_seat(*, demands: list[float]) -> float:
     Por isso o recorte agrega por **média**, nunca por soma: a contagem de quem
     quer já traz a população dentro do valor de cada aluno, e somar sobre os
     alunos a contaria duas vezes — o número deixaria de se ler como alunos por
-    vaga. Não há aditividade (um curso não é parcela do global), e em troca
-    cursos de tamanhos diferentes se comparam direto: um curso com mais
-    ingressantes não aparece mais apertado só por ser maior.
+    vaga. Não há aditividade (um recorte não é parcela do global), e em troca
+    recortes de tamanhos diferentes se comparam direto: uma geração com mais
+    alunos não aparece mais apertada só por ser maior.
 
     Disciplinas sem vaga no período ficam de fora do conjunto pelo chamador —
     não são oferta, e dividir por zero não tem leitura. Conjunto vazio dá 0,
@@ -71,7 +80,7 @@ def demand_per_seat(*, demands: list[float]) -> float:
 
 
 def semestralization(*, approved_hours: int, max_hours: int, periods_completed: int) -> float:
-    """sigma_a = H~_a / (W_a * idade_a) — o quanto o aluno andou no curso em
+    """sigma_a = H~_a / (W_a * idade_a) — o quanto o aluno andou na grade em
     relação ao máximo que poderia ter andado desde que ingressou.
 
     Não consta no anteprojeto: mede o atraso na progressão, que é justamente o
@@ -129,9 +138,9 @@ def compute_metrics(
 ) -> Metrics:
     """Agrega as métricas de um recorte de alunos.
 
-    Para um curso, `total_seats` continua sendo a oferta total da universidade:
-    a ocupação vira então a fração das vagas ofertadas que foi para aquele
-    curso, e a soma dos cursos reproduz a ocupação global da eq. (54). A
+    Para um recorte, `total_seats` continua sendo a oferta total da
+    universidade: a ocupação vira então a fração das vagas ofertadas que foi
+    para aquele grupo, e a soma dos grupos reproduz a eq. (54). A
     escassez e a concorrência **não** seguem essa convenção: são médias dos
     alunos, pelo motivo explicado em `demand_per_seat`.
     """

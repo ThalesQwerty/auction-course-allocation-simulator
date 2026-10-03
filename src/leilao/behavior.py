@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import Course, SimulationConfig
+from .config import SimulationConfig
 from .population import Student
 
 # U_a^(t) = soma das utilidades = fração do orçamento que o aluno se dispõe a
@@ -33,16 +33,15 @@ SPEND_FRACTION_RANGE = (0.5, 1.0)
 class UtilityDraw:
     """O sorteio bruto de u_{a,·}^(t) para um par (aluno, período).
 
-    Guarda um peso por disciplina e um por grupo da grade, ambos Gamma(1), em
-    vez da Dirichlet já normalizada. A normalização fica para o tempo de
-    execução porque o conjunto elegível muda conforme o aluno é aprovado — e,
-    pela propriedade de agregação da Dirichlet, normalizar um subconjunto de
-    pesos Gamma(1) dá exatamente uma Dirichlet(1) sobre esse subconjunto. O
-    sorteio é fixo; o recorte é determinístico.
+    Guarda um peso Gamma(1) por disciplina, em vez da Dirichlet já normalizada.
+    A normalização fica para o tempo de execução porque o conjunto elegível
+    muda conforme o aluno é aprovado e libera pré-requisitos — e, pela
+    propriedade de agregação da Dirichlet, normalizar um subconjunto de pesos
+    Gamma(1) dá exatamente uma Dirichlet(1) sobre esse subconjunto. O sorteio é
+    fixo; o recorte é determinístico.
     """
 
     spend_fraction: float  # U_a^(t) — eq. (42)
-    group_weights: tuple[float, float, float]  # obrigatórias, optativas, livres
     weights: dict[str, float]  # peso bruto de cada disciplina do cenário
 
 
@@ -56,13 +55,11 @@ def draw_utilities(
     shape = (len(students), periods)
     spend = rng.uniform(*SPEND_FRACTION_RANGE, size=shape)
     # Gamma(1) = Exponencial(1): normalizado, dá Dirichlet(1) — eq. (41).
-    groups = rng.standard_exponential(size=(*shape, 3))
     weights = rng.standard_exponential(size=(*shape, len(names)))
 
     return {
         (student.id, period + 1): UtilityDraw(
             spend_fraction=float(spend[a, period]),
-            group_weights=tuple(float(w) for w in groups[a, period]),
             weights={name: float(weights[a, period, j]) for j, name in enumerate(names)},
         )
         for a, student in enumerate(students)
@@ -71,49 +68,53 @@ def draw_utilities(
 
 
 def utility_matrix(
-    *,
-    draw: UtilityDraw,
-    student: Student,
-    course: Course,
-    config: SimulationConfig,
+    *, draw: UtilityDraw, student: Student, config: SimulationConfig
 ) -> dict[str, float]:
-    """u_{a,·}^(t) a partir do sorteio já feito — eqs. (41)-(43), (47)-(48).
+    """u_{a,·}^(t) a partir do sorteio já feito — eqs. (41)-(43).
 
     Função determinística: mesmo `draw` e mesmo estado do aluno, mesma saída.
-    Retorna apenas as disciplinas com utilidade positiva — as já aprovadas têm
-    utilidade zero por construção (Seção 7.2.4) e simplesmente não aparecem.
+    Retorna apenas as disciplinas com utilidade positiva — o conjunto elegível
+    da eq. (42), que aqui é "não aprovada e com os pré-requisitos cumpridos".
+    As já aprovadas e as ainda bloqueadas têm utilidade zero por construção
+    (Seção 7.2.4) e simplesmente não aparecem.
 
-    A hierarquia obrigatórias > optativas > livres das eqs. (47)-(48) é
-    garantida ordenando as massas dos grupos de forma decrescente na ordem dos
-    grupos presentes.
+    Sem grupos de grade: como toda disciplina é obrigatória, a hierarquia
+    obrigatórias > optativas > livres das eqs. (47)-(48) não tem o que ordenar,
+    e a massa U_a se reparte numa Dirichlet(1) única sobre o elegível. Quem
+    ordena a grade agora é o pré-requisito, que diz *quando* a disciplina entra
+    no conjunto, não quanto ela vale dentro dele.
+
+    **Zerar fora do elegível torna a escala de U_a redundante.** Como a soma das
+    utilidades é exatamente U_a (eq. 43), a satisfação da eq. (51) divide por
+    ela e o fator se cancela; os lances das eqs. (44)-(46) usam só razões entre
+    utilidades, que também o cancelam. O `spend_fraction` continua multiplicando
+    aqui porque é ele que faz valer a eq. (43) — mas, depois dela, U_a só pesa
+    de fato como fração do orçamento em `compute_bids`. Em troca, psi_a passa a
+    ser a fração do que o aluno **podia** cursar: antes a utilidade se espalhava
+    por disciplinas fora do alcance dele, e psi = 1 era inatingível por
+    construção.
+
+    O **perfil de afinidade** entra como um expoente sobre os pesos antes da
+    normalização. Expoente > 1 afasta as utilidades entre si (o aluno
+    concentrado), < 1 as aproxima (o disperso), e 1 não muda nada. Elevar o peso
+    bruto e normalizar depois dá exatamente o mesmo que elevar a utilidade já
+    normalizada e renormalizar — w^e / soma(w^e) não depende da escala de w —,
+    então a conta é feita de uma vez só, no peso.
     """
-    approved = student.approved(config.min_grade)
-    groups = [
-        [name for name in course.required if name not in approved],
-        [name for name in course.electives if name not in approved],
-        [name for name in config.free_disciplines(course) if name not in approved],
-    ]
-    present = [index for index, names in enumerate(groups) if names]
-    if not present:
+    eligible = config.eligible_disciplines(student.approved(config.min_grade))
+    if not eligible:
         return {}
 
-    # Massas decrescentes: o grupo mais prioritário entre os presentes fica com
-    # a maior fatia, satisfazendo soma_M u >= soma_O u >= soma_L u.
-    group_total = sum(draw.group_weights[index] for index in present)
-    masses = sorted(
-        (draw.group_weights[index] / group_total * draw.spend_fraction for index in present),
-        reverse=True,
-    )
-
-    utilities: dict[str, float] = {}
-    for mass, index in zip(masses, present):
-        names = groups[index]
-        # Normalizar os pesos Gamma(1) do grupo reparte a massa sem privilegiar
-        # nenhuma disciplina a priori — valores contínuos e distintos, eq. (41).
-        total = sum(draw.weights[name] for name in names)
-        for name in names:
-            utilities[name] = mass * draw.weights[name] / total
-    return utilities
+    # Normalizar os pesos Gamma(1) do conjunto reparte U_a sem privilegiar
+    # nenhuma disciplina a priori — valores contínuos e distintos, eq. (41).
+    exponent = student.affinity.exponent
+    weights = {name: draw.weights[name] ** exponent for name in eligible}
+    # A divisão pelo somatório é o que mantém a eq. (43) valendo depois da
+    # distorção: sem ela o expoente mandaria U_a para qualquer lado.
+    total = sum(weights.values())
+    return {
+        name: draw.spend_fraction * weight / total for name, weight in weights.items()
+    }
 
 
 def compute_bids(

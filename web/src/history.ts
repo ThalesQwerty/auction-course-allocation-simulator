@@ -9,7 +9,12 @@ export interface SimulationRun {
   result: SimulateResponse;
 }
 
-const STORAGE_KEY = "leilao.historico.v1";
+/** A versão faz parte da chave porque o formato do resultado mudou com o
+ * modelo: a v1 guardava recortes por curso (`by_course`) e um `overall` que era
+ * só as métricas. Não há como converter uma execução daquelas — os cursos
+ * deixaram de existir e a conclusão passou a exigir a grade inteira —, então as
+ * antigas simplesmente não são lidas, em vez de aparecerem meio vazias. */
+const STORAGE_KEY = "leilao.historico.v2";
 
 /** Teto de execuções guardadas: cada resultado carrega todas as séries e todos
  * os alunos, então o histórico é podado pelas mais antigas. */
@@ -38,21 +43,8 @@ export function loadHistory(): SimulationRun[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
-    // Execuções gravadas antes destes campos existirem não os têm. O nível de
-    // aprendizado era fixo em 1 ponto por recursada, então é esse o valor que
-    // descreve essas execuções antigas — não o padrão atual. A única política
-    // de retorno que existia era a nula.
     return (parsed as SimulationRun[]).map((run) => ({
       ...run,
-      config: {
-        ...run.config,
-        learning_gain: run.config.learning_gain ?? 1,
-        credit_return: run.config.credit_return ?? "none",
-        // Antes destes campos existirem o ingresso era em todos os períodos e
-        // não havia prazo — exatamente o que `null` e 0 significam hoje.
-        entry_periods: run.config.entry_periods ?? null,
-        max_residence: run.config.max_residence ?? 0,
-      },
       result: { ...run.result, histories: run.result.histories ?? [] },
     }));
   } catch {
@@ -95,23 +87,29 @@ export function formatRunDate(at: string): string {
 
 /** Resumo de uma linha do cenário, para distinguir execuções do mesmo minuto. */
 export function describeRun(run: SimulationRun): string {
-  const { periods, rounds, courses, credit_return, max_residence } = run.config;
-  // Uma geração por período *com ingresso*: a população é o que cada curso
-  // recebe por geração vezes L, não vezes |T|.
+  const { periods, rounds, disciplines, credit_return, aptitude_profiles, affinity_profiles } =
+    run.config;
+  // Uma geração por período *com ingresso*: a população é o que entra por
+  // período vezes L, não vezes |T|.
   const entrySpan = Math.min(run.config.entry_periods ?? periods, periods);
-  const students =
-    courses.reduce((sum, course) => sum + course.students_per_generation, 0) * entrySpan;
+  const students = run.config.students_per_period * entrySpan;
   const rodadas = rounds === 1 ? "1 rodada" : `${rounds} rodadas`;
   // A fase de drenagem e o prazo de jubilamento mudam o resultado inteiro, não
   // só a escala: duas execuções que só diferem neles precisam se distinguir.
   const horizonte =
     entrySpan < periods ? `${periods} períodos (${entrySpan} com ingresso)` : `${periods} períodos`;
-  const prazo = max_residence ? ` · jubilamento em ${max_residence}` : "";
+  // Um eixo com um perfil só é a população homogênea — o default —, e dizer
+  // "1 perfil" não distingue execução nenhuma. Só entra quando há comparação.
+  const perfis = [
+    aptitude_profiles.length > 1 ? `${aptitude_profiles.length} aptidões` : null,
+    affinity_profiles.length > 1 ? `${affinity_profiles.length} afinidades` : null,
+  ].filter(Boolean);
   // A política de retorno entra no resumo porque é o eixo de experimentação da
   // Seção 7.3.2: duas execuções que só diferem nela precisam se distinguir na
   // barra lateral.
   return (
-    `${horizonte} × ${rodadas} · ${courses.length} cursos · ${students} alunos` +
-    ` · retorno ${creditReturnLabel(credit_return)}${prazo}`
+    `${horizonte} × ${rodadas} · ${disciplines.length} disciplinas · ${students} alunos` +
+    (perfis.length ? ` · ${perfis.join(", ")}` : "") +
+    ` · retorno ${creditReturnLabel(credit_return)}`
   );
 }

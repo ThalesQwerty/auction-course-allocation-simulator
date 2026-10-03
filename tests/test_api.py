@@ -77,44 +77,107 @@ def test_run_rejects_overspent_budget(client):
     assert response.status_code == 400
 
 
+def test_run_with_no_bids_returns_empty_allocation(client):
+    request = {
+        "agents": [{"id": "ana", "capacity": 10, "budget": 10}],
+        "goods": [{"id": "x1", "quantity": 1, "weight": 1}],
+        "bids": [],
+        "seed": 1,
+    }
+    response = client.post("/run", json=request)
+    assert response.status_code == 200
+    assert response.json()["allocation"] == {}
+
+
+# Grade de dois períodos: "Cálculo I" e "Programação" sem pré-requisito (a
+# matrícula garantida de quem ingressa) e "Física I" atrás de "Cálculo I".
 SIMULATE_REQUEST = {
     "disciplines": [
-        {"name": "Cálculo I", "seats": 3, "hours": 60},
-        {"name": "Física I", "seats": 3, "hours": 60},
-        {"name": "Programação", "seats": 3, "hours": 60},
-    ],
-    "courses": [
-        {
-            "name": "Computação",
-            "students_per_generation": 4,
-            "hours_to_graduate": 120,
-            "required": ["Cálculo I", "Programação"],
-            "electives": ["Física I"],
-        }
+        {"name": "Cálculo I", "seats": 6, "hours": 60, "prerequisites": []},
+        {"name": "Programação", "seats": 6, "hours": 60, "prerequisites": []},
+        {"name": "Física I", "seats": 6, "hours": 60, "prerequisites": ["Cálculo I"]},
     ],
     "periods": 3,
+    "students_per_period": 4,
     "rounds": 2,
     "seed": 5,
 }
 
+PROFILES = {
+    "aptitude_profiles": [
+        {"name": "Exemplar", "mean": 8, "stddev": 1, "learning_gain": 3, "share": 50},
+        {"name": "Instável", "mean": 5, "stddev": 2, "learning_gain": 1, "share": 50},
+    ],
+    "affinity_profiles": [
+        {
+            "name": "Focados",
+            "kind": "concentrated",
+            "intensity": 2,
+            "max_hours": 180,
+            "share": 50,
+        },
+        {
+            "name": "Dispersos",
+            "kind": "diluted",
+            "intensity": 2,
+            "max_hours": 120,
+            "share": 50,
+        },
+    ],
+}
 
-def test_simulate_returns_series_by_period_and_course(client):
+
+def test_simulate_returns_series_by_period_and_cohort(client):
     response = client.post("/simulate", json=SIMULATE_REQUEST)
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["courses"] == ["Computação"]
     assert len(payload["periods"]) == 3
     # 4 por geração em 3 períodos: uma geração nova entra a cada período.
     assert len(payload["students"]) == 12
+    # O período de cada disciplina sai dos pré-requisitos, por indução.
+    assert payload["curriculum_periods"] == {
+        "Cálculo I": 1, "Programação": 1, "Física I": 2
+    }
 
     period = payload["periods"][0]
     assert len(period["rounds"]) == 2
     assert period["aggregate"]["round"] == 0
-    assert [s["course"] for s in period["aggregate"]["by_course"]] == ["Computação"]
-    assert 0 <= period["aggregate"]["overall"]["efficiency"] <= 1
+    assert period["aggregate"]["overall"]["group"] is None
+    # No primeiro período só existe a geração 1.
+    assert [g["group"] for g in period["aggregate"]["by_cohort"]] == ["1"]
+    assert 0 <= period["aggregate"]["overall"]["metrics"]["efficiency"] <= 1
     # nomes de disciplina com acento e espaço sobrevivem ao solver
-    assert {d["name"] for d in period["disciplines"]} == {"Cálculo I", "Física I", "Programação"}
+    assert {d["name"] for d in period["disciplines"]} == {
+        "Cálculo I", "Física I", "Programação"
+    }
+
+
+def test_simulate_grants_the_entrants_their_first_period_seats(client):
+    """Quem ingressa entra sem leilão nas disciplinas sem pré-requisito, e o
+    sistema lança o gasto correspondente."""
+    payload = client.post(
+        "/simulate", json={**SIMULATE_REQUEST, "include_histories": True}
+    ).json()
+
+    first = payload["periods"][0]
+    granted = {d["name"]: d["granted"] for d in first["disciplines"]}
+    assert granted == {"Cálculo I": 4, "Programação": 4, "Física I": 0}
+
+    entry = {s["id"]: s["entry_period"] for s in payload["students"]}
+    for history in payload["histories"]:
+        for record in history["periods"]:
+            if record["period"] != entry[history["student_id"]]:
+                continue
+            assert {r["discipline"] for r in record["requests"]} == {
+                "Cálculo I", "Programação"
+            }
+            # won_round 0 = vaga garantida, fora do leilão.
+            assert all(r["won_round"] == 0 for r in record["requests"])
+            # 10 créditos repartidos em duas disciplinas: 5 em cada.
+            assert all(r["paid"] == 5 for r in record["requests"])
+            assert record["credits_spent"] == 10
+            assert record["satisfaction"] == pytest.approx(1.0)
 
 
 def test_simulate_omits_histories_unless_asked(client):
@@ -142,53 +205,47 @@ def test_simulate_returns_a_history_per_student(client):
         assert 1 <= record["period"] <= 3
         assert 0 <= record["satisfaction"] <= 1
         for request in record["requests"]:
-            assert request["kind"] in {"required", "elective", "free"}
             # um lance por rodada — |R| = 2 nesta requisição
             assert len(request["bids"]) == 2
             assert (request["won_round"] is None) == (request["grade"] is None)
 
 
-def test_simulate_rejects_impossible_curriculum(client):
+def test_simulate_rejects_a_prerequisite_cycle(client):
     request = {
         **SIMULATE_REQUEST,
-        "courses": [{**SIMULATE_REQUEST["courses"][0], "hours_to_graduate": 9999}],
+        "disciplines": [
+            {"name": "A", "seats": 6, "hours": 60, "prerequisites": ["B"]},
+            {"name": "B", "seats": 6, "hours": 60, "prerequisites": ["A"]},
+        ],
     }
     response = client.post("/simulate", json=request)
     assert response.status_code == 400
+    assert "ciclo" in response.json()["detail"]
 
 
-def test_run_with_no_bids_returns_empty_allocation(client):
-    request = {
-        "agents": [{"id": "ana", "capacity": 10, "budget": 10}],
-        "goods": [{"id": "x1", "quantity": 1, "weight": 1}],
-        "bids": [],
-        "seed": 1,
-    }
-    response = client.post("/run", json=request)
-    assert response.status_code == 200
-    assert response.json()["allocation"] == {}
+def test_simulate_rejects_a_generation_that_does_not_fit_the_guarantee(client):
+    response = client.post(
+        "/simulate", json={**SIMULATE_REQUEST, "students_per_period": 7}
+    )
+    assert response.status_code == 400
+    assert "menor oferta" in response.json()["detail"]
 
 
-def test_simulate_accepts_an_entry_window_and_a_deadline(client):
-    """L e T_max chegam ao motor pela API, e o resultado traz as duas portas de
-    saída — `dismissed` nos recortes e `dismissed_at` em cada aluno."""
+def test_simulate_accepts_an_entry_window(client):
+    """L chega ao motor pela API: só os L primeiros períodos recebem geração
+    nova, e os demais drenam."""
     payload = client.post(
-        "/simulate",
-        json={**SIMULATE_REQUEST, "periods": 5, "entry_periods": 2, "max_residence": 2},
+        "/simulate", json={**SIMULATE_REQUEST, "periods": 6, "entry_periods": 2}
     ).json()
 
     # 4 por geração em 2 gerações: a janela de ingresso, não o horizonte.
     assert len(payload["students"]) == 8
     assert {s["entry_period"] for s in payload["students"]} == {1, 2}
 
-    # Prazo de 2 períodos: ninguém fica em aberto ao fim.
-    for student in payload["students"]:
-        assert (student["graduated_at"] is None) != (student["dismissed_at"] is None)
-
-    last = payload["periods"][-1]["aggregate"]["by_course"][0]
+    last = payload["periods"][-1]["aggregate"]["overall"]
     assert last["population"] == 8
-    assert last["graduated"] + last["dismissed"] == 8
-    assert sum(p["dismissed_now"] for p in payload["periods"]) == last["dismissed"]
+    # A conclusão é a única porta de saída, e o acumulado bate com o por período.
+    assert sum(p["graduated_now"] for p in payload["periods"]) == last["graduated"]
 
 
 def test_simulate_rejects_an_entry_window_wider_than_the_horizon(client):
@@ -199,25 +256,145 @@ def test_simulate_rejects_an_entry_window_wider_than_the_horizon(client):
     assert "ingresso" in response.json()["detail"]
 
 
-def test_simulate_without_the_new_fields_keeps_the_previous_behaviour(client):
-    """Omitir L e T_max = ingresso em todos os períodos e sem prazo, que é o que
-    as requisições montadas antes destes campos mandam."""
+def test_simulate_without_the_optional_fields_keeps_the_defaults(client):
+    """Omitir L e os perfis = ingresso em todos os períodos e um perfil neutro
+    em cada eixo."""
     payload = client.post("/simulate", json=SIMULATE_REQUEST).json()
     assert {s["entry_period"] for s in payload["students"]} == {1, 2, 3}
-    assert all(s["dismissed_at"] is None for s in payload["students"])
-    assert all(p["dismissed_now"] == 0 for p in payload["periods"])
+    assert payload["aptitude_profiles"] == ["Padrão"]
+    assert payload["affinity_profiles"] == ["Padrão"]
+    assert {s["aptitude"] for s in payload["students"]} == {"Padrão"}
 
 
-def test_simulate_treats_a_zero_deadline_as_no_deadline(client):
-    """0 é o desligado do jubilamento, e é o que a interface manda quando o
-    usuário zera o campo."""
-    payload = client.post(
-        "/simulate", json={**SIMULATE_REQUEST, "periods": 5, "max_residence": 0}
-    ).json()
-    assert all(s["dismissed_at"] is None for s in payload["students"])
-    assert all(p["dismissed_now"] == 0 for p in payload["periods"])
 
 
-def test_simulate_rejects_a_negative_deadline(client):
-    response = client.post("/simulate", json={**SIMULATE_REQUEST, "max_residence": -1})
+def test_simulate_returns_a_cut_per_profile_axis(client):
+    """Os três recortes vêm prontos na resposta, na ordem em que o cenário
+    declara os perfis — é o que o seletor de agregação da tela usa."""
+    payload = client.post("/simulate", json={**SIMULATE_REQUEST, **PROFILES}).json()
+
+    assert payload["aptitude_profiles"] == ["Exemplar", "Instável"]
+    assert payload["affinity_profiles"] == ["Focados", "Dispersos"]
+    assert {s["aptitude"] for s in payload["students"]} == {"Exemplar", "Instável"}
+    assert {s["affinity"] for s in payload["students"]} == {"Focados", "Dispersos"}
+
+    for period in payload["periods"]:
+        for report in [*period["rounds"], period["aggregate"]]:
+            assert [g["group"] for g in report["by_aptitude"]] == ["Exemplar", "Instável"]
+            assert [g["group"] for g in report["by_affinity"]] == ["Focados", "Dispersos"]
+            # Cada eixo parte a mesma população.
+            for axis in ("by_cohort", "by_aptitude", "by_affinity"):
+                assert sum(g["active"] for g in report[axis]) == report["overall"]["active"]
+
+
+def test_simulate_rejects_profile_shares_that_do_not_add_up(client):
+    response = client.post(
+        "/simulate",
+        json={
+            **SIMULATE_REQUEST,
+            "aptitude_profiles": [{"name": "X", "mean": 6, "stddev": 1, "share": 40}],
+        },
+    )
+    assert response.status_code == 400
+    assert "somar 100%" in response.json()["detail"]
+
+
+def test_simulate_rejects_an_out_of_range_affinity_intensity(client):
+    response = client.post(
+        "/simulate",
+        json={
+            **SIMULATE_REQUEST,
+            "affinity_profiles": [
+                {"name": "X", "kind": "concentrated", "intensity": 0, "share": 100}
+            ],
+        },
+    )
     assert response.status_code == 422
+
+
+def test_the_affinity_profile_caps_the_workload_of_its_students(client):
+    """W_a saiu do cenário e virou parâmetro do perfil de afinidade: cada aluno
+    é limitado pelo teto do perfil dele, não por um teto global."""
+    payload = client.post(
+        "/simulate", json={**SIMULATE_REQUEST, **PROFILES, "include_histories": True}
+    ).json()
+    cap = {p["name"]: p["max_hours"] for p in PROFILES["affinity_profiles"]}
+    affinity = {s["id"]: s["affinity"] for s in payload["students"]}
+
+    seen = set()
+    for history in payload["histories"]:
+        limit = cap[affinity[history["student_id"]]]
+        for record in history["periods"]:
+            assert record["enrolled_hours"] <= limit
+            seen.add(affinity[history["student_id"]])
+    assert seen == set(cap), "os dois perfis deveriam aparecer"
+
+
+def test_simulate_rejects_a_first_period_heavier_than_the_tightest_profile(client):
+    """A matrícula garantida não escolhe quem a recebe, então a carga das
+    disciplinas de 1º período tem de caber no perfil mais apertado."""
+    response = client.post(
+        "/simulate",
+        json={
+            **SIMULATE_REQUEST,
+            "affinity_profiles": [
+                {"name": "Apertado", "kind": "concentrated", "intensity": 1,
+                 "max_hours": 90, "share": 100},
+            ],
+        },
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "não cabem na carga horária máxima" in detail
+    assert "Apertado" in detail
+
+
+def test_the_aptitude_profile_sets_the_learning_gain(client):
+    """O incremento por recursada saiu do cenário e virou parâmetro do perfil de
+    aptidão: quem repete ganha o que o perfil dele promete."""
+    payload = client.post(
+        "/simulate",
+        json={**SIMULATE_REQUEST, **PROFILES, "periods": 6, "include_histories": True},
+    ).json()
+    gain = {p["name"]: p["learning_gain"] for p in PROFILES["aptitude_profiles"]}
+    aptitude = {s["id"]: s["aptitude"] for s in payload["students"]}
+
+    retakes = 0
+    for history in payload["histories"]:
+        step = gain[aptitude[history["student_id"]]]
+        # Maior nota obtida em cada tentativa de cada disciplina.
+        best: dict[str, tuple[int, float]] = {}
+        for record in history["periods"]:
+            for request in record["requests"]:
+                if request["attempt"] is None:
+                    continue
+                previous = best.get(request["discipline"])
+                if previous and request["attempt"] == previous[0] + 1:
+                    # eq. (33): a nota da tentativa n+1 é a da n mais o ganho,
+                    # saturando em 10.
+                    assert request["grade"] == pytest.approx(
+                        min(10.0, round(previous[1] + step, 1))
+                    )
+                    retakes += 1
+                best[request["discipline"]] = (request["attempt"], request["grade"])
+    assert retakes > 0, "o cenário deveria ter recursadas"
+
+
+def test_the_discipline_snapshot_carries_the_three_grouping_axes(client):
+    """Os gráficos por disciplina agrupam por período da grade, vagas e carga
+    horária — os três têm de vir na resposta, com os pedidos para a
+    concorrência."""
+    payload = client.post("/simulate", json=SIMULATE_REQUEST).json()
+    by_name = {
+        d["name"]: d for period in payload["periods"] for d in period["disciplines"]
+    }
+    assert by_name["Cálculo I"]["curriculum_period"] == 1
+    assert by_name["Física I"]["curriculum_period"] == 2
+    assert {d["hours"] for d in by_name.values()} == {60}
+    assert {d["seats"] for d in by_name.values()} == {6}
+
+    for period in payload["periods"]:
+        for discipline in period["disciplines"]:
+            # Quem pediu é pelo menos quem conseguiu: a vaga sai de um pedido.
+            assert discipline["requests"] >= discipline["filled"]
+            assert discipline["filled"] <= discipline["seats"]

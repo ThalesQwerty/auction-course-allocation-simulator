@@ -1,24 +1,22 @@
 import { useMemo } from "react";
-import { MetricChart, SeriesPoint, courseColors, formatCount, formatRatio, usePrefersDark } from "./charts";
+import { MetricChart, SeriesPoint, categoricalColors, formatCount, formatRatio, usePrefersDark } from "./charts";
+import { cohortLabel, GUARANTEED_ROUND } from "./types";
 import type { RequestRecord, StudentHistory, StudentPeriodRecord, StudentSummary } from "./types";
 
-const KIND_LABEL: Record<RequestRecord["kind"], string> = {
-  required: "obrigatória",
-  elective: "optativa",
-  free: "livre",
-};
-
-/** As três saídas possíveis de um pedido. "sem lance" é a que mais explica
+/** As quatro saídas possíveis de um pedido. "sem lance" é a que mais explica
  * resultado inesperado: a disciplina saiu de B_a^(t,r) antes do leilão. */
 function outcome(request: RequestRecord): { label: string; className: string } {
+  // A garantida vem antes da checagem de rodada: ela não passou por rodada
+  // nenhuma, e ler "atendida (rodada 0)" sugeriria um leilão que não houve.
+  if (request.won_round === GUARANTEED_ROUND) return { label: "vaga garantida", className: "won" };
   if (request.won_round !== null) return { label: `atendida (rodada ${request.won_round})`, className: "won" };
   if (request.bids.some((credits) => credits > 0)) return { label: "recusada", className: "refused" };
   return { label: "sem lance", className: "unbid" };
 }
 
 /** Uma série por grandeza, com o período no eixo horizontal. Diferente dos
- * gráficos agregados (uma linha por curso), aqui a linha é a do próprio aluno:
- * esta tela existe para investigar um caso individual. */
+ * gráficos agregados (uma linha por geração), aqui a linha é a do próprio
+ * aluno: esta tela existe para investigar um caso individual. */
 function series(records: StudentPeriodRecord[], values: (r: StudentPeriodRecord) => Record<string, number>): SeriesPoint[] {
   return records.map((record) => ({ x: String(record.period), ...values(record) }));
 }
@@ -26,29 +24,28 @@ function series(records: StudentPeriodRecord[], values: (r: StudentPeriodRecord)
 export function StudentDetail({
   student,
   history,
-  courseColor,
+  cohortColor,
 }: {
   student: StudentSummary;
   history: StudentHistory;
-  courseColor: string;
+  cohortColor: string;
 }) {
   const dark = usePrefersDark();
   const records = history.periods;
 
   const charts = useMemo(() => {
     const keys = ["aprovadas", "meta", "CR", "satisfação", "no início", "gastos", "retorno", "no fim", "solicitadas", "atendidas", "aprovadas no período"];
-    const colors = courseColors(keys, dark);
-    return { colors };
+    return { colors: categoricalColors(keys, dark) };
   }, [dark]);
 
   if (records.length === 0) {
     return (
       <>
-        <Header student={student} courseColor={courseColor} />
+        <Header student={student} cohortColor={cohortColor} />
         <div className="panel">
           <p className="empty-state">
             Este aluno não participou de nenhum período: ingressou no período {student.entry_period},
-            depois do fim do cenário, ou todas as disciplinas elegíveis já estavam aprovadas.
+            depois do fim do cenário.
           </p>
         </div>
       </>
@@ -57,14 +54,14 @@ export function StudentDetail({
 
   return (
     <>
-      <Header student={student} courseColor={courseColor} />
+      <Header student={student} cohortColor={cohortColor} />
 
       <div className="chart-grid">
         <MetricChart
           title="Progressão curricular"
-          hint={`Carga horária aprovada contra a meta do curso (${student.hours_to_graduate} h) — eq. (39)`}
+          hint={`Carga horária aprovada contra a grade inteira (${student.hours_to_graduate} h) — toda disciplina é obrigatória, então conclui quem aprova em todas`}
           data={series(records, (r) => ({ aprovadas: r.approved_hours, meta: student.hours_to_graduate }))}
-          courses={["aprovadas", "meta"]}
+          series={["aprovadas", "meta"]}
           colors={charts.colors}
           domain={[0, "auto"]}
           format={formatCount}
@@ -73,15 +70,15 @@ export function StudentDetail({
           title="Coeficiente de rendimento"
           hint="N_a no início de cada período — eq. (49)"
           data={series(records, (r) => ({ CR: r.grade_average }))}
-          courses={["CR"]}
+          series={["CR"]}
           colors={charts.colors}
           domain={[0, 10]}
         />
         <MetricChart
           title="Satisfação (ψ)"
-          hint="Fração da utilidade desejada que o aluno obteve — eq. (51)"
+          hint="Fração da utilidade elegível que o aluno obteve — eq. (51). No período de ingresso é 1: a vaga vem garantida"
           data={series(records, (r) => ({ satisfação: r.satisfaction }))}
-          courses={["satisfação"]}
+          series={["satisfação"]}
           colors={charts.colors}
           domain={[0, 1]}
         />
@@ -94,7 +91,7 @@ export function StudentDetail({
             retorno: r.credits_returned,
             "no fim": r.credits_end,
           }))}
-          courses={["no início", "gastos", "retorno", "no fim"]}
+          series={["no início", "gastos", "retorno", "no fim"]}
           colors={charts.colors}
           domain={[0, "auto"]}
           format={formatCount}
@@ -107,7 +104,7 @@ export function StudentDetail({
             atendidas: r.requests.filter((q) => q.won_round !== null).length,
             "aprovadas no período": r.requests.filter((q) => q.approved).length,
           }))}
-          courses={["solicitadas", "atendidas", "aprovadas no período"]}
+          series={["solicitadas", "atendidas", "aprovadas no período"]}
           colors={charts.colors}
           domain={[0, "auto"]}
           format={formatCount}
@@ -121,13 +118,14 @@ export function StudentDetail({
   );
 }
 
-function Header({ student, courseColor }: { student: StudentSummary; courseColor: string }) {
+function Header({ student, cohortColor }: { student: StudentSummary; cohortColor: string }) {
   return (
     <div className="panel student-head">
       <div>
         <h1>{student.name}</h1>
         <p className="note">
-          <span className="swatch" style={{ background: courseColor }} /> {student.course} · {student.id}
+          <span className="swatch" style={{ background: cohortColor }} />{" "}
+          {cohortLabel(student.entry_period)} · {student.id}
         </p>
       </div>
       <dl className="stat-row">
@@ -162,13 +160,9 @@ function Header({ student, courseColor }: { student: StudentSummary; courseColor
           <dd>{formatRatio(student.mean_satisfaction)}</dd>
         </div>
         <div>
-          <dt>Saída</dt>
+          <dt>Conclusão</dt>
           <dd>
-            {student.graduated_at
-              ? `formado no período ${student.graduated_at}`
-              : student.dismissed_at
-                ? `jubilado no período ${student.dismissed_at}`
-                : "—"}
+            {student.graduated_at ? `período ${student.graduated_at}` : "em curso"}
           </dd>
         </div>
       </dl>
@@ -180,6 +174,9 @@ function PeriodPanel({ record }: { record: StudentPeriodRecord }) {
   const won = record.requests.filter((q) => q.won_round !== null).length;
   const asked = record.requests.filter((q) => q.bids.some((c) => c > 0)).length;
   const rounds = record.requests[0]?.bids.length ?? 1;
+  // No período de ingresso não houve disputa: as vagas vieram garantidas, e
+  // "6 de 6 pedidos atendidos" leria como um leilão bem-sucedido.
+  const guaranteed = record.requests.some((q) => q.won_round === GUARANTEED_ROUND);
 
   return (
     <details className="panel period-panel" open>
@@ -187,8 +184,8 @@ function PeriodPanel({ record }: { record: StudentPeriodRecord }) {
         <div className="period-summary-row">
           <h2>
             {`Período ${record.period}`}
+            {guaranteed && <span className="badge">matrícula garantida</span>}
             {record.graduated && <span className="badge">concluiu o curso</span>}
-            {record.dismissed && <span className="badge">jubilado por decurso de prazo</span>}
           </h2>
           <span className="period-summary">
             {won} de {asked} pedidos atendidos · {record.enrolled_hours} h · ψ{" "}
@@ -203,7 +200,6 @@ function PeriodPanel({ record }: { record: StudentPeriodRecord }) {
         <thead>
           <tr>
             <th>Disciplina</th>
-            <th>Grade</th>
             <th>Utilidade</th>
             <th>{rounds > 1 ? `Lances (${rounds} rodadas)` : "Lance"}</th>
             <th>Resultado</th>
@@ -219,7 +215,6 @@ function PeriodPanel({ record }: { record: StudentPeriodRecord }) {
             return (
               <tr key={request.discipline}>
                 <td>{request.discipline}</td>
-                <td className="muted-cell">{KIND_LABEL[request.kind]}</td>
                 <td>{request.utility.toLocaleString("pt-BR", { maximumFractionDigits: 3 })}</td>
                 <td className="muted-cell">{request.bids.map((c) => c || "—").join(" / ")}</td>
                 <td className={`outcome ${status.className}`}>{status.label}</td>

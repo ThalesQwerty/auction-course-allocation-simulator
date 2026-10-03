@@ -2,11 +2,12 @@
 
 As notas são um parâmetro de entrada, não um sorteio em tempo de execução: a
 matriz n^0 com a nota que cada aluno tiraria na primeira tentativa de cada
-disciplina é gerada junto com a população. Quando o aluno repete uma
-disciplina que reprovou, a nota sobe pelo Incremento de aprendizado configurado
-(`SimulationConfig.learning_gain`) em relação à tentativa anterior, modelando
-aprendizado progressivo e garantindo a monotonicidade da eq. (33) — e que
-ninguém fique preso numa disciplina para sempre.
+disciplina é gerada junto com a população, a partir do perfil de aptidão de
+cada um. Quando o aluno repete uma disciplina que reprovou, a nota sobe pelo
+incremento de aprendizado **do perfil dele** (`AptitudeProfile.learning_gain`)
+em relação à tentativa anterior, modelando aprendizado progressivo e garantindo
+a monotonicidade da eq. (33) — e que ninguém fique preso numa disciplina para
+sempre.
 """
 from __future__ import annotations
 
@@ -15,20 +16,22 @@ import numpy as np
 from .config import CreditReturnPolicy, Discipline
 from .population import Student
 
-# Nota da primeira tentativa ~ Normal(BASE + SPREAD * aptidão, STDDEV),
-# truncada em [0, 10] e arredondada a 0,1 (domínio da Seção 7.2.2). As
-# constantes são escolha de modelagem — o anteprojeto não fixa distribuição.
-GRADE_BASE = 3.0
-GRADE_SPREAD = 6.0
-GRADE_STDDEV = 1.5
 
 def initial_grades(
     students: list[Student], disciplines: list[Discipline], rng: np.random.Generator
 ) -> dict[tuple[str, str], float]:
-    """Matriz n^0: nota de primeira tentativa de cada par (aluno, disciplina)."""
-    abilities = np.array([s.ability for s in students])
-    means = GRADE_BASE + GRADE_SPREAD * abilities
-    draws = rng.normal(means[:, None], GRADE_STDDEV, size=(len(students), len(disciplines)))
+    """Matriz n^0: nota de primeira tentativa de cada par (aluno, disciplina).
+
+    Cada aluno sorteia da normal do seu perfil de aptidão (`AptitudeProfile`),
+    truncada em [0, 10] e arredondada a 0,1 — o domínio das notas da
+    Seção 7.2.2. A distribuição não é fixada pelo anteprojeto; a normal é
+    escolha de modelagem, e seus parâmetros são do cenário, não do código.
+    """
+    means = np.array([s.aptitude.mean for s in students])
+    stddevs = np.array([s.aptitude.stddev for s in students])
+    draws = rng.normal(
+        means[:, None], stddevs[:, None], size=(len(students), len(disciplines))
+    )
     draws = np.clip(np.round(draws, 1), 0.0, 10.0)
     return {
         (student.id, discipline.name): float(draws[i, j])

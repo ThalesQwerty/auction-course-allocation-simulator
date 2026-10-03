@@ -7,12 +7,10 @@ completa, em que alunos, utilidades e notas são gerados a partir da seed.
 """
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..auction import AuctionResult
-from ..config import CreditReturnPolicy
+from ..config import MAX_AFFINITY_INTENSITY, AffinityKind, CreditReturnPolicy
 
 
 class AgentIn(BaseModel):
@@ -67,24 +65,65 @@ class DisciplineIn(BaseModel):
     name: str
     seats: int = Field(ge=0, description="q_x — vagas")
     hours: int = Field(gt=0, description="w_x — carga horária")
-
-
-class CourseIn(BaseModel):
-    name: str
-    students_per_generation: int = Field(
-        ge=0,
-        description="alunos que ingressam a cada período com ingresso; a população é isto × L",
+    prerequisites: list[str] = Field(
+        default_factory=list,
+        description=(
+            "disciplinas que precisam estar aprovadas para o aluno disputar vaga aqui. "
+            "Vazio = disciplina de 1º período, em que o ingressante entra direto."
+        ),
     )
-    hours_to_graduate: int = Field(ge=0, description="S_k — eq. (39)")
-    required: list[str] = Field(default_factory=list, description="M_k — obrigatórias")
-    electives: list[str] = Field(default_factory=list, description="O_k — optativas")
+
+
+class AptitudeProfileIn(BaseModel):
+    """Perfil de aptidão: a normal das notas de primeira tentativa."""
+
+    name: str
+    mean: float = Field(ge=0, le=10, description="média das notas")
+    stddev: float = Field(gt=0, description="desvio padrão das notas")
+    learning_gain: float = Field(
+        default=2.5, gt=0, le=10, description="ganho de nota por recursada — eq. (33)"
+    )
+    share: float = Field(gt=0, le=100, description="% dos alunos com este perfil")
+
+
+class AffinityProfileIn(BaseModel):
+    """Perfil de afinidade: o expoente aplicado à matriz de utilidades."""
+
+    name: str
+    kind: AffinityKind = Field(
+        description=(
+            "'concentrated' eleva a um inteiro positivo e afasta as utilidades entre "
+            "si; 'diluted' eleva ao inverso dele e as aproxima"
+        )
+    )
+    intensity: int = Field(
+        ge=1, le=MAX_AFFINITY_INTENSITY, description="intensidade, inteiro positivo"
+    )
+    max_hours: int = Field(
+        default=360, ge=1, description="W_a — carga horária máxima por período"
+    )
+    share: float = Field(gt=0, le=100, description="% dos alunos com este perfil")
 
 
 class SimulateRequest(BaseModel):
     """Configuração completa de um cenário (Seção 7.2)."""
 
     disciplines: list[DisciplineIn] = Field(default_factory=list)
-    courses: list[CourseIn] = Field(default_factory=list)
+    aptitude_profiles: list[AptitudeProfileIn] = Field(
+        default_factory=list,
+        description=(
+            "perfis de aptidão; as fatias precisam somar 100%. Vazio = um perfil "
+            "neutro para toda a população."
+        ),
+    )
+    affinity_profiles: list[AffinityProfileIn] = Field(
+        default_factory=list,
+        description=(
+            "perfis de afinidade; as fatias precisam somar 100%. Vazio = um perfil "
+            "neutro (expoente 1, sem distorção). É independente da aptidão: a fatia "
+            "de uma combinação é o produto das duas."
+        ),
+    )
     periods: int = Field(default=1, ge=1, le=40, description="|T| — períodos letivos")
     entry_periods: int | None = Field(
         default=None,
@@ -96,22 +135,18 @@ class SimulateRequest(BaseModel):
             "ingresso, em que a população só diminui."
         ),
     )
-    max_residence: int = Field(
-        default=0,
-        ge=0,
-        le=40,
+    students_per_period: int = Field(
+        default=1,
+        ge=1,
         description=(
-            "T_max — períodos que o aluno pode permanecer antes de ser jubilado. "
-            "0 = sem jubilamento."
+            "alunos que ingressam em cada período com ingresso; a população é isto × L. "
+            "Não pode passar da menor oferta entre as disciplinas de 1º período, porque "
+            "o ingressante tem vaga garantida em todas elas."
         ),
     )
     rounds: int = Field(default=1, ge=1, le=10, description="|R| — rodadas por período")
     min_grade: float = Field(default=5.0, gt=0, le=10, description="n_min")
     base_credits: int = Field(default=10, ge=1, description="Gamma_min — créditos base")
-    max_hours: int = Field(default=360, ge=1, description="W_a — carga horária máxima")
-    learning_gain: float = Field(
-        default=2.5, gt=0, le=10, description="ganho de nota por recursada — eq. (33)"
-    )
     # f_gamma — eq. (34); as políticas estão em `grading.credit_return`.
     credit_return: CreditReturnPolicy = "none"
     seed: int = 0
@@ -142,22 +177,22 @@ class MetricsOut(BaseModel):
     semestralization: float  # carga aprovada / máximo possível desde o ingresso
 
 
-class CourseSnapshotOut(BaseModel):
+class GroupSnapshotOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    course: str
-    # Null no recorte do curso inteiro (`by_course`); em `by_cohort`, o
-    # período de ingresso (t_a, eq. 31) da geração agregada ali.
-    entry_period: int | None
+    # Quem é este recorte: null na universidade inteira (`overall`), o período
+    # de ingresso (t_a, eq. 31) em `by_cohort` e o nome do perfil em
+    # `by_aptitude`/`by_affinity`. Texto porque os três eixos dividem a mesma
+    # estrutura; a lista de origem diz como ler a chave.
+    group: str | None
     # Nulos quando o recorte não tem aluno no período — não havia ninguém, o
     # que é diferente de ninguém ter ficado satisfeito.
     metrics: MetricsOut | None
     active: int
     # Alunos do recorte que já ingressaram, tenham saído ou não — o
-    # denominador das frações de formados e de jubilados.
+    # denominador da fração de formados.
     population: int
     graduated: int
-    dismissed: int
     mean_credits: float | None
     mean_approved_hours: float | None
     credits_per_student: float | None
@@ -184,10 +219,14 @@ class RoundReportOut(BaseModel):
 
     period: int
     round: int
-    overall: MetricsOut
-    by_course: list[CourseSnapshotOut]
-    # Agregado por curso × geração; só as gerações que já ingressaram.
-    by_cohort: list[CourseSnapshotOut]
+    overall: GroupSnapshotOut
+    # Agregado por geração; só as gerações que já ingressaram.
+    by_cohort: list[GroupSnapshotOut]
+    # E pelos dois eixos de perfil, na ordem em que o cenário os declara. Os
+    # três recortes particionam a mesma população: somar qualquer um deles
+    # reproduz `overall`.
+    by_aptitude: list[GroupSnapshotOut]
+    by_affinity: list[GroupSnapshotOut]
     # Null quando nenhuma disciplina estava no mercado no instante.
     prices: PriceStatsOut | None
 
@@ -196,8 +235,16 @@ class DisciplineSnapshotOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str
+    # Período da disciplina na grade, induzido dos pré-requisitos.
+    curriculum_period: int
+    hours: int
     seats: int
     filled: int
+    # Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
+    granted: int
+    # Quantos pediram a disciplina no período; dividido por `seats` dá a
+    # concorrência dela.
+    requests: int
     # Média de pi_x nas rodadas em que ainda havia vaga; null se nunca houve.
     mean_price: float | None
     approvals: int
@@ -211,7 +258,6 @@ class PeriodReportOut(BaseModel):
     aggregate: RoundReportOut
     disciplines: list[DisciplineSnapshotOut]
     graduated_now: int
-    dismissed_now: int
 
 
 class StudentSummaryOut(BaseModel):
@@ -219,8 +265,9 @@ class StudentSummaryOut(BaseModel):
 
     id: str
     name: str
-    course: str
     entry_period: int
+    aptitude: str
+    affinity: str
     grade_average: float
     approved_hours: int
     hours_to_graduate: int
@@ -229,16 +276,15 @@ class StudentSummaryOut(BaseModel):
     approvals: int
     mean_satisfaction: float
     graduated_at: int | None
-    dismissed_at: int | None
 
 
 class RequestRecordOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     discipline: str
-    kind: Literal["required", "elective", "free"]
     utility: float
     bids: list[int]
+    # 0 = vaga garantida de ingressante, concedida fora do leilão.
     won_round: int | None
     paid: int
     attempt: int | None
@@ -261,7 +307,6 @@ class StudentPeriodRecordOut(BaseModel):
     enrolled_hours: int
     requests: list[RequestRecordOut]
     graduated: bool
-    dismissed: bool
 
 
 class StudentHistoryOut(BaseModel):
@@ -277,5 +322,9 @@ class SimulateResponse(BaseModel):
     periods: list[PeriodReportOut]
     students: list[StudentSummaryOut]
     histories: list[StudentHistoryOut]
-    courses: list[str]
     disciplines: list[str]
+    # Período de cada disciplina na grade, induzido dos pré-requisitos.
+    curriculum_periods: dict[str, int]
+    # Os perfis do cenário, na ordem em que `by_aptitude` e `by_affinity` saem.
+    aptitude_profiles: list[str]
+    affinity_profiles: list[str]

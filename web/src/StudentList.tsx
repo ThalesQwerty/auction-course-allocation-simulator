@@ -1,14 +1,20 @@
 import { useMemo, useState } from "react";
 import { formatRatio } from "./charts";
+import { cohortLabel } from "./types";
 import type { StudentSummary } from "./types";
 
-type SortKey = "name" | "course" | "course-name";
+type SortKey = "name" | "cohort" | "cohort-name";
 
 const SORTS: { value: SortKey; label: string }[] = [
-  { value: "course-name", label: "curso, depois nome" },
+  { value: "cohort-name", label: "geração, depois nome" },
   { value: "name", label: "nome" },
-  { value: "course", label: "curso" },
+  { value: "cohort", label: "geração" },
 ];
+
+/** Vazio = sem filtro naquele eixo. Os três se combinam, então dá para isolar
+ * uma única célula da grade de perfis dentro de uma geração — é o recorte que
+ * a tela individual depois abre aluno a aluno. */
+const ALL = "";
 
 /** Normaliza para busca: sem acento e sem caixa, para "jose" achar "José". */
 const fold = (text: string) =>
@@ -16,33 +22,47 @@ const fold = (text: string) =>
 
 export function StudentList({
   students,
-  courses,
+  cohorts,
+  aptitudes,
+  affinities,
   colors,
   selectedId,
   onSelect,
 }: {
   students: StudentSummary[];
-  courses: string[];
+  /** Os períodos de ingresso presentes na execução, em ordem. */
+  cohorts: number[];
+  /** Os perfis do cenário, na ordem em que ele os declara. */
+  aptitudes: string[];
+  affinities: string[];
   colors: Record<string, string>;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
   const [search, setSearch] = useState("");
-  const [course, setCourse] = useState("");
-  const [sort, setSort] = useState<SortKey>("course-name");
+  const [cohort, setCohort] = useState(ALL);
+  const [aptitude, setAptitude] = useState(ALL);
+  const [affinity, setAffinity] = useState(ALL);
+  const [sort, setSort] = useState<SortKey>("cohort-name");
 
   const visible = useMemo(() => {
     const needle = fold(search.trim());
-    const order = courses.reduce<Record<string, number>>((acc, name, i) => ({ ...acc, [name]: i }), {});
+    const wanted = cohort === ALL ? null : Number(cohort);
     const byName = (a: StudentSummary, b: StudentSummary) => a.name.localeCompare(b.name, "pt-BR");
-    const byCourse = (a: StudentSummary, b: StudentSummary) => order[a.course] - order[b.course];
+    const byCohort = (a: StudentSummary, b: StudentSummary) => a.entry_period - b.entry_period;
 
     return students
-      .filter((s) => (!course || s.course === course) && (!needle || fold(s.name).includes(needle)))
+      .filter(
+        (s) =>
+          (wanted === null || s.entry_period === wanted) &&
+          (aptitude === ALL || s.aptitude === aptitude) &&
+          (affinity === ALL || s.affinity === affinity) &&
+          (!needle || fold(s.name).includes(needle))
+      )
       .sort(
-        sort === "name" ? byName : sort === "course" ? byCourse : (a, b) => byCourse(a, b) || byName(a, b)
+        sort === "name" ? byName : sort === "cohort" ? byCohort : (a, b) => byCohort(a, b) || byName(a, b)
       );
-  }, [students, courses, search, course, sort]);
+  }, [students, search, cohort, aptitude, affinity, sort]);
 
   return (
     <aside className="rail" aria-label="Alunos">
@@ -55,9 +75,37 @@ export function StudentList({
           onChange={(e) => setSearch(e.target.value)}
         />
         <div className="rail-filters">
-          <select value={course} onChange={(e) => setCourse(e.target.value)} aria-label="Filtrar por curso">
-            <option value="">todos os cursos</option>
-            {courses.map((name) => (
+          <select
+            value={cohort}
+            onChange={(e) => setCohort(e.target.value)}
+            aria-label="Filtrar por geração"
+          >
+            <option value="">todas as gerações</option>
+            {cohorts.map((entry) => (
+              <option key={entry} value={entry}>
+                {cohortLabel(entry)}
+              </option>
+            ))}
+          </select>
+          <select
+            value={aptitude}
+            onChange={(e) => setAptitude(e.target.value)}
+            aria-label="Filtrar por perfil de aptidão"
+          >
+            <option value={ALL}>toda aptidão</option>
+            {aptitudes.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={affinity}
+            onChange={(e) => setAffinity(e.target.value)}
+            aria-label="Filtrar por perfil de afinidade"
+          >
+            <option value={ALL}>toda afinidade</option>
+            {affinities.map((name) => (
               <option key={name} value={name}>
                 {name}
               </option>
@@ -91,13 +139,12 @@ export function StudentList({
               onClick={() => onSelect(student.id)}
             >
               <span className="rail-item-name">
-                <span className="swatch" style={{ background: colors[student.course] }} />
+                <span
+                  className="swatch"
+                  style={{ background: colors[cohortLabel(student.entry_period)] }}
+                />
                 {student.name}
-                {student.graduated_at ? (
-                  <span className="badge">formado</span>
-                ) : student.dismissed_at ? (
-                  <span className="badge">jubilado</span>
-                ) : null}
+                {student.graduated_at ? <span className="badge">formado</span> : null}
               </span>
               <span className="rail-item-stats">
                 CR {formatRatio(student.grade_average)} · ψ {formatRatio(student.mean_satisfaction)} ·{" "}

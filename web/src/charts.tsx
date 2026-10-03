@@ -11,8 +11,8 @@ import {
 } from "recharts";
 
 /** Paleta categórica de 8 posições, validada para daltonismo e contraste nas
- * duas superfícies (clara #ffffff, escura #212227). A cor segue o curso, nunca
- * a posição na lista: filtrar cursos não repinta os que sobram. */
+ * duas superfícies (clara #ffffff, escura #212227). A cor segue a série, nunca
+ * a posição na lista: filtrar séries não repinta as que sobram. */
 const PALETTE_LIGHT = [
   "#2a78d6", "#eb6834", "#1baf7a", "#eda100",
   "#e87ba4", "#008300", "#4a3aa7", "#e34948",
@@ -21,8 +21,6 @@ const PALETTE_DARK = [
   "#3987e5", "#d95926", "#199e70", "#c98500",
   "#d55181", "#008300", "#9085e9", "#e66767",
 ];
-
-export const MAX_SERIES = PALETTE_LIGHT.length;
 
 const INK = {
   light: { muted: "#898781", secondary: "#52514e", grid: "#e1e0d9", axis: "#c3c2b7", surface: "#ffffff" },
@@ -42,9 +40,9 @@ export function usePrefersDark(): boolean {
   return dark;
 }
 
-export function courseColors(courses: string[], dark: boolean): Record<string, string> {
+export function categoricalColors(labels: string[], dark: boolean): Record<string, string> {
   const palette = dark ? PALETTE_DARK : PALETTE_LIGHT;
-  return Object.fromEntries(courses.map((course, i) => [course, palette[i % palette.length]]));
+  return Object.fromEntries(labels.map((label, i) => [label, palette[i % palette.length]]));
 }
 
 /** Rampa para séries *ordenadas* — as gerações de alunos, em que a posição na
@@ -143,9 +141,9 @@ export function bandColors(labels: string[], dark: boolean): Record<string, stri
   );
 }
 
-/** Cor da linha agregada — o total, que não é curso nem geração, e sim a soma
- * deles. Tinta neutra de propósito: fora da paleta categórica, ninguém lê o
- * total como "mais um curso", e ela não rouba nenhuma cor dos parciais. */
+/** Cor da linha agregada — o total, que não é uma geração, e sim a soma
+ * delas. Tinta neutra de propósito: fora da paleta categórica, ninguém lê o
+ * total como "mais um recorte", e ela não rouba nenhuma cor dos parciais. */
 const AGGREGATE = { light: "#52514e", dark: "#c3c2b7" };
 
 export function totalColor(label: string, dark: boolean): Record<string, string> {
@@ -196,7 +194,7 @@ export function MetricChart({
   title,
   hint,
   data,
-  courses,
+  series,
   colors,
   domain,
   format = formatRatio,
@@ -206,7 +204,8 @@ export function MetricChart({
   title: string;
   hint?: string;
   data: SeriesPoint[];
-  courses: string[];
+  /** Os `dataKey` de cada linha, na ordem em que entram na legenda. */
+  series: string[];
   colors: Record<string, string>;
   domain?: [number | "auto", number | "auto"];
   format?: (value: number) => string;
@@ -225,7 +224,7 @@ export function MetricChart({
   // linha: repetir o nome na ponta seria ruído. Numa faixa a identidade é a
   // própria ordem vertical — e, quando as linhas se encontram (um preço que
   // despenca ao piso), os rótulos cairiam empilhados no mesmo ponto.
-  const labelEnds = !band && courses.length > 1 && courses.length <= 4 && data.length > 1;
+  const labelEnds = !band && series.length > 1 && series.length <= 4 && data.length > 1;
 
   return (
     <figure className="chart-card">
@@ -235,10 +234,10 @@ export function MetricChart({
       </figcaption>
 
       <div className="legend">
-        {courses.map((course) => (
-          <span className="legend-item" key={course}>
-            <span className="swatch" style={{ background: colors[course] }} />
-            {course}
+        {series.map((name) => (
+          <span className="legend-item" key={name}>
+            <span className="swatch" style={{ background: colors[name] }} />
+            {name}
           </span>
         ))}
       </div>
@@ -266,16 +265,16 @@ export function MetricChart({
             cursor={{ stroke: ink.axis }}
             content={<Tip colors={colors} format={format} dark={dark} />}
           />
-          {courses.map((course) => (
+          {series.map((name) => (
             <Line
-              key={course}
+              key={name}
               type="monotone"
-              dataKey={course}
-              stroke={colors[course]}
+              dataKey={name}
+              stroke={colors[name]}
               strokeWidth={2}
               isAnimationActive={false}
               connectNulls
-              dot={showDots ? { r: 3, strokeWidth: 0, fill: colors[course] } : false}
+              dot={showDots ? { r: 3, strokeWidth: 0, fill: colors[name] } : false}
               activeDot={{ r: 4, stroke: ink.surface, strokeWidth: 2 }}
               label={
                 labelEnds
@@ -283,13 +282,13 @@ export function MetricChart({
                       if (props.index !== data.length - 1) return <g key="skip" />;
                       return (
                         <text
-                          key={course}
+                          key={name}
                           x={Number(props.x ?? 0) + 6}
                           y={Number(props.y ?? 0) + 4}
                           fill={ink.secondary}
                           fontSize={11}
                         >
-                          {course.length > 12 ? `${course.slice(0, 11)}…` : course}
+                          {name.length > 12 ? `${name.slice(0, 11)}…` : name}
                         </text>
                       );
                     }

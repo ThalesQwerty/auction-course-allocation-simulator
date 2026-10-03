@@ -4,17 +4,11 @@ export interface DisciplineInput {
   name: string;
   seats: number; // q_x — vagas
   hours: number; // w_x — carga horária
-}
-
-export interface CourseInput {
-  name: string;
-  /** Alunos que ingressam a cada período **com ingresso**: o curso recebe uma
-   * geração nova em cada um dos L primeiros períodos, então sua população é
-   * este número × L (`entry_periods ?? periods`), não × `periods`. */
-  students_per_generation: number;
-  hours_to_graduate: number; // S_k — eq. (39)
-  required: string[]; // M_k — obrigatórias
-  electives: string[]; // O_k — optativas
+  /** Disciplinas que o aluno precisa ter aprovado para disputar vaga aqui.
+   * Vazio = disciplina de 1º período, em que o ingressante entra direto, sem
+   * leilão. O período de cada disciplina sai daí por indução — ver
+   * `curriculum.ts`. */
+  prerequisites: string[];
 }
 
 /** Política de retorno de créditos f_γ — eq. (34). Espelha
@@ -43,9 +37,86 @@ export const CREDIT_RETURN_POLICIES: {
 export const creditReturnLabel = (policy: CreditReturnPolicy): string =>
   CREDIT_RETURN_POLICIES.find((option) => option.value === policy)?.label ?? policy;
 
+/** Nome de uma geração — o grupo que ingressou naquele período (geração 3 =
+ * quem entrou no período 3, esteja ele hoje em que semestre estiver). O aluno
+ * nasce numa geração e fica nela até o fim, que é o que mantém cada série
+ * falando sempre do mesmo conjunto de alunos.
+ *
+ * Com os cursos fora do modelo, a geração é o único recorte de aluno que
+ * sobra — e é também o que mais separa as curvas, porque a posição na cadeia de
+ * pré-requisitos é o que de fato distingue um aluno de outro aqui. */
+export const cohortLabel = (entryPeriod: number): string => `Geração ${entryPeriod}`;
+
+/** Perfil de aptidão: a normal das notas de primeira tentativa do aluno. É o
+ * que dá heterogeneidade de desempenho — sem ela o CR vira ruído e a
+ * correlação da eq. (57) não mede nada. */
+export interface AptitudeProfileInput {
+  name: string;
+  mean: number; // média das notas, em [0, 10]
+  stddev: number; // desvio padrão, > 0
+  /** Quanto a nota sobe a cada recursada — eq. (33). Fica no perfil, e não no
+   * cenário, porque é a mesma grandeza que a média e o desvio: o quanto o aluno
+   * aprende. Um perfil que erra muito na primeira tentativa pode ser justamente
+   * o que mais ganha ao repetir. */
+  learning_gain: number;
+  share: number; // % dos alunos com este perfil
+}
+
+/** Sentido da distorção da matriz de utilidades. `concentrated` eleva a um
+ * inteiro positivo e afasta as utilidades entre si; `diluted` eleva ao inverso
+ * dele e as aproxima. */
+export type AffinityKind = "concentrated" | "diluted";
+
+export const AFFINITY_KINDS: { value: AffinityKind; label: string; hint: string }[] = [
+  {
+    value: "concentrated",
+    label: "concentrado",
+    hint: "afasta as utilidades entre si — o aluno quer muito uma ou duas disciplinas",
+  },
+  {
+    value: "diluted",
+    label: "diluído",
+    hint: "aproxima as utilidades — o aluno é indiferente entre o que lhe resta",
+  },
+];
+
+export const affinityKindLabel = (kind: AffinityKind): string =>
+  AFFINITY_KINDS.find((option) => option.value === kind)?.label ?? kind;
+
+/** Perfil de afinidade: o quanto o aluno concentra a preferência. A utilidade
+ * sorteada é elevada ao expoente do perfil e renormalizada, de modo que U_a
+ * continue valendo a eq. (43). Intensidade 1 é o perfil neutro — expoente 1
+ * nos dois sentidos, sem distorção alguma. */
+export interface AffinityProfileInput {
+  name: string;
+  kind: AffinityKind;
+  intensity: number; // inteiro positivo, até MAX_AFFINITY_INTENSITY
+  /** W_a — carga horária máxima por período, eq. (4). Fica no perfil porque
+   * anda junto da concentração: quem quer poucas disciplinas com intensidade e
+   * quem quer muitas por igual não descrevem só preferência, mas também quanto
+   * conseguem carregar num período. */
+  max_hours: number;
+  share: number; // % dos alunos com este perfil
+}
+
+/** Acima disso a transformação não muda mais nada de útil: com expoente 10 a
+ * massa já está praticamente toda na disciplina preferida. Espelha
+ * `leilao.config.MAX_AFFINITY_INTENSITY`. */
+export const MAX_AFFINITY_INTENSITY = 10;
+
+/** O expoente que o perfil aplica a u_{a,x} — espelha `AffinityProfile.exponent`. */
+export const affinityExponent = (profile: AffinityProfileInput): number =>
+  profile.kind === "concentrated" ? profile.intensity : 1 / profile.intensity;
+
 export interface SimulateRequest {
   disciplines: DisciplineInput[];
-  courses: CourseInput[];
+  /** Os dois eixos de perfil do aluno. São **independentes**: a fatia de cada
+   * perfil de aptidão é a mesma dentro de cada perfil de afinidade, então a
+   * fatia de uma combinação é o produto das duas (dois perfis de 50% em cada
+   * eixo dão 25% para cada uma das quatro combinações). As fatias de cada eixo
+   * somam 100%. */
+  aptitude_profiles: AptitudeProfileInput[];
+  affinity_profiles: AffinityProfileInput[];
   periods: number; // |T|
   /** L — em quantos dos |T| períodos entra geração nova, contados do primeiro.
    * `null` = em todos. Com L < |T| há uma fase de drenagem depois do último
@@ -54,16 +125,13 @@ export interface SimulateRequest {
    * horizonte. **Só existem L gerações** — os períodos de drenagem não têm
    * geração correspondente. */
   entry_periods: number | null;
-  /** T_max — períodos que o aluno pode permanecer antes de ser jubilado por
-   * decurso de prazo. **0 desliga a regra**: o jubilamento é opcional, e
-   * permanecer zero períodos não significaria nada, então o valor fica livre
-   * para servir de sentinela. Global, não por aluno. */
-  max_residence: number;
+  /** Alunos que ingressam em cada período com ingresso; a população é isto × L.
+   * Não pode passar da menor oferta entre as disciplinas de 1º período, porque
+   * o ingressante tem **vaga garantida** em todas elas. */
+  students_per_period: number;
   rounds: number; // |R|
   min_grade: number; // n_min
   base_credits: number; // Γ_min
-  max_hours: number; // W_a
-  learning_gain: number; // ganho de nota por recursada — eq. (33)
   credit_return: CreditReturnPolicy;
   seed: number;
 }
@@ -72,49 +140,55 @@ export interface Metrics {
   students: number;
   allocated: number;
   allocations_per_student: number;
-  efficiency: number; // ψ̄ — eq. (53)
+  /** ψ̄ — eq. (53). A utilidade do aluno é zero fora do conjunto elegível, então
+   * ψ é a fração do que ele **podia** cursar e conseguiu: 1 é atingível, e é o
+   * que o ingressante com matrícula garantida obtém. */
+  efficiency: number;
   fairness: number; // φ — Jain, eq. (55)
   occupancy: number; // θ — eq. (54)
   /** Escassez: elegíveis por vaga. Para cada disciplina que o aluno ainda pode
-   * cursar, (quantos são elegíveis a ela) ÷ (vagas); a do aluno é a média
-   * dessas razões, e a do recorte é a média dos alunos. Demanda **potencial** —
-   * mesma unidade e mesma forma da concorrência, que mede a efetiva. */
+   * cursar — não aprovada e com os pré-requisitos cumpridos —, (quantos são
+   * elegíveis a ela) ÷ (vagas); a do aluno é a média dessas razões, e a do
+   * recorte é a média dos alunos. Demanda **potencial** — mesma unidade e mesma
+   * forma da concorrência, que mede a efetiva. */
   scarcity: number;
   /** Concorrência: solicitantes por vaga. Mesma forma da escassez sobre as
    * disciplinas em que o aluno deu lance, contando quem deu lance em cada uma.
-   * Demanda **efetiva**: a razão concorrência ÷ escassez diz quanto da demanda
-   * potencial virou pedido. */
+   * A matrícula garantida conta como pedido: o ingressante não disputou, mas
+   * ocupa a vaga. Demanda **efetiva**: a razão concorrência ÷ escassez diz
+   * quanto da demanda potencial virou pedido. */
   contention: number;
   mean_grade_average: number; // N̄ — eq. (56)
   correlation: number; // λ — eq. (57)
   /** Carga horária aprovada ÷ (W_a × idade em períodos), média do recorte.
-   * Não está no anteprojeto: mede o atraso na progressão do curso. */
+   * Não está no anteprojeto: mede o atraso na progressão na grade. */
   semestralization: number;
 }
 
-export interface CourseSnapshot {
-  course: string;
-  /** `null` no recorte do curso inteiro (`by_course`); em `by_cohort`, o
-   * período de ingresso (t_a, eq. 31) da geração agregada ali. Os dois recortes
-   * têm os mesmos campos, então um gráfico só troca de lista para trocar de
-   * agregação. */
-  entry_period: number | null;
+/** Um recorte de alunos num instante: a universidade inteira (`overall`), uma
+ * geração (`by_cohort`) ou um perfil (`by_aptitude`, `by_affinity`). Todos
+ * trazem os mesmos campos, então um gráfico só troca de lista para trocar de
+ * agregação. */
+export interface GroupSnapshot {
+  /** Quem é este recorte: `null` na universidade inteira, o período de ingresso
+   * (t_a, eq. 31) em `by_cohort` e o nome do perfil nos outros dois. Texto
+   * porque os três eixos dividem a mesma estrutura; a lista de origem diz como
+   * ler a chave. */
+  group: string | null;
   /** Nulos quando o recorte não tem aluno no período: não havia ninguém, o que
    * é diferente de ninguém ter ficado satisfeito. Zero seria um ponto falso. */
   metrics: Metrics | null;
   active: number;
-  /** Alunos do recorte que já ingressaram, tenham saído ou não. **Não** é
-   * `active + graduated + dismissed`: quem sai ao fim do período conta nos dois
-   * lados dessa soma, porque disputou o período inteiro antes de sair. É este o
-   * denominador das frações de formados e de jubilados. */
+  /** Alunos do recorte que já ingressaram, tenham concluído ou não. **Não** é
+   * `active + graduated`: quem se forma ao fim do período conta nos dois lados
+   * dessa soma, porque disputou o período inteiro antes de sair. É este o
+   * denominador da fração de formados. */
   population: number;
   graduated: number;
-  /** Jubilados acumulados até aqui — desligados por decurso de prazo. */
-  dismissed: number;
   mean_credits: number | null;
   mean_approved_hours: number | null;
   /** Oferta de créditos do início do período (C_a^(t,1), antes dos lances),
-   * dividida pelos alunos do curso e pelas vagas de toda a universidade — a
+   * dividida pelos alunos do recorte e pelas vagas de toda a universidade — a
    * segunda é o preço que uma vaga teria se todo o crédito fosse gasto. */
   credits_per_student: number | null;
   credits_per_seat: number | null;
@@ -131,8 +205,8 @@ export interface CourseSnapshot {
 
 /** Dispersão do preço de mercado (π_x, eq. 24) entre as disciplinas que
  * estavam no mercado no instante — as que ainda tinham vaga. O preço não é
- * grandeza de aluno nem de curso: é o que a faixa entre a disciplina mais cara
- * e a mais barata diz sobre onde o crédito se concentrou. */
+ * grandeza de aluno nem de geração: é o que a faixa entre a disciplina mais
+ * cara e a mais barata diz sobre onde o crédito se concentrou. */
 export interface PriceStats {
   min: number;
   mean: number;
@@ -142,12 +216,17 @@ export interface PriceStats {
 export interface RoundReport {
   period: number;
   round: number; // 0 = agregado do período
-  overall: Metrics;
-  by_course: CourseSnapshot[];
-  /** O mesmo instante agregado por curso × geração. Só as gerações que já
-   * ingressaram, então a série de uma geração começa no período do seu
-   * ingresso — e o aluno fica na mesma geração do início ao fim. */
-  by_cohort: CourseSnapshot[];
+  /** Toda a universidade. */
+  overall: GroupSnapshot;
+  /** O mesmo instante agregado por geração. Só as gerações que já ingressaram,
+   * então a série de uma geração começa no período do seu ingresso — e o aluno
+   * fica na mesma geração do início ao fim. */
+  by_cohort: GroupSnapshot[];
+  /** E pelos dois eixos de perfil, na ordem em que o cenário os declara. Os
+   * três recortes particionam a mesma população de formas diferentes: somar
+   * qualquer um deles reproduz `overall`. */
+  by_aptitude: GroupSnapshot[];
+  by_affinity: GroupSnapshot[];
   /** `null` quando nenhuma disciplina estava no mercado: sem oferta não há
    * preço, e 0 ali se leria como "de graça". */
   prices: PriceStats | null;
@@ -155,11 +234,23 @@ export interface RoundReport {
 
 export interface DisciplineSnapshot {
   name: string;
+  /** Os três eixos pelos quais as disciplinas se agrupam nos gráficos. O
+   * período vem dos pré-requisitos; vagas e carga horária são do cenário, e
+   * disciplinas com o mesmo valor caem no mesmo grupo. */
+  curriculum_period: number;
+  hours: number;
   seats: number;
   filled: number;
+  /** Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
+   * Só é diferente de zero nas disciplinas de 1º período. */
+  granted: number;
+  /** Quantos alunos pediram a disciplina no período — deram lance em alguma
+   * rodada, ou a receberam na matrícula garantida. Dividido por `seats` dá a
+   * **concorrência** dela: candidatos por vaga. */
+  requests: number;
   /** Média de π_x nas rodadas em que a disciplina ainda tinha vaga. `null` se
-   * ela nunca esteve no mercado (q_x = 0) — a esgotada não vale o piso da
-   * eq. (24), que leria como barata justamente a que todo mundo quis. */
+   * ela nunca esteve no mercado — a esgotada não vale o piso da eq. (24), que
+   * leria como barata justamente a que todo mundo quis. */
   mean_price: number | null;
   approvals: number;
 }
@@ -170,36 +261,42 @@ export interface PeriodReport {
   aggregate: RoundReport;
   disciplines: DisciplineSnapshot[];
   graduated_now: number;
-  dismissed_now: number;
 }
 
 export interface StudentSummary {
   id: string;
   name: string;
-  course: string;
   entry_period: number; // t_a — eq. (31)
+  aptitude: string; // nome do perfil de aptidão
+  affinity: string; // nome do perfil de afinidade
   grade_average: number; // N_a — eq. (49)
   approved_hours: number;
+  /** S — a carga da grade inteira. Toda disciplina é obrigatória, então é a
+   * mesma meta para todos. */
   hours_to_graduate: number;
   credits: number;
   enrollments: number;
   approvals: number;
   mean_satisfaction: number;
+  /** Período em que concluiu o curso — a **única** porta de saída. Quem não
+   * concluiu continua disputando até o fim do horizonte. */
   graduated_at: number | null;
-  /** Período em que foi jubilado. Exclusivo com `graduated_at`: o aluno sai do
-   * conjunto ativo por uma porta ou pela outra. */
-  dismissed_at: number | null;
 }
+
+/** Rodada de `won_round` quando a vaga não veio de rodada nenhuma: é a
+ * matrícula garantida do ingressante, concedida antes de o leilão abrir. */
+export const GUARANTEED_ROUND = 0;
 
 /** O que aconteceu com uma disciplina que o aluno quis num período.
  * `bids` todo zero = o aluno nem chegou a dar lance (a disciplina saiu de
  * B_a^(t,r): sem vaga, sem carga horária ou sem orçamento). */
 export interface RequestRecord {
   discipline: string;
-  kind: "required" | "elective" | "free";
   utility: number; // u_{a,x}^(t) — eq. (41)
   bids: number[]; // créditos apostados em cada rodada
-  won_round: number | null; // null = recusada
+  /** Rodada em que obteve a vaga; `null` = recusada. `GUARANTEED_ROUND` (0) é a
+   * matrícula garantida do ingressante. */
+  won_round: number | null;
   paid: number; // eq. (27)
   attempt: number | null;
   grade: number | null; // eq. (33)
@@ -219,7 +316,6 @@ export interface StudentPeriodRecord {
   enrolled_hours: number;
   requests: RequestRecord[];
   graduated: boolean;
-  dismissed: boolean;
 }
 
 export interface StudentHistory {
@@ -233,22 +329,29 @@ export interface SimulateResponse {
   /** Detalhe período a período de cada aluno. Pesado (≈1 MB num cenário de 8
    * períodos), então não vai para o localStorage — ver `history.ts`. */
   histories: StudentHistory[];
-  courses: string[];
   disciplines: string[];
+  /** Período de cada disciplina na grade, induzido dos pré-requisitos. */
+  curriculum_periods: Record<string, number>;
+  /** Os perfis do cenário, na ordem em que `by_aptitude` e `by_affinity` saem. */
+  aptitude_profiles: string[];
+  affinity_profiles: string[];
 }
 
 export function defaultScenario(): SimulateRequest {
   return {
     disciplines: [],
-    courses: [],
+    aptitude_profiles: [
+      { name: "Padrão", mean: 6.5, stddev: 1.5, learning_gain: 2.5, share: 100 },
+    ],
+    affinity_profiles: [
+      { name: "Padrão", kind: "concentrated", intensity: 1, max_hours: 360, share: 100 },
+    ],
     periods: 1,
     entry_periods: null,
-    max_residence: 0,
+    students_per_period: 1,
     rounds: 1,
     min_grade: 5,
     base_credits: 10,
-    max_hours: 360,
-    learning_gain: 2.5,
     credit_return: "none",
     seed: 0,
   };

@@ -14,9 +14,9 @@ export function Project() {
         Em toda matrícula universitária há disciplinas em que a demanda supera as vagas. O critério
         usual de desempate é o coeficiente de rendimento: ordena-se a fila por CR e atende-se de
         cima para baixo. O critério é simples e transparente, mas ignora <em>o quanto</em> cada
-        aluno precisa de cada vaga. Um aluno a uma disciplina da formatura e um aluno em busca de
-        uma optativa qualquer entram na mesma fila, e vence quem tem o histórico melhor — não quem
-        perderia mais com a recusa.
+        aluno precisa de cada vaga. Um aluno a uma disciplina da formatura e um aluno que
+        tanto faz qual vai cursar entram na mesma fila, e vence quem tem o histórico melhor — não
+        quem perderia mais com a recusa.
       </p>
       <p>
         A hipótese do trabalho é que um mecanismo de <strong>leilão por créditos</strong> aloca
@@ -39,15 +39,69 @@ export function Project() {
       <p>
         Sobre esse núcleo estático somam-se as camadas que o anteprojeto formaliza: múltiplas
         rodadas por período (eqs. 11–17), a dimensão temporal dos períodos letivos (eqs. 31–32),
-        notas e retorno de créditos (eqs. 33–37), senioridade, grade curricular e conclusão de curso
-        (eqs. 38–40) e o comportamento dos alunos ao transformar utilidade em lance (eqs. 41–48).
+        notas e retorno de créditos (eqs. 33–37), grade curricular e conclusão de curso (eqs.
+        38–40) e o comportamento dos alunos ao transformar utilidade em lance (eqs. 41–48).
+      </p>
+
+      <h2>A universidade simulada</h2>
+      <p>
+        Não há cursos: todo aluno é da universidade e cursa a mesma grade, e{" "}
+        <strong>toda disciplina é obrigatória</strong> — conclui quem aprova em todas. O que ordena
+        a grade são os <strong>pré-requisitos</strong>: uma disciplina sem pré-requisito é de 1º
+        período, e uma com pré-requisitos é do período seguinte ao mais tardio deles. Essa indução
+        toma o lugar da senioridade s<sub>x</sub> da eq. (38) — em vez de um número atribuído a cada
+        disciplina, o período sai da própria estrutura da grade, e o aluno só fica elegível a
+        disputar uma vaga quando aprovou tudo que ela exige.
+      </p>
+      <p>
+        Quem <strong>ingressa</strong> não disputa nada: recebe vaga garantida em todas as
+        disciplinas de 1º período e fica de fora do leilão naquele período. O sistema ainda assim
+        lança o gasto na conta dele, repartindo o orçamento igualmente entre essas disciplinas e
+        deixando o resto da divisão no saldo — é esse valor que alimenta o retorno de créditos da
+        eq. (34). A garantia vale só no ingresso: recursar uma dessas disciplinas é disputá-la no
+        leilão como qualquer outra. Daí os dois limites do ritmo de entrada: a geração não pode
+        passar da menor oferta entre as disciplinas de 1º período, nem a carga somada delas pode
+        passar de W<sub>a</sub>.
+      </p>
+      <p>
+        Os alunos se distinguem por dois <strong>perfis independentes</strong>. A{" "}
+        <em>aptidão</em> é a normal de onde saem as notas de primeira tentativa, dada por média e
+        desvio padrão, mais o quanto cada recursada acrescenta (eq. 33). A <em>afinidade</em> é um
+        expoente aplicado à matriz de utilidades antes de ela ser normalizada — expoente maior que
+        1 afasta as utilidades entre si (o aluno concentra a preferência em uma ou duas
+        disciplinas), menor que 1 as aproxima (ele é indiferente entre o que lhe resta), e 1 não
+        distorce nada —, mais a carga horária máxima que ele carrega por período (W<sub>a</sub>,
+        eq. 4). A afinidade é justamente a informação que o leilão diz captar e a ordenação por CR
+        não vê. Como os eixos são independentes, a fatia de uma combinação é o produto das duas, e
+        a repartição é exata e idêntica em toda geração — não sorteada, para que a comparação entre
+        perfis não meça a sorte do sorteio junto.
+      </p>
+      <p>
+        Os dois parâmetros extras moram no perfil, e não no cenário, porque são a mesma grandeza
+        que o eixo já nomeia. O incremento de aprendizado é o quanto o aluno aprende: um perfil que
+        erra muito na primeira tentativa pode ser justamente o que mais ganha ao repetir, e com um
+        valor global não havia como dizer isso. A carga horária máxima anda junto da concentração:
+        querer poucas disciplinas com intensidade e querer muitas por igual não descrevem só
+        preferência, mas também quanto se consegue carregar. Como W<sub>a</sub> varia entre alunos,
+        a semestralização mede cada um contra o próprio teto.
+      </p>
+      <p>
+        A conclusão do curso é a <strong>única</strong> porta de saída: quem não concluiu continua
+        disputando até o fim do horizonte.
       </p>
 
       <h2>O que a simulação faz em cada período</h2>
       <ol>
         <li>
+          Quem ingressa no período recebe a matrícula garantida nas disciplinas de 1º período, e as
+          vagas saem do estoque antes de o leilão abrir.
+        </li>
+        <li>
           Cada aluno ativo lê sua linha da matriz de utilidades — já sorteada na inicialização —
-          respeitando a hierarquia obrigatórias &gt; optativas &gt; livres (eqs. 41–43, 47–48).
+          sobre o seu conjunto elegível: as disciplinas que ainda não aprovou e cujos
+          pré-requisitos já cumpriu (eqs. 41–43). Fora dele a utilidade é zero, e a matriz é
+          distorcida pelo expoente do perfil de afinidade e renormalizada, de modo que U
+          <sub>a</sub> continue valendo a eq. (43).
         </li>
         <li>
           Em cada rodada, os lances saem deterministicamente das utilidades (eqs. 44–46), o leilão
@@ -56,13 +110,14 @@ export function Project() {
           Seção 7.1.2.
         </li>
         <li>
-          Ao fim do período saem as notas, o retorno de créditos (eqs. 33–36) e as conclusões de
-          curso (eq. 40).
+          Ao fim do período saem as notas — sorteadas da normal do perfil de aptidão do aluno —, o
+          retorno de créditos (eqs. 33–36) e as conclusões de curso (eq. 40).
         </li>
       </ol>
       <p>
-        Tudo é reprodutível: alunos, nomes, aptidões, utilidades, notas e períodos de ingresso vêm
-        da <em>seed</em>, e todos são sorteados <strong>antes</strong> do primeiro período. A mesma
+        Tudo é reprodutível: nomes, utilidades e notas vêm da <em>seed</em>, e todos são
+        sorteados <strong>antes</strong> do primeiro período. O período de ingresso e o perfil não
+        vêm dela — são repartições exatas do cenário, idênticas sob qualquer seed. A mesma
         configuração produz sempre a mesma simulação, como exige a Seção 7.3 — uma vez
         inicializado, o modelo não sorteia mais nada em tempo de execução.
       </p>
@@ -76,21 +131,33 @@ export function Project() {
 
       <h2>As métricas</h2>
       <p>
-        O resultado de cada período é medido pelas métricas da Seção 7.3.3, e elas se dividem em
-        duas famílias. As <strong>do aluno</strong> — eficiência, equidade, correlação,
-        semestralização, progressão, créditos — são agregadas por curso ou por geração: é aí que a
-        diferença entre populações aparece, e com dezenas de alunos qualquer recorte mais granular
-        vira ruído. As <strong>do mercado</strong> — ocupação, demanda por vaga e preço — não se
-        recortam: medem a oferta contra as vagas de toda a universidade, o mesmo denominador para
-        qualquer curso, de modo que o recorte devolveria a fatia daquele curso no lugar de uma taxa
-        comparável entre cursos. Essas saem numa linha só.
+        O resultado de cada período é medido pelas métricas da Seção 7.3.3, e elas se dividem
+        pelos dois lados do mercado. As <strong>do aluno</strong> — eficiência, equidade,
+        correlação, semestralização, progressão, créditos — são agregadas por um de três recortes:
+        a geração, o perfil de aptidão ou o perfil de afinidade. Os três partem a mesma população
+        de formas diferentes, então somar qualquer um deles reproduz a universidade; o que muda de
+        um para o outro é a pergunta. Com dezenas de alunos, qualquer recorte mais granular vira
+        ruído.
+      </p>
+      <p>
+        As <strong>da disciplina</strong> — concorrência, preço, ocupação e taxa de aprovação —
+        pedem o recorte oposto: as disciplinas se agrupam por uma propriedade que compartilham, e
+        disciplinas com o mesmo valor caem no mesmo grupo. São três eixos: o período na grade (que
+        vem dos pré-requisitos), o número de vagas e a carga horária. É assim que se vê, por
+        exemplo, que as disciplinas de turma pequena formam preço e as de turma grande ficam no
+        piso — uma média sobre a universidade inteira esconderia a gradação. Concorrência e preço
+        são do bem, então o grupo é a média delas; ocupação e aprovação são razões de contagens,
+        então o grupo é a razão das somas, senão uma disciplina de 40 vagas pesaria o mesmo que uma
+        de 120.
       </p>
       <dl className="metric-list">
         <div>
           <dt>Eficiência de alocação (ψ̄) — eq. (53)</dt>
           <dd>
             Satisfação média dos alunos ativos: quanto da utilidade que o aluno queria ele de fato
-            conseguiu. É a medida principal da hipótese.
+            conseguiu. Como a utilidade é zero fora do conjunto elegível, é a fração do que ele{" "}
+            <em>podia</em> cursar — então 1 é atingível, e é o que a geração que acaba de ingressar
+            obtém. É a medida principal da hipótese.
           </dd>
         </div>
         <div>
@@ -102,28 +169,41 @@ export function Project() {
         </div>
         <div>
           <dt>Ocupação (θ) — eq. (54)</dt>
-          <dd>Fração das vagas ofertadas que foi efetivamente preenchida.</dd>
+          <dd>
+            Fração das vagas ofertadas que foi efetivamente preenchida. Aparece dos dois lados:
+            por aluno é a <em>fatia</em> das vagas da universidade que cada recorte levou, e os
+            parciais somam o total; por disciplina é a <em>taxa</em> com que cada tipo de oferta
+            encheu, que não é fatia de nada.
+          </dd>
         </div>
         <div>
           <dt>Demanda por vaga — fora do anteprojeto</dt>
           <dd>
-            Alunos por vaga, disciplina a disciplina, na média das disciplinas de cada aluno — a
-            razão candidato/vaga do vestibular. A <em>escassez</em> conta quem poderia cursar cada
-            disciplina da sua grade: é a demanda <em>potencial</em>, e quase não depende do
-            mecanismo. A <em>concorrência</em> faz a mesma conta sobre as disciplinas em que o aluno
-            de fato deu lance: é a <em>efetiva</em>. O vão entre as duas é a demanda que não virou
-            pedido — por isso as duas dividem o mesmo gráfico.
+            Alunos por vaga — a razão candidato/vaga do vestibular. A <em>escassez</em> conta quem
+            poderia cursar cada disciplina (não aprovada e com os pré-requisitos cumpridos): é a
+            demanda <em>potencial</em>, e quase não depende do mecanismo. A{" "}
+            <em>concorrência</em> faz a mesma conta sobre quem de fato a pediu: é a{" "}
+            <em>efetiva</em>, e a razão entre as duas diz quanto da potencial virou pedido. Nos
+            gráficos sobrou só a concorrência, e do lado das disciplinas, onde ela é razão de
+            contagens sobre um bem concreto; a escassez segue na tabela por período.
           </dd>
         </div>
         <div>
           <dt>Preço de disciplina (π) — eq. (24)</dt>
           <dd>
             O maior lance mal-sucedido de cada disciplina, ou 1 crédito quando ninguém ficou de
-            fora. O gráfico mostra a faixa — a disciplina mais cara, a média e a mais barata —,
-            porque a média sozinha não distingue um crédito concentrado em poucas disputas de um
-            espalhado por todas as vagas. Só entram as disciplinas que ainda tinham vaga no
-            instante: a esgotada não recebe mais lance e cairia no piso de 1, o que leria como
-            barata justamente a que todo mundo quis.
+            fora. Só entram as disciplinas que ainda tinham vaga no instante: a esgotada não
+            recebe mais lance e cairia no piso de 1, o que leria como barata justamente a que todo
+            mundo quis. O gráfico mostra a média de cada grupo de disciplinas — é a comparação
+            entre grupos que diz onde o crédito se concentrou.
+          </dd>
+        </div>
+        <div>
+          <dt>Taxa de aprovação — fora do anteprojeto</dt>
+          <dd>
+            Aprovados ÷ matriculados de um grupo de disciplinas ao fim do período. Não mede
+            alocação: serve para distinguir um tipo de disciplina que represa a fila por
+            reprovação de outro que a represa por falta de vaga.
           </dd>
         </div>
         <div>
@@ -153,9 +233,9 @@ export function Project() {
         <div>
           <dt>Economia de créditos — fora do anteprojeto</dt>
           <dd>
-            A oferta que o curso levou ao leilão (C<sub>a</sub><sup>(t,1)</sup>, antes de qualquer
-            lance) dividida pelos alunos ativos dá os <em>créditos por aluno</em>; dividida pelas
-            vagas ofertadas dá o <em>preço esperado</em> da vaga, o que ela custaria se todo o
+            A oferta que o recorte levou ao leilão (C<sub>a</sub><sup>(t,1)</sup>, antes de
+            qualquer lance) dividida pelos alunos ativos dá os <em>créditos por aluno</em>;
+            dividida pelas vagas ofertadas dá o <em>preço esperado</em> da vaga, o que ela custaria se todo o
             crédito em mãos fosse gasto — um teto de referência, não o preço que o leilão formou
             (esse é o π acima). O <em>saldo médio</em> é outra coisa: é o que sobrou depois das
             rodadas.
@@ -166,61 +246,75 @@ export function Project() {
       <h2>Escolhas de modelagem não fixadas pelo anteprojeto</h2>
       <ul>
         <li>
-          <strong>Aptidão latente do aluno:</strong> define a distribuição das notas de primeira
-          tentativa. Sem heterogeneidade de desempenho o CR vira ruído e a eq. (57) não mede nada.
+          <strong>Perfis de aptidão:</strong> as notas de primeira tentativa saem de uma normal
+          parametrizada por média e desvio padrão, uma por perfil. Sem heterogeneidade de
+          desempenho o CR vira ruído e a eq. (57) não mede nada.
+        </li>
+        <li>
+          <strong>Perfis de afinidade:</strong> um expoente sobre a matriz de utilidades, seguido
+          de renormalização. Não consta no anteprojeto, e existe porque concentrar preferência é
+          exatamente o que o leilão deveria recompensar.
         </li>
         <li>
           <strong>Notas como parâmetro de entrada:</strong> a matriz com a nota de primeira
           tentativa de cada par (aluno, disciplina) é gerada junto com a população, e cada recursada
-          soma exatamente 1 ponto à tentativa anterior.
+          soma à tentativa anterior o incremento de aprendizado do perfil de aptidão do aluno.
+        </li>
+
+        <li>
+          <strong>Matrícula garantida do ingressante:</strong> entra sem leilão em todas as
+          disciplinas de 1º período, com o orçamento repartido igualmente entre elas e o resto da
+          divisão no saldo. O anteprojeto não trata do ingresso.
         </li>
         <li>
-          <strong>Carga horária máxima por período (W<sub>a</sub>):</strong> parâmetro global,
-          idêntico para todos os alunos.
-        </li>
-        <li>
-          <strong>Conclusão de curso:</strong> exige aprovação em todas as obrigatórias <em>e</em> a
-          carga horária curricular da eq. (39). Disciplinas livres não contam.
+          <strong>Conclusão de curso:</strong> toda disciplina é obrigatória, então a eq. (40) vira
+          aprovar na grade inteira — não há carga horária mínima a somar separadamente.
         </li>
         <li>
           <strong>Orçamento gasto (U<sub>a</sub>):</strong> fração sorteada em [0,5; 1,0]; as
-          utilidades dentro de cada grupo seguem uma Dirichlet uniforme.
+          utilidades sobre o conjunto elegível seguem uma Dirichlet uniforme, distorcida pelo
+          expoente da afinidade.
         </li>
         <li>
-          <strong>Ingresso escalonado (t<sub>a</sub>):</strong> cada curso recebe uma geração
-          nova a cada período, do primeiro ao último, com o número de alunos que o cenário
-          definir — como um vestibular por semestre. A população do curso é esse número vezes
-          |T|, e todas as gerações têm o mesmo tamanho. O anteprojeto não fixa a distribuição
-          dos ingressos.
+          <strong>Ingresso escalonado (t<sub>a</sub>):</strong> entra uma geração nova a cada
+          período, do primeiro ao L-ésimo, com o número de alunos que o cenário definir — como um
+          vestibular por semestre. Todas as gerações têm o mesmo tamanho e a mesma composição de
+          perfis. O anteprojeto não fixa a distribuição dos ingressos.
         </li>
       </ul>
 
       <h2>Ainda não incluído</h2>
       <ul>
         <li>Mecanismo tradicional por CR como linha de base — eqs. (49)–(50), Seção 7.3.1.</li>
-        <li>Políticas de retorno de créditos além da nula — f<sub>γ</sub>, eq. (34).</li>
-        <li>Senioridade das disciplinas (s<sub>x</sub>) — eq. (38).</li>
         <li>Choque de horário: existe no motor, mas a simulação ainda não gera horários.</li>
+        <li>
+          Qualquer saída sem diploma: a conclusão é a única porta, então não há jubilamento por
+          decurso de prazo nem evasão comportamental. A evasão responde ao mecanismo, e por isso é
+          contra a linha de base por CR que ela precisaria ser medida.
+        </li>
       </ul>
 
       <h2>Como ler os resultados</h2>
       <p>
-        Cada execução guardada na barra lateral abre os gráficos do cenário — uma linha por curso,
-        com o eixo horizontal por período ou por rodada, divididos em métricas principais,
-        progressão e economia de créditos — seguidos das tabelas por período, por
-        curso, por disciplina e por aluno. Os gráficos são a representação principal; as tabelas
-        servem para conferir números específicos. O histórico fica no navegador, então execuções
-        antigas sobrevivem a um recarregamento da página.
+        Cada execução guardada na barra lateral abre os gráficos do cenário, em dois blocos. Os{" "}
+        <strong>gráficos por aluno</strong> trazem uma linha por geração ou por perfil, com o eixo
+        horizontal por período ou por rodada, divididos em métricas principais, progressão e
+        economia de créditos. Os <strong>gráficos por disciplina</strong> trazem uma linha por
+        período da grade, por número de vagas ou por carga horária, sempre em período. Depois vêm
+        as tabelas por período, por recorte, por disciplina e por aluno. Os gráficos são a
+        representação principal; as tabelas servem para conferir números específicos. O histórico
+        fica no navegador, então execuções antigas sobrevivem a um recarregamento da página.
       </p>
       <p>
-        A barra lateral à direita lista os alunos daquela execução. Clicar num deles abre a tela
-        individual: a progressão dele período a período e, em cada período, tudo o que pediu. Cada
-        pedido tem uma de três saídas — <strong>atendida</strong> (e em que rodada),{" "}
-        <strong>recusada</strong> (deu lance e perdeu o desempate) ou <strong>sem lance</strong>, que
-        significa que a disciplina saiu de B<sub>a</sub><sup>(t,r)</sup> antes do leilão por falta de
-        vaga, de carga horária ou de orçamento. É a tela para investigar um agregado que saiu
-        diferente do esperado: ela desce ao nível em que a causa é visível, que os gráficos por curso
-        deliberadamente escondem.
+        A barra lateral à direita lista os alunos daquela execução, e filtra por geração e pelos
+        dois perfis. Clicar num deles abre a tela individual: a progressão dele período a período
+        e, em cada período, tudo o que pediu. Cada pedido tem uma de quatro saídas —{" "}
+        <strong>vaga garantida</strong> (o ingressante, fora do leilão),{" "}
+        <strong>atendida</strong> (e em que rodada), <strong>recusada</strong> (deu lance e perdeu
+        o desempate) ou <strong>sem lance</strong>, que significa que a disciplina saiu de B
+        <sub>a</sub><sup>(t,r)</sup> antes do leilão por falta de vaga, de carga horária ou de
+        orçamento. É a tela para investigar um agregado que saiu diferente do esperado: ela desce
+        ao nível do aluno e da disciplina, que os dois blocos de gráficos agregam de propósito.
       </p>
     </article>
   );

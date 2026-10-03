@@ -284,6 +284,20 @@ input.invalid {
 
 /* Cabeçalho do grupo: mesma tipografia do <h2> dos painéis, sem a moldura —
    ele separa os gráficos sem competir com os títulos de cada card. */
+/* Separa os dois lados do mercado — gráficos por aluno e por disciplina.
+   Fica acima das seções, com peso maior que o cabeçalho delas, porque a
+   troca ali é de pergunta, não de bloco dentro da mesma pergunta. */
+.chart-part-head {
+  margin: 28px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--border);
+  font-size: 15px;
+}
+
+.chart-part-head:first-of-type {
+  margin-top: 8px;
+}
+
 .chart-section-head {
   margin: 0 0 10px;
   padding-bottom: 8px;
@@ -690,6 +704,7 @@ td, th {
 
 .rail-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 

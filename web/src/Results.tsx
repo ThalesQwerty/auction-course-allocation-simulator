@@ -1,9 +1,16 @@
 import { useMemo, useState } from "react";
-import { MAX_SERIES, MetricChart, SeriesPoint, bandColors, courseColors, formatCount, formatRatio, rampColors, totalColor, usePrefersDark } from "./charts";
+import { MetricChart, SeriesPoint, categoricalColors, formatCount, formatRatio, rampColors, totalColor, usePrefersDark } from "./charts";
 import { describeRun, formatRunDate, hasHistories, SimulationRun } from "./history";
 import { StudentDetail } from "./StudentDetail";
 import { StudentList } from "./StudentList";
-import type { CourseSnapshot, RoundReport, SimulateResponse } from "./types";
+import { cohortLabel } from "./types";
+import type {
+  DisciplineSnapshot,
+  GroupSnapshot,
+  PeriodReport,
+  RoundReport,
+  SimulateResponse,
+} from "./types";
 
 /** Carregamento sob demanda do detalhe por aluno: ele não cabe no localStorage,
  * então uma execução restaurada de outra sessão precisa ser reexecutada. */
@@ -15,14 +22,14 @@ export interface HistoriesLoader {
 
 /** `null` = a grandeza não existe para esse recorte naquele período (não havia
  * aluno). O ponto some do gráfico em vez de virar zero. */
-type Accessor = (snapshot: CourseSnapshot) => number | null;
+type Accessor = (snapshot: GroupSnapshot) => number | null;
 
 /** Grandezas que não são do aluno, e sim do mercado, e que **não se decompõem**:
  * a escassez e a concorrência são médias de razões por aluno, e o preço é do
  * bem, não de quem o comprou — somar recortes não reconstrói nenhuma das três.
- * Por isso elas não passam pela agregação escolhida: trazem as próprias linhas,
- * numa lista fixa que não vem da população, e que são leituras ordenadas da
- * mesma grandeza (as pontas de uma faixa), nunca recortes de aluno.
+ * Por isso elas não passam pela agregação por geração: trazem as próprias
+ * linhas, numa lista fixa que não vem da população, e que são leituras
+ * ordenadas da mesma grandeza (as pontas de uma faixa), nunca recortes de aluno.
  *
  * É o que as separa da ocupação, que divide pela mesma oferta mas é aditiva:
  * ali o parcial é a fatia que o recorte levou, e tem leitura — ver `total`. */
@@ -31,41 +38,36 @@ type OverallSeries = { label: string; of: (report: RoundReport) => number | null
 /** Nome da linha agregada dos gráficos aditivos. */
 const TOTAL_SERIES = "Total";
 
-/** Uma linha por curso, ou uma linha por geração dentro de um curso. Por
- * geração é um curso de cada vez: sobrepor cursos e gerações no mesmo gráfico
- * esconderia justamente a diferença entre eles.
+/** Por que recortar a população. Os três eixos particionam os mesmos alunos de
+ * formas diferentes, então somar qualquer um deles reproduz a universidade — e
+ * trocar de eixo é trocar a lista que alimenta as séries, nada mais.
  *
- * O valor "entry" conserva o nome do campo que define a geração
- * (`entry_period`, o t_a da eq. 31): a geração é identificada pelo período em
- * que ingressou. */
-type GroupBy = "course" | "entry";
+ * A **geração** é série ordenada (quem entrou antes está mais adiante na
+ * grade), e por isso leva a rampa; os **perfis** são categorias sem ordem entre
+ * si, e levam a paleta categórica. */
+type GroupBy = "cohort" | "aptitude" | "affinity";
 
-/** Nome da série de um recorte: o curso, ou a geração — o grupo que ingressou
- * naquele período (geração 3 = quem entrou no período 3, esteja ele hoje em
- * que semestre estiver). O aluno nasce numa geração e fica nela até o fim, que
- * é o que mantém cada linha falando sempre do mesmo conjunto de alunos. */
-const seriesKey = (snapshot: CourseSnapshot) =>
-  snapshot.entry_period === null ? snapshot.course : `Geração ${snapshot.entry_period}`;
+interface Axis {
+  value: GroupBy;
+  label: string;
+  /** Rótulo do filtro de séries e do título da tabela. */
+  legend: string;
+  of: (report: RoundReport) => GroupSnapshot[];
+  /** Nome de série a partir da chave crua do recorte. */
+  name: (group: string) => string;
+  /** Séries ordenadas (geração) ganham rampa; categóricas, a paleta. */
+  ordered: boolean;
+}
 
-/** Como o aluno saiu da simulação: pela conclusão do curso (eq. 40), pelo
- * prazo de jubilamento, ou ainda não saiu. As duas portas são exclusivas. */
-const exitLabel = (student: { graduated_at: number | null; dismissed_at: number | null }) =>
-  // Testes por veracidade, não contra `null`: numa execução gravada antes do
-  // jubilamento existir o campo vem ausente, e `undefined !== null` daria
-  // "jubilado no período undefined".
-  student.graduated_at
-    ? `formado no período ${student.graduated_at}`
-    : student.dismissed_at
-      ? `jubilado no período ${student.dismissed_at}`
-      : "—";
+/** Conclusão do curso (eq. 40) — a única porta de saída. Quem não concluiu
+ * continua disputando até o fim do horizonte. */
+const exitLabel = (student: { graduated_at: number | null }) =>
+  student.graduated_at ? `formado no período ${student.graduated_at}` : "em curso";
 
 /** Célula de tabela: traço quando a grandeza não existe. */
 const cell = (value: number | null, format: (v: number) => string) =>
   value === null ? "—" : format(value);
 
-/** `cohortOf` nulo = uma série por curso; com um curso, uma série por idade
- * dentro dele. Como os dois recortes trazem os mesmos campos, trocar de
- * agregação é trocar a lista que alimenta as séries — nada mais. */
 /** Os instantes do eixo: as rodadas de cada período, ou um ponto por período. */
 const reportsOf = (result: SimulateResponse, byRound: boolean): RoundReport[] =>
   byRound
@@ -75,41 +77,35 @@ const reportsOf = (result: SimulateResponse, byRound: boolean): RoundReport[] =>
 const pointX = (report: RoundReport, byRound: boolean) =>
   byRound ? `${report.period}.${report.round}` : String(report.period);
 
+/** Uma linha por grupo do eixo escolhido. O total, quando a grandeza é
+ * aditiva, é a soma dos parciais — que é a universidade inteira, porque
+ * qualquer um dos eixos particiona a população. */
 function buildSeries(
   result: SimulateResponse,
   byRound: boolean,
   accessor: Accessor,
-  cohortOf: string | null,
+  axis: Axis,
   total: boolean
 ): SeriesPoint[] {
   return reportsOf(result, byRound).map((report) => {
     const point: SeriesPoint = { x: pointX(report, byRound) };
-    const snapshots =
-      cohortOf === null
-        ? report.by_course
-        : report.by_cohort.filter((snapshot) => snapshot.course === cohortOf);
-    // A soma sai de **todos** os recortes, não só dos visíveis: esconder um
-    // curso tira a linha dele do gráfico, não a parte dele do total.
+    // A soma sai de **todos** os grupos, não só dos visíveis: esconder um tira
+    // a linha dele do gráfico, não a parte dele do total.
     let sum: number | null = null;
-    for (const snapshot of snapshots) {
+    for (const snapshot of axis.of(report)) {
       const value = accessor(snapshot);
       if (value === null) continue;
-      point[seriesKey(snapshot)] = value;
+      if (snapshot.group !== null) point[axis.name(snapshot.group)] = value;
       sum = (sum ?? 0) + value;
     }
-    // O total é a soma dos parciais — e não o agregado da universidade — para
-    // acompanhar o recorte: por curso ele dá a universidade inteira, por
-    // geração dá o curso escolhido, que é de quem as gerações em tela são
-    // parte. Um total que não fosse o total do que está em tela seria uma
-    // linha boiando acima de parcelas que não a explicam.
     if (total && sum !== null) point[TOTAL_SERIES] = sum;
     return point;
   });
 }
 
 /** Séries das grandezas de mercado: um ponto por instante, lido do agregado do
- * instante. Não passam pelo filtro de cursos nem de gerações — esconder uma
- * série não muda uma grandeza que não é daquele recorte. */
+ * instante. Não passam pelo filtro de gerações — esconder uma série não muda
+ * uma grandeza que não é daquele recorte. */
 function buildOverallSeries(
   result: SimulateResponse,
   byRound: boolean,
@@ -128,39 +124,10 @@ function buildOverallSeries(
 /** Gasto do período, por aluno ativo. Não vem da API, mas é exato: a oferta e o
  * saldo são médias sobre os mesmos alunos, então a diferença entre as duas é a
  * média do que cada um consumiu nos leilões. */
-const spentOf = (snapshot: CourseSnapshot): number | null =>
+const spentOf = (snapshot: GroupSnapshot): number | null =>
   snapshot.credits_per_student === null || snapshot.mean_credits === null
     ? null
     : snapshot.credits_per_student - snapshot.mean_credits;
-
-/** Média da universidade de uma grandeza **por aluno**: as médias dos cursos
- * ponderadas pelos ativos de cada um. Somar não serviria — o valor do curso já
- * traz a população dentro dele, e a soma a contaria duas vezes. */
-const perStudentMean = (
-  report: RoundReport,
-  pick: (snapshot: CourseSnapshot) => number | null
-): number | null => {
-  let weighted = 0;
-  let students = 0;
-  for (const snapshot of report.by_course) {
-    const value = pick(snapshot);
-    if (value === null || snapshot.active === 0) continue;
-    weighted += value * snapshot.active;
-    students += snapshot.active;
-  }
-  return students ? weighted / students : null;
-};
-
-/** O preço esperado não vem pronto no agregado — a API só o traz por recorte.
- * Mas os cursos particionam os alunos e todos dividem pelas mesmas vagas da
- * universidade, então somar os cursos reconstrói exatamente a oferta total por
- * vaga. */
-const overallCreditsPerSeat = (report: RoundReport): number | null => {
-  const values = report.by_course
-    .map((snapshot) => snapshot.credits_per_seat)
-    .filter((value): value is number => value !== null);
-  return values.length ? values.reduce((total, value) => total + value, 0) : null;
-};
 
 interface ChartStyle {
   title: string;
@@ -174,7 +141,7 @@ interface ChartStyle {
   periodOnly?: boolean;
 }
 
-/** Ou o gráfico lê o recorte (uma linha por curso ou por geração), ou lê o
+/** Ou o gráfico lê o recorte (uma linha por grupo do eixo escolhido), ou lê o
  * agregado da universidade (uma linha só) — nunca os dois. */
 type ChartSpec = ChartStyle &
   (
@@ -184,18 +151,11 @@ type ChartSpec = ChartStyle &
          * linha do total, que é a soma deles. */
         total?: boolean;
       }
-    | {
-        overall: OverallSeries;
-        /** As linhas são leituras ordenadas da mesma grandeza (mín/média/máx,
-         * potencial/efetiva) e não medidas diferentes: levam a rampa de faixa
-         * no lugar da paleta categórica, e dispensam rótulo na ponta — a ordem
-         * vertical já as identifica. */
-        band?: boolean;
-      }
+    | { overall: OverallSeries }
   );
 
 /** Os gráficos saem em três blocos, cada um respondendo uma pergunta diferente:
- * o leilão alocou bem? (métricas principais), a população anda no curso?
+ * o leilão alocou bem? (métricas principais), a população anda na grade?
  * (progressão), e o que acontece com o dinheiro? (economia). Dentro de um
  * bloco os eixos são comparáveis entre si. */
 const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
@@ -205,7 +165,7 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
     charts: [
       {
         title: "Eficiência de alocação (ψ̄)",
-        hint: "Satisfação média dos alunos ativos — eq. (53)",
+        hint: "Satisfação média dos alunos ativos — eq. (53). A utilidade é zero fora do conjunto elegível, então ψ é a fração do que o aluno podia cursar e conseguiu: 1 é atingível, e é o que a geração que acaba de ingressar obtém, porque entra com vaga garantida",
         accessor: (s) => s.metrics?.efficiency ?? null,
         domain: [0, 1],
       },
@@ -227,24 +187,10 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
         // ocupação de um recorte é a fatia que ele levou e os parciais somam o
         // total. É o que a separa das outras métricas da oferta.
         title: "Taxa de ocupação (θ)",
-        hint: "Fatia das vagas ofertadas que foi preenchida — eq. (54). O total é a soma dos parciais: cada curso (ou geração) levou a sua parte das mesmas vagas",
+        hint: "Fatia das vagas ofertadas que foi preenchida — eq. (54). O total é a soma dos parciais: cada recorte levou a sua parte das mesmas vagas",
         accessor: (s) => s.metrics?.occupancy ?? null,
         total: true,
         domain: [0, 1],
-      },
-      {
-        // As duas são a mesma conta — alunos por vaga — sobre conjuntos
-        // diferentes, então dividem o eixo: é a distância entre elas que se lê,
-        // e em gráficos separados essa distância teria de ser estimada no olho.
-        title: "Demanda por vaga",
-        hint: "Alunos por vaga, na média das disciplinas de cada aluno: a escassez conta quem pode cursar cada uma (demanda potencial) e a concorrência quem de fato a pediu (efetiva) — o vão entre as linhas é a demanda que não virou pedido. Médias de razões por aluno: somar recortes não as reconstrói, então não se dividem por curso nem por geração",
-        overall: [
-          { label: "Escassez", of: (report) => report.overall.scarcity },
-          { label: "Concorrência", of: (report) => report.overall.contention },
-        ],
-        band: true,
-        domain: [0, "auto"],
-        format: formatCount,
       },
       {
         title: "Semestralização (σ̄)",
@@ -256,11 +202,11 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
   },
   {
     title: "Progressão",
-    hint: "Como a população avança no curso ao longo dos períodos",
+    hint: "Como a população avança na grade ao longo dos períodos",
     charts: [
       {
         title: "Vagas obtidas por aluno",
-        hint: "Disciplinas conquistadas por aluno ativo",
+        hint: "Disciplinas conquistadas por aluno ativo, contando a matrícula garantida de quem ingressa",
         accessor: (s) => s.metrics?.allocations_per_student ?? null,
         domain: [0, "auto"],
         format: formatCount,
@@ -273,23 +219,15 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
       },
       {
         title: "Alunos ativos",
-        hint: "Matriculados no período — |A_k|",
+        hint: "Matriculados no período — |A^(t)|",
         accessor: (s) => s.active,
         domain: [0, "auto"],
         format: formatCount,
       },
       {
         title: "Formados (fração do recorte)",
-        hint: "Concluintes acumulados ÷ alunos que já ingressaram — eq. (40)",
+        hint: "Concluintes acumulados ÷ alunos que já ingressaram. Concluir é aprovar em todas as disciplinas da grade — eq. (40)",
         accessor: (s) => (s.population > 0 ? s.graduated / s.population : null),
-        domain: [0, 1],
-      },
-      {
-        title: "Jubilados (fração do recorte)",
-        hint:
-          "Desligados por decurso de prazo ÷ alunos que já ingressaram. A outra porta de saída: " +
-          "quem sai por aqui não aparece nas médias dos períodos seguintes",
-        accessor: (s) => (s.population > 0 ? s.dismissed / s.population : null),
         domain: [0, 1],
       },
       {
@@ -306,24 +244,18 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
     hint: "De onde vem o crédito, quanto dele circula e o que ele compra",
     charts: [
       {
-        // As três na mesma unidade e no mesmo eixo: o que se lê é o vão entre a
-        // oferta e o gasto — o crédito que não circulou —, e em gráficos
+        // As quatro na mesma unidade e no mesmo eixo: o que se lê é o vão entre
+        // a oferta e o gasto — o crédito que não circulou —, e em gráficos
         // separados ele teria de ser estimado no olho entre duas rampas quase
         // sobrepostas. Medidas diferentes, não as pontas de uma faixa: paleta
         // categórica, não a rampa.
         title: "Créditos por aluno",
-        hint: "A contabilidade do período, por aluno ativo: o orçamento no início (C_a^(t,1)), quanto dele foi apostado, quanto virou gasto de fato e o retorno das disciplinas cursadas (Σγ, eq. 34; não inclui Γ_min). O vão orçamento→gasto é o saldo que sobrou; o vão lances→gasto é o que foi comprometido e não pago — lance perdedor, ou o desconto de pagar o preço no lugar do lance. Lances pode passar do orçamento: perder não consome crédito, então o mesmo crédito é apostado de novo na rodada seguinte. As quatro dividem o eixo, então aqui são a média da universidade — por curso e por geração, ver a tabela",
+        hint: "A contabilidade do período, por aluno ativo: o orçamento no início (C_a^(t,1)), quanto dele foi apostado, quanto virou gasto de fato e o retorno das disciplinas cursadas (Σγ, eq. 34; não inclui Γ_min). O vão orçamento→gasto é o saldo que sobrou; o vão lances→gasto é o que foi comprometido e não pago — lance perdedor, ou o desconto de pagar o preço no lugar do lance. Lances pode passar do orçamento: perder não consome crédito, então o mesmo crédito é apostado de novo na rodada seguinte. A matrícula garantida entra como lance e gasto pelo mesmo valor, que é o que o sistema lança na conta do ingressante. As quatro dividem o eixo, então aqui são a média da universidade — por recorte, ver a tabela",
         overall: [
-          {
-            label: "Orçamento",
-            of: (report) => perStudentMean(report, (s) => s.credits_per_student),
-          },
-          { label: "Lances", of: (report) => perStudentMean(report, (s) => s.mean_bids) },
-          { label: "Gasto", of: (report) => perStudentMean(report, spentOf) },
-          {
-            label: "Retorno",
-            of: (report) => perStudentMean(report, (s) => s.mean_credit_return),
-          },
+          { label: "Orçamento", of: (report) => report.overall.credits_per_student },
+          { label: "Lances", of: (report) => report.overall.mean_bids },
+          { label: "Gasto", of: (report) => spentOf(report.overall) },
+          { label: "Retorno", of: (report) => report.overall.mean_credit_return },
         ],
         domain: [0, "auto"],
         format: formatCount,
@@ -340,23 +272,150 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
             : null,
         domain: [0, 1],
       },
+    ],
+  },
+];
+
+/** ---------------------------------------------------------------------------
+ * Gráficos por disciplina
+ *
+ * O outro lado do mercado. Os gráficos por aluno perguntam quem foi bem
+ * servido; estes perguntam **o que** foi disputado — e a resposta só aparece
+ * quando as disciplinas se agrupam por alguma propriedade que elas
+ * compartilham. Disciplinas com o mesmo valor caem no mesmo grupo, e os três
+ * eixos são o período na grade (que vem dos pré-requisitos), o número de vagas
+ * e a carga horária.
+ *
+ * Tudo aqui é por período, nunca por rodada: a disciplina só fecha preço,
+ * ocupação e aprovações ao fim do período.
+ * ------------------------------------------------------------------------- */
+type DisciplineGroupBy = "period" | "seats" | "hours";
+
+interface DisciplineAxis {
+  value: DisciplineGroupBy;
+  label: string;
+  legend: string;
+  key: (discipline: DisciplineSnapshot) => number;
+  name: (key: number) => string;
+}
+
+const DISCIPLINE_AXES: DisciplineAxis[] = [
+  {
+    value: "period",
+    label: "uma por período da grade",
+    legend: "Períodos da grade no gráfico",
+    key: (d) => d.curriculum_period,
+    name: (key) => `${key}º período`,
+  },
+  {
+    value: "seats",
+    label: "uma por número de vagas",
+    legend: "Tamanhos de turma no gráfico",
+    key: (d) => d.seats,
+    name: (key) => `${key} vagas`,
+  },
+  {
+    value: "hours",
+    label: "uma por carga horária",
+    legend: "Cargas horárias no gráfico",
+    key: (d) => d.hours,
+    name: (key) => `${key} h`,
+  },
+];
+
+/** O agregado de um grupo de disciplinas num período. Guarda as razões por
+ * disciplina (`contentions`, `prices`) além das somas, porque as duas coisas se
+ * leem de formas diferentes: concorrência e preço são **do bem**, e o grupo é a
+ * média delas; ocupação e aprovação são razões de contagens, e o grupo é a
+ * razão das somas. Fazer média de ocupações daria peso igual a uma disciplina
+ * de 40 vagas e a uma de 120. */
+interface DisciplineGroup {
+  seats: number;
+  filled: number;
+  approvals: number;
+  /** requests ÷ seats de cada disciplina do grupo. */
+  contentions: number[];
+  /** π das disciplinas que chegaram a estar no mercado; as esgotadas não entram. */
+  prices: number[];
+}
+
+const mean = (values: number[]): number | null =>
+  values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+
+function groupDisciplines(
+  period: PeriodReport,
+  axis: DisciplineAxis
+): Map<number, DisciplineGroup> {
+  const groups = new Map<number, DisciplineGroup>();
+  for (const discipline of period.disciplines) {
+    const key = axis.key(discipline);
+    const group =
+      groups.get(key) ??
+      { seats: 0, filled: 0, approvals: 0, contentions: [], prices: [] };
+    group.seats += discipline.seats;
+    group.filled += discipline.filled;
+    group.approvals += discipline.approvals;
+    // Disciplina sem vaga não tem concorrência — a razão seria divisão por zero.
+    if (discipline.seats > 0) group.contentions.push(discipline.requests / discipline.seats);
+    if (discipline.mean_price !== null) group.prices.push(discipline.mean_price);
+    groups.set(key, group);
+  }
+  return groups;
+}
+
+interface DisciplineChart extends ChartStyle {
+  of: (group: DisciplineGroup) => number | null;
+}
+
+const DISCIPLINE_CHARTS: { title: string; hint: string; charts: DisciplineChart[] }[] = [
+  {
+    title: "Oferta e disputa",
+    hint: "O que cada tipo de disciplina viveu no período — é aqui que a gradação de escassez embutida na grade aparece",
+    charts: [
       {
-        // A faixa, e não só a média: uma média estável esconde se o crédito se
-        // concentrou em poucas disputas ou se espalhou por todas as vagas.
-        title: "Preço de disciplina (π)",
-        hint: "Maior lance mal-sucedido de cada disciplina, ou 1 — eq. (24). Só entram as disciplinas que ainda tinham vaga: a esgotada não recebe lance e cairia no piso, o que leria como barata justamente a que todo mundo quis. O preço é do bem, não de quem o comprou, então não se divide por curso nem por geração",
-        overall: [
-          { label: "Máximo", of: (report) => report.prices?.max ?? null },
-          { label: "Médio", of: (report) => report.prices?.mean ?? null },
-          { label: "Mínimo", of: (report) => report.prices?.min ?? null },
-        ],
-        band: true,
+        title: "Concorrência por vaga",
+        hint: "Candidatos por vaga de cada disciplina (quantos a pediram ÷ vagas), na média do grupo. A matrícula garantida conta como pedido: o ingressante não disputou, mas ocupa a vaga, e para quem recursa a pressão é a mesma",
+        of: (g) => mean(g.contentions),
         domain: [0, "auto"],
         format: formatCount,
+      },
+      {
+        title: "Preço de disciplina (π)",
+        hint: "Maior lance mal-sucedido de cada disciplina, ou 1 — eq. (24) —, na média do grupo. Só entram as que ainda tinham vaga: a esgotada não recebe lance e cairia no piso, o que leria como barata justamente a que todo mundo quis",
+        of: (g) => mean(g.prices),
+        domain: [0, "auto"],
+        format: formatCount,
+      },
+      {
+        title: "Taxa de ocupação",
+        hint: "Vagas preenchidas ÷ vagas ofertadas do grupo. É a razão das somas, não a média das razões: senão uma disciplina de 40 vagas pesaria o mesmo que uma de 120. Diferente da ocupação por aluno, esta não é fatia de nada — é o quanto cada tipo de oferta encheu",
+        of: (g) => (g.seats > 0 ? g.filled / g.seats : null),
+        domain: [0, 1],
+      },
+      {
+        title: "Taxa de aprovação",
+        hint: "Aprovados ÷ matriculados do grupo ao fim do período. Mede a dificuldade do que foi cursado, não a alocação — serve para ver se um tipo de disciplina represa a fila por reprovação em vez de por falta de vaga",
+        of: (g) => (g.filled > 0 ? g.approvals / g.filled : null),
+        domain: [0, 1],
       },
     ],
   },
 ];
+
+function buildDisciplineSeries(
+  result: SimulateResponse,
+  axis: DisciplineAxis,
+  of: (group: DisciplineGroup) => number | null
+): SeriesPoint[] {
+  return result.periods.map((period) => {
+    const point: SeriesPoint = { x: String(period.period) };
+    for (const [key, group] of groupDisciplines(period, axis)) {
+      const value = of(group);
+      if (value !== null) point[axis.name(key)] = value;
+    }
+    return point;
+  });
+}
 
 export function Results({
   run,
@@ -370,21 +429,21 @@ export function Results({
   const result = run.result;
   const dark = usePrefersDark();
   const [byRound, setByRound] = useState(false);
-  // Geração é o padrão: é o recorte que separa as tendências neste modelo —
-  // entre cursos as curvas quase se sobrepõem, entre gerações não.
-  const [groupBy, setGroupBy] = useState<GroupBy>("entry");
-  // Um filtro por agregação: alternar entre curso e idade não deve descartar o
-  // que o usuário já tinha escondido do outro lado.
-  const [hiddenCourses, setHiddenCourses] = useState<string[]>([]);
-  const [hiddenEntries, setHiddenEntries] = useState<string[]>([]);
-  const [pickedCourse, setPickedCourse] = useState<string | null>(null);
+  const [groupBy, setGroupBy] = useState<GroupBy>("cohort");
+  const [disciplineGroupBy, setDisciplineGroupBy] = useState<DisciplineGroupBy>("seats");
+  const [hiddenDisciplines, setHiddenDisciplines] = useState<Record<DisciplineGroupBy, string[]>>(
+    { period: [], seats: [], hours: [] }
+  );
+  // Um filtro por eixo: trocar de recorte não deve descartar o que o usuário
+  // já tinha escondido do outro.
+  const [hidden, setHidden] = useState<Record<GroupBy, string[]>>({
+    cohort: [],
+    aptitude: [],
+    affinity: [],
+  });
   const [allStudents, setAllStudents] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // A cor é atribuída sobre a lista completa de cursos: esconder um curso não
-  // repinta os que continuam no gráfico. Vale para toda a tela — a tabela de
-  // alunos e a barra lateral seguem a cor do curso em qualquer agregação.
-  const colors = useMemo(() => courseColors(result.courses, dark), [result.courses, dark]);
   const hasRounds = result.periods.some((period) => period.rounds.length > 1);
   // Fases do horizonte, lidas da configuração desta execução: os L primeiros
   // períodos recebem geração nova, os demais drenam. Só há L gerações.
@@ -394,43 +453,111 @@ export function Results({
   );
   const drainPeriods = result.periods.length - entrySpan;
 
-  // O curso do recorte por geração só existe enquanto estiver nesta execução:
-  // reabrir outra simulação não pode deixar a tela presa num curso que sumiu.
-  const entryCourse =
-    pickedCourse && result.courses.includes(pickedCourse) ? pickedCourse : result.courses[0] ?? null;
-  const byEntry = groupBy === "entry" && entryCourse !== null;
-
-  // As gerações do curso escolhido. O agregado do período basta: uma geração
-  // que aparece numa rodada aparece no fim do período também.
-  const entries = useMemo(() => {
-    if (entryCourse === null) return [];
+  // As gerações da execução. O agregado do último período basta: toda geração
+  // que já ingressou continua na lista até o fim.
+  const cohorts = useMemo(() => {
     const found = new Set<number>();
     for (const period of result.periods) {
       for (const snapshot of period.aggregate.by_cohort) {
-        if (snapshot.course === entryCourse && snapshot.entry_period !== null) {
-          found.add(snapshot.entry_period);
-        }
+        if (snapshot.group !== null) found.add(Number(snapshot.group));
       }
     }
-    return [...found].sort((a, b) => a - b).map((entry) => `Geração ${entry}`);
-  }, [result.periods, entryCourse]);
+    return [...found].sort((a, b) => a - b);
+  }, [result.periods]);
+
+  const axes: Axis[] = useMemo(
+    () => [
+      {
+        value: "cohort",
+        label: "uma por geração",
+        legend: "Gerações no gráfico",
+        of: (report) => report.by_cohort,
+        name: (group) => cohortLabel(Number(group)),
+        ordered: true,
+      },
+      {
+        value: "aptitude",
+        label: "uma por perfil de aptidão",
+        legend: "Perfis de aptidão no gráfico",
+        of: (report) => report.by_aptitude,
+        name: (group) => group,
+        ordered: false,
+      },
+      {
+        value: "affinity",
+        label: "uma por perfil de afinidade",
+        legend: "Perfis de afinidade no gráfico",
+        of: (report) => report.by_affinity,
+        name: (group) => group,
+        ordered: false,
+      },
+    ],
+    []
+  );
+  const axis = axes.find((a) => a.value === groupBy) ?? axes[0];
+
+  const allSeries = useMemo(() => {
+    if (axis.value === "cohort") return cohorts.map(cohortLabel);
+    // Execuções gravadas antes dos perfis existirem não trazem as listas: o
+    // último relatório ainda diz quais grupos o eixo tem.
+    const profiles =
+      axis.value === "aptitude" ? result.aptitude_profiles : result.affinity_profiles;
+    return profiles ?? [];
+  }, [axis, cohorts, result.aptitude_profiles, result.affinity_profiles]);
 
   // Geração é série ordenada: a cor anda pelo círculo cromático conforme o
-  // número cresce, em vez de sair da paleta categórica.
-  const entryColors = useMemo(() => rampColors(entries, dark), [entries, dark]);
-  const seriesColors = byEntry ? entryColors : colors;
-  const allSeries = byEntry ? entries : result.courses;
-  const hiddenSeries = byEntry ? hiddenEntries : hiddenCourses;
-  // Só o recorte por curso trunca: a paleta categórica tem MAX_SERIES cores e
-  // não cicla (a cor segue o curso, não a posição na lista), então um nono
-  // curso ficaria sem cor própria. A rampa de geração é gerada sob medida para
-  // a lista inteira, então mostra todas as gerações da simulação.
-  const visible = allSeries.filter((name) => !hiddenSeries.includes(name));
-  const series = byEntry ? visible : visible.slice(0, MAX_SERIES);
+  // número cresce. Perfil é categoria sem ordem, e sai da paleta categórica.
+  // Nos dois casos a cor é atribuída sobre a lista inteira — esconder um grupo
+  // não repinta os que ficam.
+  const colors = useMemo(
+    () => (axis.ordered ? rampColors : categoricalColors)(allSeries, dark),
+    [axis.ordered, allSeries, dark]
+  );
+  const hiddenSeries = hidden[axis.value];
+  const series = allSeries.filter((name) => !hiddenSeries.includes(name));
   const toggleSeries = (name: string) =>
-    (byEntry ? setHiddenEntries : setHiddenCourses)((current) =>
-      current.includes(name) ? current.filter((other) => other !== name) : [...current, name]
-    );
+    setHidden((current) => ({
+      ...current,
+      [axis.value]: current[axis.value].includes(name)
+        ? current[axis.value].filter((other) => other !== name)
+        : [...current[axis.value], name],
+    }));
+
+  // A cor do aluno segue sempre a geração, em qualquer agregação: a barra
+  // lateral e a tabela de alunos não mudam de paleta quando o gráfico muda de
+  // eixo, senão a mesma pessoa trocaria de cor a cada clique.
+  const cohortColors = useMemo(
+    () => rampColors(cohorts.map(cohortLabel), dark),
+    [cohorts, dark]
+  );
+
+  // Os grupos de disciplina do eixo escolhido, em ordem crescente da grandeza:
+  // período 1..6, 40/80/120 vagas, 60/90 h. Todos são séries **ordenadas**,
+  // então levam a rampa de cor, como as gerações.
+  const disciplineAxis =
+    DISCIPLINE_AXES.find((a) => a.value === disciplineGroupBy) ?? DISCIPLINE_AXES[0];
+  const disciplineSeries = useMemo(() => {
+    const found = new Set<number>();
+    for (const period of result.periods) {
+      for (const discipline of period.disciplines) found.add(disciplineAxis.key(discipline));
+    }
+    return [...found].sort((a, b) => a - b).map(disciplineAxis.name);
+  }, [result.periods, disciplineAxis]);
+  const disciplineColors = useMemo(
+    () => rampColors(disciplineSeries, dark),
+    [disciplineSeries, dark]
+  );
+  const hiddenDisciplineSeries = hiddenDisciplines[disciplineGroupBy];
+  const visibleDisciplineSeries = disciplineSeries.filter(
+    (name) => !hiddenDisciplineSeries.includes(name)
+  );
+  const toggleDisciplineSeries = (name: string) =>
+    setHiddenDisciplines((current) => ({
+      ...current,
+      [disciplineGroupBy]: current[disciplineGroupBy].includes(name)
+        ? current[disciplineGroupBy].filter((other) => other !== name)
+        : [...current[disciplineGroupBy], name],
+    }));
 
   const students = allStudents ? result.students : result.students.slice(0, 50);
   const lastPeriod = result.periods[result.periods.length - 1];
@@ -466,7 +593,11 @@ export function Results({
             </p>
           </div>
         ) : selectedHistory ? (
-          <StudentDetail student={selected} history={selectedHistory} courseColor={colors[selected.course]} />
+          <StudentDetail
+            student={selected}
+            history={selectedHistory}
+            cohortColor={cohortColors[cohortLabel(selected.entry_period)]}
+          />
         ) : (
           <div className="panel">
             <p className="empty-state">
@@ -482,25 +613,21 @@ export function Results({
         <>
       <div className="panel">
         <h2>Resultado — {result.periods.length} períodos simulados</h2>
-        {(drainPeriods > 0 || run.config.max_residence) && (
+        <p className="note">
+          Três recortes da mesma população: a <strong>geração</strong> (quem ingressou num mesmo
+          período) e os dois <strong>perfis</strong> do aluno — a aptidão, que dá a distribuição
+          das notas, e a afinidade, que diz o quanto ele concentra a preferência. Somar qualquer um
+          deles reproduz a universidade; o que muda de um para o outro é a pergunta. Em todos, o
+          aluno fica na mesma linha do início ao fim. A geração aparece com ψ = 1 no período em que
+          entra — o ingressante tem vaga garantida nas disciplinas de 1º período e não disputa nada.
+        </p>
+        {drainPeriods > 0 && (
           <p className="note">
-            {drainPeriods > 0 && (
-              <>
-                Ingresso nos {entrySpan} primeiros períodos e drenagem nos {drainPeriods}{" "}
-                últimos: há <strong>{entrySpan} gerações</strong>, e os períodos de drenagem não
-                têm geração correspondente — ninguém entra e a população só diminui. As curvas por
-                período caem no fim porque há menos gente disputando, não porque o mecanismo
-                melhorou; o recorte por geração não tem essa distorção.{" "}
-              </>
-            )}
-            {run.config.max_residence > 0 && (
-              <>
-                Jubilamento em {run.config.max_residence} períodos: quem passa do prazo sai da
-                disputa. O período em que o aluno é desligado ainda conta nas médias — contar só
-                quem fica faria o mecanismo parecer melhor por ter expulsado justamente quem ele
-                serviu pior.
-              </>
-            )}
+            Ingresso nos {entrySpan} primeiros períodos e drenagem nos {drainPeriods} últimos: há{" "}
+            <strong>{entrySpan} gerações</strong>, e os períodos de drenagem não têm geração
+            correspondente — ninguém entra e a população só diminui. As curvas por período caem no
+            fim porque há menos gente disputando, não porque o mecanismo melhorou; o recorte por
+            geração não tem essa distorção.
           </p>
         )}
         <div className="field-row">
@@ -514,24 +641,15 @@ export function Results({
           <div className="field">
             <label>Linhas do gráfico</label>
             <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)}>
-              <option value="course">uma por curso</option>
-              <option value="entry">uma por geração</option>
+              {axes.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
-          {groupBy === "entry" && (
-            <div className="field">
-              <label>Curso</label>
-              <select value={entryCourse ?? ""} onChange={(e) => setPickedCourse(e.target.value)}>
-                {result.courses.map((course) => (
-                  <option key={course} value={course}>
-                    {course}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
           <div className="field grow">
-            <label>{byEntry ? "Gerações no gráfico" : "Cursos no gráfico"}</label>
+            <label>{axis.legend}</label>
             <div className="chips">
               {allSeries.map((name) => (
                 <button
@@ -539,26 +657,16 @@ export function Results({
                   className={`chip ${hiddenSeries.includes(name) ? "off" : "on"}`}
                   onClick={() => toggleSeries(name)}
                 >
-                  <span className="swatch" style={{ background: seriesColors[name] }} />
+                  <span className="swatch" style={{ background: colors[name] }} />
                   {name}
                 </button>
               ))}
             </div>
           </div>
         </div>
-        {byEntry && (
-          <p className="note">
-            Uma geração é quem ingressou num mesmo período. Um curso de cada vez: cada aluno
-            fica na mesma linha do início ao fim, e a geração só se compara dentro do mesmo
-            currículo.
-          </p>
-        )}
-        {!byEntry && allSeries.length > MAX_SERIES && (
-          <p className="note">
-            Os gráficos mostram no máximo {MAX_SERIES} cursos de cada vez; use os filtros acima.
-          </p>
-        )}
       </div>
+
+      <h2 className="chart-part-head">Gráficos por aluno</h2>
 
       {CHART_GROUPS.map((group) => (
         <section className="chart-section" key={group.title}>
@@ -567,57 +675,115 @@ export function Results({
             <p>{group.hint}</p>
           </header>
           <div className="chart-grid">
-            {group.charts.map((chart) => {
-              // Gráfico agregado: traz as próprias linhas, lidas do agregado
-              // do instante, sem passar pelo recorte nem pelo filtro de séries.
+            {group.charts.map((chart) => (
+              // Gráfico agregado: traz as próprias linhas, lidas do agregado do
+              // instante, sem passar pelo recorte nem pelo filtro de séries.
               // Cada um explica no próprio subtítulo por que não se divide — os
               // motivos são diferentes e nenhuma frase genérica serve aos três.
-              return (
-                <MetricChart
-                  key={chart.title}
-                  title={chart.title}
-                  hint={
-                    byRound && chart.periodOnly
-                      ? `${chart.hint} · só existe ao fim do período, então este gráfico segue em período`
-                      : chart.hint
-                  }
-                  data={
-                    "overall" in chart
-                      ? buildOverallSeries(result, byRound && !chart.periodOnly, chart.overall)
-                      : buildSeries(
-                          result,
-                          byRound && !chart.periodOnly,
-                          chart.accessor,
-                          byEntry ? entryCourse : null,
-                          chart.total === true
-                        )
-                  }
-                  // O total vem primeiro: é a linha de cima do gráfico, já que
-                  // as outras são parte dela.
-                  courses={
-                    "overall" in chart
-                      ? chart.overall.map((line) => line.label)
-                      : chart.total
-                        ? [TOTAL_SERIES, ...series]
-                        : series
-                  }
-                  colors={
-                    "overall" in chart
-                      ? (chart.band ? bandColors : courseColors)(
-                          chart.overall.map((line) => line.label),
-                          dark
-                        )
-                      : chart.total
-                        ? { ...seriesColors, ...totalColor(TOTAL_SERIES, dark) }
-                        : seriesColors
-                  }
-                  domain={chart.domain}
-                  format={chart.format ?? formatRatio}
-                  zeroLine={chart.zeroLine}
-                  band={"overall" in chart && chart.band === true}
-                />
-              );
-            })}
+              <MetricChart
+                key={chart.title}
+                title={chart.title}
+                hint={
+                  byRound && chart.periodOnly
+                    ? `${chart.hint} · só existe ao fim do período, então este gráfico segue em período`
+                    : chart.hint
+                }
+                data={
+                  "overall" in chart
+                    ? buildOverallSeries(result, byRound && !chart.periodOnly, chart.overall)
+                    : buildSeries(
+                        result,
+                        byRound && !chart.periodOnly,
+                        chart.accessor,
+                        axis,
+                        chart.total === true
+                      )
+                }
+                // O total vem primeiro: é a linha de cima do gráfico, já que
+                // as outras são parte dela.
+                series={
+                  "overall" in chart
+                    ? chart.overall.map((line) => line.label)
+                    : chart.total
+                      ? [TOTAL_SERIES, ...series]
+                      : series
+                }
+                colors={
+                  "overall" in chart
+                    ? categoricalColors(chart.overall.map((line) => line.label), dark)
+                    : chart.total
+                      ? { ...colors, ...totalColor(TOTAL_SERIES, dark) }
+                      : colors
+                }
+                domain={chart.domain}
+                format={chart.format ?? formatRatio}
+                zeroLine={chart.zeroLine}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+
+      <h2 className="chart-part-head">Gráficos por disciplina</h2>
+
+      <div className="panel">
+        <p className="note">
+          Aqui o recorte é da <strong>oferta</strong>, não da população: as disciplinas se agrupam
+          por uma propriedade que compartilham, e disciplinas com o mesmo valor caem no mesmo
+          grupo. Sempre por período — a disciplina só fecha preço, ocupação e aprovações ao fim
+          dele.
+        </p>
+        <div className="field-row">
+          <div className="field">
+            <label>Linhas do gráfico</label>
+            <select
+              value={disciplineGroupBy}
+              onChange={(e) => setDisciplineGroupBy(e.target.value as DisciplineGroupBy)}
+            >
+              {DISCIPLINE_AXES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field grow">
+            <label>{disciplineAxis.legend}</label>
+            <div className="chips">
+              {disciplineSeries.map((name) => (
+                <button
+                  key={name}
+                  className={`chip ${hiddenDisciplineSeries.includes(name) ? "off" : "on"}`}
+                  onClick={() => toggleDisciplineSeries(name)}
+                >
+                  <span className="swatch" style={{ background: disciplineColors[name] }} />
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {DISCIPLINE_CHARTS.map((group) => (
+        <section className="chart-section" key={group.title}>
+          <header className="chart-section-head">
+            <h2>{group.title}</h2>
+            <p>{group.hint}</p>
+          </header>
+          <div className="chart-grid">
+            {group.charts.map((chart) => (
+              <MetricChart
+                key={chart.title}
+                title={chart.title}
+                hint={chart.hint}
+                data={buildDisciplineSeries(result, disciplineAxis, chart.of)}
+                series={visibleDisciplineSeries}
+                colors={disciplineColors}
+                domain={chart.domain}
+                format={chart.format ?? formatRatio}
+              />
+            ))}
           </div>
         </section>
       ))}
@@ -627,30 +793,30 @@ export function Results({
         <table>
           <thead>
             <tr>
-              <th>Período</th><th>Ativos</th><th>Concluintes</th><th>Jubilados</th><th>Vagas preenchidas</th>
+              <th>Período</th><th>Ativos</th><th>Concluintes</th><th>Vagas preenchidas</th>
               <th>Eficiência</th><th>Equidade</th><th>Ocupação</th><th>Escassez</th><th>Concorrência</th><th>Preço esperado</th><th>Semestralização</th>
               <th>CR médio</th><th>Correlação</th>
             </tr>
           </thead>
           <tbody>
             {result.periods.map((period) => {
-              const m = period.aggregate.overall;
+              const snapshot = period.aggregate.overall;
+              const m = snapshot.metrics;
               return (
                 <tr key={period.period}>
                   <td>{period.period}</td>
-                  <td>{m.students}</td>
+                  <td>{snapshot.active}</td>
                   <td>{period.graduated_now}</td>
-                  <td>{period.dismissed_now ?? 0}</td>
-                  <td>{m.allocated}</td>
-                  <td>{formatRatio(m.efficiency)}</td>
-                  <td>{formatRatio(m.fairness)}</td>
-                  <td>{formatRatio(m.occupancy)}</td>
-                  <td>{formatCount(m.scarcity)}</td>
-                  <td>{formatCount(m.contention)}</td>
-                  <td>{cell(overallCreditsPerSeat(period.aggregate), formatCount)}</td>
-                  <td>{formatRatio(m.semestralization)}</td>
-                  <td>{formatRatio(m.mean_grade_average)}</td>
-                  <td>{formatRatio(m.correlation)}</td>
+                  <td>{m?.allocated ?? "—"}</td>
+                  <td>{cell(m?.efficiency ?? null, formatRatio)}</td>
+                  <td>{cell(m?.fairness ?? null, formatRatio)}</td>
+                  <td>{cell(m?.occupancy ?? null, formatRatio)}</td>
+                  <td>{cell(m?.scarcity ?? null, formatCount)}</td>
+                  <td>{cell(m?.contention ?? null, formatCount)}</td>
+                  <td>{cell(snapshot.credits_per_seat, formatCount)}</td>
+                  <td>{cell(m?.semestralization ?? null, formatRatio)}</td>
+                  <td>{cell(m?.mean_grade_average ?? null, formatRatio)}</td>
+                  <td>{cell(m?.correlation ?? null, formatRatio)}</td>
                 </tr>
               );
             })}
@@ -659,56 +825,51 @@ export function Results({
       </div>
 
       <div className="panel">
-        <h2>{byEntry ? `Por geração e período — ${entryCourse}` : "Por curso e período"}</h2>
+        <h2>Por {axis.legend.split(" no gráfico")[0].toLowerCase()} e período</h2>
         <p className="note">
           Escassez, concorrência e preço não entram aqui: as duas primeiras são médias de razões
           por aluno e o preço é do bem, não de quem o comprou — somar recortes não reconstrói
           nenhum dos três, e eles só se leem na tabela acima. A ocupação fica, porque é aditiva: o
           parcial é a fatia das vagas que o recorte levou, e os parciais somam o total. O crédito
-          também fica — orçamento, lances, gasto, saldo e retorno são por aluno e se recortam —, e é aqui que
-          ele se lê por curso e por geração: no gráfico as quatro grandezas dividem o eixo, e por
+          também fica — orçamento, lances, gasto, saldo e retorno são por aluno e se recortam —, e
+          é aqui que ele se lê por recorte: no gráfico as quatro grandezas dividem o eixo, e por
           isso só cabe ali a média da universidade.
         </p>
         <table>
           <thead>
             <tr>
-              <th>{byEntry ? "Geração" : "Curso"}</th><th>Período</th><th>Ativos</th><th>Ingressos</th><th>Concluintes</th><th>Jubilados</th>
+              <th>Recorte</th><th>Período</th><th>Ativos</th><th>Ingressos</th><th>Concluintes</th>
               <th>Eficiência</th><th>Equidade</th><th>Ocupação</th><th>Semestralização</th><th>Vagas/aluno</th>
               <th>Orçamento</th><th>Lances</th><th>Gasto</th><th>Saldo</th><th>Retorno</th><th>Horas aprovadas</th>
             </tr>
           </thead>
           <tbody>
             {result.periods.flatMap((period) =>
-              (byEntry
-                ? period.aggregate.by_cohort.filter((snapshot) => snapshot.course === entryCourse)
-                : period.aggregate.by_course
-              ).map((snapshot) => (
-                <tr key={`${period.period}-${seriesKey(snapshot)}`}>
-                  <td>
-                    <span
-                      className="swatch"
-                      style={{ background: seriesColors[seriesKey(snapshot)] }}
-                    />{" "}
-                    {seriesKey(snapshot)}
-                  </td>
-                  <td>{period.period}</td>
-                  <td>{snapshot.active}</td>
-                  <td>{snapshot.population ?? "—"}</td>
-                  <td>{snapshot.graduated}</td>
-                  <td>{snapshot.dismissed ?? 0}</td>
-                  <td>{cell(snapshot.metrics?.efficiency ?? null, formatRatio)}</td>
-                  <td>{cell(snapshot.metrics?.fairness ?? null, formatRatio)}</td>
-                  <td>{cell(snapshot.metrics?.occupancy ?? null, formatRatio)}</td>
-                  <td>{cell(snapshot.metrics?.semestralization ?? null, formatRatio)}</td>
-                  <td>{cell(snapshot.metrics?.allocations_per_student ?? null, formatCount)}</td>
-                  <td>{cell(snapshot.credits_per_student, formatCount)}</td>
-                  <td>{cell(snapshot.mean_bids, formatCount)}</td>
-                  <td>{cell(spentOf(snapshot), formatCount)}</td>
-                  <td>{cell(snapshot.mean_credits, formatCount)}</td>
-                  <td>{cell(snapshot.mean_credit_return, formatCount)}</td>
-                  <td>{cell(snapshot.mean_approved_hours, formatCount)}</td>
-                </tr>
-              ))
+              axis.of(period.aggregate).map((snapshot) => {
+                const label = axis.name(snapshot.group ?? "");
+                return (
+                  <tr key={`${period.period}-${label}`}>
+                    <td>
+                      <span className="swatch" style={{ background: colors[label] }} /> {label}
+                    </td>
+                    <td>{period.period}</td>
+                    <td>{snapshot.active}</td>
+                    <td>{snapshot.population}</td>
+                    <td>{snapshot.graduated}</td>
+                    <td>{cell(snapshot.metrics?.efficiency ?? null, formatRatio)}</td>
+                    <td>{cell(snapshot.metrics?.fairness ?? null, formatRatio)}</td>
+                    <td>{cell(snapshot.metrics?.occupancy ?? null, formatRatio)}</td>
+                    <td>{cell(snapshot.metrics?.semestralization ?? null, formatRatio)}</td>
+                    <td>{cell(snapshot.metrics?.allocations_per_student ?? null, formatCount)}</td>
+                    <td>{cell(snapshot.credits_per_student, formatCount)}</td>
+                    <td>{cell(snapshot.mean_bids, formatCount)}</td>
+                    <td>{cell(spentOf(snapshot), formatCount)}</td>
+                    <td>{cell(snapshot.mean_credits, formatCount)}</td>
+                    <td>{cell(snapshot.mean_credit_return, formatCount)}</td>
+                    <td>{cell(snapshot.mean_approved_hours, formatCount)}</td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -717,15 +878,28 @@ export function Results({
       {lastPeriod && (
         <div className="panel">
           <h2>Disciplinas no último período simulado</h2>
+          <p className="note">
+            "Garantidas" são as vagas entregues aos ingressantes antes de o leilão abrir: só as
+            disciplinas de 1º período têm, e é o que explica uma delas chegar à primeira rodada
+            já quase cheia. Sem vaga sobrando, a disciplina sai do mercado e não forma preço.
+          </p>
           <table>
             <thead>
-              <tr><th>Disciplina</th><th>Vagas</th><th>Preenchidas</th><th>Preço médio</th><th>Aprovações</th></tr>
+              <tr>
+                <th>Disciplina</th><th>Período</th><th>Carga</th><th>Vagas</th>
+                <th>Garantidas</th><th>Pedidos</th><th>Preenchidas</th>
+                <th>Preço médio</th><th>Aprovações</th>
+              </tr>
             </thead>
             <tbody>
               {lastPeriod.disciplines.map((discipline) => (
                 <tr key={discipline.name}>
                   <td>{discipline.name}</td>
+                  <td className="muted-cell">{discipline.curriculum_period}º</td>
+                  <td className="muted-cell">{discipline.hours} h</td>
                   <td>{discipline.seats}</td>
+                  <td>{discipline.granted || "—"}</td>
+                  <td>{discipline.requests}</td>
                   <td>{discipline.filled}</td>
                   <td>{cell(discipline.mean_price, formatCount)}</td>
                   <td>{discipline.approvals}</td>
@@ -741,29 +915,35 @@ export function Results({
         <table>
           <thead>
             <tr>
-              <th>Aluno</th><th>Curso</th><th>CR</th><th>Horas aprovadas</th>
-              <th>Créditos</th><th>Matrículas</th><th>Satisfação média</th><th>Saída</th>
+              <th>Aluno</th><th>Geração</th><th>Aptidão</th><th>Afinidade</th><th>CR</th>
+              <th>Horas aprovadas</th><th>Créditos</th><th>Matrículas</th>
+              <th>Satisfação média</th><th>Saída</th>
             </tr>
           </thead>
           <tbody>
-            {students.map((student) => (
-              <tr key={student.id}>
-                <td>
-                  <button className="link" onClick={() => select(student.id)}>
-                    {student.name}
-                  </button>
-                </td>
-                <td>
-                  <span className="swatch" style={{ background: colors[student.course] }} /> {student.course}
-                </td>
-                <td>{formatRatio(student.grade_average)}</td>
-                <td>{student.approved_hours} / {student.hours_to_graduate}</td>
-                <td>{student.credits}</td>
-                <td>{student.enrollments}</td>
-                <td>{formatRatio(student.mean_satisfaction)}</td>
-                <td>{exitLabel(student)}</td>
-              </tr>
-            ))}
+            {students.map((student) => {
+              const label = cohortLabel(student.entry_period);
+              return (
+                <tr key={student.id}>
+                  <td>
+                    <button className="link" onClick={() => select(student.id)}>
+                      {student.name}
+                    </button>
+                  </td>
+                  <td>
+                    <span className="swatch" style={{ background: cohortColors[label] }} /> {label}
+                  </td>
+                  <td className="muted-cell">{student.aptitude}</td>
+                  <td className="muted-cell">{student.affinity}</td>
+                  <td>{formatRatio(student.grade_average)}</td>
+                  <td>{student.approved_hours} / {student.hours_to_graduate}</td>
+                  <td>{student.credits}</td>
+                  <td>{student.enrollments}</td>
+                  <td>{formatRatio(student.mean_satisfaction)}</td>
+                  <td>{exitLabel(student)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         {result.students.length > 50 && (
@@ -780,8 +960,10 @@ export function Results({
 
       <StudentList
         students={result.students}
-        courses={result.courses}
-        colors={colors}
+        cohorts={cohorts}
+        aptitudes={result.aptitude_profiles ?? []}
+        affinities={result.affinity_profiles ?? []}
+        colors={cohortColors}
         selectedId={selectedId}
         onSelect={select}
       />

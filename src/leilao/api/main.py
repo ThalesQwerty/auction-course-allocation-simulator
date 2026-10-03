@@ -17,7 +17,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..auction import AuctionInput, Bid, run_auction
-from ..config import Course, Discipline, SimulationConfig
+from ..config import (
+    DEFAULT_AFFINITY,
+    DEFAULT_APTITUDE,
+    AffinityProfile,
+    AptitudeProfile,
+    Discipline,
+    SimulationConfig,
+)
 from ..entities import Agent, Good, MutualExclusion
 from ..simulation import run_simulation
 from .schemas import (
@@ -75,27 +82,31 @@ def run(req: RunRequest) -> RunResponse:
 @app.post("/simulate", response_model=SimulateResponse)
 def simulate(req: SimulateRequest) -> SimulateResponse:
     """Roda uma simulação multi-período completa a partir da configuração."""
+    # Lista de perfis vazia cai no perfil neutro do eixo — o mesmo default do
+    # motor, repetido aqui porque uma lista vazia *apagaria* esse default em vez
+    # de pedi-lo, e requisições montadas antes dos perfis existirem mandam [].
+    aptitude = [
+        AptitudeProfile(p.name, p.mean, p.stddev, p.learning_gain, p.share)
+        for p in req.aptitude_profiles
+    ] or [DEFAULT_APTITUDE]
+    affinity = [
+        AffinityProfile(p.name, p.kind, p.intensity, p.max_hours, p.share)
+        for p in req.affinity_profiles
+    ] or [DEFAULT_AFFINITY]
     try:
         config = SimulationConfig(
-            disciplines=[Discipline(d.name, d.seats, d.hours) for d in req.disciplines],
-            courses=[
-                Course(
-                    name=c.name,
-                    students_per_generation=c.students_per_generation,
-                    hours_to_graduate=c.hours_to_graduate,
-                    required=tuple(c.required),
-                    electives=tuple(c.electives),
-                )
-                for c in req.courses
+            disciplines=[
+                Discipline(d.name, d.seats, d.hours, tuple(d.prerequisites))
+                for d in req.disciplines
             ],
+            aptitude_profiles=aptitude,
+            affinity_profiles=affinity,
             periods=req.periods,
             entry_periods=req.entry_periods,
-            max_residence=req.max_residence,
+            students_per_period=req.students_per_period,
             rounds=req.rounds,
             min_grade=req.min_grade,
             base_credits=req.base_credits,
-            max_hours=req.max_hours,
-            learning_gain=req.learning_gain,
             credit_return=req.credit_return,
             seed=req.seed,
         )
@@ -117,8 +128,10 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
             if req.include_histories
             else []
         ),
-        courses=result.courses,
         disciplines=result.disciplines,
+        curriculum_periods=result.curriculum_periods,
+        aptitude_profiles=result.aptitude_profiles,
+        affinity_profiles=result.affinity_profiles,
     )
 
 
