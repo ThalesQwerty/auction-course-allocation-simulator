@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..auction import AuctionInput, Bid, run_auction
+from ..comparison import run_comparison
 from ..config import (
     DEFAULT_AFFINITY,
     DEFAULT_APTITUDE,
@@ -28,9 +29,13 @@ from ..config import (
 from ..entities import Agent, Good, MutualExclusion
 from ..simulation import run_simulation
 from .schemas import (
+    CompareRequest,
+    CompareResponse,
     PeriodReportOut,
     RunRequest,
     RunResponse,
+    RunSummaryOut,
+    ScenarioIn,
     SimulateRequest,
     SimulateResponse,
     StudentHistoryOut,
@@ -79,9 +84,13 @@ def run(req: RunRequest) -> RunResponse:
     return RunResponse.from_result(result)
 
 
-@app.post("/simulate", response_model=SimulateResponse)
-def simulate(req: SimulateRequest) -> SimulateResponse:
-    """Roda uma simulação multi-período completa a partir da configuração."""
+def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
+    """Converte o cenário recebido no `SimulationConfig` do motor.
+
+    Compartilhada pelos dois modos: a execução única passa a seed do formulário
+    e a comparação passa cada seed da amostra. É o mesmo cenário dos dois lados,
+    que é o que a Seção 7.3 exige da comparação.
+    """
     # Lista de perfis vazia cai no perfil neutro do eixo — o mesmo default do
     # motor, repetido aqui porque uma lista vazia *apagaria* esse default em vez
     # de pedi-lo, e requisições montadas antes dos perfis existirem mandam [].
@@ -93,23 +102,29 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
         AffinityProfile(p.name, p.kind, p.intensity, p.max_hours, p.share)
         for p in req.affinity_profiles
     ] or [DEFAULT_AFFINITY]
+    return SimulationConfig(
+        disciplines=[
+            Discipline(d.name, d.seats, d.hours, tuple(d.prerequisites))
+            for d in req.disciplines
+        ],
+        aptitude_profiles=aptitude,
+        affinity_profiles=affinity,
+        periods=req.periods,
+        entry_periods=req.entry_periods,
+        students_per_period=req.students_per_period,
+        rounds=req.rounds,
+        min_grade=req.min_grade,
+        base_credits=req.base_credits,
+        credit_return=req.credit_return,
+        seed=seed,
+    )
+
+
+@app.post("/simulate", response_model=SimulateResponse)
+def simulate(req: SimulateRequest) -> SimulateResponse:
+    """Roda uma simulação multi-período completa a partir da configuração."""
     try:
-        config = SimulationConfig(
-            disciplines=[
-                Discipline(d.name, d.seats, d.hours, tuple(d.prerequisites))
-                for d in req.disciplines
-            ],
-            aptitude_profiles=aptitude,
-            affinity_profiles=affinity,
-            periods=req.periods,
-            entry_periods=req.entry_periods,
-            students_per_period=req.students_per_period,
-            rounds=req.rounds,
-            min_grade=req.min_grade,
-            base_credits=req.base_credits,
-            credit_return=req.credit_return,
-            seed=req.seed,
-        )
+        config = build_config(req, seed=req.seed)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -132,6 +147,38 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
         curriculum_periods=result.curriculum_periods,
         aptitude_profiles=result.aptitude_profiles,
         affinity_profiles=result.affinity_profiles,
+    )
+
+
+@app.post("/compare", response_model=CompareResponse)
+def compare(req: CompareRequest) -> CompareResponse:
+    """Roda o mesmo cenário nos dois mecanismos, N vezes de cada lado.
+
+    As seeds vão de 1 a N e são pareadas: a execução i de um mecanismo e a do
+    outro partem da mesma população, das mesmas utilidades e das mesmas notas.
+    A resposta traz só as cinco métricas principais, já reduzidas a um valor por
+    execução — nada de crédito e nenhum recorte, porque o que se compara aqui é
+    o mecanismo, não o que acontece dentro de cada um.
+
+    São 2N simulações completas; com um cenário grande a requisição leva
+    dezenas de segundos.
+    """
+    try:
+        config = build_config(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        result = run_comparison(config, runs=req.runs)
+    except Exception as exc:  # noqa: BLE001 — reporta falha do solver/instância inviável
+        raise HTTPException(
+            status_code=422, detail=f"falha ao comparar os mecanismos: {exc}"
+        ) from exc
+
+    return CompareResponse(
+        runs=result.runs,
+        credits=[RunSummaryOut.model_validate(r) for r in result.credits],
+        ranking=[RunSummaryOut.model_validate(r) for r in result.ranking],
     )
 
 

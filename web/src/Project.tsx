@@ -25,6 +25,12 @@ export function Project() {
         ordenação por CR não captura. A pergunta da pesquisa é se isso melhora a satisfação agregada
         sem destruir a equidade entre os alunos.
       </p>
+      <p>
+        O simulador implementa os <strong>dois</strong> mecanismos sobre o mesmo modelo de
+        universidade, e é essa a razão de existir do modo de <strong>comparação</strong>: a
+        hipótese não se verifica olhando um mecanismo isolado, só na diferença entre ele e a linha
+        de base rodando o mesmo cenário.
+      </p>
 
       <h2>A formalização</h2>
       <p>
@@ -41,6 +47,38 @@ export function Project() {
         rodadas por período (eqs. 11–17), a dimensão temporal dos períodos letivos (eqs. 31–32),
         notas e retorno de créditos (eqs. 33–37), grade curricular e conclusão de curso (eqs.
         38–40) e o comportamento dos alunos ao transformar utilidade em lance (eqs. 41–48).
+      </p>
+
+      <h2>Os dois mecanismos</h2>
+      <p>
+        A <strong>linha de base</strong> (Seção 7.3.1, eqs. 49–50) é o mecanismo tradicional: não
+        há lance, não há orçamento de créditos, não há preço e o resolvedor não usa PLI. Todas as
+        solicitações do período são ordenadas pelo CR de quem as fez — N<sub>a</sub>
+        <sup>(t)</sup>, a média das notas ponderada pela carga horária, mais a mesma perturbação
+        estocástica que desempata no leilão — e cada uma recebe a vaga se ainda houver.
+      </p>
+      <p>
+        A diferença de fundo está em <em>onde</em> as restrições são resolvidas. No leilão, carga
+        horária e exclusão mútua são restrições do PLI, e é o resolvedor global que as satisfaz. Na
+        linha de base elas são resolvidas <strong>localmente e ex-ante</strong> por cada aluno,
+        dentro das próprias solicitações: ele só pede um conjunto que já lhe cabe, e por isso
+        atender todos os pedidos dele é sempre viável.
+      </p>
+      <p>
+        O que substitui o orçamento é a carga horária. No leilão o aluno reparte C<sub>a</sub>
+        <sup>(t,r)</sup> entre lances proporcionais à utilidade; aqui ele gasta W<sub>a</sub>
+        <sup>(t,r)</sup> em horas, e U<sub>a</sub><sup>(t)</sup> continua sendo a fração daquele
+        teto que ele se dispõe a comprometer (eq. 50). A estratégia deixa de ser "quanto apostar em
+        cada uma" e passa a ser "quais pedir": um <strong>Problema da Mochila 0-1</strong>, com a
+        carga horária como peso e a utilidade percebida como valor. É aí que ele perde a
+        capacidade de dizer <em>o quanto</em> quer cada disciplina — a mochila só lê a ordem das
+        utilidades —, e é exatamente essa perda que a comparação põe à prova.
+      </p>
+      <p>
+        Tudo o mais é idêntico: população, utilidades, notas, pré-requisitos, matrícula garantida,
+        conclusão e métricas. Como ali não existe crédito, as grandezas de crédito saem{" "}
+        <strong>nulas</strong> dos relatórios — orçamento, saldo, lances, retorno e preço —, e não
+        zeradas: zero se leria como "ninguém gastou", e o certo é "não há o que gastar".
       </p>
 
       <h2>A universidade simulada</h2>
@@ -285,18 +323,35 @@ export function Project() {
 
       <h2>Ainda não incluído</h2>
       <ul>
-        <li>Mecanismo tradicional por CR como linha de base — eqs. (49)–(50), Seção 7.3.1.</li>
+        <li>
+          Escolha do mecanismo numa execução única: a linha de base só aparece dentro do modo de
+          comparação, então não há como abrir os gráficos por período nem a tela por aluno de uma
+          execução por CR.
+        </li>
+        <li>
+          Teste estatístico sobre as duas amostras: a comparação mostra a dispersão e a contagem
+          pareada, mas não calcula p-valor nem intervalo de confiança.
+        </li>
         <li>Choque de horário: existe no motor, mas a simulação ainda não gera horários.</li>
         <li>
           Qualquer saída sem diploma: a conclusão é a única porta, então não há jubilamento por
-          decurso de prazo nem evasão comportamental. A evasão responde ao mecanismo, e por isso é
-          contra a linha de base por CR que ela precisaria ser medida.
+          decurso de prazo nem evasão comportamental. A evasão responde ao mecanismo, e é contra a
+          linha de base por CR que ela precisaria ser medida.
         </li>
       </ul>
 
       <h2>Como ler os resultados</h2>
       <p>
-        Cada execução guardada na barra lateral abre os gráficos do cenário, em dois blocos. Os{" "}
+        Uma <strong>comparação</strong> abre cinco boxplots, um por métrica principal, com uma
+        caixa por mecanismo: a linha grossa é a mediana, a caixa é a metade central das N
+        execuções, os bigodes vão até 1,5 IQR. Cada valor é uma execução, reduzida à média dos
+        períodos ponderada pelos alunos ativos. O que se lê é a sobreposição — caixas que não se
+        tocam separam os mecanismos; caixas sobrepostas dizem que a diferença entre as medianas
+        cabe dentro da variação entre populações. Como as seeds são pareadas, a tabela ainda
+        informa em quantas delas o leilão ficou acima, que é uma leitura independente da primeira.
+      </p>
+      <p>
+        Uma <strong>simulação</strong> abre os gráficos do cenário, em dois blocos. Os{" "}
         <strong>gráficos por aluno</strong> trazem uma linha por geração ou por perfil, com o eixo
         horizontal por período ou por rodada, divididos em métricas principais, progressão e
         economia de créditos. Os <strong>gráficos por disciplina</strong> trazem uma linha por

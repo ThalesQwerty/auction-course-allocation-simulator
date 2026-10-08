@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -298,6 +298,367 @@ export function MetricChart({
           ))}
         </LineChart>
       </ResponsiveContainer>
+    </figure>
+  );
+}
+
+/** ---------------------------------------------------------------------------
+ * Boxplot — a forma da comparação entre mecanismos
+ *
+ * Aqui o eixo horizontal não é o tempo: cada caixa é a **distribuição** de uma
+ * métrica sobre as N execuções de um mecanismo, e o que se lê é a mediana e a
+ * dispersão. Uma média sozinha não serviria: se as duas caixas se sobrepõem, a
+ * diferença entre as médias pode ser do sorteio; se não se sobrepõem, não é.
+ *
+ * Não há primitiva de boxplot no recharts, então o desenho é SVG direto. São
+ * poucas marcas e a geometria é toda explícita, o que acaba sendo mais simples
+ * do que encaixá-la numa biblioteca de séries temporais.
+ * ------------------------------------------------------------------------- */
+
+/** O resumo de cinco números de uma amostra, mais os pontos fora dos bigodes. */
+export interface BoxStats {
+  n: number;
+  min: number;
+  q1: number;
+  median: number;
+  q3: number;
+  max: number;
+  /** Pontas dos bigodes: o valor mais extremo ainda dentro de 1,5 IQR do
+   * quartil — a convenção de Tukey. O que sobra vira ponto solto. */
+  low: number;
+  high: number;
+  outliers: number[];
+}
+
+/** Quantil por interpolação linear entre as ordens estatísticas (o método 7,
+ * padrão do R e do numpy). Com N pequeno a escolha do método desloca os
+ * quartis visivelmente, então convém que seja a mesma que qualquer conferência
+ * externa usaria. */
+function quantile(sorted: number[], p: number): number {
+  if (sorted.length === 1) return sorted[0];
+  const position = p * (sorted.length - 1);
+  const floor = Math.floor(position);
+  const rest = position - floor;
+  return rest === 0
+    ? sorted[floor]
+    : sorted[floor] + rest * (sorted[floor + 1] - sorted[floor]);
+}
+
+export function boxStats(values: number[]): BoxStats | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const q1 = quantile(sorted, 0.25);
+  const median = quantile(sorted, 0.5);
+  const q3 = quantile(sorted, 0.75);
+  const fence = 1.5 * (q3 - q1);
+  const inside = sorted.filter((v) => v >= q1 - fence && v <= q3 + fence);
+  return {
+    n: sorted.length,
+    min: sorted[0],
+    q1,
+    median,
+    q3,
+    max: sorted[sorted.length - 1],
+    low: inside.length ? inside[0] : sorted[0],
+    high: inside.length ? inside[inside.length - 1] : sorted[sorted.length - 1],
+    outliers: sorted.filter((v) => v < q1 - fence || v > q3 + fence),
+  };
+}
+
+/** Domínio e marcas arredondados a passos legíveis (1, 2, 2,5 ou 5 vezes uma
+ * potência de 10), estendidos até cobrir os dados. */
+export function niceScale(low: number, high: number, count = 4) {
+  if (!(high > low)) {
+    const pad = Math.abs(high) * 0.05 || 0.05;
+    low = high - pad;
+    high = high + pad;
+  }
+  const rough = (high - low) / count;
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  const normalized = rough / magnitude;
+  const step =
+    (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10) *
+    magnitude;
+  const from = Math.floor(low / step) * step;
+  const to = Math.ceil(high / step) * step;
+  const ticks: number[] = [];
+  for (let i = 0; from + i * step <= to + step / 2; i++) ticks.push(from + i * step);
+  return { from, to: ticks[ticks.length - 1], ticks };
+}
+
+/** Largura real do cartão, para o SVG não depender de um viewBox esticado — o
+ * texto de um viewBox escalado sai com corpo diferente em cada coluna da
+ * grade. */
+function useWidth(): [(node: HTMLDivElement | null) => void, number] {
+  const [width, setWidth] = useState(0);
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((node: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    if (!node) return;
+    setWidth(node.clientWidth);
+    observer.current = new ResizeObserver(([entry]) =>
+      setWidth(entry.contentRect.width)
+    );
+    observer.current.observe(node);
+  }, []);
+  useEffect(() => () => observer.current?.disconnect(), []);
+  return [ref, width];
+}
+
+export const PLOT = { top: 12, right: 16, bottom: 30, left: 50, height: 232 };
+/** Caixa fina, como toda marca: a leitura é a posição e a altura, nunca a
+ * largura, que não codifica nada. */
+export const BOX_WIDTH = 30;
+
+export function BoxPlot({
+  title,
+  hint,
+  groups,
+  colors,
+  format = formatRatio,
+  bounds,
+  zeroLine = false,
+}: {
+  title: string;
+  hint?: string;
+  /** Uma caixa por grupo, na ordem em que entram no eixo e na legenda.
+   * `short` é o rótulo do eixo: a legenda carrega o nome inteiro, e embaixo da
+   * caixa cabe pouco — um nome longo colide com o do vizinho. */
+  groups: { label: string; short?: string; values: number[] }[];
+  colors: Record<string, string>;
+  format?: (value: number) => string;
+  /** Limites naturais da métrica (ψ̄ não passa de 1; λ vive em [-1, 1]). O
+   * domínio é folgado em torno dos dados, mas nunca além deles — uma caixa
+   * encostada no teto tem de se ler como encostada no teto. */
+  bounds?: [number, number];
+  /** Marca o zero quando o sinal da métrica é o que se lê (λ). */
+  zeroLine?: boolean;
+}) {
+  const dark = usePrefersDark();
+  const ink = INK[dark ? "dark" : "light"];
+  const [ref, width] = useWidth();
+  const [hovered, setHovered] = useState<number | null>(null);
+
+  const boxes = groups.map((group) => ({ ...group, stats: boxStats(group.values) }));
+  const all = groups.flatMap((group) => group.values);
+
+  const scale = (() => {
+    if (!all.length) return { from: 0, to: 1, ticks: [0, 1] };
+    let low = Math.min(...all);
+    let high = Math.max(...all);
+    if (zeroLine) {
+      low = Math.min(low, 0);
+      high = Math.max(high, 0);
+    }
+    // Folga proporcional à dispersão: as caixas ficam quase coladas quando as
+    // execuções concordam, e é justamente isso que se quer ver.
+    const pad = (high - low) * 0.25 || Math.max(Math.abs(high) * 0.05, 0.01);
+    const nice = niceScale(low - pad, high + pad);
+    return bounds
+      ? { ...nice, from: Math.max(nice.from, bounds[0]), to: Math.min(nice.to, bounds[1]) }
+      : nice;
+  })();
+
+  const plotWidth = Math.max(0, width - PLOT.left - PLOT.right);
+  const plotHeight = PLOT.height - PLOT.top - PLOT.bottom;
+  const y = (value: number) =>
+    PLOT.top +
+    plotHeight * (1 - (value - scale.from) / (scale.to - scale.from || 1));
+  const band = plotWidth / Math.max(1, boxes.length);
+  const center = (index: number) => PLOT.left + band * (index + 0.5);
+
+  return (
+    <figure className="chart-card">
+      <figcaption>
+        <h3>{title}</h3>
+        {hint && <p>{hint}</p>}
+      </figcaption>
+
+      <div className="legend">
+        {groups.map((group) => (
+          <span className="legend-item" key={group.label}>
+            <span className="swatch" style={{ background: colors[group.label] }} />
+            {group.label}
+          </span>
+        ))}
+      </div>
+
+      <div className="boxplot" ref={ref}>
+        {width > 0 && (
+          <svg width={width} height={PLOT.height} role="img" aria-label={title}>
+            {scale.ticks
+              .filter((tick) => tick >= scale.from - 1e-9 && tick <= scale.to + 1e-9)
+              .map((tick) => (
+                <g key={tick}>
+                  <line
+                    x1={PLOT.left}
+                    x2={width - PLOT.right}
+                    y1={y(tick)}
+                    y2={y(tick)}
+                    stroke={ink.grid}
+                  />
+                  <text
+                    x={PLOT.left - 8}
+                    y={y(tick) + 4}
+                    textAnchor="end"
+                    fontSize={11}
+                    fill={ink.muted}
+                  >
+                    {format(tick)}
+                  </text>
+                </g>
+              ))}
+            {zeroLine && 0 >= scale.from && 0 <= scale.to && (
+              <line
+                x1={PLOT.left}
+                x2={width - PLOT.right}
+                y1={y(0)}
+                y2={y(0)}
+                stroke={ink.axis}
+              />
+            )}
+
+            {boxes.map((box, index) => {
+              const color = colors[box.label];
+              const x = center(index);
+              const half = Math.min(BOX_WIDTH, band * 0.4) / 2;
+              return (
+                <g key={box.label}>
+                  {box.stats && (
+                    <>
+                      {/* Bigodes: a extensão dos dados dentro de 1,5 IQR. */}
+                      <line
+                        x1={x}
+                        x2={x}
+                        y1={y(box.stats.high)}
+                        y2={y(box.stats.low)}
+                        stroke={color}
+                        strokeWidth={1.5}
+                      />
+                      {[box.stats.high, box.stats.low].map((value) => (
+                        <line
+                          key={value}
+                          x1={x - half / 2}
+                          x2={x + half / 2}
+                          y1={y(value)}
+                          y2={y(value)}
+                          stroke={color}
+                          strokeWidth={1.5}
+                        />
+                      ))}
+                      {/* A caixa é o intervalo interquartil: metade central da
+                          amostra. Preenchimento lavado, contorno fino. */}
+                      <rect
+                        x={x - half}
+                        width={half * 2}
+                        y={y(box.stats.q3)}
+                        height={Math.max(1, y(box.stats.q1) - y(box.stats.q3))}
+                        rx={2}
+                        fill={color}
+                        fillOpacity={0.14}
+                        stroke={color}
+                        strokeWidth={1.5}
+                      />
+                      {/* A mediana é a única marca grossa: é o número que se
+                          compara entre as duas caixas. */}
+                      <line
+                        x1={x - half}
+                        x2={x + half}
+                        y1={y(box.stats.median)}
+                        y2={y(box.stats.median)}
+                        stroke={color}
+                        strokeWidth={3}
+                      />
+                      {box.stats.outliers.map((value, i) => (
+                        <circle
+                          key={`${value}-${i}`}
+                          cx={x}
+                          cy={y(value)}
+                          r={4}
+                          fill={color}
+                          stroke={ink.surface}
+                          strokeWidth={2}
+                        />
+                      ))}
+                          {/* Rótulo direto: só a mediana, ao lado da caixa — e
+                          nunca um número por ponto. Em tinta de texto: a
+                          identidade vem da caixa colorida ao lado. Vai para a
+                          esquerda quando não couber à direita, em vez de
+                          transbordar o cartão. */}
+                      {(() => {
+                        const text = format(box.stats.median);
+                        // Largura aproximada do texto a 11px; basta para
+                        // decidir o lado, e medir de verdade exigiria render.
+                        const fits = x + half + 7 + text.length * 6.4 < width - 4;
+                        return (
+                          <text
+                            x={fits ? x + half + 7 : x - half - 7}
+                            y={y(box.stats.median) + 4}
+                            textAnchor={fits ? "start" : "end"}
+                            fontSize={11}
+                            fill={ink.secondary}
+                          >
+                            {text}
+                          </text>
+                        );
+                      })()}
+                    </>
+                  )}
+                  <text
+                    x={x}
+                    y={PLOT.height - 10}
+                    textAnchor="middle"
+                    fontSize={11}
+                    fill={ink.muted}
+                  >
+                    {box.short ?? box.label}
+                  </text>
+                  {/* Alvo de hover da faixa inteira, bem maior que a caixa. */}
+                  <rect
+                    x={PLOT.left + band * index}
+                    width={band}
+                    y={PLOT.top}
+                    height={plotHeight}
+                    fill="transparent"
+                    onMouseEnter={() => setHovered(index)}
+                    onMouseLeave={() => setHovered(null)}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+        )}
+
+        {hovered !== null && boxes[hovered]?.stats && (
+          <div
+            className="tooltip boxplot-tooltip"
+            style={{
+              left: center(hovered) > width / 2 ? undefined : center(hovered) + 20,
+              right: center(hovered) > width / 2 ? width - center(hovered) + 20 : undefined,
+            }}
+          >
+            <div className="tooltip-title">
+              {boxes[hovered].label} · {boxes[hovered].stats!.n} execuções
+            </div>
+            {(
+              [
+                ["máximo", boxes[hovered].stats!.max],
+                ["3º quartil", boxes[hovered].stats!.q3],
+                ["mediana", boxes[hovered].stats!.median],
+                ["1º quartil", boxes[hovered].stats!.q1],
+                ["mínimo", boxes[hovered].stats!.min],
+              ] as const
+            ).map(([label, value]) => (
+              <div className="tooltip-row" key={label}>
+                <span className="tooltip-label">{label}</span>
+                <span className="tooltip-value" style={{ color: ink.secondary }}>
+                  {format(value)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </figure>
   );
 }

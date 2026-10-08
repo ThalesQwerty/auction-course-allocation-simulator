@@ -9,8 +9,15 @@ matrícula universitária"* (UFBA, 2026).
 Simula a matrícula de uma universidade inteira ao longo de vários períodos
 letivos: o usuário configura a grade de disciplinas e os perfis de aluno, e a
 simulação gera os alunos (nome, utilidades, notas) a partir de uma seed, roda
-as rodadas de leilão de cada período e devolve as métricas de eficiência,
+as rodadas de alocação de cada período e devolve as métricas de eficiência,
 equidade e correlação da Seção 7.3.
+
+São **dois mecanismos de alocação** sobre o mesmo modelo de universidade: o
+**leilão por créditos** proposto (Seção 7.1) e a **ordenação por CR** que serve
+de linha de base (Seção 7.3.1, eqs. 49-50). E, por isso, dois modos de
+execução — uma simulação, que detalha um mecanismo por dentro, e uma
+**comparação**, que roda o mesmo cenário nos dois, N vezes de cada lado, e
+mostra só as métricas principais em boxplot.
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade, e **toda
 disciplina é obrigatória** — conclui quem aprova em todas. O que ordena a grade
@@ -29,9 +36,11 @@ Simulador/
 │   ├── names.py          # 256 nomes x 256 sobrenomes para batizar os alunos
 │   ├── population.py     # Alunos e seu histórico acadêmico
 │   ├── behavior.py       # Utilidades e lances — eqs. (41)-(48)
+│   ├── ranking.py        # Linha de base por CR — eqs. (49)-(50), Seção 7.3.1
 │   ├── grading.py        # Notas e retorno de créditos — eqs. (33)-(37)
 │   ├── metrics.py        # Eficiência, Jain, correlação, semestralização
 │   ├── simulation.py     # Loop multi-período — Seção 7.2
+│   ├── comparison.py     # N execuções pareadas dos dois mecanismos — Seção 7.3
 │   └── api/              # Ponte FastAPI (sem persistência — stateless)
 ├── tests/                # pytest (motor + simulação + API)
 ├── examples/             # Script de exemplo executável
@@ -45,17 +54,19 @@ Simulador/
     ├── profiles.ts       # Repartição da geração entre os perfis (maior resto)
     ├── Project.tsx       # Visão teórica do projeto
     ├── Results.tsx       # Gráficos e tabelas de uma execução
+    ├── Comparison.tsx    # Boxplots e tabelas de uma comparação
     ├── StudentList.tsx   # Barra lateral direita: busca, filtro e ordenação
     ├── StudentDetail.tsx # Tela individual do aluno (depuração)
-    ├── charts.tsx        # Paleta, eixos e tooltip dos gráficos
+    ├── charts.tsx        # Paleta, eixos, tooltip e o boxplot da comparação
     └── history.ts        # Histórico de execuções (localStorage)
 ```
 
 **Front-end (TypeScript) → API (FastAPI/Python) → Motor (Python)**: a
 interface monta a configuração inteira no navegador e manda para `/simulate`,
 que devolve as séries por período, por rodada e por recorte (geração, perfil de
-aptidão ou perfil de afinidade). Não há banco de dados — cada execução é
-independente e reprodutível pela seed.
+aptidão ou perfil de afinidade), ou para `/compare`, que devolve N resumos de
+cada mecanismo. Não há banco de dados — cada execução é independente e
+reprodutível pela seed.
 
 ## Como a simulação funciona
 
@@ -114,6 +125,56 @@ que a diferença entre dois cenários não era atribuível ao mecanismo. Agora d
 cenários com a mesma seed compartilham a matriz inteira — há um teste
 (`test_utilities_come_from_the_seed_not_from_the_simulation_path`) que triplica
 as vagas e confirma que nenhuma utilidade se mexe.
+
+### Os dois mecanismos
+
+O cenário, a população, as utilidades, as notas, os pré-requisitos, a matrícula
+garantida do ingressante, a conclusão do curso e as métricas são **os mesmos**
+nos dois. O que `mechanism` troca é só o miolo da rodada — e é por isso que a
+diferença entre eles se lê como efeito do mecanismo.
+
+| | `credits` (leilão, Seção 7.1) | `ranking` (linha de base, Seção 7.3.1) |
+|---|---|---|
+| **Moeda** | créditos, `C_a^(t,r)` | carga horária, `W_a^(t,r)` |
+| **O que o aluno decide** | quanto apostar em cada disciplina — eqs. (44)-(46) | quais pedir, dado o teto `U_a · W_a` — eq. (50) |
+| **Estratégia** | lances proporcionais à utilidade | mochila 0-1: `w_x` é peso, `u_{a,x}` é valor |
+| **Quem decide a alocação** | PLI exata sobre todos os lances (eq. 22) | varredura por `N_a^(t) + ε` — eq. (49) |
+| **Onde as restrições são resolvidas** | globalmente, no resolvedor | localmente e *ex-ante*, por cada aluno |
+| **Preço** | 2º preço, eq. (24) | não existe |
+| **Retorno de créditos** | `f_γ`, eq. (34) | não existe — não houve preço a devolver |
+
+Na linha de base, `U_a^(t)` continua sendo a fração do que o aluno tem em mãos
+que ele se dispõe a comprometer no período: só que o que ele tem em mãos é
+tempo, não crédito. A perda de expressividade é o ponto da comparação — a
+mochila só lê a *ordem* das utilidades, enquanto o lance carrega o *quanto*.
+
+Como ali não há crédito, as grandezas de crédito saem **nulas** dos relatórios
+(orçamento, saldo, lances, retorno e preço), não zeradas: zero se leria como
+"ninguém gastou", e o certo é "não há o que gastar". `base_credits` e
+`credit_return` continuam no cenário — a comparação roda a mesma configuração
+dos dois lados — mas não têm efeito em `ranking`.
+
+### A comparação
+
+`run_comparison` roda o mesmo cenário nos dois mecanismos, `N` vezes de cada
+lado, com as **seeds de 1 a N**. As duas condições da Seção 7.3 saem daí:
+
+1. **Mesma inicialização dos dois lados.** A seed gera a população, as
+   utilidades e as notas, então rodar a mesma seed nos dois é literalmente a
+   mesma gente encontrando regras diferentes. As duas listas da resposta são
+   **pareadas**: o i-ésimo elemento de cada uma é a mesma população.
+2. **Múltiplas configurações de entrada.** As N seeds são essas configurações.
+   Uma execução só não diria nada — a diferença poderia ser daquela população.
+
+Cada execução vira **um número por métrica**, que é um valor dentro da caixa:
+a média dos períodos **ponderada pelos alunos ativos**. A simulação termina
+numa fase de drenagem, e uma média simples daria a um período final de vinte
+alunos o mesmo peso de um período cheio de trezentos.
+
+Só entram as **cinco métricas principais** — eficiência (ψ̄), equidade (φ),
+correlação (λ), ocupação (θ) e semestralização (σ̄). Nada de crédito, porque não
+há contraparte do outro lado, e nenhum recorte por geração ou perfil, porque o
+que está em comparação é o mecanismo, não o que acontece dentro de cada um.
 
 ### Garantias dos relatórios
 
@@ -306,7 +367,11 @@ em período, com o aviso no subtítulo.
 
 ### Ainda não incluído
 
-- Mecanismo tradicional por CR como linha de base — eqs. (49)-(50), Seção 7.3.1.
+- Escolha do mecanismo numa execução **única**: a linha de base só aparece
+  dentro do modo de comparação, então não há como abrir os gráficos por período
+  nem a tela por aluno de uma execução por CR.
+- Teste estatístico sobre as duas amostras: a comparação mostra a dispersão e a
+  contagem pareada, mas não calcula p-valor nem intervalo de confiança.
 - Choque de horário: existe no motor (`MutualExclusion`), mas a simulação não
   gera horários.
 - Persistência de cenários no servidor: o histórico de execuções fica no
@@ -314,8 +379,8 @@ em período, com o aviso no subtítulo.
 - **Qualquer saída sem diploma.** A conclusão (eq. 40) é a única porta: quem
   não concluiu continua disputando até o fim do horizonte. Nem jubilamento por
   decurso de prazo, nem evasão comportamental. A evasão em particular responde
-  ao mecanismo, e por isso é contra a linha de base por CR que ela precisaria
-  ser medida — antes dela existir, não haveria com o que comparar.
+  ao mecanismo, e é contra a linha de base por CR que ela precisaria ser
+  medida — agora que ela existe, é comparação possível.
 
 ## Como rodar
 
@@ -344,7 +409,21 @@ funcionam igual chamados do PowerShell, do `cmd` ou do Git Bash.
 
 Em `http://localhost:5173`, a barra lateral tem **Configurar** (o formulário do
 cenário), **Projeto** (visão teórica do modelo e das métricas) e a lista de
-**Simulações** já executadas, cada uma identificada por data e hora.
+**Execuções** já feitas, cada uma identificada por data e hora — as comparações
+levam uma etiqueta, porque abrem numa tela diferente.
+
+No topo de "Configurar", **Modo de execução** escolhe o que o botão faz:
+
+- **uma simulação do leilão por créditos** — o cenário roda uma vez, com a seed
+  do formulário, e a tela traz todos os gráficos por período, os recortes por
+  geração e perfil e a tela de depuração por aluno.
+- **comparar os dois mecanismos** — o mesmo cenário roda nos dois, `N` vezes de
+  cada lado, com as seeds de 1 a `N`. O campo da seed some (ali ela vira o eixo
+  da amostra) e dá lugar a **execuções por mecanismo (N)**. São `2N` simulações
+  completas: com o preset Computação e `N = 20`, cerca de meio minuto.
+
+O cenário é o mesmo nos dois modos — trocar de modo não mexe em nada do que
+está configurado.
 
 Em "Configurar", a barra lateral **direita** lista os presets — cenários
 prontos. Clicar num deles carrega o cenário no formulário; clicar no que já
@@ -446,9 +525,31 @@ lance** (a disciplina saiu de `B_a^(t,r)` antes do leilão: sem vaga, sem carga
 horária ou sem orçamento). É a tela de depuração do projeto: quando um agregado
 sai fora do esperado, é aqui que se vê por quê.
 
+#### Tela de comparação
+
+Uma comparação não tem gráfico por período, recorte nem tela por aluno: tem
+**cinco boxplots**, um por métrica principal, com uma caixa por mecanismo. A
+linha grossa é a mediana, a caixa é a metade central da amostra (1º ao 3º
+quartil), os bigodes vão até 1,5 IQR e o que sobra aparece como ponto solto.
+Cada valor dentro de uma caixa é uma execução, reduzida à média dos períodos
+ponderada pelos alunos ativos.
+
+O que se lê é a **sobreposição**: caixas que não se tocam separam os
+mecanismos; caixas sobrepostas dizem que a diferença entre as medianas cabe
+dentro da variação entre populações. Abaixo vêm duas tabelas — o resumo de
+cinco números de cada distribuição, com a diferença entre as medianas e a
+contagem pareada de **seeds a favor**, e a listagem execução a execução, em que
+o pareamento fica à vista: cada linha é uma seed, e os dois valores de cada
+coluna são a mesma população sob regras diferentes.
+
+As duas leituras não são equivalentes. Uma diferença pequena de medianas com
+quase todas as seeds a favor é um efeito consistente e pequeno — coisa bem
+diferente de um empate.
+
 O histórico fica no `localStorage` do navegador — sobrevive a um
-recarregamento, guarda as 20 execuções mais recentes e é apagado por "Limpar
-histórico". O detalhe por aluno (`histories` na resposta) é a parte pesada do
+recarregamento, guarda as 20 execuções mais recentes (simulações e
+comparações na mesma lista) e é apagado por "Limpar histórico". O detalhe por
+aluno (`histories` na resposta) é a parte pesada do
 resultado — ~1 MB contra 51 kB do resto, num cenário de 8 períodos — e por isso
 **não** é persistido: ao abrir um aluno de uma execução de outra sessão, a
 interface reexecuta a simulação, que a seed garante idêntica.

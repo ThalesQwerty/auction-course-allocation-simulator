@@ -398,3 +398,55 @@ def test_the_discipline_snapshot_carries_the_three_grouping_axes(client):
             # Quem pediu é pelo menos quem conseguiu: a vaga sai de um pedido.
             assert discipline["requests"] >= discipline["filled"]
             assert discipline["filled"] <= discipline["seats"]
+
+
+# --- /compare: o mesmo cenário nos dois mecanismos (Seção 7.3) -------------
+
+
+def test_compare_returns_one_summary_per_seed_on_each_side(client):
+    payload = client.post("/compare", json={**SIMULATE_REQUEST, "runs": 3}).json()
+
+    assert payload["runs"] == 3
+    # As seeds vão de 1 a N e são pareadas: a i-ésima execução de um lado e a do
+    # outro partem da mesma população.
+    assert [r["seed"] for r in payload["credits"]] == [1, 2, 3]
+    assert [r["seed"] for r in payload["ranking"]] == [1, 2, 3]
+
+
+def test_compare_returns_only_the_five_main_metrics(client):
+    """Nada de crédito: orçamento, preço e retorno não existem do lado da linha
+    de base, e nenhum recorte — o que se compara é o mecanismo."""
+    payload = client.post("/compare", json={**SIMULATE_REQUEST, "runs": 2}).json()
+
+    assert set(payload["credits"][0]) == {
+        "seed",
+        "periods",
+        "efficiency",
+        "fairness",
+        "correlation",
+        "occupancy",
+        "semestralization",
+    }
+
+
+def test_compare_ignores_the_scenario_seed(client):
+    """A seed do formulário não entra: numa comparação ela vira o eixo da
+    amostra, e fixá-la mediria uma população só."""
+    first = client.post("/compare", json={**SIMULATE_REQUEST, "seed": 1, "runs": 2}).json()
+    second = client.post("/compare", json={**SIMULATE_REQUEST, "seed": 77, "runs": 2}).json()
+
+    assert first == second
+
+
+def test_compare_rejects_an_invalid_run_count(client):
+    assert client.post("/compare", json={**SIMULATE_REQUEST, "runs": 0}).status_code == 422
+    assert client.post("/compare", json={**SIMULATE_REQUEST, "runs": 500}).status_code == 422
+
+
+def test_compare_rejects_an_invalid_scenario(client):
+    response = client.post(
+        "/compare", json={**SIMULATE_REQUEST, "students_per_period": 7, "runs": 2}
+    )
+
+    assert response.status_code == 400
+    assert "vaga garantida" in response.json()["detail"]

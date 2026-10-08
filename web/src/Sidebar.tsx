@@ -1,4 +1,4 @@
-import { describeRun, formatRunDate, SimulationRun } from "./history";
+import { describeEntry, formatRunDate, HistoryEntry } from "./history";
 
 export type View = { kind: "config" } | { kind: "project" } | { kind: "run"; id: string };
 
@@ -10,7 +10,7 @@ export function Sidebar({
   onClear,
 }: {
   view: View;
-  history: SimulationRun[];
+  history: HistoryEntry[];
   onNavigate: (view: View) => void;
   onDelete: (id: string) => void;
   onClear: () => void;
@@ -39,26 +39,30 @@ export function Sidebar({
       </ul>
 
       <div className="sidebar-section">
-        <h2>Simulações</h2>
+        <h2>Execuções</h2>
         {history.length === 0 ? (
-          <p className="sidebar-empty">Nenhuma simulação executada ainda.</p>
+          <p className="sidebar-empty">Nada executado ainda.</p>
         ) : (
           <ul className="nav-list">
-            {history.map((run) => (
-              <li key={run.id} className="nav-row">
+            {history.map((entry) => (
+              <li key={entry.id} className="nav-row">
                 <button
-                  className={`nav-item run ${selected({ kind: "run", id: run.id }) ? "current" : ""}`}
-                  onClick={() => onNavigate({ kind: "run", id: run.id })}
-                  title={describeRun(run)}
+                  className={`nav-item run ${selected({ kind: "run", id: entry.id }) ? "current" : ""}`}
+                  onClick={() => onNavigate({ kind: "run", id: entry.id })}
+                  title={describeEntry(entry)}
                 >
-                  {formatRunDate(run.at)}
-                  <span>{describeRun(run)}</span>
+                  {/* A etiqueta distingue os dois tipos de resultado antes de
+                      abrir: uma comparação não tem gráficos por período nem
+                      tela por aluno, e quem procura um deles não deve clicar. */}
+                  {formatRunDate(entry.at)}
+                  {entry.kind === "comparison" && <em className="nav-tag">comparação</em>}
+                  <span>{describeEntry(entry)}</span>
                 </button>
                 <button
                   className="nav-delete"
-                  onClick={() => onDelete(run.id)}
-                  title={`Apagar a simulação de ${formatRunDate(run.at)}`}
-                  aria-label={`Apagar a simulação de ${formatRunDate(run.at)}`}
+                  onClick={() => onDelete(entry.id)}
+                  title={`Apagar a execução de ${formatRunDate(entry.at)}`}
+                  aria-label={`Apagar a execução de ${formatRunDate(entry.at)}`}
                 >
                   ×
                 </button>

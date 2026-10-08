@@ -200,6 +200,16 @@ input, select {
   margin: 8px 0 0;
 }
 
+/* Nota em lista (os dois mecanismos na tela de configuração): mesma tinta e
+   mesmo corpo de uma nota corrida, só com marcadores. */
+ul.note {
+  padding-left: 18px;
+}
+
+ul.note li {
+  margin-top: 2px;
+}
+
 .field.grow {
   flex: 1;
   min-width: 220px;
@@ -359,6 +369,22 @@ input.invalid {
   gap: 5px;
 }
 
+/* O boxplot é SVG desenhado à mão — não há primitiva dele no recharts. O
+   contêiner é o referencial do tooltip, que é posicionado em pixels sobre a
+   faixa onde o mouse está. */
+.boxplot {
+  position: relative;
+  margin-top: 4px;
+}
+
+.boxplot-tooltip {
+  position: absolute;
+  top: 12px;
+  pointer-events: none;
+  min-width: 132px;
+  z-index: 1;
+}
+
 .tooltip {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -470,6 +496,21 @@ td, th {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Distingue uma comparação de uma simulação antes de abrir: são telas
+   diferentes, e quem procura o gráfico por período não deve clicar aqui. */
+.nav-tag {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 6px;
+  vertical-align: 1px;
 }
 
 .nav-item.danger {

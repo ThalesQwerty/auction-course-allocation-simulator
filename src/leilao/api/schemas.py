@@ -10,6 +10,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..auction import AuctionResult
+from ..comparison import MAX_RUNS
 from ..config import MAX_AFFINITY_INTENSITY, AffinityKind, CreditReturnPolicy
 
 
@@ -105,8 +106,15 @@ class AffinityProfileIn(BaseModel):
     share: float = Field(gt=0, le=100, description="% dos alunos com este perfil")
 
 
-class SimulateRequest(BaseModel):
-    """Configuração completa de um cenário (Seção 7.2)."""
+class ScenarioIn(BaseModel):
+    """O cenário em si (Seção 7.2) — tudo que descreve a universidade e a
+    população, sem dizer *como* ele será executado.
+
+    Os dois modos partem daqui e acrescentam só o que lhes é próprio: uma
+    execução única acrescenta a seed, e a comparação acrescenta quantas
+    execuções fazer. É o que garante que os dois lados de uma comparação rodem
+    exatamente o mesmo cenário — a condição metodológica da Seção 7.3.
+    """
 
     disciplines: list[DisciplineIn] = Field(default_factory=list)
     aptitude_profiles: list[AptitudeProfileIn] = Field(
@@ -148,7 +156,14 @@ class SimulateRequest(BaseModel):
     min_grade: float = Field(default=5.0, gt=0, le=10, description="n_min")
     base_credits: int = Field(default=10, ge=1, description="Gamma_min — créditos base")
     # f_gamma — eq. (34); as políticas estão em `grading.credit_return`.
+    # Este e o `base_credits` acima são do leilão por créditos e não têm efeito
+    # na linha de base por CR, que não tem orçamento nem preço pago.
     credit_return: CreditReturnPolicy = "none"
+
+
+class SimulateRequest(ScenarioIn):
+    """Uma execução única do mecanismo proposto."""
+
     seed: int = 0
     include_histories: bool = Field(
         default=False,
@@ -159,6 +174,54 @@ class SimulateRequest(BaseModel):
             "exatamente o mesmo detalhe."
         ),
     )
+
+
+class CompareRequest(ScenarioIn):
+    """Uma comparação entre os dois mecanismos sobre o mesmo cenário.
+
+    Não há seed: as seeds são 1..`runs`, e cada uma roda dos dois lados. Fixar
+    uma só mediria aquela população; não parear mediria a variação entre
+    populações junto da variação entre mecanismos.
+    """
+
+    runs: int = Field(
+        default=20,
+        ge=1,
+        le=MAX_RUNS,
+        description=(
+            "N — quantas simulações de cada mecanismo, com as seeds de 1 a N. "
+            "São 2N simulações no total, e a seed pareia os dois lados."
+        ),
+    )
+
+
+class RunSummaryOut(BaseModel):
+    """Uma execução reduzida a um ponto por métrica — o que vira um valor no
+    boxplot. É a média dos períodos ponderada pelos alunos ativos, de modo que
+    a fase de drenagem não pese como um período cheio."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    seed: int
+    # Períodos efetivamente publicados; menor que |T| se a população se esvaziou
+    # antes do horizonte.
+    periods: int
+    efficiency: float  # eq. (53)
+    fairness: float  # eq. (55)
+    correlation: float  # eq. (57)
+    occupancy: float  # eq. (54)
+    semestralization: float
+
+
+class CompareResponse(BaseModel):
+    """As duas amostras, pareadas pela seed: o i-ésimo elemento de cada lista é
+    a mesma população sob regras de alocação diferentes."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    runs: int
+    credits: list[RunSummaryOut]
+    ranking: list[RunSummaryOut]
 
 
 class MetricsOut(BaseModel):

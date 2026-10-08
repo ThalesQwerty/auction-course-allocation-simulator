@@ -2,7 +2,14 @@ import { useMemo, useState } from "react";
 import { CYCLIC, curriculumLength, curriculumPeriods } from "./curriculum";
 import { PresetList } from "./PresetList";
 import { generationMix } from "./profiles";
-import { AFFINITY_KINDS, CREDIT_RETURN_POLICIES, MAX_AFFINITY_INTENSITY, affinityExponent } from "./types";
+import {
+  AFFINITY_KINDS,
+  CREDIT_RETURN_POLICIES,
+  MAX_AFFINITY_INTENSITY,
+  MAX_COMPARISON_RUNS,
+  MECHANISMS,
+  affinityExponent,
+} from "./types";
 import type {
   AffinityKind,
   AffinityProfileInput,
@@ -11,6 +18,12 @@ import type {
   DisciplineInput,
   SimulateRequest,
 } from "./types";
+
+/** O que o botão executa. O **cenário é o mesmo nos dois**: o que muda é se
+ * ele roda uma vez, com a seed do formulário, ou N vezes de cada lado dos dois
+ * mecanismos, com as seeds de 1 a N. Por isso o modo não vive dentro do
+ * cenário — trocar de modo não pode mexer no que está configurado. */
+export type RunMode = "single" | "compare";
 
 /** Nome livre para uma disciplina nova, sem colidir com as que já existem —
  * nome repetido é rejeitado pelo motor, e o usuário levaria o erro só ao rodar. */
@@ -25,6 +38,10 @@ function freshName(disciplines: DisciplineInput[]): string {
 export function Config({
   config,
   setConfig,
+  mode,
+  setMode,
+  runs,
+  setRuns,
   running,
   error,
   onRun,
@@ -34,6 +51,10 @@ export function Config({
 }: {
   config: SimulateRequest;
   setConfig: (update: (current: SimulateRequest) => SimulateRequest) => void;
+  mode: RunMode;
+  setMode: (mode: RunMode) => void;
+  runs: number;
+  setRuns: (runs: number) => void;
   running: boolean;
   error: string | null;
   onRun: () => void;
@@ -41,6 +62,7 @@ export function Config({
   hasCustom: boolean;
   onSelectPreset: (presetId: string | null) => void;
 }) {
+  const comparing = mode === "compare";
   // Qual disciplina está com o editor de pré-requisitos aberto. Uma de cada
   // vez: 36 grades de chips abertas ao mesmo tempo não se leem.
   const [editingPrerequisites, setEditingPrerequisites] = useState<string | null>(null);
@@ -163,9 +185,64 @@ export function Config({
   return (
     <div className="rail-layout">
       <div className="rail-layout-main">
-      <h1>Configurar simulação</h1>
+      <h1>Configurar {comparing ? "comparação" : "simulação"}</h1>
 
       {error && <div className="error-banner">{error}</div>}
+
+      <div className="panel">
+        <h2>Modo de execução</h2>
+        <div className="field-row">
+          <div className="field">
+            <label>O que executar</label>
+            <select value={mode} onChange={(e) => setMode(e.target.value as RunMode)}>
+              <option value="single">uma simulação do leilão por créditos</option>
+              <option value="compare">comparar os dois mecanismos</option>
+            </select>
+          </div>
+          {comparing && (
+            <div className="field">
+              <label>Execuções por mecanismo (N)</label>
+              <input
+                type="number"
+                min={1}
+                max={MAX_COMPARISON_RUNS}
+                value={runs}
+                onChange={(e) => setRuns(Number(e.target.value))}
+              />
+              <span className="field-hint">
+                Seeds de 1 a {runs}, as mesmas dos dois lados — {runs * 2} simulações no
+                total. Com poucas seeds a dispersão da caixa mal se lê.
+              </span>
+            </div>
+          )}
+        </div>
+        {comparing ? (
+          <>
+            <p className="note">
+              O <strong>mesmo cenário</strong> roda nos dois mecanismos, e a seed pareia os dois
+              lados: a i-ésima execução de um e a do outro partem da mesma população, das mesmas
+              utilidades e das mesmas notas. É o que torna a diferença atribuível ao mecanismo, e
+              não ao sorteio — a condição metodológica da Seção 7.3.
+            </p>
+            <ul className="note">
+              {MECHANISMS.map((mechanism) => (
+                <li key={mechanism.value}>
+                  <strong>{mechanism.label}</strong> — {mechanism.hint}
+                </li>
+              ))}
+            </ul>
+            <p className="note">
+              O resultado traz só as cinco métricas principais, em boxplot: sem nada de crédito
+              (não existe do lado da linha de base) e sem recorte por geração ou perfil.
+            </p>
+          </>
+        ) : (
+          <p className="note">
+            Uma execução do mecanismo proposto, com todos os gráficos por período, os recortes por
+            geração e perfil e a tela de depuração por aluno.
+          </p>
+        )}
+      </div>
 
       <div className="panel">
         <h2>Configurações gerais</h2>
@@ -255,16 +332,21 @@ export function Config({
             </select>
             <span className="field-hint">
               {CREDIT_RETURN_POLICIES.find((p) => p.value === config.credit_return)?.hint}
+              {comparing && " — vale só do lado do leilão; na linha de base não há preço pago a devolver"}
             </span>
           </div>
-          <div className="field">
-            <label>Seed</label>
-            <input type="number" value={config.seed} onChange={(e) => patch({ seed: Number(e.target.value) })} />
-          </div>
+          {!comparing && (
+            <div className="field">
+              <label>Seed</label>
+              <input type="number" value={config.seed} onChange={(e) => patch({ seed: Number(e.target.value) })} />
+            </div>
+          )}
         </div>
         <p className="note">
           Alunos, nomes, utilidades e notas são sorteados a partir da seed. A mesma configuração sempre
-          produz a mesma simulação.
+          produz a mesma simulação.{" "}
+          {comparing &&
+            "Numa comparação a seed deixa de ser parâmetro e vira o eixo da amostra: são as de 1 a N, e fixar uma só mediria aquela população."}
         </p>
       </div>
 
@@ -731,7 +813,13 @@ export function Config({
 
       <div className="actions sticky-actions">
         <button className="primary" disabled={running} onClick={onRun}>
-          {running ? "Simulando..." : "Executar simulação"}
+          {comparing
+            ? running
+              ? `Comparando — ${runs * 2} simulações...`
+              : "Comparar mecanismos"
+            : running
+              ? "Simulando..."
+              : "Executar simulação"}
         </button>
       </div>
       </div>

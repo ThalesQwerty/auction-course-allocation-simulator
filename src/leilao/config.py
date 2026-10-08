@@ -17,6 +17,13 @@ import math
 from dataclasses import dataclass, field
 from typing import Literal
 
+# Mecanismo de alocação. `credits` é o leilão por créditos proposto (Seção 7.1),
+# em que o aluno reparte um orçamento entre lances e um PLI decide a alocação.
+# `ranking` é a linha de base tradicional (Seção 7.3.1, eqs. 49-50): não há
+# leilão nem PLI — as solicitações são atendidas em ordem decrescente do CR do
+# aluno, e a carga horária faz o papel do orçamento.
+Mechanism = Literal["credits", "ranking"]
+
 # Política de retorno de créditos f_gamma — eq. (34). O anteprojeto deixa a
 # forma concreta em aberto e trata as políticas como eixo de experimentação
 # (Seção 7.3.2) — as quatro comparadas estão em `grading.credit_return`.
@@ -209,9 +216,22 @@ class SimulationConfig:
     )
     rounds: int = 1  # |R| — rodadas de alocação por período
     min_grade: float = 5.0  # n_min — nota mínima de aprovação
+    # Os dois parâmetros abaixo são do leilão por créditos e **não têm efeito**
+    # com `mechanism="ranking"`: ali não há orçamento a repor nem preço pago a
+    # devolver. Ficam no cenário assim mesmo porque a comparação entre os dois
+    # mecanismos roda a mesma configuração nos dois lados.
     base_credits: int = 10  # Gamma_min — créditos base por período, eq. (35)/(37)
     credit_return: CreditReturnPolicy = "none"
+    mechanism: Mechanism = "credits"
     seed: int = 0
+
+    @property
+    def uses_credits(self) -> bool:
+        """Se o crédito existe neste cenário. Na linha de base por CR ele não
+        existe — e as grandezas de crédito saem `None` nos relatórios, não zero:
+        zero se leria como "ninguém gastou", e o certo é "não há o que gastar".
+        """
+        return self.mechanism == "credits"
 
     def __post_init__(self) -> None:
         if self.periods < 1:

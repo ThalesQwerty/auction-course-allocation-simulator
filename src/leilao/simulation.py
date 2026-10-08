@@ -33,6 +33,15 @@ disputá-la no leilão como qualquer outra.
 O aluno sai do conjunto ativo por uma única porta: concluindo o curso (eq. 40).
 Quem não concluiu continua disputando até o fim do horizonte, e é a fase de
 drenagem que dá às gerações tardias tempo de chegar lá.
+
+**Dois mecanismos, um cenário.** `config.mechanism` troca só o miolo da rodada:
+o leilão por créditos da Seção 7.1 (`credits`) ou a ordenação por CR da
+Seção 7.3.1 (`ranking`, módulo `ranking`). Tudo o mais — população, utilidades,
+notas, pré-requisitos, matrícula garantida, conclusão e métricas — é idêntico,
+que é a condição metodológica da Seção 7.3: os dois lados partem da mesma
+inicialização, e por isso a diferença entre eles é atribuível ao mecanismo.
+Sem crédito não há orçamento, preço nem retorno, e essas grandezas saem `None`
+dos relatórios — ver `SimulationConfig.uses_credits`.
 """
 from __future__ import annotations
 
@@ -49,6 +58,7 @@ from .entities import Agent, Good
 from .grading import credit_return, grade_for_attempt, initial_grades
 from .metrics import Metrics, compute_metrics, demand_per_seat, satisfaction, semestralization
 from .population import Student, generate_students
+from .ranking import allocate_by_ranking, request_set
 from .tie_breaking import stochastic_perturbations
 
 # `RequestRecord.won_round` quando a vaga não veio de rodada nenhuma: é a
@@ -312,9 +322,16 @@ def _snapshot_group(
     supply: dict[str, int],
     bids: dict[str, int],
     credit_returns: dict[str, int] | None,
+    uses_credits: bool,
 ) -> GroupSnapshot:
     """Um recorte qualquer de alunos: a universidade inteira, uma geração ou um
-    perfil."""
+    perfil.
+
+    Sem crédito no cenário (linha de base por CR) as cinco grandezas de crédito
+    saem `None`, como já saem num recorte vazio: ali não houve ninguém, aqui não
+    há moeda. Zero nos dois casos se leria como um fato — "ninguém gastou" — em
+    vez da ausência que é.
+    """
     if not members:
         return GroupSnapshot(
             group=group,
@@ -344,14 +361,20 @@ def _snapshot_group(
         active=len(members),
         population=population,
         graduated=graduated,
-        mean_credits=sum(credits[s.id] for s in members) / len(members),
+        mean_credits=(
+            sum(credits[s.id] for s in members) / len(members) if uses_credits else None
+        ),
         mean_approved_hours=sum(approved_hours[s.id] for s in members) / len(members),
-        credits_per_student=group_supply / len(members),
-        credits_per_seat=group_supply / total_seats if total_seats else None,
-        mean_bids=sum(bids[s.id] for s in members) / len(members),
+        credits_per_student=group_supply / len(members) if uses_credits else None,
+        credits_per_seat=(
+            group_supply / total_seats if uses_credits and total_seats else None
+        ),
+        mean_bids=(
+            sum(bids[s.id] for s in members) / len(members) if uses_credits else None
+        ),
         mean_credit_return=(
             sum(credit_returns[s.id] for s in members) / len(members)
-            if credit_returns is not None
+            if uses_credits and credit_returns is not None
             else None
         ),
     )
@@ -414,6 +437,7 @@ def _snapshot_groups(
             members=members,
             population=population,
             graduated=graduated,
+            uses_credits=config.uses_credits,
             satisfactions=satisfactions,
             grade_averages=grade_averages,
             semestralizations=semestralizations,
@@ -464,6 +488,7 @@ def _snapshot_groups(
 def run_simulation(config: SimulationConfig) -> SimulationResult:
     """Roda a simulação inteira. Determinística: mesma config, mesmo resultado."""
     rng = np.random.default_rng(config.seed)
+    uses_credits = config.uses_credits
     students = generate_students(config, rng)
     hours = config.hours_by_discipline()
     total_seats = sum(d.seats for d in config.disciplines)
@@ -594,6 +619,10 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         price_rounds: dict[str, int] = {d.name: 0 for d in config.disciplines}
         # Rastro do período para o histórico individual (tela de depuração).
         credits_start = {s.id: s.credits for s in active}
+        # O que o aluno pediu em cada rodada. No leilão guarda c_{a,x}^(t,r), os
+        # créditos do lance; na ordenação por CR não há lance, e guarda 1 onde
+        # houve solicitação — é o marcador que a concorrência do período lê
+        # (`requested`), e que o histórico individual mostra como pedido.
         bid_log: dict[str, dict[str, list[int]]] = {s.id: {} for s in active}
         # Créditos apostados no período, somando as rodadas. Acumula como o
         # gasto, para que as duas séries do mesmo gráfico falem do mesmo
@@ -612,7 +641,10 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         granted: dict[str, int] = {d.name: 0 for d in config.disciplines}
         guaranteed: dict[str, list[str]] = {s.id: [] for s in active}
         for student in (s for s in active if s.entry_period == period):
-            share = budget[student.id] // len(first_period)
+            # Sem crédito não há o que lançar na conta: a vaga garantida é a
+            # mesma nos dois mecanismos, e o que muda é só se ela custa algo.
+            share = budget[student.id] // len(first_period) if uses_credits else 0
+            marker = share if uses_credits else 1
             for name in first_period:
                 guaranteed[student.id].append(name)
                 won[student.id].add(name)
@@ -623,7 +655,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 budget[student.id] -= share  # eq. (27)
                 spent[student.id] += share
                 paid[(student.id, name)] = share
-                bid_log[student.id].setdefault(name, [0] * config.rounds)[0] = share
+                bid_log[student.id].setdefault(name, [0] * config.rounds)[0] = marker
                 bid_total[student.id] += share
 
         # As rodadas guardam só o que muda nelas; o relatório de cada uma é
@@ -636,69 +668,119 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             # vaga: só essas disciplinas têm preço com leitura. As vagas já
             # entregues aos ingressantes saíram do mercado antes da rodada 1.
             offered = [d.name for d in config.disciplines if seats[d.name] > 0]
-            bids: list[Bid] = []
-            for student in active:
-                # B_a^(t,r): disciplinas em que ainda é possível obter vaga —
-                # há vaga livre, cabe na carga horária restante e o aluno ainda
-                # não a conquistou neste período (eq. 15). O ingressante já
-                # conquistou tudo que lhe é elegível, então sai daqui vazio e
-                # não dá lance nenhum.
-                available = [
+            # B_a^(t,r): disciplinas em que ainda é possível obter vaga — há
+            # vaga livre, cabe na carga horária restante e o aluno ainda não a
+            # conquistou neste período (eq. 15). O ingressante já conquistou
+            # tudo que lhe é elegível, então sai daqui vazio e não pede nada.
+            # O conjunto é o mesmo nos dois mecanismos: o que muda é o que o
+            # aluno faz com ele — repartir créditos ou escolher quais pedir.
+            available = {
+                s.id: [
                     name
-                    for name in utilities[student.id]
+                    for name in utilities[s.id]
                     if seats[name] > 0
-                    and hours[name] <= capacity[student.id]
-                    and name not in won[student.id]
+                    and hours[name] <= capacity[s.id]
+                    and name not in won[s.id]
                 ]
-                student_bids = compute_bids(
-                    utilities=utilities[student.id],
-                    available=available,
-                    budget=budget[student.id],
-                    spend_fraction=spend_fraction[student.id],
-                )
-                for name, credits in student_bids.items():
-                    bid_log[student.id].setdefault(name, [0] * config.rounds)[
-                        round_number - 1
-                    ] = credits
-                bid_total[student.id] += sum(student_bids.values())
-                bids.extend(Bid(student.id, name, credits) for name, credits in student_bids.items())
-
+                for s in active
+            }
             # A vaga garantida entra como conquista da rodada 1: é ali que ela
             # passa a valer, e sem isso o ingressante apareceria com satisfação
             # zero na primeira rodada e plena só no agregado do período.
             won_now: dict[str, list[str]] = {
                 s.id: list(guaranteed[s.id]) if round_number == 1 else [] for s in active
             }
-            # pi_x da rodada — eq. (24). O piso de 1 crédito é o valor da
-            # equação quando não houve lance mal-sucedido, inclusive quando não
-            # houve lance nenhum e o leilão nem chegou a rodar.
-            round_prices: dict[str, int] = {name: 1 for name in offered}
-            if bids:
-                result = run_auction(
-                    AuctionInput(
-                        agents=[Agent(s.id, capacity[s.id]) for s in active],
-                        goods=[Good(d.name, seats[d.name], d.hours) for d in config.disciplines],
-                        budgets=budget,
-                        bids=bids,
-                        tie_break_order=tie_break_order,
-                        epsilon=epsilon,
-                        seed=config.seed,
+            # `None` fora do leilão: sem lance não se forma preço, e a série
+            # some do gráfico em vez de virar uma linha de piso que ninguém
+            # pagou.
+            round_prices: dict[str, int] | None = None
+
+            if uses_credits:
+                bids: list[Bid] = []
+                for student in active:
+                    student_bids = compute_bids(
+                        utilities=utilities[student.id],
+                        available=available[student.id],
+                        budget=budget[student.id],
+                        spend_fraction=spend_fraction[student.id],
                     )
-                )
-                for (student_id, name), allocated in result.allocation.items():
-                    if allocated:
-                        won_now[student_id].append(name)
-                        won[student_id].add(name)
-                        won_round[(student_id, name)] = round_number
-                        seats[name] -= 1  # eq. (13)
-                        capacity[student_id] -= hours[name]  # eq. (14)
-                for (student_id, name), consumed in result.consumption.items():
-                    budget[student_id] -= consumed  # eq. (27)
-                    spent[student_id] += consumed
-                    paid[(student_id, name)] = paid.get((student_id, name), 0) + consumed
-                for name, price in result.prices.items():
-                    if name in round_prices:
-                        round_prices[name] = price
+                    for name, credits in student_bids.items():
+                        bid_log[student.id].setdefault(name, [0] * config.rounds)[
+                            round_number - 1
+                        ] = credits
+                    bid_total[student.id] += sum(student_bids.values())
+                    bids.extend(
+                        Bid(student.id, name, credits)
+                        for name, credits in student_bids.items()
+                    )
+
+                # pi_x da rodada — eq. (24). O piso de 1 crédito é o valor da
+                # equação quando não houve lance mal-sucedido, inclusive quando
+                # não houve lance nenhum e o leilão nem chegou a rodar.
+                round_prices = {name: 1 for name in offered}
+                if bids:
+                    result = run_auction(
+                        AuctionInput(
+                            agents=[Agent(s.id, capacity[s.id]) for s in active],
+                            goods=[
+                                Good(d.name, seats[d.name], d.hours)
+                                for d in config.disciplines
+                            ],
+                            budgets=budget,
+                            bids=bids,
+                            tie_break_order=tie_break_order,
+                            epsilon=epsilon,
+                            seed=config.seed,
+                        )
+                    )
+                    for (student_id, name), allocated in result.allocation.items():
+                        if allocated:
+                            won_now[student_id].append(name)
+                            won[student_id].add(name)
+                            won_round[(student_id, name)] = round_number
+                            seats[name] -= 1  # eq. (13)
+                            capacity[student_id] -= hours[name]  # eq. (14)
+                    for (student_id, name), consumed in result.consumption.items():
+                        budget[student_id] -= consumed  # eq. (27)
+                        spent[student_id] += consumed
+                        paid[(student_id, name)] = (
+                            paid.get((student_id, name), 0) + consumed
+                        )
+                    for name, price in result.prices.items():
+                        if name in round_prices:
+                            round_prices[name] = price
+            else:
+                # Linha de base: o aluno resolve a carga horária em casa
+                # (eq. 50) e a universidade atende por ordem de CR (eq. 49).
+                # Não há lance, orçamento nem preço — e, como cada pedido já
+                # cabe no que resta de W_a, atender todos os de um aluno é
+                # viável por construção e a varredura não reverifica nada.
+                requests: list[tuple[str, str]] = []
+                for student in active:
+                    for name in request_set(
+                        utilities=utilities[student.id],
+                        available=available[student.id],
+                        hours=hours,
+                        capacity=int(capacity[student.id]),
+                        spend_fraction=spend_fraction[student.id],
+                    ):
+                        bid_log[student.id].setdefault(name, [0] * config.rounds)[
+                            round_number - 1
+                        ] = 1
+                        requests.append((student.id, name))
+                # A prioridade é do **aluno**, não do par: o mesmo CR vale em
+                # todas as disciplinas que ele pediu. O epsilon só desempata.
+                priority = {
+                    key: grade_averages[key[0]] + epsilon.get(key, 0.0) for key in requests
+                }
+                for student_id, name in allocate_by_ranking(
+                    requests=requests, priority=priority, seats=seats
+                ):
+                    won_now[student_id].append(name)
+                    won[student_id].add(name)
+                    won_round[(student_id, name)] = round_number
+                    seats[name] -= 1  # eq. (13)
+                    capacity[student_id] -= hours[name]  # eq. (14)
 
             round_satisfaction = {
                 s.id: satisfaction(
@@ -708,9 +790,10 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 )
                 for s in active
             }
-            for name, price in round_prices.items():
-                price_sum[name] += price
-                price_rounds[name] += 1
+            if round_prices is not None:
+                for name, price in round_prices.items():
+                    price_sum[name] += price
+                    price_rounds[name] += 1
 
             round_states.append(
                 _RoundState(
@@ -719,13 +802,18 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                     won={s.id: set(won_now[s.id]) for s in active},
                     budget=dict(budget),
                     bids=dict(bid_total),
-                    prices=_price_stats(list(round_prices.values())),
+                    prices=(
+                        _price_stats(list(round_prices.values()))
+                        if round_prices is not None
+                        else None
+                    ),
                 )
             )
 
         # Concorrência: candidatos por vaga nas disciplinas que o aluno de
-        # fato pediu — aquelas em que deu lance em alguma rodada (`bid_log`
-        # guarda zero nas rodadas em que não pediu). A matrícula garantida conta
+        # fato pediu — aquelas em que deu lance (ou, na linha de base, fez
+        # solicitação) em alguma rodada; `bid_log` guarda zero nas rodadas em
+        # que não pediu. A matrícula garantida conta
         # como pedido: o ingressante não disputou, mas ocupa a vaga, e para quem
         # recursa a disciplina a pressão é a mesma. Como a escassez, é do
         # período inteiro e usa a oferta do início dele, então também não anda
@@ -805,18 +893,30 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 attempt_log[(student.id, name)] = (attempt, student.grades[name])
                 if student.grades[name] >= config.min_grade:
                     approvals[name] += 1
-                gamma = credit_return(
-                    config.credit_return,
-                    paid=paid.get((student.id, name), 0),
-                    grade=student.grades[name],
-                    min_grade=config.min_grade,
+                # f_gamma (eq. 34) é do leilão: devolve parte do *preço pago*.
+                # Na linha de base por CR não houve preço nem pagamento, então
+                # não há o que devolver, qualquer que seja a política escolhida.
+                gamma = (
+                    credit_return(
+                        config.credit_return,
+                        paid=paid.get((student.id, name), 0),
+                        grade=student.grades[name],
+                        min_grade=config.min_grade,
+                    )
+                    if uses_credits
+                    else 0
                 )
                 returned_by_discipline[(student.id, name)] = gamma
                 returned += gamma
             credits_returned[student.id] = returned
             # eq. (36): o que sobrou do período é carregado e soma-se ao
             # retorno total Gamma_a^(t) = Gamma_min + soma gamma_{a,x} (eq. 35).
-            student.credits = student.credits - spent[student.id] + config.base_credits + returned
+            # Fora do leilão o saldo não se move — nada foi gasto, e inflá-lo
+            # com Gamma_min a cada período daria um número sem significado.
+            if uses_credits:
+                student.credits = (
+                    student.credits - spent[student.id] + config.base_credits + returned
+                )
 
             # Conclusão — eq. (40): toda disciplina é obrigatória, então conclui
             # quem aprovou na grade inteira.

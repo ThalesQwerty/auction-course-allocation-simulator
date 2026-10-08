@@ -136,6 +136,78 @@ export interface SimulateRequest {
   seed: number;
 }
 
+/** Os dois mecanismos de alocação comparados pelo trabalho. `credits` é o
+ * leilão por créditos proposto (Seção 7.1); `ranking` é a linha de base
+ * tradicional, que atende as solicitações em ordem decrescente de CR
+ * (Seção 7.3.1, eqs. 49-50). Espelha `leilao.config.Mechanism`. */
+export type Mechanism = "credits" | "ranking";
+
+/** A ordem em que os dois entram no eixo e na legenda: a linha de base
+ * primeiro, o mecanismo proposto depois — é contra ela que ele se mede. */
+export const MECHANISMS: {
+  value: Mechanism;
+  label: string;
+  /** Rótulo do eixo do boxplot: embaixo da caixa cabe pouco, e o nome inteiro
+   * fica na legenda. */
+  short: string;
+  hint: string;
+}[] = [
+  {
+    value: "ranking",
+    label: "CR (legado)",
+    short: "CR",
+    hint: "as solicitações são atendidas em ordem decrescente do CR do aluno; a carga horária faz o papel do orçamento — eqs. (49)-(50)",
+  },
+  {
+    value: "credits",
+    label: "Créditos (proposto)",
+    short: "Créditos",
+    hint: "o aluno reparte um orçamento de créditos entre lances e um PLI decide a alocação — Seção 7.1",
+  },
+];
+
+export const mechanismLabel = (mechanism: Mechanism): string =>
+  MECHANISMS.find((option) => option.value === mechanism)?.label ?? mechanism;
+
+/** Uma comparação: o mesmo cenário rodado nos dois mecanismos, N vezes de cada
+ * lado. Não tem `seed` — as seeds são 1..N e são pareadas, de modo que a
+ * i-ésima execução de um lado e a do outro partem da mesma população, das
+ * mesmas utilidades e das mesmas notas (condição metodológica da Seção 7.3). */
+export interface CompareRequest extends Omit<SimulateRequest, "seed"> {
+  runs: number; // N
+}
+
+/** Teto de execuções por mecanismo. Espelha `leilao.comparison.MAX_RUNS`. */
+export const MAX_COMPARISON_RUNS = 100;
+
+/** Uma execução reduzida a um ponto por métrica — o que vira um valor dentro
+ * de uma caixa. A redução é a média dos períodos **ponderada pelos alunos
+ * ativos**: a simulação termina numa fase de drenagem, e uma média simples
+ * daria a um período final de vinte alunos o mesmo peso de um período cheio. */
+export interface RunSummary {
+  seed: number;
+  /** Períodos efetivamente publicados; menor que |T| se a população se
+   * esvaziou antes do horizonte. */
+  periods: number;
+  efficiency: number; // ψ̄ — eq. (53)
+  fairness: number; // φ — eq. (55)
+  correlation: number; // λ — eq. (57)
+  occupancy: number; // θ — eq. (54)
+  semestralization: number; // σ̄
+}
+
+/** As duas amostras, pareadas pela seed: o i-ésimo elemento de cada lista é a
+ * mesma população sob regras de alocação diferentes. */
+export interface CompareResponse {
+  runs: number;
+  credits: RunSummary[];
+  ranking: RunSummary[];
+}
+
+/** As grandezas de `RunSummary` que são métricas — as cinco principais. Serve
+ * de chave para os boxplots e para a tabela. */
+export type ComparisonMetric = Exclude<keyof RunSummary, "seed" | "periods">;
+
 export interface Metrics {
   students: number;
   allocated: number;
