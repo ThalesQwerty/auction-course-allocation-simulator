@@ -26,21 +26,25 @@ class Metrics:
     semestralization: float  # sigma-barra — semestralização média, ver `semestralization`
 
 
-def satisfaction(
-    *, utilities: dict[str, float], spend_fraction: float, allocated: list[str]
-) -> float:
+def satisfaction(*, utilities: dict[str, float], allocated: list[str]) -> float:
     """psi_a = (1/U_a) * soma_x u_{a,x} * z_{a,x} — eq. (51), em [0, 1].
 
     `utilities` traz só o conjunto elegível (`behavior.utility_matrix`), e U_a é
     a soma dele — eq. (43). A razão é então a fração do que o aluno **podia**
     cursar e de fato cursou, e não a fração de um desejo que incluía disciplinas
     fora do alcance dele: psi = 1 é atingível, e é o que o ingressante com
-    matrícula garantida obtém. A escala de U_a se cancela na divisão, então o
-    valor não depende de quanto do orçamento o aluno pretendia gastar.
+    matrícula garantida obtém.
+
+    O denominador é 1 por construção, já que a utilidade é normalizada sobre o
+    conjunto elegível. A divisão continua escrita porque é a eq. (51) e porque
+    mantém o valor em [0, 1] mesmo com o resíduo do ponto flutuante acumulado na
+    normalização; `U_a <= 0` só acontece com o conjunto elegível vazio, de quem
+    já aprovou a grade inteira e nem chega a disputar.
     """
-    if spend_fraction <= 0:
+    total = sum(utilities.values())
+    if total <= 0:
         return 0.0
-    return sum(utilities.get(name, 0.0) for name in allocated) / spend_fraction
+    return sum(utilities.get(name, 0.0) for name in allocated) / total
 
 
 def demand_per_seat(*, demands: list[float]) -> float:

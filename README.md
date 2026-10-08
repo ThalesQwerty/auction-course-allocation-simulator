@@ -7,7 +7,7 @@ matrícula universitária"* (UFBA, 2026).
 ## O que o simulador faz
 
 Simula a matrícula de uma universidade inteira ao longo de vários períodos
-letivos: o usuário configura a grade de disciplinas e os perfis de aluno, e a
+letivos: o usuário configura a grade de disciplinas e a população, e a
 simulação gera os alunos (nome, utilidades, notas) a partir de uma seed, roda
 as rodadas de alocação de cada período e devolve as métricas de eficiência,
 equidade e correlação da Seção 7.3.
@@ -35,7 +35,7 @@ Simulador/
 │   ├── wdp_solver.py     # Resolvedor exato via PLI (Winner Determination Problem)
 │   ├── tie_breaking.py   # Desempate, viés administrativo e perturbação — 7.1.2
 │   ├── auction.py        # Leilão por créditos de uma rodada — 7.1
-│   ├── config.py         # Cenário: geral, grade, pré-requisitos e perfis de aluno
+│   ├── config.py         # Cenário: geral, grade, pré-requisitos e as duas normais
 │   ├── names.py          # 256 nomes x 256 sobrenomes para batizar os alunos
 │   ├── population.py     # Alunos e seu histórico acadêmico
 │   ├── behavior.py       # Utilidades e lances — eqs. (41)-(48)
@@ -54,7 +54,6 @@ Simulador/
     ├── PresetList.tsx    # Barra lateral direita: cenários prontos
     ├── presets.ts        # Catálogo de presets e regra de seleção
     ├── curriculum.ts     # Período de cada disciplina, induzido dos pré-requisitos
-    ├── profiles.ts       # Repartição da geração entre os perfis (maior resto)
     ├── Project.tsx       # Visão teórica do projeto
     ├── Results.tsx       # Gráficos e tabelas de uma execução
     ├── Comparison.tsx    # Boxplots e tabelas de uma comparação
@@ -66,8 +65,8 @@ Simulador/
 
 **Front-end (TypeScript) → API (FastAPI/Python) → Motor (Python)**: a
 interface monta a configuração inteira no navegador e manda para `/simulate`,
-que devolve as séries por período, por rodada e por recorte (geração, perfil de
-aptidão ou perfil de afinidade), ou para `/compare`, que devolve N resumos de
+que devolve as séries por período, por rodada e por recorte (geração), ou para
+`/compare`, que devolve N resumos de
 cada mecanismo. Não há banco de dados — cada execução é independente e
 reprodutível pela seed.
 
@@ -80,12 +79,12 @@ Para cada período letivo `t`:
 2. Cada aluno ativo lê sua linha da matriz de utilidades `u^(t)` — já sorteada
    na inicialização — sobre o seu **conjunto elegível**: as disciplinas que
    ainda não aprovou e cujos pré-requisitos já cumpriu (eqs. 41-43). Fora dele a
-   utilidade é zero. A matriz é então elevada ao expoente do perfil de afinidade
-   do aluno e renormalizada.
+   utilidade é zero. Fora isso a linha dele não muda: ela é sorteada uma vez só,
+   para a simulação inteira.
 3. Para cada rodada `r`, os lances saem deterministicamente das utilidades
-   (eqs. 44-46), o leilão resolve o WDP por PLI (eqs. 22-25) e vagas, carga
+   (mochila côncava), o leilão resolve o WDP por PLI (eqs. 22-25) e vagas, carga
    horária e orçamento são descontados (eqs. 13, 14, 27).
-4. Ao fim do período saem as notas — da normal do perfil de aptidão do aluno —,
+4. Ao fim do período saem as notas — da normal do cenário —,
    o retorno de créditos (eqs. 33-36) e as conclusões de curso (eq. 40).
 
 Tudo que é aleatório vem da `seed` e é sorteado **na inicialização**, antes do
@@ -93,34 +92,98 @@ primeiro período — nada é sorteado dentro do loop, como exige a Seção 7.3:
 
 | Matriz | O que é | Onde |
 | --- | --- | --- |
-| `n^0` | nota de primeira tentativa de cada par (aluno, disciplina) | `grading.initial_grades` |
+| `n` | sorteio de nota de cada par (aluno, disciplina) em cada período | `grading.draw_grades` |
 | `u^(t)` | utilidade de cada par (aluno, disciplina) em cada período | `behavior.draw_utilities` |
 | `alpha`, `epsilon` | ordem de desempate e perturbação | `tie_breaking` |
 
-Duas coisas **não** vêm da seed, de propósito: o período de ingresso `t_a` e o
-par de perfis de cada aluno. Os dois são repartições exatas do cenário
-(`population.generate_students`, `config.generation_profiles`), idênticas sob
-qualquer seed — assim duas execuções que só diferem na seed têm a mesma
-composição, e a diferença entre elas não é a sorte de quem entrou.
+Uma coisa **não** vem da seed, de propósito: o período de ingresso `t_a`. As
+gerações têm todas o mesmo tamanho, em períodos consecutivos
+(`population.generate_students`) — assim duas execuções que só diferem na seed
+têm a mesma estrutura de entrada, e a diferença entre elas não é quem entrou
+quando.
 
-Cada recursada soma à tentativa anterior o *Incremento de aprendizado* do cenário
-(`learning_gain`, 2,5 pontos por padrão).
+**A matriz de notas é sorteada por período, e a recursada desloca a média.** O
+aluno que repete uma disciplina não recebe a nota anterior mais um incremento:
+ele tira uma nota nova, de uma normal cuja média subiu o *Incremento de
+aprendizado* (`learning_gain`, 2,5 por padrão) por tentativa já feita. Em
+distribuição é o mesmo que somar o incremento ao sorteio daquele período, e é
+assim que a conta é feita — `draw_grades` devolve o sorteio cru e
+`grade_for_attempt` desloca, arredonda a 0,1 e trunca em [0, 10].
 
-A matriz de utilidades é sorteada como um **peso por disciplina** (Gamma(1)) em
-vez de uma Dirichlet já normalizada. Em tempo de execução, `utility_matrix` só
-normaliza os pesos do conjunto elegível — e, pela propriedade de agregação da
-Dirichlet, normalizar um subconjunto de pesos Gamma(1) dá exatamente uma
-Dirichlet(1) sobre esse subconjunto. O resultado é o mesmo modelo, mas com a
-preferência do aluno fixa desde o início.
+Duas consequências. A recursada **deixa de garantir nota maior**: o aluno
+aprende, mas pode ter um dia pior. E `Student.grades` continua guardando a
+**maior** nota já obtida — é ela que conta para o CR e para a aprovação —,
+enquanto o histórico por período guarda a nota **daquela** tentativa, que é o que
+a tela individual precisa mostrar. A monotonicidade da eq. (33) passa a valer no
+esperado e no registro, não em cada sorteio; como a média sobe a cada tentativa,
+a probabilidade de aprovar tende a 1 e ninguém fica preso numa disciplina.
 
-**Zerar a utilidade fora do elegível torna a escala de `U_a` redundante.** A
-soma das utilidades é exatamente `U_a` (eq. 43), então a satisfação da eq. (51)
-divide por ela e o fator se cancela; os lances das eqs. (44)-(46) usam só razões
-entre utilidades, que também o cancelam. `U_a` segue multiplicando em
-`utility_matrix` porque é o que faz valer a eq. (43), mas depois dela só pesa de
-fato como fração do orçamento em `compute_bids`. Em troca, `psi_a` passa a ser a
-fração do que o aluno **podia** cursar: antes a utilidade se espalhava por
-disciplinas fora do alcance dele, e `psi = 1` era inatingível por construção.
+A matriz de utilidades é sorteada como **uma linha por (aluno, período)**, em
+dois passos:
+
+1. Um **valor preliminar** por par (aluno, disciplina), tirado de uma
+   **log-normal** de média logarítmica 0 e desvio `utility_sigma`.
+2. **Divisão pelo somatório**, que faz a linha valer 1 sobre a grade inteira.
+
+A log-normal é o que se obtém quando a grandeza é **produto** de muitos fatores
+independentes — e é assim que se forma o quanto alguém quer uma disciplina:
+interesse no tema vezes afinidade com a área vezes horário vezes dificuldade
+percebida. É uma afirmação sobre alunos, e não sobre a ignorância de quem modela.
+
+`sigma` é o único parâmetro, e **grande concentra, pequeno achata**:
+
+- o coeficiente de variação é `sqrt(exp(σ²) − 1)`, que cresce depressa, de modo
+  que a faixa útil inteira cabe entre ~0,25 (aluno quase indiferente) e ~3 (quer
+  uma disciplina e despreza o resto) — em passos **lineares**;
+- a média do logaritmo não é configurável porque some: deslocá-la multiplica a
+  linha por uma constante, e a constante morre na normalização;
+- a moda do sorteio cru é `exp(−σ²)`, **sempre positiva** — não há limiar de
+  sigma a respeitar para que a utilidade mais provável de uma disciplina não
+  seja zero.
+
+**A normalização não é necessária para o mecanismo.** As duas mochilas do aluno
+comparam só razões entre utilidades e `psi` divide pela soma do elegível, de
+modo que a simulação sai idêntica com ou sem ela (há medição: mesma alocação
+aluno a aluno, mesmas séries). Ela fica porque é o que mantém o número legível no
+relatório — 0,11 é "11% do que o aluno quer", 1,94 não é nada — e o `U_a^(t)` da
+eq. (43) com significado.
+
+Há uma **guarda contra underflow** (`behavior.UNDERFLOW_GUARD`) que não é
+parâmetro de modelagem: utilidade zero é o que marca o *inelegível*, filtrado por
+`utilidade > 0` nas duas mochilas, e um zero tiraria a disciplina do conjunto de
+escolha. Com a log-normal ela nunca dispara — só chegaria a zero com expoente
+abaixo de −745 —, e fica como invariante.
+
+**Esta é a terceira distribuição do projeto**, e as duas anteriores caíram por
+motivos estruturais. A normal cortada em `[ε, 1]` não produzia aluno
+concentrado: com suporte limitado e média no meio, a maior cota normalizada não
+passava de `~1/(n·média)`, um teto que nenhum parâmetro removia. A Gamma (cuja
+normalização é uma Dirichlet) resolvia isso, mas exigia `k` variando por quatro
+ordens de grandeza para cobrir a mesma faixa, devolvia `0,0` exato por underflow
+abaixo de `k = 2⁻⁶`, e tinha moda no zero para `k ≤ 1`.
+
+**O gosto do aluno é resorteado a cada período.** O que ele quis no semestre
+passado não determina o que quer neste — e isso muda o comportamento da fila:
+com uma preferência fixa, perder uma vaga disputada condenava o aluno a querer a
+mesma disciplina com a mesma intensidade até consegui-la, e a fila se acumulava;
+agora a disputa recomeça com preferências novas.
+
+Sobre a linha do período agem os zeros da eq. (42). `utility_matrix` recorta ao
+conjunto elegível e **não renormaliza**: os valores que sobram são os mesmos da
+linha sorteada, e a soma deles é o `U_a^(t)` da eq. (43) — menor que 1 sempre
+que algo estiver fora do alcance do aluno.
+
+Isso não muda alocação nenhuma, e vale saber por quê: as duas mochilas do aluno
+comparam só **razões** entre utilidades, e a satisfação da eq. (51) divide pela
+soma do elegível. Multiplicar a linha por uma constante não muda lance, pedido
+nem `psi`. O `U_a` existe como leitura — quanto do que o aluno quer está ao
+alcance dele agora —, não como alavanca. E `psi = 1` continua atingível, que é o
+que o ingressante com matrícula garantida obtém.
+
+Sobre poupar: não há. A eq. (42) prevê um `U_a` que é a fração do que o aluno
+tem em mãos que ele se dispõe a comprometer, mas nem crédito nem carga horária
+passam de um período para o outro, então guardar não é estratégia, é perda — o
+aluno gasta todo o orçamento no leilão e pede até o `W_a` cheio na linha de base.
 
 Isso importa para comparar cenários. Com o sorteio dentro do loop, mexer numa
 vaga deslocava o fluxo do gerador e mudava as utilidades de todo mundo, de modo
@@ -139,17 +202,30 @@ diferença entre eles se lê como efeito do mecanismo.
 | | `credits` (leilão, Seção 7.1) | `ranking` (linha de base, Seção 7.3.1) |
 |---|---|---|
 | **Moeda** | créditos, `C_a^(t,r)` | carga horária, `W_a^(t,r)` |
-| **O que o aluno decide** | quanto apostar em cada disciplina — eqs. (44)-(46) | quais pedir, dado o teto `U_a · W_a` — eq. (50) |
-| **Estratégia** | lances proporcionais à utilidade | mochila 0-1: `w_x` é peso, `u_{a,x}` é valor |
+| **O que o aluno decide** | quanto apostar em cada disciplina | quais pedir, dado o teto `W_a` — eq. (50) |
+| **Estratégia** | mochila **côncava** de pesos unitários: o N-ésimo crédito posto em `x` vale `u_{a,x}/N` | mochila **0-1**: `w_x` é peso, `u_{a,x}` é valor |
 | **Quem decide a alocação** | PLI exata sobre todos os lances (eq. 22) | varredura por `N_a^(t) + ε` — eq. (49) |
 | **Onde as restrições são resolvidas** | globalmente, no resolvedor | localmente e *ex-ante*, por cada aluno |
 | **Preço** | 2º preço, eq. (24) | não existe |
 | **Retorno de créditos** | `f_γ`, eq. (34) | não existe — não houve preço a devolver |
 
-Na linha de base, `U_a^(t)` continua sendo a fração do que o aluno tem em mãos
-que ele se dispõe a comprometer no período: só que o que ele tem em mãos é
-tempo, não crédito. A perda de expressividade é o ponto da comparação — a
-mochila só lê a *ordem* das utilidades, enquanto o lance carrega o *quanto*.
+Em **empate de utilidade**, as duas mochilas preferem a disciplina **listada
+primeiro** no cenário — ver abaixo. Os dois lados gastam **tudo**, cada um na sua
+moeda, e é o que mantém a
+comparação honesta: o que os separa tem de ser o mecanismo, não quanto cada um
+resolveu guardar. A perda de expressividade é o ponto da comparação — a mochila
+0-1 só lê a *ordem* das utilidades, enquanto a côncava carrega o *quanto*: ela
+decide não só quais disciplinas, mas quantos créditos cada uma merece.
+
+**A mochila côncava substitui as eqs. (44)-(46)**, que repartiam o orçamento
+proporcionalmente à utilidade, truncavam e distribuíam a sobra em ordem de
+preferência. O lance proporcional é o ótimo da relaxação contínua da mochila
+(maximizar `Σ u_x·ln(c_x)` com `Σ c_x` fixo dá `c_x` proporcional a `u_x`), de
+modo que a mochila é a versão **inteira e exata** do mesmo critério e resolve
+sozinha o arredondamento que as eqs. (45)-(46) tratavam à parte. Como os pesos
+são unitários e o ganho marginal cai dentro de cada disciplina, o guloso sobre
+os ganhos marginais é ótimo — não há tabela de programação dinâmica a montar,
+como há na mochila 0-1 da linha de base.
 
 Como ali não há crédito, as grandezas de crédito saem **nulas** dos relatórios
 (orçamento, saldo, lances, retorno e preço), não zeradas: zero se leria como
@@ -170,8 +246,8 @@ invertia o sinal da correlação da eq. (57):
 
 | λ (seed 1) | com calouros | sem calouros |
 | --- | --- | --- |
-| CR (legado) | +0,228 | +0,466 |
-| Créditos | −0,088 | +0,041 |
+| CR (legado) | +0,267 | +0,587 |
+| Créditos | −0,122 | +0,066 |
 
 A regra, portanto: o calouro **fica nas contagens de pessoas** (`active`,
 `population`, `graduated`) e **sai de toda média por aluno** — as métricas e as
@@ -215,7 +291,7 @@ As duas condições da Seção 7.3 saem daí:
 
 São **quatro métricas**: eficiência (ψ̄), equidade (φ), correlação (λ) e
 **tempo de formatura**. Nada de crédito, porque não há contraparte do outro
-lado, e nenhum recorte por geração ou perfil, porque o que está em comparação é
+lado, e nenhum recorte por geração, porque o que está em comparação é
 o mecanismo, não o que acontece dentro de cada um.
 
 As três primeiras são de período, e uma execução vira um número pela média
@@ -239,6 +315,44 @@ pouco ficou por alocar; um que leva a disputa adiante distribui as vagas pelas
 rodadas. Nenhuma rodada isolada tem lado "melhor": na primeira, mais alto é
 atender mais; nas seguintes, mais alto é ter deixado mais para trás. E a
 matrícula garantida não infla a primeira, porque o calouro está fora do recorte.
+
+#### O segundo eixo: a varredura da forma da preferência
+
+A hipótese do trabalho é que o leilão capta **intensidade** de preferência que a
+ordenação por CR não enxerga. Se é isso, o quanto a população diferencia as
+disciplinas não é um parâmetro a calibrar — é a **variável independente**. Por
+isso `run_sweep` roda a comparação inteira em vários `utility_sigma`, numa faixa
+**linear**, e devolve um ponto por `σ`.
+
+Linear basta porque o coeficiente de variação da log-normal cresce depressa em
+`σ`: a faixa útil inteira cabe entre ~0,25 e ~3 em passos iguais. (Era a Gamma
+que precisava de progressão geométrica e eixo logarítmico, porque exigia quatro
+ordens de grandeza do parâmetro.) O `utility_sigma` do cenário é o **canônico** —
+o que os boxplots medem — e é marcado no eixo com uma linha de referência, sem
+precisar cair exatamente num ponto varrido.
+
+| | σ canônico (boxplot) | varredura (linhas) |
+| --- | --- | --- |
+| pergunta | a diferença supera o ruído amostral? | como o vão depende de σ? |
+| execuções | muitas (`runs`, 20 por padrão) | poucas (3 por padrão), por ponto |
+| forma | caixa por modelo | linha por modelo, eixo x linear |
+
+Cada ponto traz também o **histograma da própria matriz de utilidades** — o
+gráfico da causa ao lado do da consequência. Ele mostra como a preferência de um
+aluno se reparte entre as disciplinas: cada linha (aluno, período) é reescalada
+ao **próprio** mínimo e máximo e dividida em 9 faixas de mesma largura, e a
+altura é a fração de utilidades em cada faixa. A escala é por linha, e não do
+menor ao maior valor da matriz inteira, porque global degenera — um único extremo
+define o intervalo e, de `σ = 1` em diante, 94% dos valores caem na primeira
+faixa, de modo que todos os gráficos sairiam iguais.
+
+A varredura acrescenta uma métrica que **não** está no boxplot: a contagem de
+**formandos**. Ela é obrigatória aqui porque `ψ̄` é cega para a patologia que a
+varredura revela — `ψ̄` cresce monotonicamente conforme a preferência concentra e
+chega perto de 1 na ponta, justamente onde ninguém se forma: o aluno quer uma
+disciplina só, consegue, e a satisfação dele é plena. `ψ̄` é satisfação *relativa
+ao que o aluno queria*. Lado a lado no mesmo eixo, as duas contam a troca que o
+mecanismo faz.
 
 Ficaram de fora, por motivos diferentes. A **ocupação** (θ) porque, com o
 calouro fora do recorte, ela deixou de se ler como "o quanto a universidade
@@ -281,6 +395,23 @@ em período, com o aviso no subtítulo.
   nenhum —, e o aluno só fica elegível a disputá-la quando aprovou tudo que ela
   exige. Um ciclo de pré-requisitos é recusado na entrada: as disciplinas dele
   não teriam período e nunca ficariam elegíveis.
+- **Ordem de desempate entre disciplinas**: quando duas valem o mesmo para um
+  aluno, ganha a **listada primeiro** em `SimulationConfig.disciplines` — a
+  ordem em que a interface as mostra, que é a ordem em que foram acrescentadas.
+  É uma ordem **global**: a mesma para todo aluno, período e rodada, e vale nas
+  duas decisões que o aluno toma sozinho — a mochila côncava do lance e a
+  mochila 0-1 do pedido por CR. Ela se propaga sem ninguém carregá-la de
+  propósito, porque `utility_matrix` constrói a linha do aluno varrendo a grade
+  e dicionário em Python preserva a ordem de inserção; por isso as duas mochilas
+  leem o posto de `utilities`, nunca de `available`, que é só um filtro.
+
+  Com utilidade sorteada o empate tem probabilidade zero, então a regra quase
+  nunca é acionada. Ela existe para que um cenário escrito à mão — uma grade
+  simétrica, um teste — não dependa da ordem de iteração para dar sempre o mesmo
+  resultado, que é a mesma exigência de determinismo da Seção 7.3 que mantém os
+  sorteios fora do loop. Não se confunde com `alpha`/`epsilon` (eq. 20): aquilo
+  desempata **entre alunos**, dentro do leilão; isto desempata **entre
+  disciplinas**, dentro da cabeça de um aluno.
 - **Matrícula garantida do ingressante**: quem entra num período recebe vaga em
   **todas** as disciplinas de 1º período e não participa dos lances. O sistema
   ainda assim lança o gasto na conta dele, repartindo o orçamento igualmente
@@ -289,48 +420,31 @@ em período, com o aviso no subtítulo.
   ingresso: recursar uma delas é disputá-la no leilão como qualquer outra. Daí
   as duas validações do ritmo de entrada: a geração não pode passar da menor
   oferta entre as disciplinas de 1º período, nem a carga somada delas pode
-  passar do `W_a` **mais apertado entre os perfis** — a matrícula garantida não
-  escolhe quem a recebe.
-- **Perfis de aluno**, em dois eixos independentes:
+  passar do `W_a` — a matrícula garantida não escolhe quem a recebe.
+- **As duas normais da população**, no lugar dos perfis de aluno:
 
-  | Eixo | O que define | Parâmetros |
+  | Normal | O que define | Parâmetros |
   | --- | --- | --- |
-  | aptidão | a normal de onde saem as notas, e o que cada recursada acrescenta | média, desvio padrão, incremento de aprendizado |
-  | afinidade | o expoente aplicado a `u^(t)`, e quanto o aluno carrega por período | tipo (concentrado/diluído), intensidade, `W_a` |
+  | notas | de onde sai cada sorteio de nota, e o quanto a recursada desloca a média | `grade_mean`, `grade_stddev`, `learning_gain` |
+  | utilidades | o quanto o aluno diferencia as disciplinas | `utility_sigma` (o desvio da log-normal; a média do log some na normalização) |
 
-  Expoente maior que 1 (**concentrado**) afasta as utilidades entre si — o aluno
-  quer muito uma ou duas disciplinas e quase nada o resto; menor que 1
-  (**diluído**, o inverso de um inteiro) as aproxima; intensidade 1 é o perfil
-  neutro, que não distorce nada. Depois da distorção a matriz é dividida pelo
-  somatório, de modo que `U_a` continue valendo a eq. (43).
+  Toda a população sai delas, e o que distingue um aluno do outro é só o que a
+  seed sorteou para ele. A das notas existe porque sem dispersão de desempenho o
+  CR vira ruído e a eq. (57) não mede nada. A das utilidades existe porque
+  diferenciar preferência é **exatamente** a informação que o leilão diz captar e
+  a ordenação por CR não vê. Nenhuma das duas está no anteprojeto.
 
-  A aptidão existe porque sem heterogeneidade de desempenho o CR vira ruído e a
-  eq. (57) não mede nada. A afinidade existe porque concentrar preferência é
-  **exatamente** a informação que o leilão diz captar e a ordenação por CR não
-  vê. Nenhum dos dois está no anteprojeto.
+  `W_a` (eq. 4) também é do cenário e igual para todos, o que faz a
+  semestralização comparar todo mundo contra o mesmo teto e dá à validação da
+  matrícula garantida um número só a conferir.
 
-  Os dois parâmetros que antes eram globais moraram para dentro dos perfis,
-  cada um para o eixo de que é a mesma grandeza. O **incremento de
-  aprendizado** (eq. 33) é do perfil de aptidão: é o quanto o aluno aprende, e
-  um perfil que erra muito na primeira tentativa pode ser justamente o que mais
-  ganha ao repetir — com um valor global não havia como dizer isso. A **carga
-  horária máxima** `W_a` (eq. 4) é do perfil de afinidade: anda junto da
-  concentração, porque querer poucas disciplinas com intensidade e querer
-  muitas por igual não descrevem só preferência, mas também quanto se consegue
-  carregar num período. Como `W_a` passa a variar entre alunos, a
-  semestralização mede cada um contra o próprio teto, e o piso de períodos
-  (`minimum_periods_to_graduate`) usa o `W_a` mais folgado — é o do aluno mais
-  rápido possível.
+  **Os perfis de aluno existiram entre 03/10 e 08/10/2026** e foram removidos a
+  pedido. Eram dois eixos independentes — aptidão (a normal das notas) e
+  afinidade (um expoente sobre `u`) —, cada um com nome, parâmetros e % da
+  população, repartidos exatamente pelo método do maior resto. Com eles saíram os
+  recortes dos relatórios por perfil: a heterogeneidade continua, mas deixou de
+  ser *sistemática*, e sem grupo não há o que separar além da senioridade.
 
-  Cada perfil tem um nome e uma **% dos alunos**, e as fatias de cada eixo somam
-  100% (o cenário é recusado fora disso — normalizar em silêncio esconderia um
-  erro de digitação). Os eixos são independentes, então a fatia de uma
-  combinação é o produto das duas: dois perfis de 50% em cada eixo dão 25% para
-  cada uma das quatro combinações. A repartição inteira é feita pelo método do
-  **maior resto** sobre a combinação (não eixo a eixo, que não garantiria o
-  produto) e é a mesma em **toda geração** — sem isso o perfil ficaria
-  correlacionado com o período de ingresso, e o recorte por geração passaria a
-  medir perfil junto com senioridade.
 - **Retorno de créditos** (`f_gamma`, eq. 34): o anteprojeto deixa a forma
   concreta em aberto — é o eixo de experimentação da Seção 7.3.2. São quatro
   políticas, escolhidas na configuração e aplicadas ao fim de cada período
@@ -398,9 +512,9 @@ em período, com o aviso no subtítulo.
   progressão do aluno: os pré-requisitos deixam elegíveis, no caso típico, as
   disciplinas do período corrente mais as atrasadas, então a escassez de um
   aluno fala do trecho da grade em que ele está, não do catálogo inteiro. (2) O
-  conjunto pedido depende do orçamento: o truncamento da eq. (44) derruba os
-  lances que arredondam para zero, então aluno com pouco crédito pede menos
-  disciplinas. (3) A concorrência é demanda revelada *sob este mecanismo*;
+  conjunto pedido depende do orçamento: a mochila côncava reparte `C_a^(t,r)`
+  créditos indivisíveis, então um aluno com `B` créditos dá lance em no máximo
+  `B` disciplinas — quem tem pouco crédito pede menos, e não menos em cada uma. (3) A concorrência é demanda revelada *sob este mecanismo*;
   quando o baseline por CR entrar (eqs. 49-50), "pedir" significará outra coisa,
   e comparar a concorrência entre os dois mecanismos compara linguagens de
   pedido, não qualidade de alocação — a escassez não tem esse problema. Nenhuma
@@ -417,14 +531,17 @@ em período, com o aviso no subtítulo.
 - **Conclusão de curso**: toda disciplina é obrigatória, então a eq. (40) vira
   aprovar na grade inteira — não há carga horária mínima a somar à parte, e
   `hours_to_graduate` é a soma de `w_x` sobre a grade, igual para todos.
-- **U_a** (fração do orçamento que o aluno se dispõe a gastar) é sorteada em
-  [0,5; 1,0]; as utilidades sobre o conjunto elegível seguem uma Dirichlet
-  uniforme, distorcida pelo expoente da afinidade.
+- **Utilidades**: um valor por par (aluno, disciplina, período), tirado de uma
+  log-normal de desvio `utility_sigma` e dividido pelo somatório da linha — uma
+  linha por (aluno, período). O anteprojeto não fixa a distribuição nem
+  o valor de `U_a`; aqui `U_a^(t)` é a soma do que está ao alcance do aluno
+  naquele período, e ele gasta tudo o que tem, porque não há transferência de
+  saldo entre períodos que justificasse poupar.
 - **Ingresso escalonado** (`t_a`, eq. 31): o cenário diz quantos alunos entram
   **por período** (`students_per_period`), e uma geração entra a cada período
   letivo, do primeiro ao `L`-ésimo (`entry_periods`, padrão `|T|`). A população
   é, portanto, `students_per_period * L`, e todas as gerações têm exatamente o
-  mesmo tamanho e a mesma composição de perfis. O anteprojeto não fixa a
+  mesmo tamanho. O anteprojeto não fixa a
   distribuição dos ingressos; esta é a que imita um vestibular por semestre.
 - **Fase de drenagem** (`L < |T|`): depois do `L`-ésimo período ninguém mais
   entra e a população só diminui. Existem **`L` gerações**, não `|T|` — os
@@ -446,6 +563,13 @@ em período, com o aviso no subtítulo.
   contagem pareada, mas não calcula p-valor nem intervalo de confiança.
 - Choque de horário: existe no motor (`MutualExclusion`), mas a simulação não
   gera horários.
+- **Poupança.** O aluno gasta sempre tudo: todo o orçamento de créditos no
+  leilão, todo o `W_a` na linha de base. Guardar não teria para onde ir — nem
+  crédito nem hora passam de um período para o outro —, mas guardar *entre
+  rodadas do mesmo período* seria uma estratégia de verdade, e não existe: hoje
+  o aluno reparte na rodada 1 tudo o que tem. Enquanto o lance perdedor não
+  consome crédito, apostar cedo não custa nada, então essa estratégia só
+  apareceria com uma regra que cobrasse a aposta.
 - Persistência de cenários no servidor: o histórico de execuções fica no
   navegador, mas não há como salvar, nomear ou exportar um cenário.
 - **Qualquer saída sem diploma.** A conclusão (eq. 40) é a única porta: quem
@@ -487,8 +611,8 @@ levam uma etiqueta, porque abrem numa tela diferente.
 No topo de "Configurar", **Modo de execução** escolhe o que o botão faz:
 
 - **uma simulação do leilão por créditos** — o cenário roda uma vez, com a seed
-  do formulário, e a tela traz todos os gráficos por período, os recortes por
-  geração e perfil e a tela de depuração por aluno.
+  do formulário, e a tela traz todos os gráficos por período, o recorte por
+  geração e a tela de depuração por aluno.
 - **comparar os três modelos** — o mesmo cenário roda nos três, `N` vezes em
   cada um, com as seeds de 1 a `N`. Somem dois campos: o da **seed** (ali ela
   vira o eixo da amostra) e o do **retorno de créditos** (ali ele vira o eixo do
@@ -510,8 +634,8 @@ cada (36 no total, 2700 h), encadeada por pré-requisitos, em 12 períodos —
 ingresso nos 6 primeiros (60 alunos por período, 360 no total) e drenagem nos 6
 últimos.
 
-Cada período da grade soma exatamente 450 h, que é a carga horária máxima dos
-dois perfis de afinidade (`W_a`): o aluno em dia cursa as seis disciplinas do
+Cada período da grade soma exatamente 450 h, que é a carga horária máxima
+(`W_a`): o aluno em dia cursa as seis disciplinas do
 seu período e nada mais. Isso faz a disputa ser por *quais* seis, e não por
 quantas — quem fica para trás escolhe entre recuperar o atraso e avançar —, e
 deixa a matrícula garantida do ingressante caber em `W_a`.
@@ -528,33 +652,28 @@ recursa.
 
 As 40 vagas são o gargalo: em regime, cada período da grade tem ~60 alunos em
 dia querendo as mesmas seis disciplinas, e as de 40 não comportam nem a turma
-em dia. Rodando o cenário, `psi` anda entre 0,82 e 1,00 e ~28% concluem em 12
-períodos, com a conclusão mais rápida em 6 — o piso da cadeia. No recorte por
-vagas, as de 40 chegam a 1,3 candidato por vaga e preço 2,5, enquanto as de 120
-ficam em 0,4 e no piso de 1 crédito. Com 30 ingressantes por período a
-universidade inteira fica frouxa (`psi` = 1,00, preço sempre 1); com 70 a fila
-nas de 40 vagas passa de 1,7 e a conclusão cai para 22%.
+em dia. Rodando o cenário em σ = 1, **29% concluem** em 12 períodos. No recorte por
+vagas, as de 40 são o gargalo e as de 120 nunca apertam — é essa gradação que os
+gráficos por disciplina existem para mostrar. Com 30 ingressantes por período a
+universidade fica frouxa; com 70 a conclusão despenca. Os números exatos variam
+com σ, e é a varredura que os põe em contexto.
 
-Os perfis do preset — os dois parâmetros extras são iguais em todos, para que a
-diferença entre perfis seja só o eixo que cada um nomeia:
+A população do preset, nas duas normais do cenário:
 
-| Aptidão | Média | Desvio | Ganho por recursada | % |
-| --- | --- | --- | --- | --- |
-| Exemplar | 8,0 | 1,0 | 2,5 | 25% |
-| Regular | 6,5 | 1,5 | 2,5 | 50% |
-| Instável | 5,0 | 2,0 | 2,5 | 25% |
+| Normal | Parâmetros |
+| --- | --- |
+| notas | média 6,5, desvio 1,5, ganho por recursada 2,5 |
+| utilidades | desvio `σ` = 1 (log-normal normalizada) |
 
-| Afinidade | Tipo | Intensidade | `W_a` | % |
-| --- | --- | --- | --- | --- |
-| Focados | concentrado | 2 | 450 h | 50% |
-| Dispersos | diluído | 2 | 450 h | 50% |
+A média das notas é a da mistura dos três perfis de aptidão que existiam antes
+(0,25·8 + 0,50·6,5 + 0,25·5 = 6,5), e o desvio é menor que o dela — ali parte da
+dispersão vinha da distância *entre* os perfis, que é a diferença sistemática
+que saiu do modelo.
 
-Ou monte o seu: configure os parâmetros gerais, os perfis e a grade. Na tabela
+Ou monte o seu: configure os parâmetros gerais, a população e a grade. Na tabela
 de disciplinas, a coluna **Período** é derivada (não se edita) e a célula de
 pré-requisitos abre a lista de chips para marcar de quais disciplinas aquela
-depende. O painel de perfis mostra a composição de uma geração — toda
-combinação (aptidão × afinidade), com a fatia e quantos alunos inteiros ela dá.
-Ao executar, a simulação entra no histórico e a tela abre nela.
+depende. Ao executar, a simulação entra no histórico e a tela abre nela.
 
 Os gráficos são a representação principal e saem em **dois lados do mercado**.
 
@@ -562,11 +681,10 @@ Os **gráficos por aluno** perguntam quem foi bem servido. Uma linha por
 recorte, com eixo por período ou por rodada, em três blocos: **métricas
 principais** (eficiência, equidade, correlação, ocupação e semestralização),
 **progressão** (vagas por aluno, CR, ativos, formados e carga aprovada) e
-**economia de créditos** (créditos por aluno e fração gasta). O seletor
-**Linhas do gráfico** troca o recorte entre **geração**, **perfil de aptidão** e
-**perfil de afinidade**. Os três partem a mesma população, então somar qualquer
-um reproduz a universidade; o que muda é a pergunta. A geração é série ordenada
-e leva a rampa de cor; os perfis são categorias e levam a paleta categórica.
+**economia de créditos** (créditos por aluno e fração gasta). O recorte de aluno
+é a **geração**, que parte a mesma população do agregado — somá-la reproduz a
+universidade. É série ordenada (quem entrou antes está mais adiante na grade) e
+por isso leva a rampa de cor, não a paleta categórica.
 
 Os **gráficos por disciplina** perguntam o que foi disputado. Ali o recorte é da
 oferta: as disciplinas se agrupam por **período da grade**, por **número de
@@ -579,15 +697,14 @@ somas** — senão uma disciplina de 40 vagas pesaria o mesmo que uma de 120.
 
 Depois dos gráficos vêm as tabelas por período, por recorte, por disciplina e
 por aluno; "Reabrir esta configuração" devolve o cenário ao formulário para
-variar um parâmetro e rodar de novo. O filtro de séries é por eixo: esconder uma
-geração não desfaz o que estava escondido no eixo dos perfis nem no das
-disciplinas.
+variar um parâmetro e rodar de novo. O filtro de séries dos alunos é
+independente do das disciplinas: esconder uma geração não desfaz o que estava
+escondido lá.
 
 #### Tela individual do aluno
 
 Na vista de uma execução, a barra lateral **direita** lista os alunos, com
-busca por nome, filtro por geração e pelos dois perfis, e ordenação por geração
-e/ou nome. Clicar num aluno troca o conteúdo pela tela individual dele:
+busca por nome, filtro por geração e ordenação por geração e/ou nome. Clicar num aluno troca o conteúdo pela tela individual dele:
 gráficos de progressão (carga horária aprovada contra a grade inteira, CR,
 satisfação, créditos e disciplinas por período) e, período a período, a tabela
 de tudo o que ele pediu.

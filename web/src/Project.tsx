@@ -68,14 +68,16 @@ export function Project() {
         atender todos os pedidos dele é sempre viável.
       </p>
       <p>
-        O que substitui o orçamento é a carga horária. No leilão o aluno reparte C<sub>a</sub>
-        <sup>(t,r)</sup> entre lances proporcionais à utilidade; aqui ele gasta W<sub>a</sub>
-        <sup>(t,r)</sup> em horas, e U<sub>a</sub><sup>(t)</sup> continua sendo a fração daquele
-        teto que ele se dispõe a comprometer (eq. 50). A estratégia deixa de ser "quanto apostar em
-        cada uma" e passa a ser "quais pedir": um <strong>Problema da Mochila 0-1</strong>, com a
-        carga horária como peso e a utilidade percebida como valor. É aí que ele perde a
-        capacidade de dizer <em>o quanto</em> quer cada disciplina — a mochila só lê a ordem das
-        utilidades —, e é exatamente essa perda que a comparação põe à prova.
+        O que substitui o orçamento é a carga horária. Os dois lados gastam tudo o que têm, cada
+        um na sua moeda: no leilão o aluno reparte C<sub>a</sub>
+        <sup>(t,r)</sup> créditos; aqui ele gasta W<sub>a</sub>
+        <sup>(t,r)</sup> em horas, até o teto cheio (eq. 50) — hora não cursada não passa para o
+        período seguinte. O que muda é a <em>forma</em> da mochila. Aqui é uma{" "}
+        <strong>mochila 0-1</strong>, com a carga horária como peso e a utilidade percebida como
+        valor: o aluno decide "quais pedir". No leilão é uma <strong>mochila côncava</strong> de
+        pesos unitários, em que ele ainda decide "quanto em cada uma". É aí que ele perde a
+        capacidade de dizer <em>o quanto</em> quer cada disciplina — a mochila 0-1 só lê a ordem
+        das utilidades —, e é exatamente essa perda que a comparação põe à prova.
       </p>
       <p>
         Tudo o mais é idêntico: população, utilidades, notas, pré-requisitos, matrícula garantida,
@@ -115,26 +117,22 @@ export function Project() {
         uma simulação não publica métrica nenhuma, porque ali todo mundo é calouro.
       </p>
       <p>
-        Os alunos se distinguem por dois <strong>perfis independentes</strong>. A{" "}
-        <em>aptidão</em> é a normal de onde saem as notas de primeira tentativa, dada por média e
-        desvio padrão, mais o quanto cada recursada acrescenta (eq. 33). A <em>afinidade</em> é um
-        expoente aplicado à matriz de utilidades antes de ela ser normalizada — expoente maior que
-        1 afasta as utilidades entre si (o aluno concentra a preferência em uma ou duas
-        disciplinas), menor que 1 as aproxima (ele é indiferente entre o que lhe resta), e 1 não
-        distorce nada —, mais a carga horária máxima que ele carrega por período (W<sub>a</sub>,
-        eq. 4). A afinidade é justamente a informação que o leilão diz captar e a ordenação por CR
-        não vê. Como os eixos são independentes, a fatia de uma combinação é o produto das duas, e
-        a repartição é exata e idêntica em toda geração — não sorteada, para que a comparação entre
-        perfis não meça a sorte do sorteio junto.
+        <strong>Não há perfis de aluno.</strong> Toda a população sai de duas distribuições do
+        cenário, e o que distingue um aluno do outro é só o que a <em>seed</em> sorteou para ele. A{" "}
+        <em>normal das notas</em> é de onde cada par (aluno, disciplina) sorteia a nota em cada
+        período, por média e desvio, e a recursada desloca essa média (eq. 33) — sem dispersão de
+        desempenho o CR vira ruído e a eq. (57) não mede nada. A <em>log-normal das utilidades</em> tem
+        um parâmetro só, o desvio <em>σ</em>, e é ele que diz o quanto o aluno diferencia uma
+        disciplina da outra: <em>σ</em> grande concentra a preferência e <em>σ</em> pequeno a
+        achata. Diferenciar preferência é justamente a informação
+        que o leilão diz captar e a ordenação por CR não vê.
       </p>
       <p>
-        Os dois parâmetros extras moram no perfil, e não no cenário, porque são a mesma grandeza
-        que o eixo já nomeia. O incremento de aprendizado é o quanto o aluno aprende: um perfil que
-        erra muito na primeira tentativa pode ser justamente o que mais ganha ao repetir, e com um
-        valor global não havia como dizer isso. A carga horária máxima anda junto da concentração:
-        querer poucas disciplinas com intensidade e querer muitas por igual não descrevem só
-        preferência, mas também quanto se consegue carregar. Como W<sub>a</sub> varia entre alunos,
-        a semestralização mede cada um contra o próprio teto.
+        A carga horária máxima (W<sub>a</sub>, eq. 4) também é do cenário e igual para todos, então
+        a semestralização compara todo mundo contra o mesmo teto. Até 08/10/2026 os alunos se
+        dividiam em perfis de <em>aptidão</em> e <em>afinidade</em>, cada um com os seus parâmetros
+        e a sua fatia da população; isso saiu a pedido, e com ele saiu o recorte dos relatórios por
+        perfil. A heterogeneidade continua — ela só deixou de ser sistemática.
       </p>
       <p>
         A conclusão do curso é a <strong>única</strong> porta de saída: quem não concluiu continua
@@ -150,24 +148,29 @@ export function Project() {
         <li>
           Cada aluno ativo lê sua linha da matriz de utilidades — já sorteada na inicialização —
           sobre o seu conjunto elegível: as disciplinas que ainda não aprovou e cujos
-          pré-requisitos já cumpriu (eqs. 41–43). Fora dele a utilidade é zero, e a matriz é
-          distorcida pelo expoente do perfil de afinidade e renormalizada, de modo que U
-          <sub>a</sub> continue valendo a eq. (43).
+          pré-requisitos já cumpriu (eqs. 41–43). Fora dele a utilidade é zero. A linha é
+          sorteada de novo a cada período — o que ele quis no semestre passado não determina o que
+          quer neste — e não é renormalizada, então a soma do que está ao alcance dele é o
+          U<sub>a</sub><sup>(t)</sup> da eq. (43). Não há poupança: saldo de créditos e carga
+          horária não passam de um período para o outro.
         </li>
         <li>
-          Em cada rodada, os lances saem deterministicamente das utilidades (eqs. 44–46), o leilão
-          resolve o WDP e vagas, carga horária e orçamento são descontados (eqs. 13, 14, 27).
+          Em cada rodada, os lances saem deterministicamente das utilidades: o aluno resolve uma
+          mochila côncava em que cada crédito pesa 1 e o N-ésimo crédito posto numa disciplina
+          vale u<sub>a,x</sub>/N. Depois o leilão resolve o WDP e vagas, carga horária e orçamento
+          são descontados (eqs. 13, 14, 27).
           Empates são resolvidos pela regra de desempate, viés administrativo e perturbação da
           Seção 7.1.2.
         </li>
         <li>
-          Ao fim do período saem as notas — sorteadas da normal do perfil de aptidão do aluno —, o
+          Ao fim do período saem as notas — sorteadas da normal do cenário, com a média
+          deslocada pelo incremento de aprendizado de quem recursa —, o
           retorno de créditos (eqs. 33–36) e as conclusões de curso (eq. 40).
         </li>
       </ol>
       <p>
         Tudo é reprodutível: nomes, utilidades e notas vêm da <em>seed</em>, e todos são
-        sorteados <strong>antes</strong> do primeiro período. O período de ingresso e o perfil não
+        sorteados <strong>antes</strong> do primeiro período. O período de ingresso não
         vêm dela — são repartições exatas do cenário, idênticas sob qualquer seed. A mesma
         configuração produz sempre a mesma simulação, como exige a Seção 7.3 — uma vez
         inicializado, o modelo não sorteia mais nada em tempo de execução.
@@ -184,11 +187,9 @@ export function Project() {
       <p>
         O resultado de cada período é medido pelas métricas da Seção 7.3.3, e elas se dividem
         pelos dois lados do mercado. As <strong>do aluno</strong> — eficiência, equidade,
-        correlação, semestralização, progressão, créditos — são agregadas por um de três recortes:
-        a geração, o perfil de aptidão ou o perfil de afinidade. Os três partem a mesma população
-        de formas diferentes, então somar qualquer um deles reproduz a universidade; o que muda de
-        um para o outro é a pergunta. Com dezenas de alunos, qualquer recorte mais granular vira
-        ruído.
+        correlação, semestralização, progressão, créditos — são agregadas pelo recorte da{" "}
+        <strong>geração</strong>, que parte a mesma população do agregado: somá-la reproduz a
+        universidade. Com dezenas de alunos, qualquer recorte mais granular vira ruído.
       </p>
       <p>
         As <strong>da disciplina</strong> — concorrência, preço, ocupação e taxa de aprovação —
@@ -296,19 +297,16 @@ export function Project() {
       <h2>Escolhas de modelagem não fixadas pelo anteprojeto</h2>
       <ul>
         <li>
-          <strong>Perfis de aptidão:</strong> as notas de primeira tentativa saem de uma normal
-          parametrizada por média e desvio padrão, uma por perfil. Sem heterogeneidade de
-          desempenho o CR vira ruído e a eq. (57) não mede nada.
+          <strong>A normal das notas:</strong> as notas saem de uma normal do cenário,
+          parametrizada por média e desvio padrão. Sem dispersão de desempenho o CR vira ruído e a
+          eq. (57) não mede nada.
         </li>
         <li>
-          <strong>Perfis de afinidade:</strong> um expoente sobre a matriz de utilidades, seguido
-          de renormalização. Não consta no anteprojeto, e existe porque concentrar preferência é
-          exatamente o que o leilão deveria recompensar.
-        </li>
-        <li>
-          <strong>Notas como parâmetro de entrada:</strong> a matriz com a nota de primeira
-          tentativa de cada par (aluno, disciplina) é gerada junto com a população, e cada recursada
-          soma à tentativa anterior o incremento de aprendizado do perfil de aptidão do aluno.
+          <strong>Notas como parâmetro de entrada:</strong> a matriz com o sorteio de cada par
+          (aluno, disciplina) em cada <em>período</em> é gerada junto com a população. A recursada
+          desloca a <strong>média</strong> do sorteio pelo incremento de aprendizado, então ela
+          não garante nota maior — o aluno aprende, mas pode ter um dia pior. O que não regride é
+          a maior nota já obtida, que é a que conta para o CR.
         </li>
 
         <li>
@@ -321,15 +319,26 @@ export function Project() {
           aprovar na grade inteira — não há carga horária mínima a somar separadamente.
         </li>
         <li>
-          <strong>Orçamento gasto (U<sub>a</sub>):</strong> fração sorteada em [0,5; 1,0]; as
-          utilidades sobre o conjunto elegível seguem uma Dirichlet uniforme, distorcida pelo
-          expoente da afinidade.
+          <strong>Utilidades (u):</strong> um valor por par (aluno, disciplina, período), tirado
+          de uma log-normal de desvio <em>σ</em> e dividido pelo
+          somatório do conjunto elegível — a soma dá 1. O anteprojeto não fixa a distribuição nem
+          o valor de U<sub>a</sub>; aqui ele é 1 para todo aluno, porque nada de saldo passa de um
+          período para o outro e poupar seria só perder.
+        </li>
+        <li>
+          <strong>Ordem de desempate entre disciplinas:</strong> quando duas valem o mesmo para um
+          aluno, ganha a <strong>listada primeiro</strong> — a ordem em que a grade aparece nesta
+          interface, que é a ordem em que as disciplinas foram acrescentadas. É global: a mesma
+          para todo aluno, período e rodada, e vale tanto no lance quanto no pedido por CR. Com
+          utilidade sorteada o empate tem probabilidade zero; a regra existe para que um cenário
+          escrito à mão dê sempre o mesmo resultado. Não se confunde com o desempate do leilão
+          (eq. 20), que é <em>entre alunos</em>.
         </li>
         <li>
           <strong>Ingresso escalonado (t<sub>a</sub>):</strong> entra uma geração nova a cada
           período, do primeiro ao L-ésimo, com o número de alunos que o cenário definir — como um
-          vestibular por semestre. Todas as gerações têm o mesmo tamanho e a mesma composição de
-          perfis. O anteprojeto não fixa a distribuição dos ingressos.
+          vestibular por semestre. Todas as gerações têm o mesmo tamanho. O anteprojeto não fixa
+          a distribuição dos ingressos.
         </li>
       </ul>
 
@@ -387,8 +396,19 @@ export function Project() {
         formaram em cada execução.
       </p>
       <p>
+        A comparação tem um <strong>segundo eixo, opcional</strong>: a varredura da forma da
+        preferência. A hipótese do trabalho é que o leilão capta intensidade que a ordenação por
+        CR não enxerga — e se é isso, o quanto a população diferencia as disciplinas não é um
+        parâmetro a calibrar, é a variável independente. A varredura roda a comparação inteira em
+        vários <em>σ</em>, numa faixa linear, com poucas execuções por ponto: ali se lê a{" "}
+        <strong>forma da curva</strong>, enquanto os boxplots respondem, no <em>σ</em> canônico e
+        com muitas execuções, se a diferença supera o ruído amostral. O resultado sai em duas
+        seções próprias — as linhas por métrica e, ao lado, o histograma de como a utilidade se
+        reparte em cada <em>σ</em>, que é o gráfico da causa.
+      </p>
+      <p>
         Uma <strong>simulação</strong> abre os gráficos do cenário, em dois blocos. Os{" "}
-        <strong>gráficos por aluno</strong> trazem uma linha por geração ou por perfil, com o eixo
+        <strong>gráficos por aluno</strong> trazem uma linha por geração, com o eixo
         horizontal por período ou por rodada, divididos em métricas principais, progressão e
         economia de créditos. Os <strong>gráficos por disciplina</strong> trazem uma linha por
         período da grade, por número de vagas ou por carga horária, sempre em período. Depois vêm
@@ -397,8 +417,8 @@ export function Project() {
         fica no navegador, então execuções antigas sobrevivem a um recarregamento da página.
       </p>
       <p>
-        A barra lateral à direita lista os alunos daquela execução, e filtra por geração e pelos
-        dois perfis. Clicar num deles abre a tela individual: a progressão dele período a período
+        A barra lateral à direita lista os alunos daquela execução, e filtra por geração. Clicar
+        num deles abre a tela individual: a progressão dele período a período
         e, em cada período, tudo o que pediu. Cada pedido tem uma de quatro saídas —{" "}
         <strong>vaga garantida</strong> (o ingressante, fora do leilão),{" "}
         <strong>atendida</strong> (e em que rodada), <strong>recusada</strong> (deu lance e perdeu

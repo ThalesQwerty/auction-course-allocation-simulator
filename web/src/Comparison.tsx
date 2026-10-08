@@ -1,15 +1,18 @@
 import { useMemo } from "react";
 import {
   BoxPlot,
+  Histogram,
+  MetricChart,
   boxStats,
   categoricalColors,
   formatCount,
   formatRatio,
   usePrefersDark,
 } from "./charts";
+import type { SeriesPoint } from "./charts";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
 import { COMPARISON_ARMS } from "./types";
-import type { RunSummary } from "./types";
+import type { ArmResult, RunSummary, Sweep } from "./types";
 
 /** Períodos com uma casa: o tempo de formatura anda em frações de período, e
  * duas casas sugeririam uma precisão que a amostra não tem. */
@@ -44,8 +47,8 @@ interface Metric {
  *
  * Nada de crédito: orçamento, preço e retorno não existem do lado da linha de
  * base, e comparar um mecanismo com o vazio não compara nada. E nenhum recorte
- * por geração ou perfil: aqui a pergunta é sobre o modelo, não sobre o que
- * acontece dentro de cada um.
+ * por geração: aqui a pergunta é sobre o modelo, não sobre o que acontece
+ * dentro de cada um.
  *
  * Duas saíram em 08/10. A **ocupação** (θ), porque com o calouro fora do
  * recorte ela deixou de se ler como "o quanto a universidade encheu" — as vagas
@@ -95,6 +98,24 @@ const METRICS: Metric[] = [
     format: formatPeriods,
   },
 ];
+
+/** Formandos entra **só na varredura**, e não no boxplot. O motivo é o achado
+ * que a varredura revelou: ψ̄ sobe monotonicamente conforme a preferência
+ * concentra e chega perto de 1 na ponta, onde ninguém se forma — o aluno quer
+ * uma disciplina só, consegue, e a satisfação dele é plena. ψ̄ é satisfação
+ * *relativa ao que o aluno queria*, então ela é cega para essa patologia, e a
+ * contagem de formandos é a única métrica que a pega. Lado a lado no mesmo eixo
+ * x, as duas contam a troca que o mecanismo faz. */
+const GRADUATES: Metric = {
+  id: "graduates",
+  title: "Formandos",
+  short: "Formandos",
+  hint: "Quantos concluíram o curso no horizonte. Sem ele, ψ̄ sozinha diria que concentrar a preferência é sempre melhor — e no extremo ela chega perto de 1 justamente onde ninguém se forma",
+  of: (run) => run.graduates,
+  bounds: [0, Infinity],
+  betterWhen: "higher",
+  format: formatCount,
+};
 
 const ORDINALS = ["1ª", "2ª", "3ª", "4ª", "5ª", "6ª", "7ª", "8ª", "9ª", "10ª"];
 
@@ -150,6 +171,84 @@ export function Comparison({
    * derrubar a tela. */
   const runsOf = (key: string): RunSummary[] =>
     result.arms.find((arm) => arm.key === key)?.runs ?? [];
+
+  /** As duas distribuições de entrada do cenário. A de utilidades só entra
+   * aqui quando **não** há varredura — com varredura ela tem seção própria, uma
+   * por sigma. A de notas entra sempre, porque não depende de sigma: varrida,
+   * ela sairia idêntica em todos os pontos. */
+  const scenarioHistograms = [
+    result.grade_distribution?.length ? (
+      <Histogram
+        key="notas"
+        title="Notas de primeira tentativa"
+        hint="a normal do cenário, truncada em [0, 10]"
+        fractions={result.grade_distribution}
+        domain={[0, 10]}
+      />
+    ) : null,
+    !result.sweep && result.utility_distribution?.length ? (
+      <Histogram
+        key="utilidades"
+        title="Utilidades"
+        hint="como a preferência de um aluno se reparte entre as disciplinas"
+        fractions={result.utility_distribution}
+      />
+    ) : null,
+  ].filter(Boolean);
+
+  /** A varredura, quando a execução a pediu. Comparações gravadas antes dela
+   * existir simplesmente não a trazem, e a seção some em vez de aparecer
+   * vazia. */
+  const sweep: Sweep | null = result.sweep ?? null;
+
+  /** Um ponto por sigma, com uma coluna por braço — o formato que o
+   * `MetricChart` consome. O valor de cada braço é a **mediana** das execuções
+   * daquele ponto: com poucas execuções por ponto a média seria arrastada por
+   * uma só, e o que interessa aqui é a tendência. */
+  const sweepSeries = (metric: Metric): SeriesPoint[] =>
+    (sweep?.points ?? []).map((point) => {
+      const row: SeriesPoint = { x: point.sigma };
+      for (const arm of COMPARISON_ARMS) {
+        const found: ArmResult | undefined = point.arms.find((a) => a.key === arm.key);
+        const values = (found?.runs ?? [])
+          .map(metric.of)
+          .filter((value): value is number => value !== null && Number.isFinite(value))
+          .sort((a, b) => a - b);
+        if (values.length) {
+          const middle = Math.floor(values.length / 2);
+          row[arm.label] =
+            values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+        }
+      }
+      return row;
+    });
+
+  /** Marcas do eixo: uma por ponto. Com mais de 8 pontos elas colidem, e aí
+   * ficam uma sim uma não — o eixo é contínuo, então pular marca não esconde
+   * dado. */
+  const sweepTicks = (sweep?.points ?? [])
+    .map((point) => point.sigma)
+    .filter((_, index, all) => all.length <= 8 || index % 2 === 0);
+  const formatSigma = (value: number) =>
+    value.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+
+  const sweepChartFor = (metric: Metric) => (
+    <MetricChart
+      key={`sweep-${metric.id}`}
+      title={metric.title}
+      hint={metric.hint}
+      data={sweepSeries(metric)}
+      series={labels}
+      colors={colors}
+      domain={metric.bounds ? [metric.bounds[0], metric.bounds[1] === Infinity ? "auto" : metric.bounds[1]] : undefined}
+      format={metric.format}
+      zeroLine={metric.zeroLine}
+      numericX
+      xTicks={sweepTicks}
+      xFormat={formatSigma}
+      xReference={sweep?.canonical}
+    />
+  );
 
   /** Quantas rodadas o cenário teve, lido do próprio resultado. Comparações
    * gravadas antes da saturação existir não trazem a lista, e aí a seção some
@@ -385,6 +484,109 @@ export function Comparison({
             do recorte, então o número é só o que o mecanismo alocou a quem disputou.
           </p>
           <div className="chart-grid">{saturation.map(chartFor)}</div>
+        </section>
+      )}
+
+      {sweep && sweep.points.length > 1 && (
+        <section className="chart-section">
+          <header className="chart-section-head">
+            <h2>Dependência da dispersão da preferência</h2>
+            <p>
+              A mesma comparação em vários <em>σ</em>, com {sweep.runs}{" "}
+              {sweep.runs === 1 ? "execução" : "execuções"} por ponto — aqui se lê a{" "}
+              <strong>forma da curva</strong>, não a significância de um ponto, que é o que os
+              boxplots acima respondem no <em>σ</em> canônico, marcado no eixo
+            </p>
+          </header>
+          <p className="note">
+            <em>σ</em> é o desvio da log-normal de onde sai a utilidade: à{" "}
+            <strong>esquerda</strong> o aluno é quase indiferente entre as disciplinas e à{" "}
+            <strong>direita</strong> ele quer uma ou duas e despreza o resto.
+          </p>
+          <p className="note">
+            O que esta seção mostra é a hipótese do trabalho: a linha da{" "}
+            <strong>ordenação por CR é plana</strong> — concentrar a preferência da população não
+            muda nada para um mecanismo que não enxerga intensidade —, enquanto a do leilão sobe.
+            O vão entre elas <em>é</em> o quanto de intensidade há para captar. Em troca, o painel
+            de <strong>formandos</strong> cai na mesma direção: é a taxa de câmbio entre satisfação
+            e diplomas.
+          </p>
+          <div className="chart-grid">{[...METRICS, GRADUATES].map(sweepChartFor)}</div>
+        </section>
+      )}
+
+      {sweep && sweep.points.length > 0 && (
+        <section className="chart-section">
+          <header className="chart-section-head">
+            <h2>Como a utilidade se reparte em cada σ</h2>
+            <p>
+              O gráfico da <strong>causa</strong>, ao lado dos da consequência: um histograma por
+              ponto da varredura, mostrando como a preferência de um aluno se distribui entre as
+              disciplinas que ele tem diante de si
+            </p>
+          </header>
+          <p className="note">
+            Cada linha (aluno, período) é reescalada ao <strong>próprio</strong> mínimo e máximo e
+            dividida em {sweep.points[0].distribution.length} faixas de mesma largura; a altura é a
+            fração de utilidades que cai em cada faixa, e elas somam 1. Utilidade zero não entra —
+            ela marca o inelegível, não uma preferência fraca.
+          </p>
+          <p className="note">
+            O eixo horizontal traz as <strong>divisas</strong> das faixas. Como a escala é por
+            linha, ele não é o valor da utilidade: <strong>0</strong> é a disciplina que aquele
+            aluno <em>menos</em> quer no período e <strong>1</strong> é a que ele <em>mais</em>{" "}
+            quer, com os valores no meio dizendo onde entre as duas cada disciplina caiu. Massa
+            empilhada à esquerda é um aluno que quer uma coisa e despreza o resto; massa espalhada
+            é um aluno que diferencia pouco.
+          </p>
+          <p className="note">
+            A escala é <strong>por linha</strong>, e não do menor ao maior valor da matriz inteira,
+            porque global degenera: um único extremo define o intervalo e, de σ = 1 em diante, 94%
+            dos valores caem na primeira faixa — todos os gráficos sairiam iguais e nenhum
+            descreveria um aluno. A última faixa guarda sempre o máximo da linha, então ela nunca
+            é vazia: num conjunto de <em>n</em> disciplinas ela vale pelo menos 1/<em>n</em>.
+          </p>
+          <div className="chart-grid">
+            {sweep.points.map((point) => (
+              <Histogram
+                key={`hist-${point.sigma}`}
+                title={`σ = ${formatSigma(point.sigma)}`}
+                hint={
+                  Math.abs(point.sigma - sweep.canonical) < 1e-9
+                    ? "o σ canônico do cenário"
+                    : undefined
+                }
+                fractions={point.distribution}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {scenarioHistograms.length > 0 && (
+        <section className="chart-section">
+          <header className="chart-section-head">
+            <h2>As distribuições do cenário</h2>
+            <p>
+              De onde vieram os números: as duas matrizes sorteadas na inicialização, cada uma como
+              a fração de valores que cai em cada faixa
+            </p>
+          </header>
+          <p className="note">
+            As <strong>notas</strong> são as de primeira tentativa, sobre [0, 10] — é a normal do
+            cenário já truncada e arredondada, e o truncamento empilha massa nas pontas sempre que
+            a média estiver perto delas, o que não se lê dos parâmetros. A recursada fica de fora
+            porque ela desloca a média: misturar as tentativas somaria distribuições diferentes, e
+            quantas recursadas acontecem é resultado, não entrada.
+          </p>
+          <p className="note">
+            Nas <strong>utilidades</strong>, cada linha (aluno, período) é reescalada ao{" "}
+            <strong>próprio</strong> mínimo e máximo, então o eixo não é o valor da utilidade:{" "}
+            <strong>0</strong> é a disciplina que aquele aluno menos quer no período e{" "}
+            <strong>1</strong> é a que ele mais quer. Massa à esquerda é um aluno que quer uma
+            coisa e despreza o resto; massa espalhada é um aluno que diferencia pouco.
+          </p>
+          <div className="chart-grid">{scenarioHistograms}</div>
         </section>
       )}
 

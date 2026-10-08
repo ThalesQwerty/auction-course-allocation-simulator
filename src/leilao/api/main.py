@@ -17,15 +17,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..auction import AuctionInput, Bid, run_auction
-from ..comparison import run_comparison
-from ..config import (
-    DEFAULT_AFFINITY,
-    DEFAULT_APTITUDE,
-    AffinityProfile,
-    AptitudeProfile,
-    Discipline,
-    SimulationConfig,
-)
+from ..comparison import run_comparison, run_sweep
+from ..config import Discipline, SimulationConfig
 from ..entities import Agent, Good, MutualExclusion
 from ..simulation import run_simulation
 from .schemas import (
@@ -36,6 +29,8 @@ from .schemas import (
     RunRequest,
     RunResponse,
     RunSummaryOut,
+    SweepOut,
+    SweepPointOut,
     ScenarioIn,
     SimulateRequest,
     SimulateResponse,
@@ -92,24 +87,16 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
     e a comparação passa cada seed da amostra. É o mesmo cenário dos dois lados,
     que é o que a Seção 7.3 exige da comparação.
     """
-    # Lista de perfis vazia cai no perfil neutro do eixo — o mesmo default do
-    # motor, repetido aqui porque uma lista vazia *apagaria* esse default em vez
-    # de pedi-lo, e requisições montadas antes dos perfis existirem mandam [].
-    aptitude = [
-        AptitudeProfile(p.name, p.mean, p.stddev, p.learning_gain, p.share)
-        for p in req.aptitude_profiles
-    ] or [DEFAULT_APTITUDE]
-    affinity = [
-        AffinityProfile(p.name, p.kind, p.intensity, p.max_hours, p.share)
-        for p in req.affinity_profiles
-    ] or [DEFAULT_AFFINITY]
     return SimulationConfig(
         disciplines=[
             Discipline(d.name, d.seats, d.hours, tuple(d.prerequisites))
             for d in req.disciplines
         ],
-        aptitude_profiles=aptitude,
-        affinity_profiles=affinity,
+        grade_mean=req.grade_mean,
+        grade_stddev=req.grade_stddev,
+        learning_gain=req.learning_gain,
+        utility_sigma=req.utility_sigma,
+        max_hours=req.max_hours,
         periods=req.periods,
         entry_periods=req.entry_periods,
         students_per_period=req.students_per_period,
@@ -146,8 +133,8 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
         ),
         disciplines=result.disciplines,
         curriculum_periods=result.curriculum_periods,
-        aptitude_profiles=result.aptitude_profiles,
-        affinity_profiles=result.affinity_profiles,
+        utility_distribution=result.utility_distribution,
+        grade_distribution=result.grade_distribution,
     )
 
 
@@ -162,7 +149,9 @@ def compare(req: CompareRequest) -> CompareResponse:
     o modelo, não o que acontece dentro de cada um.
 
     São 3N simulações completas; com um cenário grande a requisição leva
-    dezenas de segundos.
+    dezenas de segundos. Pedir a **varredura** acrescenta a comparação inteira
+    em cada forma de preferência da progressão, e aí são minutos — por isso ela
+    roda com bem menos execuções por ponto.
     """
     try:
         config = build_config(req)
@@ -171,6 +160,21 @@ def compare(req: CompareRequest) -> CompareResponse:
 
     try:
         result = run_comparison(config, runs=req.runs)
+        sweep = (
+            run_sweep(
+                config,
+                min_sigma=req.sweep.min_sigma,
+                max_sigma=req.sweep.max_sigma,
+                points=req.sweep.points,
+                runs=req.sweep.runs,
+            )
+            if req.sweep is not None
+            else None
+        )
+    except ValueError as exc:
+        # Faixa inválida ou varredura grande demais: é erro de requisição, não
+        # falha de simulação.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 — reporta falha do solver/instância inviável
         raise HTTPException(
             status_code=422, detail=f"falha ao comparar os mecanismos: {exc}"
@@ -178,6 +182,8 @@ def compare(req: CompareRequest) -> CompareResponse:
 
     return CompareResponse(
         runs=result.runs,
+        utility_distribution=result.utility_distribution,
+        grade_distribution=result.grade_distribution,
         arms=[
             ArmResultOut(
                 key=arm.key,
@@ -187,6 +193,30 @@ def compare(req: CompareRequest) -> CompareResponse:
             )
             for arm in result.arms
         ],
+        sweep=(
+            SweepOut(
+                canonical=sweep.canonical,
+                runs=sweep.runs,
+                points=[
+                    SweepPointOut(
+                        sigma=point.sigma,
+                        distribution=point.distribution,
+                        arms=[
+                            ArmResultOut(
+                                key=arm.key,
+                                mechanism=arm.mechanism,
+                                credit_return=arm.credit_return,
+                                runs=[RunSummaryOut.model_validate(r) for r in arm.runs],
+                            )
+                            for arm in point.arms
+                        ],
+                    )
+                    for point in sweep.points
+                ],
+            )
+            if sweep is not None
+            else None
+        ),
     )
 
 

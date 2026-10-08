@@ -1,22 +1,17 @@
 import { useMemo, useState } from "react";
 import { CYCLIC, curriculumLength, curriculumPeriods } from "./curriculum";
 import { PresetList } from "./PresetList";
-import { generationMix } from "./profiles";
 import {
-  AFFINITY_KINDS,
   CREDIT_RETURN_POLICIES,
-  MAX_AFFINITY_INTENSITY,
   COMPARISON_ARMS,
+  DEFAULT_SWEEP,
   MAX_COMPARISON_RUNS,
-  affinityExponent,
 } from "./types";
 import type {
-  AffinityKind,
-  AffinityProfileInput,
-  AptitudeProfileInput,
   CreditReturnPolicy,
   DisciplineInput,
   SimulateRequest,
+  SweepIn,
 } from "./types";
 
 /** O que o botão executa. O **cenário é o mesmo nos dois**: o que muda é se
@@ -42,6 +37,8 @@ export function Config({
   setMode,
   runs,
   setRuns,
+  sweep,
+  setSweep,
   running,
   error,
   onRun,
@@ -55,6 +52,10 @@ export function Config({
   setMode: (mode: RunMode) => void;
   runs: number;
   setRuns: (runs: number) => void;
+  /** `null` = só o k canônico. A varredura é o segundo eixo do experimento, e
+   * custa pontos x 3 modelos x execuções simulações. */
+  sweep: SweepIn | null;
+  setSweep: (sweep: SweepIn | null) => void;
   running: boolean;
   error: string | null;
   onRun: () => void;
@@ -71,25 +72,6 @@ export function Config({
     setConfig((current) => ({ ...current, ...values }));
   }
 
-  /** Edita um perfil de um dos dois eixos. Os dois têm a mesma forma — nome,
-   * parâmetros e fatia —, então a mesma função serve aos dois com a chave do
-   * eixo. */
-  function updateProfile<K extends "aptitude_profiles" | "affinity_profiles">(
-    axis: K,
-    index: number,
-    values: Partial<SimulateRequest[K][number]>
-  ) {
-    setConfig((current) => ({
-      ...current,
-      [axis]: current[axis].map((p, i) => (i === index ? { ...p, ...values } : p)),
-    }));
-  }
-  function removeProfile(axis: "aptitude_profiles" | "affinity_profiles", index: number) {
-    setConfig((current) => ({
-      ...current,
-      [axis]: current[axis].filter((_, i) => i !== index),
-    }));
-  }
   function updateDiscipline(index: number, values: Partial<DisciplineInput>) {
     setConfig((current) => ({
       ...current,
@@ -128,24 +110,22 @@ export function Config({
     }));
   }
 
+  // Quantos pontos a varredura pediria, e quanto isso custa em simulações.
+  const sweepPoints = sweep && sweep.max_sigma >= sweep.min_sigma ? sweep.points : 0;
+  const sweepSimulations = sweepPoints * COMPARISON_ARMS.length * (sweep?.runs ?? 0);
+
   const periods = useMemo(() => curriculumPeriods(config.disciplines), [config.disciplines]);
   const hasCycle = Object.values(periods).some((p) => p === CYCLIC);
   const gradeLength = curriculumLength(config.disciplines);
   const firstPeriod = config.disciplines.filter((d) => periods[d.name] === 1);
   const entryHours = firstPeriod.reduce((sum, d) => sum + d.hours, 0);
-  // W_a é por perfil de afinidade. A matrícula garantida não escolhe quem a
-  // recebe, então ela tem de caber no perfil mais apertado; o piso de períodos,
-  // ao contrário, é do aluno mais rápido possível, e vale o mais folgado.
-  const workloads = config.affinity_profiles.map((p) => p.max_hours);
-  const tightestWorkload = workloads.length ? Math.min(...workloads) : 0;
-  const roomiestWorkload = workloads.length ? Math.max(...workloads) : 0;
   // O ingressante entra direto em todas as de 1º período: a geração tem de
   // caber na menor oferta delas, e a carga somada tem de caber em W_a (eq. 4).
   const smallestEntrySeats = firstPeriod.length
     ? Math.min(...firstPeriod.map((d) => d.seats))
     : 0;
   const entryTooLarge = config.students_per_period > smallestEntrySeats;
-  const entryTooHeavy = entryHours > tightestWorkload;
+  const entryTooHeavy = entryHours > config.max_hours;
 
   // Uma geração por período *com ingresso*: a população é esse número vezes L,
   // não vezes |T|. Depois do L-ésimo período ninguém mais entra — os períodos
@@ -162,24 +142,8 @@ export function Config({
   // período da grade. Um prazo de jubilamento abaixo disso desliga a população
   // inteira por construção.
   const floorPeriods = Math.max(
-    Math.ceil(totalHours / Math.max(roomiestWorkload, 1)),
+    Math.ceil(totalHours / Math.max(config.max_hours, 1)),
     gradeLength
-  );
-
-  // As fatias de cada eixo repartem a população inteira, então somam 100%. O
-  // motor recusa o cenário fora disso — normalizar em silêncio esconderia um
-  // erro de digitação que muda o cenário sem avisar.
-  const aptitudeShare = config.aptitude_profiles.reduce((sum, p) => sum + p.share, 0);
-  const affinityShare = config.affinity_profiles.reduce((sum, p) => sum + p.share, 0);
-  const sharesOk = (total: number) => Math.abs(total - 100) < 1e-6;
-  const mix = useMemo(
-    () =>
-      generationMix(
-        config.students_per_period,
-        config.aptitude_profiles,
-        config.affinity_profiles
-      ),
-    [config.students_per_period, config.aptitude_profiles, config.affinity_profiles]
   );
 
   return (
@@ -217,6 +181,90 @@ export function Config({
             </div>
           )}
         </div>
+        {comparing && (
+          <div className="subpanel">
+            <h3>
+              Varredura da forma da preferência (<em>k</em>)
+            </h3>
+            <div className="field-row">
+              <div className="field">
+                <label>Varrer σ</label>
+                <select
+                  value={sweep ? "on" : "off"}
+                  onChange={(e) => setSweep(e.target.value === "on" ? DEFAULT_SWEEP : null)}
+                >
+                  <option value="off">não — só o σ do cenário</option>
+                  <option value="on">sim — uma faixa de σ</option>
+                </select>
+              </div>
+              {sweep && (
+                <>
+                  <div className="field">
+                    <label>σ mínimo</label>
+                    <input
+                      type="number"
+                      min={0.01}
+                      step={0.25}
+                      value={sweep.min_sigma}
+                      onChange={(e) => setSweep({ ...sweep, min_sigma: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>σ máximo</label>
+                    <input
+                      type="number"
+                      min={0.01}
+                      step={0.25}
+                      value={sweep.max_sigma}
+                      onChange={(e) => setSweep({ ...sweep, max_sigma: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Pontos</label>
+                    <input
+                      type="number"
+                      min={2}
+                      max={41}
+                      value={sweep.points}
+                      onChange={(e) => setSweep({ ...sweep, points: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Execuções por ponto</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={MAX_COMPARISON_RUNS}
+                      value={sweep.runs}
+                      onChange={(e) => setSweep({ ...sweep, runs: Number(e.target.value) })}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <p className="note">
+              A varredura roda a comparação inteira em cada <em>σ</em> da faixa, em passos
+              iguais. O <em>σ</em> do cenário ({config.utility_sigma.toLocaleString("pt-BR")}) é o{" "}
+              <strong>canônico</strong> — o que os boxplots medem com N execuções —, e ele é
+              marcado no eixo mesmo quando não cai exatamente num ponto varrido.{" "}
+              {sweep ? (
+                sweepPoints > 0 ? (
+                  <>
+                    São <strong>{sweepPoints} pontos</strong> de {sweep.runs} execuções ={" "}
+                    <strong>{sweepSimulations} simulações</strong> a mais. Os gráficos de linha e
+                    os histogramas de utilidade aparecem em seções próprias do resultado.
+                  </>
+                ) : (
+                  <span className="invalid-text">
+                    O σ mínimo não pode passar do máximo.
+                  </span>
+                )
+              ) : (
+                <>Desligada, o resultado traz só os boxplots.</>
+              )}
+            </p>
+          </div>
+        )}
         {comparing ? (
           <>
             <p className="note">
@@ -282,7 +330,7 @@ export function Config({
               seguintes não têm geração correspondente, eles drenam os que já
               entraram. Sem drenagem as últimas gerações são cortadas pelo
               horizonte antes de poderem se formar. Piso teórico para concluir:{" "}
-              {floorPeriods} períodos — o maior entre ⌈{totalHours} h ÷ {roomiestWorkload} h⌉ e os{" "}
+              {floorPeriods} períodos — o maior entre ⌈{totalHours} h ÷ {config.max_hours} h⌉ e os{" "}
               {gradeLength} elos da cadeia de pré-requisitos.
             </span>
           </div>
@@ -362,317 +410,117 @@ export function Config({
       </div>
 
       <div className="panel">
-        <h2>Perfis de aluno</h2>
+        <h2>Como são os alunos</h2>
         <p className="note">
-          Dois eixos <strong>independentes</strong>: a aptidão dá a distribuição das notas e a
-          afinidade distorce a matriz de utilidades. Como são independentes, a fatia de uma
-          combinação é o produto das duas — dois perfis de 50% em cada eixo dão 25% para cada uma
-          das quatro combinações. A repartição é exata e idêntica em toda geração: sem isso o
-          perfil ficaria correlacionado com o período de ingresso, e o recorte por geração passaria
-          a medir perfil junto com senioridade.
+          <strong>Não há perfis.</strong> Toda a população sai das duas normais abaixo, e o que
+          distingue um aluno do outro é só o que a <em>seed</em> sorteou para ele — não há um
+          grupo que erra mais que outro nem um que concentre mais a preferência. Os dois eixos de
+          perfil existiram até 08/10/2026 e saíram; com eles saiu o recorte dos relatórios por
+          perfil, e sobrou o recorte por geração.
         </p>
 
         <div className="subpanel">
-          <h3>
-            Aptidão — a normal das notas e o que a recursada acrescenta{" "}
-            <span className={sharesOk(aptitudeShare) ? "muted-cell" : "invalid-text"}>
-              ({aptitudeShare.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% de 100%)
-            </span>
-          </h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Nome</th>
-                <th style={{ width: 100 }}>Média</th>
-                <th style={{ width: 120 }}>Desvio padrão</th>
-                <th style={{ width: 150 }}>Ganho por recursada</th>
-                <th style={{ width: 110 }}>% dos alunos</th>
-                <th style={{ width: 90 }} />
-              </tr>
-            </thead>
-            <tbody>
-              {config.aptitude_profiles.map((profile, i) => (
-                <tr key={i}>
-                  <td>
-                    <input
-                      value={profile.name}
-                      onChange={(e) =>
-                        updateProfile("aptitude_profiles", i, { name: e.target.value })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={0}
-                      max={10}
-                      step={0.1}
-                      value={profile.mean}
-                      onChange={(e) =>
-                        updateProfile("aptitude_profiles", i, { mean: Number(e.target.value) })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={0.1}
-                      step={0.1}
-                      value={profile.stddev}
-                      onChange={(e) =>
-                        updateProfile("aptitude_profiles", i, { stddev: Number(e.target.value) })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={0.1}
-                      max={10}
-                      step={0.1}
-                      value={profile.learning_gain}
-                      onChange={(e) =>
-                        updateProfile("aptitude_profiles", i, {
-                          learning_gain: Number(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      className={sharesOk(aptitudeShare) ? undefined : "invalid"}
-                      value={profile.share}
-                      onChange={(e) =>
-                        updateProfile("aptitude_profiles", i, { share: Number(e.target.value) })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="danger"
-                      disabled={config.aptitude_profiles.length === 1}
-                      onClick={() => removeProfile("aptitude_profiles", i)}
-                    >
-                      remover
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="actions">
-            <button
-              className="secondary"
-              onClick={() =>
-                setConfig((current) => ({
-                  ...current,
-                  aptitude_profiles: [
-                    ...current.aptitude_profiles,
-                    {
-                      name: `Aptidão ${current.aptitude_profiles.length + 1}`,
-                      mean: 6.5,
-                      stddev: 1.5,
-                      learning_gain: 2.5,
-                      share: 0,
-                    } satisfies AptitudeProfileInput,
-                  ],
-                }))
-              }
-            >
-              + adicionar perfil de aptidão
-            </button>
+          <h3>Notas — a normal de n⁰ e o que a recursada acrescenta</h3>
+          <div className="field-row">
+            <div className="field">
+              <label>Média</label>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                step={0.1}
+                value={config.grade_mean}
+                onChange={(e) => patch({ grade_mean: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Desvio padrão</label>
+              <input
+                type="number"
+                min={0.1}
+                step={0.1}
+                value={config.grade_stddev}
+                onChange={(e) => patch({ grade_stddev: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Ganho por recursada</label>
+              <input
+                type="number"
+                min={0.1}
+                max={10}
+                step={0.1}
+                value={config.learning_gain}
+                onChange={(e) => patch({ learning_gain: Number(e.target.value) })}
+              />
+            </div>
           </div>
+          <p className="note">
+            Cada par (aluno, disciplina) sorteia desta normal <strong>em cada período</strong>, e
+            o resultado é truncado em [0, 10] e arredondado a 0,1. O desvio é o que dá dispersão de
+            desempenho: sem ele o CR vira ruído e a correlação da eq. (57) não mede nada. O ganho é
+            quanto a recursada desloca a <strong>média</strong> do sorteio (eq. 33) — quem repete
+            tira uma nota nova, de uma normal mais alta, então a recursada não garante nota maior,
+            mas a chance de aprovar sobe a cada tentativa e ninguém fica preso numa disciplina.
+            A maior nota já obtida é a que conta para o CR.
+          </p>
         </div>
 
         <div className="subpanel">
-          <h3>
-            Afinidade — o expoente sobre as utilidades e a carga que o aluno carrega{" "}
-            <span className={sharesOk(affinityShare) ? "muted-cell" : "invalid-text"}>
-              ({affinityShare.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% de 100%)
-            </span>
-          </h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Nome</th>
-                <th style={{ width: 140 }}>Tipo de interesse</th>
-                <th style={{ width: 105 }}>Intensidade</th>
-                <th style={{ width: 95 }}>Expoente</th>
-                <th style={{ width: 150 }}>
-                  Carga máxima (W<sub>a</sub>)
-                </th>
-                <th style={{ width: 110 }}>% dos alunos</th>
-                <th style={{ width: 90 }} />
-              </tr>
-            </thead>
-            <tbody>
-              {config.affinity_profiles.map((profile, i) => (
-                <tr key={i}>
-                  <td>
-                    <input
-                      value={profile.name}
-                      onChange={(e) =>
-                        updateProfile("affinity_profiles", i, { name: e.target.value })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={profile.kind}
-                      onChange={(e) =>
-                        updateProfile("affinity_profiles", i, {
-                          kind: e.target.value as AffinityKind,
-                        })
-                      }
-                    >
-                      {AFFINITY_KINDS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={1}
-                      max={MAX_AFFINITY_INTENSITY}
-                      step={1}
-                      value={profile.intensity}
-                      onChange={(e) =>
-                        updateProfile("affinity_profiles", i, {
-                          intensity: Number(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                  {/* Derivado, não editável: é o que a intensidade e o tipo
-                      significam juntos, e vê-lo evita confundir "diluído 2"
-                      com expoente 2. */}
-                  <td className="muted-cell">
-                    {profile.kind === "concentrated"
-                      ? profile.intensity
-                      : `1/${profile.intensity}`}{" "}
-                    ={" "}
-                    {affinityExponent(profile).toLocaleString("pt-BR", {
-                      maximumFractionDigits: 3,
-                    })}
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={1}
-                      step={10}
-                      className={entryHours > profile.max_hours ? "invalid" : undefined}
-                      value={profile.max_hours}
-                      onChange={(e) =>
-                        updateProfile("affinity_profiles", i, {
-                          max_hours: Number(e.target.value),
-                        })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      className={sharesOk(affinityShare) ? undefined : "invalid"}
-                      value={profile.share}
-                      onChange={(e) =>
-                        updateProfile("affinity_profiles", i, { share: Number(e.target.value) })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="danger"
-                      disabled={config.affinity_profiles.length === 1}
-                      onClick={() => removeProfile("affinity_profiles", i)}
-                    >
-                      remover
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="actions">
-            <button
-              className="secondary"
-              onClick={() =>
-                setConfig((current) => ({
-                  ...current,
-                  affinity_profiles: [
-                    ...current.affinity_profiles,
-                    {
-                      name: `Afinidade ${current.affinity_profiles.length + 1}`,
-                      kind: "concentrated",
-                      intensity: 1,
-                      max_hours: tightestWorkload || 360,
-                      share: 0,
-                    } satisfies AffinityProfileInput,
-                  ],
-                }))
-              }
-            >
-              + adicionar perfil de afinidade
-            </button>
+          <h3>Utilidades — o quanto o aluno diferencia as disciplinas</h3>
+          <div className="field-row">
+            <div className="field">
+              <label>
+                Desvio da log-normal (<em>σ</em>)
+              </label>
+              <input
+                type="number"
+                min={0.01}
+                step={0.25}
+                value={config.utility_sigma}
+                onChange={(e) => patch({ utility_sigma: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field grow">
+              <label>Carga horária máxima (W<sub>a</sub>)</label>
+              <input
+                type="number"
+                min={1}
+                step={30}
+                className={entryTooHeavy ? "invalid" : undefined}
+                value={config.max_hours}
+                onChange={(e) => patch({ max_hours: Number(e.target.value) })}
+              />
+            </div>
           </div>
           <p className="note">
-            {AFFINITY_KINDS.map((kind) => `${kind.label}: ${kind.hint}`).join(" · ")}.
-            Intensidade 1 é o perfil neutro — expoente 1 nos dois sentidos, sem distorção. Depois
-            da distorção a matriz é dividida pelo somatório, de modo que U<sub>a</sub> continue
-            valendo a eq. (43).{" "}
+            Cada par (aluno, disciplina) sorteia um valor de uma <strong>log-normal</strong> de
+            desvio <em>σ</em> <strong>em cada período</strong>, e a linha do aluno é dividida pelo
+            somatório — então ela vale 1 sobre a grade inteira. O gosto dele é resorteado a cada
+            semestre: o que quis no período passado não determina o que quer neste. Sobre a linha
+            agem os zeros — a disciplina já aprovada ou ainda bloqueada por pré-requisito sai do
+            conjunto elegível.
+            <br />
+            <em>σ</em> é o único controle (a média do logaritmo some na normalização), e{" "}
+            <strong>grande concentra, pequeno achata</strong>. A faixa útil cabe entre ~0,25 (a
+            preferida vale ~1,9× a menos querida, aluno quase indiferente) e ~3 (ele quer uma
+            disciplina e despreza o resto). É o papel que o perfil de afinidade tinha.
+          </p>
+          <p className="note">
             {entryTooHeavy ? (
               <span className="invalid-text">
                 As {firstPeriod.length} disciplinas de 1º período somam {entryHours} h e não cabem
-                na carga máxima de todo perfil — o ingressante cursa todas de uma vez, e a eq. (4)
-                tem de continuar valendo.
+                na carga horária máxima — o ingressante cursa todas de uma vez, e a eq. (4) tem de
+                continuar valendo.
               </span>
             ) : (
               <>
                 A carga máxima (W<sub>a</sub>) precisa comportar as {firstPeriod.length}{" "}
                 disciplinas de 1º período, que somam {entryHours} h: é a matrícula garantida de
-                quem ingressa, e ela não escolhe perfil.
+                quem ingressa.
               </>
             )}
           </p>
-        </div>
-
-        <div className="subpanel">
-          <h3>Composição de cada geração — {config.students_per_period} alunos</h3>
-          <p className="note">
-            A repartição inteira é feita sobre a combinação, não eixo a eixo: repartir cada eixo e
-            cruzar depois não garante o produto. Sobras de arredondamento vão às maiores frações,
-            então uma fatia pode não cair exata quando a geração é pequena.
-          </p>
-          <table>
-            <thead>
-              <tr>
-                <th>Aptidão</th><th>Afinidade</th>
-                <th style={{ width: 110 }}>Fatia</th>
-                <th style={{ width: 150 }}>Alunos por geração</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mix.map((combination) => (
-                <tr key={`${combination.aptitude}|${combination.affinity}`}>
-                  <td>{combination.aptitude}</td>
-                  <td>{combination.affinity}</td>
-                  <td className="muted-cell">
-                    {combination.share.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%
-                  </td>
-                  <td>{combination.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
 

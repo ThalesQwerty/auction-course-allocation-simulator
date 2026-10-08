@@ -354,6 +354,27 @@ input.invalid {
   color: var(--muted);
 }
 
+/* Régua de divisas do histograma: os rótulos ficam **entre** as barras, então
+   cada um é posicionado na fração exata do eixo e centrado nela. A caixa recebe
+   do componente as mesmas margens da área de plotagem, de modo que 0% caia na
+   borda esquerda do gráfico e 100% na direita. */
+.histogram-edges {
+  position: relative;
+  height: 14px;
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.histogram-edges span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  /* Larguras iguais para os dígitos: sem isso "0,11" e "0,44" ocupam espaços
+     diferentes e as divisas parecem desalinhadas mesmo estando certas. */
+  font-variant-numeric: tabular-nums;
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;

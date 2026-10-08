@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { compare, simulate } from "./api";
+import type { SweepIn } from "./types";
 import { Comparison } from "./Comparison";
 import { Config, RunMode } from "./Config";
 import { choosePreset, editConfig, initialChoice, PresetChoice } from "./presets";
@@ -26,6 +27,7 @@ export default function App() {
   // uma vez ou se compara N vezes, e trocar de modo não pode mexer nele.
   const [mode, setMode] = useState<RunMode>("single");
   const [runs, setRuns] = useState(20);
+  const [sweep, setSweep] = useState<SweepIn | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -57,7 +59,7 @@ export default function App() {
         // modelos. Carregá-los junto guardaria parâmetros que não tiveram
         // efeito nenhum no resultado.
         const { seed: _seed, credit_return: _return, ...scenario } = config;
-        const request = { ...scenario, runs };
+        const request = { ...scenario, runs, ...(sweep ? { sweep } : {}) };
         entry = newComparison(request, await compare(request));
       } else {
         entry = newRun(config, await simulate(config));
@@ -148,6 +150,8 @@ export default function App() {
             setMode={setMode}
             runs={runs}
             setRuns={setRuns}
+            sweep={sweep}
+            setSweep={setSweep}
             running={running}
             error={error}
             onRun={handleRun}

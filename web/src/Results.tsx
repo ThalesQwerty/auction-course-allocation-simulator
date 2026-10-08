@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { MetricChart, SeriesPoint, categoricalColors, formatCount, formatRatio, rampColors, totalColor, usePrefersDark } from "./charts";
+import { Histogram, MetricChart, SeriesPoint, categoricalColors, formatCount, formatRatio, rampColors, totalColor, usePrefersDark } from "./charts";
 import { describeRun, formatRunDate, hasHistories, SimulationRun } from "./history";
 import { StudentDetail } from "./StudentDetail";
 import { StudentList } from "./StudentList";
@@ -38,26 +38,29 @@ type OverallSeries = { label: string; of: (report: RoundReport) => number | null
 /** Nome da linha agregada dos gráficos aditivos. */
 const TOTAL_SERIES = "Total";
 
-/** Por que recortar a população. Os três eixos particionam os mesmos alunos de
- * formas diferentes, então somar qualquer um deles reproduz a universidade — e
- * trocar de eixo é trocar a lista que alimenta as séries, nada mais.
+/** Por que recortar a população. O eixo particiona os mesmos alunos do agregado,
+ * então somá-lo reproduz a universidade — e trocar de eixo seria trocar a lista
+ * que alimenta as séries, nada mais.
  *
  * A **geração** é série ordenada (quem entrou antes está mais adiante na
- * grade), e por isso leva a rampa; os **perfis** são categorias sem ordem entre
- * si, e levam a paleta categórica. */
-type GroupBy = "cohort" | "aptitude" | "affinity";
-
+ * grade), e por isso leva a rampa, não a paleta categórica. Os recortes por
+ * perfil, que eram categóricos, saíram em 08/10/2026 junto com os perfis. */
 interface Axis {
-  value: GroupBy;
-  label: string;
   /** Rótulo do filtro de séries e do título da tabela. */
   legend: string;
   of: (report: RoundReport) => GroupSnapshot[];
   /** Nome de série a partir da chave crua do recorte. */
   name: (group: string) => string;
-  /** Séries ordenadas (geração) ganham rampa; categóricas, a paleta. */
-  ordered: boolean;
 }
+
+/** O único eixo de recorte de aluno. Os recortes por perfil existiram até
+ * 08/10/2026; a estrutura fica porque acrescentar um eixo é acrescentar outro
+ * `Axis` e voltar com o seletor de agregação. */
+const COHORT_AXIS: Axis = {
+  legend: "Gerações no gráfico",
+  of: (report) => report.by_cohort,
+  name: (group) => cohortLabel(Number(group)),
+};
 
 /** Conclusão do curso (eq. 40) — a única porta de saída. Quem não concluiu
  * continua disputando até o fim do horizonte. */
@@ -429,18 +432,12 @@ export function Results({
   const result = run.result;
   const dark = usePrefersDark();
   const [byRound, setByRound] = useState(false);
-  const [groupBy, setGroupBy] = useState<GroupBy>("cohort");
+
   const [disciplineGroupBy, setDisciplineGroupBy] = useState<DisciplineGroupBy>("seats");
   const [hiddenDisciplines, setHiddenDisciplines] = useState<Record<DisciplineGroupBy, string[]>>(
     { period: [], seats: [], hours: [] }
   );
-  // Um filtro por eixo: trocar de recorte não deve descartar o que o usuário
-  // já tinha escondido do outro.
-  const [hidden, setHidden] = useState<Record<GroupBy, string[]>>({
-    cohort: [],
-    aptitude: [],
-    affinity: [],
-  });
+  const [hidden, setHidden] = useState<string[]>([]);
   const [allStudents, setAllStudents] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -465,67 +462,26 @@ export function Results({
     return [...found].sort((a, b) => a - b);
   }, [result.periods]);
 
-  const axes: Axis[] = useMemo(
-    () => [
-      {
-        value: "cohort",
-        label: "uma por geração",
-        legend: "Gerações no gráfico",
-        of: (report) => report.by_cohort,
-        name: (group) => cohortLabel(Number(group)),
-        ordered: true,
-      },
-      {
-        value: "aptitude",
-        label: "uma por perfil de aptidão",
-        legend: "Perfis de aptidão no gráfico",
-        of: (report) => report.by_aptitude,
-        name: (group) => group,
-        ordered: false,
-      },
-      {
-        value: "affinity",
-        label: "uma por perfil de afinidade",
-        legend: "Perfis de afinidade no gráfico",
-        of: (report) => report.by_affinity,
-        name: (group) => group,
-        ordered: false,
-      },
-    ],
-    []
-  );
-  const axis = axes.find((a) => a.value === groupBy) ?? axes[0];
-
-  const allSeries = useMemo(() => {
-    if (axis.value === "cohort") return cohorts.map(cohortLabel);
-    // Execuções gravadas antes dos perfis existirem não trazem as listas: o
-    // último relatório ainda diz quais grupos o eixo tem.
-    const profiles =
-      axis.value === "aptitude" ? result.aptitude_profiles : result.affinity_profiles;
-    return profiles ?? [];
-  }, [axis, cohorts, result.aptitude_profiles, result.affinity_profiles]);
+  const axis = COHORT_AXIS;
+  const allSeries = useMemo(() => cohorts.map(cohortLabel), [cohorts]);
 
   // Geração é série ordenada: a cor anda pelo círculo cromático conforme o
   // número cresce. Perfil é categoria sem ordem, e sai da paleta categórica.
-  // Nos dois casos a cor é atribuída sobre a lista inteira — esconder um grupo
-  // não repinta os que ficam.
-  const colors = useMemo(
-    () => (axis.ordered ? rampColors : categoricalColors)(allSeries, dark),
-    [axis.ordered, allSeries, dark]
-  );
-  const hiddenSeries = hidden[axis.value];
+  // A cor é atribuída sobre a lista inteira — esconder um grupo não repinta os
+  // que ficam.
+  const colors = useMemo(() => rampColors(allSeries, dark), [allSeries, dark]);
+  const hiddenSeries = hidden;
   const series = allSeries.filter((name) => !hiddenSeries.includes(name));
   const toggleSeries = (name: string) =>
-    setHidden((current) => ({
-      ...current,
-      [axis.value]: current[axis.value].includes(name)
-        ? current[axis.value].filter((other) => other !== name)
-        : [...current[axis.value], name],
-    }));
+    setHidden((current) =>
+      current.includes(name)
+        ? current.filter((other) => other !== name)
+        : [...current, name]
+    );
 
-  // A cor do aluno segue sempre a geração, em qualquer agregação: a barra
-  // lateral e a tabela de alunos não mudam de paleta quando o gráfico muda de
-  // eixo, senão a mesma pessoa trocaria de cor a cada clique.
+  // A cor do aluno é a mesma do gráfico, porque só há um recorte; segue valendo
+  // que ela é da **geração**, para a mesma pessoa não trocar de cor entre a
+  // tabela, a barra lateral e a série.
   const cohortColors = useMemo(
     () => rampColors(cohorts.map(cohortLabel), dark),
     [cohorts, dark]
@@ -646,16 +602,6 @@ export function Results({
               <option value="round">por rodada (período.rodada)</option>
             </select>
           </div>
-          <div className="field">
-            <label>Linhas do gráfico</label>
-            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)}>
-              {axes.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="field grow">
             <label>{axis.legend}</label>
             <div className="chips">
@@ -731,6 +677,49 @@ export function Results({
           </div>
         </section>
       ))}
+
+      {(result.grade_distribution?.length || result.utility_distribution?.length) && (
+        <section className="chart-section">
+          <header className="chart-section-head">
+            <h2>As distribuições do cenário</h2>
+            <p>
+              De onde vieram os números: as duas matrizes sorteadas na inicialização, cada uma como
+              a fração de valores que cai em cada faixa
+            </p>
+          </header>
+          <p className="note">
+            As <strong>notas</strong> são as de primeira tentativa, sobre [0, 10] — é a normal do
+            cenário já truncada e arredondada, e o truncamento empilha massa nas pontas sempre que
+            a média estiver perto delas, o que não se lê dos parâmetros. A recursada fica de fora
+            porque ela desloca a média: misturar as tentativas somaria distribuições diferentes, e
+            quantas recursadas acontecem é resultado, não entrada.
+          </p>
+          <p className="note">
+            Nas <strong>utilidades</strong>, cada linha (aluno, período) é reescalada ao{" "}
+            <strong>próprio</strong> mínimo e máximo, então o eixo não é o valor da utilidade:{" "}
+            <strong>0</strong> é a disciplina que aquele aluno menos quer no período e{" "}
+            <strong>1</strong> é a que ele mais quer. Massa à esquerda é um aluno que quer uma
+            coisa e despreza o resto; massa espalhada é um aluno que diferencia pouco.
+          </p>
+          <div className="chart-grid">
+            {result.grade_distribution?.length ? (
+              <Histogram
+                title="Notas de primeira tentativa"
+                hint="a normal do cenário, truncada em [0, 10]"
+                fractions={result.grade_distribution}
+                domain={[0, 10]}
+              />
+            ) : null}
+            {result.utility_distribution?.length ? (
+              <Histogram
+                title="Utilidades"
+                hint="como a preferência de um aluno se reparte entre as disciplinas"
+                fractions={result.utility_distribution}
+              />
+            ) : null}
+          </div>
+        </section>
+      )}
 
       <h2 className="chart-part-head">Gráficos por disciplina</h2>
 
@@ -923,7 +912,7 @@ export function Results({
         <table>
           <thead>
             <tr>
-              <th>Aluno</th><th>Geração</th><th>Aptidão</th><th>Afinidade</th><th>CR</th>
+              <th>Aluno</th><th>Geração</th><th>CR</th>
               <th>Horas aprovadas</th><th>Créditos</th><th>Matrículas</th>
               <th>Satisfação média</th><th>Saída</th>
             </tr>
@@ -941,8 +930,6 @@ export function Results({
                   <td>
                     <span className="swatch" style={{ background: cohortColors[label] }} /> {label}
                   </td>
-                  <td className="muted-cell">{student.aptitude}</td>
-                  <td className="muted-cell">{student.affinity}</td>
                   <td>{formatRatio(student.grade_average)}</td>
                   <td>{student.approved_hours} / {student.hours_to_graduate}</td>
                   <td>{student.credits}</td>
@@ -969,8 +956,6 @@ export function Results({
       <StudentList
         students={result.students}
         cohorts={cohorts}
-        aptitudes={result.aptitude_profiles ?? []}
-        affinities={result.affinity_profiles ?? []}
         colors={cohortColors}
         selectedId={selectedId}
         onSelect={select}

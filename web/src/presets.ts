@@ -1,9 +1,4 @@
-import type {
-  AffinityProfileInput,
-  AptitudeProfileInput,
-  DisciplineInput,
-  SimulateRequest,
-} from "./types";
+import type { DisciplineInput, SimulateRequest } from "./types";
 
 /** Um cenário pronto. `hint` diz para que ele serve — a lista existe para
  * poupar a montagem manual de cenários que se repetem na pesquisa. */
@@ -42,8 +37,8 @@ const HOURS = [60, 90] as const;
  * para ser legível — o que a põe no 3º período é cada uma delas depender de
  * alguma do 2º, não a posição na lista.
  *
- * Cada período soma 450 h, que é a carga horária máxima dos dois perfis de
- * afinidade (W_a): o aluno em dia cursa as seis disciplinas do seu período e
+ * Cada período soma 450 h, que é a carga horária máxima do cenário (W_a): o
+ * aluno em dia cursa as seis disciplinas do seu período e
  * nada mais. Isso importa duas vezes. Faz a disputa ser por *quais* seis, e não
  * por quantas — quem fica para trás tem de escolher entre recuperar o atraso e
  * avançar. E deixa a matrícula garantida do ingressante caber em W_a: ele entra
@@ -106,8 +101,8 @@ const P6: Entry[] = [
 
 const GRADE = [P1, P2, P3, P4, P5, P6];
 
-/** Carga horária máxima por período, igual nos dois perfis de afinidade. É
- * exatamente a soma de um período da grade. */
+/** Carga horária máxima por período (W_a), igual para todos. É exatamente a
+ * soma de um período da grade. */
 const MAX_HOURS = HOURS.reduce((sum, h) => sum + h * SEATS.length, 0); // 450
 
 /** Alunos que ingressam por período. O teto formal é a menor oferta de 1º
@@ -116,58 +111,54 @@ const MAX_HOURS = HOURS.reduce((sum, h) => sum + h * SEATS.length, 0); // 450
  * em dia. Acima disso a fila nelas cresce sem nunca drenar e ninguém chega ao
  * fim da grade; bem abaixo, nada aperta e não há escassez a alocar.
  *
- * Calibrado rodando o cenário. Com 60, ψ̄ anda entre 0,82 e 1,00 ao longo dos
- * períodos e ~28% concluem em 12, com a conclusão mais rápida em 6 — o piso da
- * cadeia. O recorte por vagas fica legível: as de 40 chegam a 1,3 candidato por
- * vaga e preço 2,5, enquanto as de 120 ficam em 0,4 e no piso de 1 crédito. Com
- * 30 a universidade inteira fica frouxa (ψ̄ = 1,00, preço sempre 1); com 70 a
- * fila nas de 40 vagas passa de 1,7 e a conclusão cai para 22%. */
+ * Calibrado rodando o cenário, e revalidado em σ = 1: 29% concluem em 12
+ * períodos, a conclusão mais rápida em 7 — um acima do piso da cadeia, porque
+ * com a utilidade resorteada por período ninguém quer exatamente as seis do seu
+ * período semestre após semestre. O recorte por vagas fica legível: as de 40
+ * são o gargalo e as de 120 nunca apertam. Com 30 a universidade fica frouxa
+ * (ψ̄ perto de 1); com 70 a conclusão despenca. Como os números andam com σ, é a
+ * varredura que os põe em contexto. */
 const STUDENTS_PER_PERIOD = 60;
 
-/** Perfis de aptidão do cenário Computação: a normal das notas de primeira
- * tentativa. As médias e os desvios separam três populações de desempenho bem
- * distintas — o Exemplar quase nunca reprova, o Instável reprova com frequência
- * e varia muito de uma disciplina para outra. As fatias são escolha de
- * calibragem (o enunciado fixa os parâmetros, não a proporção): metade da
- * população no perfil do meio e um quarto em cada extremo, que é a forma usual
- * de uma turma.
+/** Os alunos do cenário Computação. **Não há perfis**: estas são as duas
+ * normais de que toda a população sai, e o que distingue um aluno do outro é só
+ * o que a seed sorteou para ele.
  *
- * O incremento por recursada é igual nos três, para que a diferença entre eles
- * seja só a distribuição das notas — é o eixo que o cenário quer isolar. */
-const APTITUDE: AptitudeProfileInput[] = [
-  { name: "Exemplar", mean: 8, stddev: 1, learning_gain: 2.5, share: 25 },
-  { name: "Regular", mean: 6.5, stddev: 1.5, learning_gain: 2.5, share: 50 },
-  { name: "Instável", mean: 5, stddev: 2, learning_gain: 2.5, share: 25 },
-];
-
-/** Perfis de afinidade: o quanto o aluno concentra a preferência. Metade a
- * metade, porque é a comparação que interessa — o leilão deveria servir melhor
- * quem concentra, já que é exatamente essa informação que a ordenação por CR
- * não capta, e com fatias iguais a diferença entre os dois é lida direto.
+ * A normal das notas é a do perfil "Regular" que existia até 08/10/2026 — e,
+ * não por acaso, a média da mistura dos três perfis de então (0,25·8 + 0,50·6,5
+ * + 0,25·5 = 6,5). O desvio é menor que o da mistura, porque ali parte da
+ * dispersão vinha da distância *entre* os perfis, e essa é justamente a
+ * diferença sistemática que saiu.
  *
- * A carga horária máxima é igual nos dois, pelo mesmo motivo do incremento:
- * isolar o eixo. Variá-la é o jeito de perguntar o que acontece quando quem
- * concentra também carrega menos por período. */
-const AFFINITY: AffinityProfileInput[] = [
-  { name: "Focados", kind: "concentrated", intensity: 2, max_hours: MAX_HOURS, share: 50 },
-  { name: "Dispersos", kind: "diluted", intensity: 2, max_hours: MAX_HOURS, share: 50 },
-];
+ * O desvio da utilidade é o default do modelo, sigma = 1: o meio da faixa útil
+ * (~0,25 a ~3), em que o aluno diferencia as disciplinas de forma clara sem
+ * virar fanático — o meio do caminho entre os perfis "Focados" e "Dispersos"
+ * que havia antes. É o valor **canônico**, o que os boxplots medem; a varredura
+ * passa por ele e o marca no eixo. */
+const POPULATION = {
+  grade_mean: 6.5,
+  grade_stddev: 1.5,
+  learning_gain: 2.5,
+  utility_sigma: 1,
+  max_hours: MAX_HOURS,
+};
 
-/** Perfil único de aptidão do cenário Homogêneo. Toda a população sorteia a
- * nota da mesma normal e aprende o mesmo a cada recursada; os alunos continuam
- * diferindo entre si, porque a nota é sorteada aluno a aluno, mas não há mais
- * diferença **sistemática** entre grupos. */
-const FLAT_APTITUDE: AptitudeProfileInput[] = [
-  { name: "Único", mean: 6, stddev: 1, learning_gain: 2, share: 100 },
-];
-
-/** Perfil único de afinidade, e **neutro**: intensidade 1 dá expoente 1 nos
- * dois sentidos, então a utilidade sorteada vale como saiu, sem concentrar nem
- * diluir. Por isso o `kind` aqui não decide nada — fica `concentrated` só por
- * ser o primeiro do formulário. */
-const FLAT_AFFINITY: AffinityProfileInput[] = [
-  { name: "Único", kind: "concentrated", intensity: 1, max_hours: MAX_HOURS, share: 100 },
-];
+/** Os alunos do cenário Homogêneo: as mesmas duas normais, bem mais apertadas.
+ *
+ * O preset existia para controlar a **heterogeneidade dos perfis**, e os perfis
+ * saíram — mas o controle continua fazendo sentido, só que agora é um controle
+ * de *dispersão*, que é o que restou do mesmo conceito. Com as notas quase
+ * iguais o CR tem pouco a ordenar, e com sigma = 0,25 as utilidades ficam quase
+ * uniformes (a preferida vale ~1,9x a menos querida), então o leilão tem pouca
+ * preferência a captar: o que a comparação mostrar aqui é da regra de alocação,
+ * não de quem a população é. */
+const FLAT_POPULATION = {
+  grade_mean: 6,
+  grade_stddev: 0.5,
+  learning_gain: 2,
+  utility_sigma: 0.25,
+  max_hours: MAX_HOURS,
+};
 
 const toDisciplines = (groups: Entry[][]): DisciplineInput[] =>
   groups.flat().map(([name, hours, seats, prerequisites]) => ({
@@ -177,13 +168,13 @@ const toDisciplines = (groups: Entry[][]): DisciplineInput[] =>
     prerequisites,
   }));
 
-/** O que os dois presets têm em comum: a mesma universidade, a mesma população
- * e a mesma calibragem. Eles diferem só nos perfis e em Γ_min, que é
- * justamente o que faz um servir de controle do outro — qualquer diferença
- * entre eles vem do que foi declarado na chamada, não da oferta. */
+/** O que os dois presets têm em comum: a mesma universidade e a mesma
+ * calibragem da oferta. Eles diferem só na dispersão das duas normais e em
+ * Γ_min, que é justamente o que faz um servir de controle do outro — qualquer
+ * diferença entre eles vem do que foi declarado na chamada, não da oferta. */
 const commonScenario = (): Omit<
   SimulateRequest,
-  "aptitude_profiles" | "affinity_profiles" | "base_credits"
+  "grade_mean" | "grade_stddev" | "learning_gain" | "utility_sigma" | "max_hours" | "base_credits"
 > => ({
   disciplines: toDisciplines(GRADE),
   periods: 12,
@@ -208,34 +199,39 @@ export const PRESETS: Preset[] = [
     hint: "Grade de 6 períodos com 6 disciplinas cada, encadeadas por pré-requisitos; do 2º período em diante repetem-se as combinações de 40/80/120 vagas × 60/90 h. 60 ingressantes por período em 6 períodos, 360 alunos, e mais 6 períodos de drenagem.",
     build: (): SimulateRequest => ({
       ...commonScenario(),
-      aptitude_profiles: APTITUDE,
-      affinity_profiles: AFFINITY,
+      ...POPULATION,
       base_credits: 10,
     }),
   },
   {
     id: "homogeneo",
     name: "Homogêneo",
-    hint: "A mesma universidade do Computação, com um único perfil de aptidão (6 ± 1, ganho 2) e um único de afinidade (neutro, intensidade 1), e Γ_min = 12. Serve de controle: sem diferença sistemática entre alunos, o que a comparação mostrar é do mecanismo.",
+    hint: "A mesma universidade do Computação, com as duas normais bem mais apertadas (notas 6 ± 0,5, utilidades σ 0,02) e Γ_min = 12. Serve de controle: com alunos quase idênticos, o CR tem pouco a ordenar e o leilão tem pouca preferência a captar, então o que a comparação mostrar é da regra de alocação.",
     // Existe para a comparação entre mecanismos. No Computação, parte do vão
     // entre CR e créditos pode vir de como cada um trata uma população
-    // desigual: a ordenação por CR premia o Exemplar por construção, e o leilão
-    // rende mais a quem concentra a preferência. Aqui não há a quem premiar —
-    // um só perfil em cada eixo, e o de afinidade sem distorção alguma —, então
-    // o que restar de diferença é da regra de alocação, não da composição da
-    // população.
+    // dispersa: a ordenação por CR premia quem tira nota alta por construção, e
+    // o leilão rende mais a quem concentra a preferência. Aqui quase não há a
+    // quem premiar.
     //
-    // Rodado (N = 10) antes de entrar na lista, e o cenário não sai degenerado:
-    // ψ̄ 0,795 no CR contra 0,890 nos dois braços de crédito, φ 0,865 contra
-    // 0,969, λ 0,553 contra ~0,05. A mesma forma do Computação, com uma
-    // diferença que vale olhar: aqui o leilão **não forma menos gente** — 116
-    // sem retorno e 120 com, contra 112 do CR, onde no Computação eram 102 e
-    // 111 contra 139. Isto é, o contra-argumento mais forte contra o leilão
-    // anda junto da heterogeneidade dos perfis, não do mecanismo.
+    // Até 08/10/2026 este preset era o controle da **heterogeneidade dos
+    // perfis**; com os perfis fora do modelo, ele passou a ser o controle da
+    // **dispersão**, que é o que restou do mesmo conceito.
+    //
+    // Rodado (N = 10), e o cenário não sai degenerado: ψ̄ 0,784 no CR contra
+    // ~0,82 nos dois braços de crédito, φ 0,841 contra ~0,93, λ 0,628 contra
+    // ~0,03. Com as notas quase iguais quase ninguém reprova, então forma-se
+    // muito mais gente que no Computação (234 no CR contra 138) — é o preço de
+    // ser um controle, e por isso ele não se lê como cenário realista.
+    //
+    // O que ele isola, desde que as matrizes passaram a ser sorteadas por
+    // período: **sem retorno** o vão em conclusões é o mesmo nos dois presets
+    // (−18% aqui, −17% no Computação), mas **com retorno** o leilão empata com
+    // o CR no Computação (+1%) e continua 9% atrás aqui. Ou seja, o retorno
+    // recupera conclusões justamente onde há dispersão de preferência para ele
+    // explorar — e quase nada onde não há.
     build: (): SimulateRequest => ({
       ...commonScenario(),
-      aptitude_profiles: FLAT_APTITUDE,
-      affinity_profiles: FLAT_AFFINITY,
+      ...FLAT_POPULATION,
       base_credits: 12,
     }),
   },

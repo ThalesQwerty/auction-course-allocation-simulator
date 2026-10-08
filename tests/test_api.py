@@ -103,27 +103,15 @@ SIMULATE_REQUEST = {
     "seed": 5,
 }
 
-PROFILES = {
-    "aptitude_profiles": [
-        {"name": "Exemplar", "mean": 8, "stddev": 1, "learning_gain": 3, "share": 50},
-        {"name": "Instável", "mean": 5, "stddev": 2, "learning_gain": 1, "share": 50},
-    ],
-    "affinity_profiles": [
-        {
-            "name": "Focados",
-            "kind": "concentrated",
-            "intensity": 2,
-            "max_hours": 180,
-            "share": 50,
-        },
-        {
-            "name": "Dispersos",
-            "kind": "diluted",
-            "intensity": 2,
-            "max_hours": 120,
-            "share": 50,
-        },
-    ],
+# As duas normais que descrevem a população, no lugar dos perfis que existiram
+# até 08/10/2026. Notas baixas e ganho alto para o cenário produzir recursadas
+# dentro do horizonte; W_a de 120 h para o teto morder.
+POPULATION = {
+    "grade_mean": 5,
+    "grade_stddev": 2,
+    "learning_gain": 3,
+    "utility_sigma": 1,
+    "max_hours": 120,
 }
 
 
@@ -261,127 +249,123 @@ def test_simulate_rejects_an_entry_window_wider_than_the_horizon(client):
 
 
 def test_simulate_without_the_optional_fields_keeps_the_defaults(client):
-    """Omitir L e os perfis = ingresso em todos os períodos e um perfil neutro
-    em cada eixo."""
+    """Omitir L = ingresso em todos os períodos; omitir as duas normais = os
+    defaults do cenário."""
     payload = client.post("/simulate", json=SIMULATE_REQUEST).json()
     assert {s["entry_period"] for s in payload["students"]} == {1, 2, 3}
-    assert payload["aptitude_profiles"] == ["Padrão"]
-    assert payload["affinity_profiles"] == ["Padrão"]
-    assert {s["aptitude"] for s in payload["students"]} == {"Padrão"}
+    assert payload["students"], "o cenário deveria produzir alunos"
 
 
-
-
-def test_simulate_returns_a_cut_per_profile_axis(client):
-    """Os três recortes vêm prontos na resposta, na ordem em que o cenário
-    declara os perfis — é o que o seletor de agregação da tela usa."""
-    payload = client.post("/simulate", json={**SIMULATE_REQUEST, **PROFILES}).json()
-
-    assert payload["aptitude_profiles"] == ["Exemplar", "Instável"]
-    assert payload["affinity_profiles"] == ["Focados", "Dispersos"]
-    assert {s["aptitude"] for s in payload["students"]} == {"Exemplar", "Instável"}
-    assert {s["affinity"] for s in payload["students"]} == {"Focados", "Dispersos"}
+def test_simulate_returns_the_cohort_cut(client):
+    """O recorte vem pronto na resposta e parte a mesma população do agregado —
+    é o que o seletor de agregação da tela usa."""
+    payload = client.post("/simulate", json={**SIMULATE_REQUEST, **POPULATION}).json()
 
     for period in payload["periods"]:
         for report in [*period["rounds"], period["aggregate"]]:
-            assert [g["group"] for g in report["by_aptitude"]] == ["Exemplar", "Instável"]
-            assert [g["group"] for g in report["by_affinity"]] == ["Focados", "Dispersos"]
-            # Cada eixo parte a mesma população.
-            for axis in ("by_cohort", "by_aptitude", "by_affinity"):
-                assert sum(g["active"] for g in report[axis]) == report["overall"]["active"]
+            groups = [g["group"] for g in report["by_cohort"]]
+            assert groups == sorted(groups, key=int)
+            assert all(g is not None for g in groups)
+            assert sum(g["active"] for g in report["by_cohort"]) == (
+                report["overall"]["active"]
+            )
 
 
-def test_simulate_rejects_profile_shares_that_do_not_add_up(client):
-    response = client.post(
-        "/simulate",
-        json={
-            **SIMULATE_REQUEST,
-            "aptitude_profiles": [{"name": "X", "mean": 6, "stddev": 1, "share": 40}],
-        },
-    )
-    assert response.status_code == 400
-    assert "somar 100%" in response.json()["detail"]
-
-
-def test_simulate_rejects_an_out_of_range_affinity_intensity(client):
-    response = client.post(
-        "/simulate",
-        json={
-            **SIMULATE_REQUEST,
-            "affinity_profiles": [
-                {"name": "X", "kind": "concentrated", "intensity": 0, "share": 100}
-            ],
-        },
-    )
+def test_simulate_rejects_an_out_of_range_utility_sigma(client):
+    response = client.post("/simulate", json={**SIMULATE_REQUEST, "utility_sigma": 0})
     assert response.status_code == 422
 
 
-def test_the_affinity_profile_caps_the_workload_of_its_students(client):
-    """W_a saiu do cenário e virou parâmetro do perfil de afinidade: cada aluno
-    é limitado pelo teto do perfil dele, não por um teto global."""
+def test_the_workload_cap_bounds_every_student(client):
+    """W_a é do cenário e vale para todo mundo: ninguém cursa mais que ele num
+    período."""
     payload = client.post(
-        "/simulate", json={**SIMULATE_REQUEST, **PROFILES, "include_histories": True}
+        "/simulate", json={**SIMULATE_REQUEST, **POPULATION, "include_histories": True}
     ).json()
-    cap = {p["name"]: p["max_hours"] for p in PROFILES["affinity_profiles"]}
-    affinity = {s["id"]: s["affinity"] for s in payload["students"]}
-
-    seen = set()
+    assert payload["histories"]
     for history in payload["histories"]:
-        limit = cap[affinity[history["student_id"]]]
         for record in history["periods"]:
-            assert record["enrolled_hours"] <= limit
-            seen.add(affinity[history["student_id"]])
-    assert seen == set(cap), "os dois perfis deveriam aparecer"
+            assert record["enrolled_hours"] <= POPULATION["max_hours"]
 
 
-def test_simulate_rejects_a_first_period_heavier_than_the_tightest_profile(client):
+def test_simulate_rejects_a_first_period_heavier_than_the_workload_cap(client):
     """A matrícula garantida não escolhe quem a recebe, então a carga das
-    disciplinas de 1º período tem de caber no perfil mais apertado."""
+    disciplinas de 1º período tem de caber em W_a."""
     response = client.post(
+        "/simulate", json={**SIMULATE_REQUEST, "max_hours": 90}
+    )
+    assert response.status_code == 400
+    assert "não cabem na carga horária máxima" in response.json()["detail"]
+
+
+def test_the_scenario_sets_the_learning_gain(client):
+    """O incremento por recursada é do cenário e vale para todo aluno — mas ele
+    desloca a **média** do sorteio, não a nota anterior: a matriz de notas é
+    sorteada por período, então a recursada é uma nota nova, de uma normal
+    centrada `learning_gain` acima.
+
+    Por isso a prova é sobre a média e não sobre cada par: a nota média da
+    tentativa n+1 fica um ganho acima da n (menos o que satura em 10), e nenhuma
+    nota isolada precisa subir. Que a recursada *pode* sair pior está em
+    `test_population.py::test_a_retake_shifts_the_mean_of_the_draw` — aqui não,
+    porque um cenário deste tamanho tem poucas recursadas e o caso é raro
+    demais para não virar teste intermitente.
+    """
+    payload = client.post(
         "/simulate",
+        json={**SIMULATE_REQUEST, **POPULATION, "periods": 8, "include_histories": True},
+    ).json()
+    step = POPULATION["learning_gain"]
+
+    by_attempt: dict[int, list[float]] = {}
+    for history in payload["histories"]:
+        for record in history["periods"]:
+            for request in record["requests"]:
+                if request["attempt"] is not None:
+                    by_attempt.setdefault(request["attempt"], []).append(request["grade"])
+
+    assert len(by_attempt.get(2, [])) > 20, "o cenário deveria ter recursadas"
+    mean = lambda values: sum(values) / len(values)  # noqa: E731
+    # Monotônica na média, e o salto da 1ª para a 2ª é o ganho — a saturação em
+    # 10 come um pedaço, daí a folga.
+    assert mean(by_attempt[2]) > mean(by_attempt[1])
+    assert mean(by_attempt[2]) - mean(by_attempt[1]) == pytest.approx(step, abs=0.8)
+
+
+def test_compare_returns_the_sweep_when_asked(client):
+    """A varredura é opcional: pedida, vem um ponto por expoente, cada um com os
+    três modelos; omitida, o campo vem nulo e o resultado é só o k canônico."""
+    body = {**SIMULATE_REQUEST, **POPULATION, "utility_sigma": 1, "runs": 2}
+    payload = client.post(
+        "/compare",
+        json={**body, "sweep": {"min_sigma": 0.5, "max_sigma": 2.5, "points": 3, "runs": 2}},
+    ).json()
+
+    sweep = payload["sweep"]
+    assert sweep["canonical"] == 1
+    assert [p["sigma"] for p in sweep["points"]] == [0.5, 1.5, 2.5]
+    for point in sweep["points"]:
+        assert [a["key"] for a in point["arms"]] == ["ranking", "credits_return", "credits"]
+        # O histograma da causa vem junto de cada ponto.
+        assert len(point["distribution"]) == 10
+        assert sum(point["distribution"]) == pytest.approx(1.0)
+
+    assert client.post("/compare", json=body).json()["sweep"] is None
+
+
+def test_compare_rejects_an_invalid_sweep_range(client):
+    """Faixa inválida é erro de requisição (400), não falha de simulação."""
+    response = client.post(
+        "/compare",
         json={
             **SIMULATE_REQUEST,
-            "affinity_profiles": [
-                {"name": "Apertado", "kind": "concentrated", "intensity": 1,
-                 "max_hours": 90, "share": 100},
-            ],
+            **POPULATION,
+            "runs": 2,
+            "sweep": {"min_sigma": 3.0, "max_sigma": 0.5, "points": 4, "runs": 1},
         },
     )
     assert response.status_code == 400
-    detail = response.json()["detail"]
-    assert "não cabem na carga horária máxima" in detail
-    assert "Apertado" in detail
-
-
-def test_the_aptitude_profile_sets_the_learning_gain(client):
-    """O incremento por recursada saiu do cenário e virou parâmetro do perfil de
-    aptidão: quem repete ganha o que o perfil dele promete."""
-    payload = client.post(
-        "/simulate",
-        json={**SIMULATE_REQUEST, **PROFILES, "periods": 6, "include_histories": True},
-    ).json()
-    gain = {p["name"]: p["learning_gain"] for p in PROFILES["aptitude_profiles"]}
-    aptitude = {s["id"]: s["aptitude"] for s in payload["students"]}
-
-    retakes = 0
-    for history in payload["histories"]:
-        step = gain[aptitude[history["student_id"]]]
-        # Maior nota obtida em cada tentativa de cada disciplina.
-        best: dict[str, tuple[int, float]] = {}
-        for record in history["periods"]:
-            for request in record["requests"]:
-                if request["attempt"] is None:
-                    continue
-                previous = best.get(request["discipline"])
-                if previous and request["attempt"] == previous[0] + 1:
-                    # eq. (33): a nota da tentativa n+1 é a da n mais o ganho,
-                    # saturando em 10.
-                    assert request["grade"] == pytest.approx(
-                        min(10.0, round(previous[1] + step, 1))
-                    )
-                    retakes += 1
-                best[request["discipline"]] = (request["attempt"], request["grade"])
-    assert retakes > 0, "o cenário deveria ter recursadas"
+    assert "máximo" in response.json()["detail"]
 
 
 def test_the_discipline_snapshot_carries_the_three_grouping_axes(client):

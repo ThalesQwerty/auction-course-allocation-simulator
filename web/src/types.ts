@@ -47,76 +47,24 @@ export const creditReturnLabel = (policy: CreditReturnPolicy): string =>
  * pré-requisitos é o que de fato distingue um aluno de outro aqui. */
 export const cohortLabel = (entryPeriod: number): string => `Geração ${entryPeriod}`;
 
-/** Perfil de aptidão: a normal das notas de primeira tentativa do aluno. É o
- * que dá heterogeneidade de desempenho — sem ela o CR vira ruído e a
- * correlação da eq. (57) não mede nada. */
-export interface AptitudeProfileInput {
-  name: string;
-  mean: number; // média das notas, em [0, 10]
-  stddev: number; // desvio padrão, > 0
-  /** Quanto a nota sobe a cada recursada — eq. (33). Fica no perfil, e não no
-   * cenário, porque é a mesma grandeza que a média e o desvio: o quanto o aluno
-   * aprende. Um perfil que erra muito na primeira tentativa pode ser justamente
-   * o que mais ganha ao repetir. */
-  learning_gain: number;
-  share: number; // % dos alunos com este perfil
-}
-
-/** Sentido da distorção da matriz de utilidades. `concentrated` eleva a um
- * inteiro positivo e afasta as utilidades entre si; `diluted` eleva ao inverso
- * dele e as aproxima. */
-export type AffinityKind = "concentrated" | "diluted";
-
-export const AFFINITY_KINDS: { value: AffinityKind; label: string; hint: string }[] = [
-  {
-    value: "concentrated",
-    label: "concentrado",
-    hint: "afasta as utilidades entre si — o aluno quer muito uma ou duas disciplinas",
-  },
-  {
-    value: "diluted",
-    label: "diluído",
-    hint: "aproxima as utilidades — o aluno é indiferente entre o que lhe resta",
-  },
-];
-
-export const affinityKindLabel = (kind: AffinityKind): string =>
-  AFFINITY_KINDS.find((option) => option.value === kind)?.label ?? kind;
-
-/** Perfil de afinidade: o quanto o aluno concentra a preferência. A utilidade
- * sorteada é elevada ao expoente do perfil e renormalizada, de modo que U_a
- * continue valendo a eq. (43). Intensidade 1 é o perfil neutro — expoente 1
- * nos dois sentidos, sem distorção alguma. */
-export interface AffinityProfileInput {
-  name: string;
-  kind: AffinityKind;
-  intensity: number; // inteiro positivo, até MAX_AFFINITY_INTENSITY
-  /** W_a — carga horária máxima por período, eq. (4). Fica no perfil porque
-   * anda junto da concentração: quem quer poucas disciplinas com intensidade e
-   * quem quer muitas por igual não descrevem só preferência, mas também quanto
-   * conseguem carregar num período. */
-  max_hours: number;
-  share: number; // % dos alunos com este perfil
-}
-
-/** Acima disso a transformação não muda mais nada de útil: com expoente 10 a
- * massa já está praticamente toda na disciplina preferida. Espelha
- * `leilao.config.MAX_AFFINITY_INTENSITY`. */
-export const MAX_AFFINITY_INTENSITY = 10;
-
-/** O expoente que o perfil aplica a u_{a,x} — espelha `AffinityProfile.exponent`. */
-export const affinityExponent = (profile: AffinityProfileInput): number =>
-  profile.kind === "concentrated" ? profile.intensity : 1 / profile.intensity;
-
 export interface SimulateRequest {
   disciplines: DisciplineInput[];
-  /** Os dois eixos de perfil do aluno. São **independentes**: a fatia de cada
-   * perfil de aptidão é a mesma dentro de cada perfil de afinidade, então a
-   * fatia de uma combinação é o produto das duas (dois perfis de 50% em cada
-   * eixo dão 25% para cada uma das quatro combinações). As fatias de cada eixo
-   * somam 100%. */
-  aptitude_profiles: AptitudeProfileInput[];
-  affinity_profiles: AffinityProfileInput[];
+  /** A normal de onde cada par (aluno, disciplina) sorteia a nota em cada
+   * período, e o quanto a recursada desloca essa média (eq. 33). É o que dá
+   * heterogeneidade de desempenho — sem ela o CR vira ruído e a correlação da
+   * eq. (57) não mede nada. Não há perfis: todo aluno sorteia daqui, e a
+   * diferença entre dois alunos é só a sorte. */
+  grade_mean: number; // em [0, 10]
+  grade_stddev: number; // > 0
+  learning_gain: number;
+  /** Desvio da log-normal de onde saem os valores preliminares das utilidades.
+   * Controla o quanto o aluno diferencia as disciplinas: sigma **grande**
+   * concentra (quer uma ou duas e despreza o resto), **pequeno** achata. A
+   * média do logaritmo é fixa em 0 porque some na normalização. A faixa útil
+   * cabe entre ~0,25 e ~3. */
+  utility_sigma: number; // > 0
+  /** W_a — carga horária máxima por período, eq. (4). Igual para todos. */
+  max_hours: number;
   periods: number; // |T|
   /** L — em quantos dos |T| períodos entra geração nova, contados do primeiro.
    * `null` = em todos. Com L < |T| há uma fase de drenagem depois do último
@@ -195,6 +143,9 @@ export const armLabel = (key: string): string =>
 export interface CompareRequest
   extends Omit<SimulateRequest, "seed" | "credit_return"> {
   runs: number; // N
+  /** Quando presente, a resposta traz também a varredura da forma da
+   * preferência. Omitir deixa só o k canônico e o boxplot. */
+  sweep?: SweepIn | null;
 }
 
 /** Teto de execuções por mecanismo. Espelha `leilao.comparison.MAX_RUNS`. */
@@ -243,9 +194,56 @@ export interface ArmResult {
 
 /** As amostras dos três braços, pareadas pela seed: o i-ésimo elemento de cada
  * lista é a mesma população sob regras diferentes. */
+/** A varredura da dispersão da preferência, o segundo eixo da comparação: a
+ * mesma comparação rodada em vários `utility_sigma`, numa faixa linear. */
+/** O padrão da varredura: a faixa em que sigma diz alguma coisa. Abaixo de 0,25
+ * a linha do aluno é praticamente uniforme e os dois mecanismos convergem;
+ * acima de 3 ele quer uma disciplina só e quase ninguém se forma. */
+export const DEFAULT_SWEEP: SweepIn = {
+  min_sigma: 0.25,
+  max_sigma: 3,
+  points: 12,
+  runs: 3,
+};
+
+export interface SweepIn {
+  min_sigma: number;
+  max_sigma: number;
+  /** Quantos sigmas, em passos iguais do mínimo ao máximo. Linear basta: o
+   * coeficiente de variação da log-normal cresce depressa em sigma. */
+  points: number;
+  /** Execuções por ponto. Poucas de propósito: aqui se lê a forma da curva ao
+   * longo de sigma, não a significância num sigma. */
+  runs: number;
+}
+
+export interface SweepPoint {
+  sigma: number;
+  arms: ArmResult[];
+  /** Como a utilidade se reparte dentro da linha de um aluno naquele sigma: uma
+   * fração por faixa, somando 1. Cada linha é reescalada ao próprio
+   * [mínimo, máximo] antes de ser dividida em faixas de mesma largura — global
+   * degeneraria, porque um único extremo da matriz definiria o intervalo. */
+  distribution: number[];
+}
+
+export interface Sweep {
+  /** O `utility_sigma` do cenário, que o boxplot mede com mais execuções. Não
+   * precisa cair exatamente num ponto varrido. */
+  canonical: number;
+  runs: number;
+  points: SweepPoint[];
+}
+
 export interface CompareResponse {
   runs: number;
   arms: ArmResult[];
+  /** Presente só quando a requisição pediu a varredura. */
+  sweep?: Sweep | null;
+  /** As duas distribuições de entrada do cenário. Não variam entre braços nem
+   * entre seeds — são do cenário, não da execução. */
+  utility_distribution?: number[];
+  grade_distribution?: number[];
 }
 
 export interface Metrics {
@@ -277,15 +275,13 @@ export interface Metrics {
   semestralization: number;
 }
 
-/** Um recorte de alunos num instante: a universidade inteira (`overall`), uma
- * geração (`by_cohort`) ou um perfil (`by_aptitude`, `by_affinity`). Todos
- * trazem os mesmos campos, então um gráfico só troca de lista para trocar de
- * agregação. */
+/** Um recorte de alunos num instante: a universidade inteira (`overall`) ou uma
+ * geração (`by_cohort`). Os dois trazem os mesmos campos, então um gráfico só
+ * troca de lista para trocar de agregação. */
 export interface GroupSnapshot {
-  /** Quem é este recorte: `null` na universidade inteira, o período de ingresso
-   * (t_a, eq. 31) em `by_cohort` e o nome do perfil nos outros dois. Texto
-   * porque os três eixos dividem a mesma estrutura; a lista de origem diz como
-   * ler a chave. */
+  /** Quem é este recorte: `null` na universidade inteira e o período de
+   * ingresso (t_a, eq. 31) em `by_cohort`. Texto, e não número, porque o eixo é
+   * genérico; a lista de origem diz como ler a chave. */
   group: string | null;
   /** Nulos quando o recorte não tem aluno no período: não havia ninguém, o que
    * é diferente de ninguém ter ficado satisfeito. Zero seria um ponto falso. */
@@ -334,11 +330,6 @@ export interface RoundReport {
    * então a série de uma geração começa no período do seu ingresso — e o aluno
    * fica na mesma geração do início ao fim. */
   by_cohort: GroupSnapshot[];
-  /** E pelos dois eixos de perfil, na ordem em que o cenário os declara. Os
-   * três recortes particionam a mesma população de formas diferentes: somar
-   * qualquer um deles reproduz `overall`. */
-  by_aptitude: GroupSnapshot[];
-  by_affinity: GroupSnapshot[];
   /** `null` quando nenhuma disciplina estava no mercado: sem oferta não há
    * preço, e 0 ali se leria como "de graça". */
   prices: PriceStats | null;
@@ -379,8 +370,6 @@ export interface StudentSummary {
   id: string;
   name: string;
   entry_period: number; // t_a — eq. (31)
-  aptitude: string; // nome do perfil de aptidão
-  affinity: string; // nome do perfil de afinidade
   grade_average: number; // N_a — eq. (49)
   approved_hours: number;
   /** S — a carga da grade inteira. Toda disciplina é obrigatória, então é a
@@ -444,20 +433,22 @@ export interface SimulateResponse {
   disciplines: string[];
   /** Período de cada disciplina na grade, induzido dos pré-requisitos. */
   curriculum_periods: Record<string, number>;
-  /** Os perfis do cenário, na ordem em que `by_aptitude` e `by_affinity` saem. */
-  aptitude_profiles: string[];
-  affinity_profiles: string[];
+  /** As duas distribuições de entrada do cenário, como histogramas: uma fração
+   * por faixa, somando 1. As utilidades são reescaladas por linha (0 a 1); as
+   * notas vão de 0 a 10. Execuções gravadas antes delas existirem não as
+   * trazem, e aí a seção some em vez de aparecer vazia. */
+  utility_distribution?: number[];
+  grade_distribution?: number[];
 }
 
 export function defaultScenario(): SimulateRequest {
   return {
     disciplines: [],
-    aptitude_profiles: [
-      { name: "Padrão", mean: 6.5, stddev: 1.5, learning_gain: 2.5, share: 100 },
-    ],
-    affinity_profiles: [
-      { name: "Padrão", kind: "concentrated", intensity: 1, max_hours: 360, share: 100 },
-    ],
+    grade_mean: 6.5,
+    grade_stddev: 1.5,
+    learning_gain: 2.5,
+    utility_sigma: 1,
+    max_hours: 360,
     periods: 1,
     entry_periods: null,
     students_per_period: 1,

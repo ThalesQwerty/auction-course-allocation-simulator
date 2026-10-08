@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..auction import AuctionResult
 from ..comparison import MAX_RUNS
-from ..config import MAX_AFFINITY_INTENSITY, AffinityKind, CreditReturnPolicy, Mechanism
+from ..config import CreditReturnPolicy, Mechanism
 
 
 class AgentIn(BaseModel):
@@ -75,37 +75,6 @@ class DisciplineIn(BaseModel):
     )
 
 
-class AptitudeProfileIn(BaseModel):
-    """Perfil de aptidão: a normal das notas de primeira tentativa."""
-
-    name: str
-    mean: float = Field(ge=0, le=10, description="média das notas")
-    stddev: float = Field(gt=0, description="desvio padrão das notas")
-    learning_gain: float = Field(
-        default=2.5, gt=0, le=10, description="ganho de nota por recursada — eq. (33)"
-    )
-    share: float = Field(gt=0, le=100, description="% dos alunos com este perfil")
-
-
-class AffinityProfileIn(BaseModel):
-    """Perfil de afinidade: o expoente aplicado à matriz de utilidades."""
-
-    name: str
-    kind: AffinityKind = Field(
-        description=(
-            "'concentrated' eleva a um inteiro positivo e afasta as utilidades entre "
-            "si; 'diluted' eleva ao inverso dele e as aproxima"
-        )
-    )
-    intensity: int = Field(
-        ge=1, le=MAX_AFFINITY_INTENSITY, description="intensidade, inteiro positivo"
-    )
-    max_hours: int = Field(
-        default=360, ge=1, description="W_a — carga horária máxima por período"
-    )
-    share: float = Field(gt=0, le=100, description="% dos alunos com este perfil")
-
-
 class ScenarioIn(BaseModel):
     """O cenário em si (Seção 7.2) — tudo que descreve a universidade e a
     população, sem dizer *como* ele será executado.
@@ -117,20 +86,26 @@ class ScenarioIn(BaseModel):
     """
 
     disciplines: list[DisciplineIn] = Field(default_factory=list)
-    aptitude_profiles: list[AptitudeProfileIn] = Field(
-        default_factory=list,
+    # As duas normais que descrevem a população. Não há perfis: todo aluno sai
+    # daqui, e a diferença entre dois alunos é só o que a seed sorteou.
+    grade_mean: float = Field(default=6.5, ge=0, le=10, description="média das notas")
+    grade_stddev: float = Field(default=1.5, gt=0, description="desvio padrão das notas")
+    learning_gain: float = Field(
+        default=2.5, gt=0, le=10, description="ganho de nota por recursada — eq. (33)"
+    )
+    utility_sigma: float = Field(
+        default=1.0,
+        gt=0,
         description=(
-            "perfis de aptidão; as fatias precisam somar 100%. Vazio = um perfil "
-            "neutro para toda a população."
+            "desvio da log-normal de onde saem os valores preliminares da matriz de "
+            "utilidades. Controla o quanto o aluno diferencia as disciplinas: "
+            "**grande concentra** (quer uma ou duas e despreza o resto), pequeno "
+            "achata. A média do logaritmo é fixa em 0 porque some na normalização. "
+            "A faixa útil cabe entre ~0,25 e ~3."
         ),
     )
-    affinity_profiles: list[AffinityProfileIn] = Field(
-        default_factory=list,
-        description=(
-            "perfis de afinidade; as fatias precisam somar 100%. Vazio = um perfil "
-            "neutro (expoente 1, sem distorção). É independente da aptidão: a fatia "
-            "de uma combinação é o produto das duas."
-        ),
+    max_hours: int = Field(
+        default=360, ge=1, description="W_a — carga horária máxima por período"
     )
     periods: int = Field(default=1, ge=1, le=40, description="|T| — períodos letivos")
     entry_periods: int | None = Field(
@@ -176,6 +151,39 @@ class SimulateRequest(ScenarioIn):
     )
 
 
+class SweepIn(BaseModel):
+    """A varredura da forma da preferência, o segundo eixo da comparação.
+
+    Os sigmas saem de uma faixa **linear** — passos iguais do mínimo ao máximo.
+    Linear basta porque o coeficiente de variação da log-normal cresce depressa
+    em sigma: a faixa útil inteira cabe entre ~0,25 e ~3.
+
+    O `utility_sigma` do cenário é o **canônico**, medido pelo boxplot com mais
+    execuções. Ele não precisa cair exatamente num ponto varrido — a interface o
+    marca como referência no eixo.
+    """
+
+    min_sigma: float = Field(
+        default=0.25, gt=0, le=20, description="menor sigma da faixa"
+    )
+    max_sigma: float = Field(
+        default=3.0, gt=0, le=20, description="maior sigma da faixa"
+    )
+    points: int = Field(
+        default=12, ge=2, le=41, description="quantos sigmas, em passos iguais"
+    )
+    runs: int = Field(
+        default=3,
+        ge=1,
+        le=MAX_RUNS,
+        description=(
+            "execuções por ponto. Poucas de propósito: aqui se lê a forma da "
+            "curva ao longo de k, não a significância num k — essa é a pergunta "
+            "do boxplot, que roda no k canônico com `runs`."
+        ),
+    )
+
+
 class CompareRequest(ScenarioIn):
     """Uma comparação entre os três modelos sobre o mesmo cenário.
 
@@ -193,6 +201,13 @@ class CompareRequest(ScenarioIn):
         description=(
             "N — quantas simulações de cada mecanismo, com as seeds de 1 a N. "
             "São 2N simulações no total, e a seed pareia os dois lados."
+        ),
+    )
+    sweep: SweepIn | None = Field(
+        default=None,
+        description=(
+            "quando presente, roda também a varredura da forma da preferência e "
+            "devolve um ponto por k. Omitir deixa só o k canônico."
         ),
     )
 
@@ -239,6 +254,34 @@ class ArmResultOut(BaseModel):
     runs: list[RunSummaryOut]
 
 
+class SweepPointOut(BaseModel):
+    """Um ponto da varredura: a comparação inteira num desvio de preferência.
+
+    `distribution` é o histograma de como a utilidade se reparte dentro da linha
+    de um aluno naquele sigma — o gráfico da causa, ao lado do do resultado.
+    Cada linha é reescalada ao próprio [mínimo, máximo] e dividida em faixas de
+    mesma largura; as frações somam 1.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    sigma: float
+    arms: list[ArmResultOut]
+    distribution: list[float]
+
+
+class SweepOut(BaseModel):
+    """A varredura inteira, em ordem crescente de sigma. `canonical` é o
+    `utility_sigma` do cenário, que o boxplot mede com mais execuções — ele não
+    precisa cair num ponto varrido."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    canonical: float
+    runs: int
+    points: list[SweepPointOut]
+
+
 class CompareResponse(BaseModel):
     """As amostras dos três braços, pareadas pela seed: o i-ésimo elemento de
     cada lista é a mesma população sob regras diferentes."""
@@ -247,6 +290,12 @@ class CompareResponse(BaseModel):
 
     runs: int
     arms: list[ArmResultOut]
+    # Presente só quando a requisição pediu a varredura.
+    sweep: SweepOut | None = None
+    # As duas distribuições de entrada do cenário, como histogramas. Não variam
+    # entre braços nem entre seeds — são do cenário, não da execução.
+    utility_distribution: list[float] = []
+    grade_distribution: list[float] = []
 
 
 class MetricsOut(BaseModel):
@@ -268,10 +317,9 @@ class MetricsOut(BaseModel):
 class GroupSnapshotOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    # Quem é este recorte: null na universidade inteira (`overall`), o período
-    # de ingresso (t_a, eq. 31) em `by_cohort` e o nome do perfil em
-    # `by_aptitude`/`by_affinity`. Texto porque os três eixos dividem a mesma
-    # estrutura; a lista de origem diz como ler a chave.
+    # Quem é este recorte: null na universidade inteira (`overall`) e o período
+    # de ingresso (t_a, eq. 31) em `by_cohort`. Texto, e não inteiro, porque o
+    # eixo é genérico; a lista de origem diz como ler a chave.
     group: str | None
     # Nulos quando o recorte não tem aluno no período — não havia ninguém, o
     # que é diferente de ninguém ter ficado satisfeito.
@@ -313,8 +361,6 @@ class RoundReportOut(BaseModel):
     # E pelos dois eixos de perfil, na ordem em que o cenário os declara. Os
     # três recortes particionam a mesma população: somar qualquer um deles
     # reproduz `overall`.
-    by_aptitude: list[GroupSnapshotOut]
-    by_affinity: list[GroupSnapshotOut]
     # Null quando nenhuma disciplina estava no mercado no instante.
     prices: PriceStatsOut | None
 
@@ -354,8 +400,6 @@ class StudentSummaryOut(BaseModel):
     id: str
     name: str
     entry_period: int
-    aptitude: str
-    affinity: str
     grade_average: float
     approved_hours: int
     hours_to_graduate: int
@@ -413,6 +457,8 @@ class SimulateResponse(BaseModel):
     disciplines: list[str]
     # Período de cada disciplina na grade, induzido dos pré-requisitos.
     curriculum_periods: dict[str, int]
-    # Os perfis do cenário, na ordem em que `by_aptitude` e `by_affinity` saem.
-    aptitude_profiles: list[str]
-    affinity_profiles: list[str]
+    # As duas distribuições de entrada do cenário, como histogramas: uma fração
+    # por faixa, somando 1. As utilidades são reescaladas por linha e vão de 0 a
+    # 1; as notas vão de 0 a 10.
+    utility_distribution: list[float] = []
+    grade_distribution: list[float] = []

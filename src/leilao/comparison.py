@@ -32,6 +32,23 @@ Por isso a política de retorno **não é parâmetro do cenário aqui**: ela é 
 do experimento, e o `credit_return` que vier na configuração é ignorado, como a
 seed. Cada braço impõe o seu.
 
+**Há um segundo eixo, opcional: a forma da preferência** (`run_sweep`). A
+hipótese do trabalho é que o leilão capta intensidade de preferência que a
+ordenação por CR não enxerga — e se é isso, o quanto a população diferencia as
+disciplinas não é um parâmetro a calibrar, é a *variável independente*. A
+varredura roda a comparação inteira em vários `utility_shape` numa progressão
+geométrica e devolve um ponto por k, de modo que se leia a dependência em vez de
+um valor isolado.
+
+Os dois eixos se dividem o trabalho: a varredura usa **poucas execuções por
+ponto** (é a forma da curva que interessa, e são muitos pontos) e o sigma
+canônico usa **muitas** (ali a pergunta é se a diferença supera o ruído
+amostral, que é o que o boxplot responde). O canônico é o `utility_sigma` do
+cenário, e a varredura é uma faixa **linear** em volta dele — o que a log-normal
+permite e a Gamma não permitia: o coeficiente de variação cresce depressa em
+sigma, então a faixa útil inteira cabe entre ~0,25 e ~3 em passos iguais, sem
+precisar de progressão geométrica nem de eixo logarítmico.
+
 **Uma execução vira um número por métrica**, que é o ponto do boxplot. Para as
 três métricas de período a redução é a média **ponderada pelos alunos medidos**:
 a simulação termina numa fase de drenagem, em que a população só diminui, e uma
@@ -77,15 +94,34 @@ from __future__ import annotations
 
 import dataclasses
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+import numpy as np
+
+from .behavior import draw_utilities, utility_distribution
+from .grading import draw_grades, grade_distribution
 from .config import CreditReturnPolicy, Mechanism, SimulationConfig
+from .population import generate_students
 from .simulation import SimulationResult, run_simulation
 
 # Teto de execuções por braço. Não é limitação técnica: é que o boxplot para de
 # ganhar informação muito antes disso, e cada execução a mais custa uma
 # simulação inteira em cada um dos três braços.
 MAX_RUNS = 100
+
+# Teto de pontos da varredura — serve só para uma requisição malformada não
+# virar um trabalho de horas.
+MAX_SWEEP_POINTS = 41
+
+# Teto de simulações de uma varredura inteira (pontos x 3 braços x execuções).
+# Uma simulação do preset custa ~0,5 s, então isto é da ordem de três minutos.
+MAX_SWEEP_SIMULATIONS = 400
+
+# A faixa em que sigma diz alguma coisa. Abaixo do piso a linha do aluno é
+# praticamente uniforme e os dois mecanismos convergem; acima do teto ele quer
+# uma disciplina só e ninguém se forma. Nada é recusado fora disso — a
+# simulação continua correta —, mas é a faixa que a interface sugere.
+USEFUL_SIGMA_RANGE = (0.25, 3.0)
 
 
 @dataclass(frozen=True)
@@ -164,6 +200,39 @@ class ComparisonResult:
 
     runs: int
     arms: list[ArmResult]
+    # As duas distribuições de entrada do cenário, para a tela mostrar de onde
+    # vieram os números. Não variam entre braços nem entre seeds — são do
+    # cenário, não da execução.
+    utility_distribution: list[float] = field(default_factory=list)
+    grade_distribution: list[float] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SweepPoint:
+    """Um ponto da varredura: a comparação inteira num desvio de preferência.
+
+    `distribution` é o histograma de como a utilidade se reparte dentro da linha
+    de um aluno naquele sigma (`behavior.utility_distribution`) — o que o
+    parâmetro faz com a preferência, ao lado do que ele faz com o resultado.
+    """
+
+    sigma: float
+    arms: list[ArmResult]
+    distribution: list[float]
+
+
+@dataclass(frozen=True)
+class SweepResult:
+    """A varredura inteira, um ponto por sigma, em ordem crescente.
+
+    `canonical` é o `utility_sigma` do cenário — o que o boxplot mede com mais
+    execuções. Ele **não** precisa cair exatamente num ponto varrido: a
+    interface o marca como referência no eixo.
+    """
+
+    canonical: float
+    runs: int
+    points: list[SweepPoint]
 
 
 def time_to_graduate(result: SimulationResult) -> float | None:
@@ -250,6 +319,117 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     )
 
 
+def sweep_sigmas(minimum: float, maximum: float, points: int) -> list[float]:
+    """Os sigmas da varredura, em passos iguais do mínimo ao máximo.
+
+    Linear, e não geométrico: o coeficiente de variação da log-normal cresce
+    depressa em sigma, então passos iguais já espalham bem a concentração da
+    preferência — era a Gamma que precisava de progressão geométrica, porque
+    exigia quatro ordens de grandeza do parâmetro para cobrir a mesma faixa.
+    """
+    if minimum <= 0:
+        raise ValueError("o sigma mínimo da varredura deve ser > 0")
+    if minimum > maximum:
+        raise ValueError("o sigma mínimo da varredura não pode passar do máximo")
+    if points < 2:
+        raise ValueError("a varredura precisa de pelo menos 2 pontos")
+    if points > MAX_SWEEP_POINTS:
+        raise ValueError(
+            f"a varredura teria {points} pontos, acima do limite de {MAX_SWEEP_POINTS}"
+        )
+    step = (maximum - minimum) / (points - 1)
+    return [minimum + step * index for index in range(points)]
+
+
+def run_sweep(
+    config: SimulationConfig,
+    *,
+    min_sigma: float,
+    max_sigma: float,
+    points: int,
+    runs: int,
+    workers: int = 4,
+) -> SweepResult:
+    """Roda a comparação inteira em cada sigma da faixa.
+
+    Poucas execuções por ponto, de propósito: o que se lê aqui é a **forma da
+    curva** ao longo de sigma, não a significância num sigma. Esta é a medida
+    que responde "o quanto a vantagem do leilão depende de haver intensidade de
+    preferência a captar?" — e a resposta se lê sobretudo na linha da ordenação
+    por CR, que é plana porque o mecanismo não enxerga intensidade.
+
+    Cada ponto traz também o histograma da própria matriz de utilidades, de modo
+    que o gráfico do resultado tenha ao lado o gráfico da causa.
+    """
+    sigmas = sweep_sigmas(min_sigma, max_sigma, points)
+    if not 1 <= runs <= MAX_RUNS:
+        raise ValueError(f"o número de execuções deve estar entre 1 e {MAX_RUNS}")
+    total = len(sigmas) * len(ARMS) * runs
+    if total > MAX_SWEEP_SIMULATIONS:
+        raise ValueError(
+            f"a varredura pediria {total} simulações ({len(sigmas)} pontos x "
+            f"{len(ARMS)} modelos x {runs} execuções), acima do limite de "
+            f"{MAX_SWEEP_SIMULATIONS}; reduza os pontos ou as execuções"
+        )
+
+    return SweepResult(
+        canonical=float(config.utility_sigma),
+        runs=runs,
+        points=[
+            SweepPoint(
+                sigma=sigma,
+                arms=run_comparison(
+                    dataclasses.replace(config, utility_sigma=sigma),
+                    runs=runs,
+                    workers=workers,
+                ).arms,
+                distribution=sample_distribution(
+                    dataclasses.replace(config, utility_sigma=sigma)
+                ),
+            )
+            for sigma in sigmas
+        ],
+    )
+
+
+# A seed da amostra dos histogramas. É a **primeira da comparação**, e não a do
+# cenário: numa comparação a seed do cenário é ignorada (ela vira o eixo da
+# amostra), e usar `config.seed` faria dois cenários idênticos a menos da seed
+# devolverem resultados diferentes — justamente o que a comparação promete que
+# não acontece. Com 1, o histograma descreve literalmente a primeira população
+# que a comparação rodou.
+SAMPLE_SEED = 1
+
+
+def sample_distribution(config: SimulationConfig) -> list[float]:
+    """O histograma de utilidades do cenário, sorteado à parte da simulação.
+
+    Descreve a **entrada**, não o resultado: a mesma distribuição que a
+    simulação usa, numa amostra própria. Vem daqui, e não de uma execução,
+    porque numa comparação há 3N matrizes, todas da mesma distribuição, sem uma
+    que seja "a" certa. (Na execução única, ao contrário, o histograma sai da
+    matriz que a simulação de fato usou.)
+    """
+    students = generate_students(config, np.random.default_rng(SAMPLE_SEED))
+    rows = draw_utilities(students, config, np.random.default_rng(SAMPLE_SEED))
+    return utility_distribution(rows)
+
+
+def sample_grade_distribution(config: SimulationConfig) -> list[float]:
+    """O histograma de notas de primeira tentativa, pelo mesmo motivo e do mesmo
+    jeito que `sample_distribution`.
+
+    Diferente das utilidades, ele **não** entra em cada ponto da varredura: a
+    normal das notas não depende de sigma, então o gráfico seria o mesmo doze
+    vezes.
+    """
+    students = generate_students(config, np.random.default_rng(SAMPLE_SEED))
+    draws = draw_grades(
+        students, config.disciplines, config, np.random.default_rng(SAMPLE_SEED)
+    )
+    return grade_distribution(draws, config)
+
+
 def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:
     return summarize(
         run_simulation(
@@ -292,6 +472,8 @@ def run_comparison(
         ]
     return ComparisonResult(
         runs=runs,
+        utility_distribution=sample_distribution(config),
+        grade_distribution=sample_grade_distribution(config),
         arms=[
             ArmResult(
                 key=arm.key,

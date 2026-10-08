@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from leilao.config import AffinityProfile, AptitudeProfile, Discipline, SimulationConfig
+from leilao.config import Discipline, SimulationConfig
 from leilao.grading import credit_return
 from leilao.metrics import demand_per_seat, jain_index, pearson, semestralization
 from leilao.population import generate_students
@@ -21,10 +21,9 @@ GRADE = [
 ]
 
 
-# W_a é do perfil de afinidade: 180 h deixa o aluno cursar três disciplinas de
-# 60 h por período, que é o aperto que os testes de escassez pressupõem.
+# W_a do cenário: 180 h deixa o aluno cursar três disciplinas de 60 h por
+# período, que é o aperto que os testes de escassez pressupõem.
 WORKLOAD = 180
-NEUTRAL = AffinityProfile("Padrão", "concentrated", 1, WORKLOAD, 100)
 
 # O calouro não entra nas métricas (ver `GroupSnapshot`), então o 1º período não
 # publica nenhuma — ali todo mundo acabou de ingressar. Os testes que precisam
@@ -35,7 +34,9 @@ NEVER_APPROVES = dict(
     periods=2,
     entry_periods=1,
     min_grade=10.0,
-    aptitude_profiles=[AptitudeProfile("Fraco", mean=5.0, stddev=0.5, learning_gain=1.0)],
+    grade_mean=5.0,
+    grade_stddev=0.5,
+    learning_gain=1.0,
 )
 
 
@@ -45,7 +46,7 @@ def make_config(**overrides) -> SimulationConfig:
         periods=5,
         students_per_period=3,
         rounds=2,
-        affinity_profiles=[NEUTRAL],
+        max_hours=WORKLOAD,
         seed=11,
     )
     return SimulationConfig(**{**base, **overrides})
@@ -628,7 +629,7 @@ def test_a_first_period_heavier_than_the_workload_cap_is_rejected():
                 Discipline("D2", seats=5, hours=60),
             ],
             students_per_period=2,
-            affinity_profiles=[AffinityProfile("Apertado", "concentrated", 1, 100, 100)],
+            max_hours=100,
         )
 
 
@@ -692,7 +693,13 @@ def test_a_student_never_changes_cohort():
 def test_an_emptied_cohort_stays_in_the_series_with_its_graduates():
     """Uma geração que já esvaziou continua na lista enquanto a simulação
     correr — senão a série dela sumiria justamente ao terminar de contar."""
-    result = run_simulation(make_config(periods=10, entry_periods=2))
+    # Notas altas e pouco dispersas: ninguém reprova, então a geração 1 fecha a
+    # grade um período antes da 2 e há um período publicado com ela vazia. Sem
+    # isso o cenário depende de sorte — com a matriz de notas sorteada por
+    # período, quem reprova pode destoar e as duas gerações acabam juntas.
+    result = run_simulation(
+        make_config(periods=12, entry_periods=2, grade_mean=9.0, grade_stddev=0.3)
+    )
     emptied = [
         cohort
         for period in result.periods
@@ -944,7 +951,7 @@ def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
             ],
         ],
         students_per_period=5,
-        affinity_profiles=[AffinityProfile("Estreito", "concentrated", 1, 60, 100)],
+        max_hours=60,
     )
     assert wide.hours_to_graduate() == 300
     assert max(wide.curriculum_periods().values()) == 2

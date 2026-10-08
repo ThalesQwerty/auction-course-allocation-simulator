@@ -4,8 +4,17 @@ import dataclasses
 
 import pytest
 
-from leilao.comparison import ARMS, allocations_per_round, run_comparison, summarize
-from leilao.config import AffinityProfile, Discipline, SimulationConfig
+from leilao.behavior import DISTRIBUTION_BINS
+from leilao.grading import DISTRIBUTION_BINS as GRADE_BINS
+from leilao.comparison import (
+    ARMS,
+    MAX_RUNS,
+    allocations_per_round,
+    run_comparison,
+    run_sweep,
+    summarize,
+)
+from leilao.config import Discipline, SimulationConfig
 from leilao.ranking import allocate_by_ranking, request_set
 from leilao.simulation import GUARANTEED_ROUND, run_simulation
 
@@ -18,7 +27,6 @@ GRADE = [
 ]
 
 WORKLOAD = 180
-NEUTRAL = AffinityProfile("Padrão", "concentrated", 1, WORKLOAD, 100)
 HOURS = {d.name: d.hours for d in GRADE}
 
 
@@ -29,7 +37,7 @@ def make_config(**overrides) -> SimulationConfig:
         entry_periods=3,
         students_per_period=3,
         rounds=2,
-        affinity_profiles=[NEUTRAL],
+        max_hours=WORKLOAD,
         mechanism="ranking",
         seed=11,
     )
@@ -39,17 +47,20 @@ def make_config(**overrides) -> SimulationConfig:
 # --- o pedido do aluno: mochila 0-1 sobre a carga horária, eq. (50) ---------
 
 
-def test_the_request_never_exceeds_the_fraction_of_the_workload():
-    """Σ w_x <= U_a · W_a^(t,r) — a eq. (50) é o teto do pedido."""
+def test_the_request_never_exceeds_the_remaining_workload():
+    """Σ w_x <= W_a^(t,r): o teto do pedido é a carga horária que sobra, cheia
+    — não há mais poupança de horas, porque hora não cursada não passa para o
+    período seguinte."""
     utilities = {"D1": 0.3, "D2": 0.25, "D3": 0.2, "D4": 0.15, "D5": 0.1}
     wanted = request_set(
         utilities=utilities,
         available=list(utilities),
         hours=HOURS,
         capacity=WORKLOAD,
-        spend_fraction=0.5,
     )
-    assert sum(HOURS[name] for name in wanted) <= 0.5 * WORKLOAD
+    assert sum(HOURS[name] for name in wanted) <= WORKLOAD
+    # E com as 180 h cheias cabem três de 60 h: o aluno não guarda nada.
+    assert sum(HOURS[name] for name in wanted) == WORKLOAD
 
 
 def test_the_request_maximises_utility_within_the_budget():
@@ -61,7 +72,6 @@ def test_the_request_maximises_utility_within_the_budget():
         available=list(utilities),
         hours=HOURS,
         capacity=120,
-        spend_fraction=1.0,
     )
     assert sorted(wanted) == ["D1", "D2"]
 
@@ -73,7 +83,6 @@ def test_the_request_takes_everything_when_everything_fits():
         available=list(utilities),
         hours=HOURS,
         capacity=WORKLOAD,
-        spend_fraction=1.0,
     )
     assert sorted(wanted) == ["D1", "D2"]
 
@@ -85,21 +94,50 @@ def test_an_empty_or_unaffordable_set_asks_for_nothing():
             available=[],
             hours=HOURS,
             capacity=WORKLOAD,
-            spend_fraction=1.0,
         )
         == []
     )
-    # Teto de 30 h não comporta nem a disciplina mais leve.
+    # Sobraram 30 h, que não comportam nem a disciplina mais leve.
     assert (
         request_set(
             utilities={"D1": 0.5},
             available=["D1"],
             hours=HOURS,
-            capacity=60,
-            spend_fraction=0.5,
+            capacity=30,
         )
         == []
     )
+
+
+def test_a_tie_in_the_request_goes_to_the_discipline_listed_first():
+    """A mochila 0-1 segue a mesma ordem global de desempate do lance: entre
+    conjuntos de valor igual, ganha o que usa as disciplinas listadas antes."""
+    # Quatro de 60 h e valor idêntico, com 120 h de teto: cabem duas.
+    tied = {"D1": 0.25, "D2": 0.25, "D3": 0.25, "D5": 0.25}
+    assert request_set(
+        utilities=tied, available=list(tied), hours=HOURS, capacity=120
+    ) == ["D1", "D2"]
+    # A ordem que decide é a da matriz, não a de `available`.
+    reversed_grade = {name: 0.25 for name in ("D5", "D3", "D2", "D1")}
+    assert sorted(
+        request_set(
+            utilities=reversed_grade,
+            available=["D1", "D2", "D3", "D5"],
+            hours=HOURS,
+            capacity=120,
+        )
+    ) == ["D3", "D5"]
+
+
+def test_the_request_does_not_depend_on_the_order_of_available():
+    tied = {"D1": 0.25, "D2": 0.25, "D3": 0.25, "D5": 0.25}
+    straight = request_set(
+        utilities=tied, available=["D1", "D2", "D3", "D5"], hours=HOURS, capacity=120
+    )
+    shuffled = request_set(
+        utilities=tied, available=["D5", "D3", "D1", "D2"], hours=HOURS, capacity=120
+    )
+    assert straight == shuffled
 
 
 # --- a alocação: ordem decrescente de CR -----------------------------------
@@ -166,7 +204,7 @@ def test_the_baseline_has_no_credits_anywhere():
         for snapshot in period.disciplines:
             assert snapshot.mean_price is None
         for report in [period.aggregate, *period.rounds]:
-            for group in [report.overall, *report.by_cohort, *report.by_aptitude]:
+            for group in [report.overall, *report.by_cohort]:
                 assert group.mean_credits is None
                 assert group.credits_per_student is None
                 assert group.credits_per_seat is None
@@ -200,7 +238,10 @@ def test_the_two_mechanisms_start_from_the_same_population():
     assert [s.entry_period for s in credits.students] == [
         s.entry_period for s in ranking.students
     ]
-    assert [s.aptitude for s in credits.students] == [s.aptitude for s in ranking.students]
+    # O perfil era a terceira coisa conferida aqui; sem perfis, o que resta da
+    # inicialização comum são o nome e o t_a. A matriz de notas também é a
+    # mesma, mas só se observa pelo CR, que diverge assim que a alocação
+    # diverge — então não dá para afirmá-la daqui.
 
 
 def test_the_two_mechanisms_allocate_differently():
@@ -246,8 +287,15 @@ def test_the_comparison_fixes_the_credit_return_per_arm():
 
 def test_the_two_credit_arms_differ_only_by_the_return():
     """Mesma seed, mesmo mecanismo, mesma população: o que separa os dois é só
-    a política de retorno — e ela precisa separar, senão o braço é redundante."""
-    result = run_comparison(make_config(), runs=4)
+    a política de retorno — e ela precisa separar, senão o braço é redundante.
+
+    Precisa de um cenário **apertado** para a prova fazer sentido: o retorno só
+    muda alguma coisa onde o crédito é escasso. Com os 3 alunos por período do
+    `make_config` ninguém disputa nada, todo preço fica no piso e os dois braços
+    saem idênticos — o que não diz que o retorno é inócuo, diz que ali não havia
+    o que devolver. Cinco alunos por período bastam para a disputa existir.
+    """
+    result = run_comparison(make_config(students_per_period=5), runs=4)
     with_return = next(a for a in result.arms if a.key == "credits_return")
     without = next(a for a in result.arms if a.key == "credits")
 
@@ -257,11 +305,96 @@ def test_the_two_credit_arms_differ_only_by_the_return():
     ]
 
 
+# --- a varredura da forma da preferência ------------------------------------
+
+
+def test_the_sweep_walks_a_linear_range_of_sigma():
+    """Passos iguais do mínimo ao máximo, e o sigma do cenário vem junto como
+    `canonical` — ele é o que o boxplot mede, e **não** precisa cair exatamente
+    num ponto varrido."""
+    sweep = run_sweep(
+        make_config(mechanism="credits", utility_sigma=0.8),
+        min_sigma=0.5,
+        max_sigma=2.5,
+        points=5,
+        runs=2,
+    )
+    assert sweep.canonical == 0.8
+    assert [round(p.sigma, 6) for p in sweep.points] == [0.5, 1.0, 1.5, 2.0, 2.5]
+    for point in sweep.points:
+        assert [a.key for a in point.arms] == [a.key for a in ARMS]
+        seeds = [[r.seed for r in arm.runs] for arm in point.arms]
+        assert seeds[0] == seeds[1] == seeds[2] == [1, 2]
+        # O histograma da causa vem com o ponto.
+        assert len(point.distribution) == DISTRIBUTION_BINS
+        assert sum(point.distribution) == pytest.approx(1.0)
+
+
+def test_each_sweep_point_really_runs_at_its_own_sigma():
+    """Se o sigma não chegasse à simulação, todos os pontos sairiam iguais — é o
+    jeito mais direto de provar que a varredura varre."""
+    sweep = run_sweep(
+        make_config(mechanism="credits", students_per_period=5),
+        min_sigma=0.5,
+        max_sigma=3.0,
+        points=4,
+        runs=2,
+    )
+    psi = [
+        tuple(r.efficiency for arm in point.arms if arm.key == "credits" for r in arm.runs)
+        for point in sweep.points
+    ]
+    assert len(set(psi)) == len(psi), "pontos diferentes deveriam medir coisas diferentes"
+    # E o histograma acompanha: mais concentração, mais massa na primeira faixa.
+    assert sweep.points[0].distribution[0] < sweep.points[-1].distribution[0]
+
+
+def test_an_invalid_sweep_range_is_rejected():
+    with pytest.raises(ValueError, match="não pode passar do máximo"):
+        run_sweep(make_config(), min_sigma=3.0, max_sigma=0.5, points=4, runs=1)
+    with pytest.raises(ValueError, match="deve ser > 0"):
+        run_sweep(make_config(), min_sigma=0.0, max_sigma=2.0, points=4, runs=1)
+    with pytest.raises(ValueError, match="pelo menos 2 pontos"):
+        run_sweep(make_config(), min_sigma=0.5, max_sigma=2.0, points=1, runs=1)
+    with pytest.raises(ValueError, match="acima do limite"):
+        run_sweep(make_config(), min_sigma=0.5, max_sigma=2.0, points=99, runs=1)
+
+
+def test_a_sweep_that_would_cost_too_much_is_rejected():
+    """O teto é de simulações, não de pontos: uma faixa pequena com muitas
+    execuções custa tanto quanto uma faixa grande com poucas."""
+    with pytest.raises(ValueError, match="acima do limite de"):
+        run_sweep(make_config(), min_sigma=0.5, max_sigma=3.0, points=20, runs=MAX_RUNS)
+
+
 def test_the_comparison_ignores_the_scenario_seed():
-    """Numa comparação a seed deixa de ser parâmetro e vira o eixo da amostra."""
+    """Numa comparação a seed deixa de ser parâmetro e vira o eixo da amostra.
+
+    Vale para o resultado **inteiro**, histogramas inclusive: eles são sorteados
+    à parte das execuções, e sortear com a seed do cenário faria dois cenários
+    idênticos a menos dela devolverem respostas diferentes — exatamente o que
+    esta propriedade promete que não acontece.
+    """
     first = run_comparison(make_config(seed=1), runs=2)
     second = run_comparison(make_config(seed=999), runs=2)
     assert first == second
+    assert first.utility_distribution and first.grade_distribution
+
+
+def test_the_comparison_carries_both_scenario_distributions():
+    """Os dois histogramas de entrada vêm com a comparação, para a tela mostrar
+    de onde vieram os números. Somam 1, e as notas têm uma faixa a mais que as
+    utilidades porque a escala delas é [0, 10]."""
+    result = run_comparison(make_config(), runs=2)
+    assert len(result.utility_distribution) == DISTRIBUTION_BINS
+    assert len(result.grade_distribution) == GRADE_BINS
+    assert sum(result.utility_distribution) == pytest.approx(1.0)
+    assert sum(result.grade_distribution) == pytest.approx(1.0)
+
+    # A das notas não depende de sigma; a das utilidades sim.
+    wider = run_comparison(make_config(utility_sigma=3.0), runs=2)
+    assert wider.grade_distribution == result.grade_distribution
+    assert wider.utility_distribution != result.utility_distribution
 
 
 def test_the_comparison_rejects_a_run_count_out_of_range():

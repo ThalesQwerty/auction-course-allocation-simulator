@@ -38,9 +38,13 @@ export type HistoryEntry = SimulationRun | ComparisonRun;
  * deixaram de existir e a conclusão passou a exigir a grade inteira —, então as
  * antigas simplesmente não são lidas, em vez de aparecerem meio vazias.
  *
- * A v2 continua valendo com as comparações: `kind` é campo novo, e uma entrada
- * gravada antes dele não tinha como ser outra coisa senão uma simulação. */
-const STORAGE_KEY = "leilao.historico.v2";
+ * A v2 continuou valendo com as comparações: `kind` era campo novo, e uma
+ * entrada gravada antes dele não tinha como ser outra coisa senão uma
+ * simulação. A **v3** (08/10/2026) quebrou de novo, e pelo mesmo motivo da v1:
+ * os perfis de aluno saíram do modelo. Uma execução da v2 traz `by_aptitude`,
+ * `by_affinity` e um cenário sem as duas normais que o substituíram, e não há
+ * como converter — a tela leria `undefined` onde espera número. */
+const STORAGE_KEY = "leilao.historico.v3";
 
 /** Teto de execuções guardadas: cada resultado carrega todas as séries e todos
  * os alunos, então o histórico é podado pelas mais antigas. */
@@ -140,7 +144,7 @@ function describeScenario(
   config: SimulateRequest | CompareRequest,
   { withCreditReturn }: { withCreditReturn: boolean }
 ): string {
-  const { periods, rounds, disciplines, aptitude_profiles, affinity_profiles } = config;
+  const { periods, rounds, disciplines } = config;
   // Uma geração por período *com ingresso*: a população é o que entra por
   // período vezes L, não vezes |T|.
   const entrySpan = Math.min(config.entry_periods ?? periods, periods);
@@ -150,15 +154,15 @@ function describeScenario(
   // execuções que só diferem nela precisam se distinguir.
   const horizonte =
     entrySpan < periods ? `${periods} períodos (${entrySpan} com ingresso)` : `${periods} períodos`;
-  // Um eixo com um perfil só é a população homogênea — o default —, e dizer
-  // "1 perfil" não distingue execução nenhuma. Só entra quando há comparação.
-  const perfis = [
-    aptitude_profiles.length > 1 ? `${aptitude_profiles.length} aptidões` : null,
-    affinity_profiles.length > 1 ? `${affinity_profiles.length} afinidades` : null,
-  ].filter(Boolean);
+  // As duas normais entram só quando saem do default: num cenário montado a
+  // partir de um preset elas distinguem execuções que, de resto, são iguais.
+  const populacao = [
+    `n ~ ${config.grade_mean.toLocaleString("pt-BR")} ± ${config.grade_stddev.toLocaleString("pt-BR")}`,
+    `u σ ${config.utility_sigma.toLocaleString("pt-BR")}`,
+  ];
   return (
     `${horizonte} × ${rodadas} · ${disciplines.length} disciplinas · ${students} alunos` +
-    (perfis.length ? ` · ${perfis.join(", ")}` : "") +
+    ` · ${populacao.join(", ")}` +
     // Numa comparação o retorno não é do cenário: é o eixo do experimento, e
     // dizer "retorno nenhum" ali descreveria só um dos três braços.
     (withCreditReturn && "credit_return" in config

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from leilao.behavior import compute_bids, draw_utilities, utility_matrix
-from leilao.config import DEFAULT_AFFINITY, DEFAULT_APTITUDE, Discipline, SimulationConfig
+from leilao.config import Discipline, SimulationConfig
 from leilao.grading import grade_for_attempt
 from leilao.names import FIRST_NAMES, LAST_NAMES, sample_names
 from leilao.population import Student
@@ -22,16 +22,9 @@ def make_config(**overrides) -> SimulationConfig:
 
 
 def student(**overrides) -> Student:
-    """Um aluno nos perfis neutros: nota média e utilidade sem distorção. O que
-    os perfis fazem é testado em `test_profiles.py`; aqui o que importa é o
-    conjunto elegível."""
-    base = dict(
-        id="a1",
-        name="Fulano",
-        aptitude=DEFAULT_APTITUDE,
-        affinity=DEFAULT_AFFINITY,
-        credits=10,
-    )
+    """Um aluno qualquer: o que importa aqui é o conjunto elegível dele. O
+    sorteio das duas matrizes é testado em `test_population.py`."""
+    base = dict(id="a1", name="Fulano", credits=10)
     return Student(**{**base, **overrides})
 
 
@@ -82,26 +75,25 @@ def test_utility_matrix_covers_only_the_eligible_disciplines():
     bloqueada por pré-requisito vale zero tanto quanto a já aprovada."""
     config = make_config(periods=20)
     novice = student()
-    draws = draw_utilities([novice], config, np.random.default_rng(3))
+    row = draw_utilities([novice], config, np.random.default_rng(3))[("a1", 1)]
 
-    for period in range(1, config.periods + 1):
-        utilities = utility_matrix(draw=draws[("a1", period)], student=novice, config=config)
-        # Quem não aprovou nada só alcança o 1º período da grade.
-        assert set(utilities) == {"D1", "D2", "D3"}
-        # eq. (43): U_a in (0, 1]
-        assert 0 < sum(utilities.values()) <= 1
-        # eq. (41): utilidades distintas entre si
-        assert len(set(utilities.values())) == len(utilities)
+    utilities = utility_matrix(row=row, student=novice, config=config)
+    # Quem não aprovou nada só alcança o 1º período da grade.
+    assert set(utilities) == {"D1", "D2", "D3"}
+    # eq. (41): utilidades distintas entre si.
+    assert len(set(utilities.values())) == len(utilities)
+    # eq. (43): a soma do recorte é o U_a^(t), menor que 1 porque metade da
+    # grade está fora do alcance dele — a linha inteira é que vale 1.
+    assert 0 < sum(utilities.values()) < 1
+    assert sum(row.values()) == pytest.approx(1.0)
 
 
 def test_approving_a_prerequisite_unlocks_the_next_discipline():
     config = make_config()
-    draw = draw_utilities([student()], config, np.random.default_rng(1))[("a1", 1)]
+    row = draw_utilities([student()], config, np.random.default_rng(1))[("a1", 1)]
 
-    before = utility_matrix(draw=draw, student=student(), config=config)
-    after = utility_matrix(
-        draw=draw, student=student(grades={"D1": 8.0}), config=config
-    )
+    before = utility_matrix(row=row, student=student(), config=config)
+    after = utility_matrix(row=row, student=student(grades={"D1": 8.0}), config=config)
     # D1 sai (aprovada) e D4 entra (pré-requisito cumprido); D6 continua fora,
     # porque depende de D4.
     assert set(before) == {"D1", "D2", "D3"}
@@ -111,78 +103,176 @@ def test_approving_a_prerequisite_unlocks_the_next_discipline():
 def test_a_failed_prerequisite_does_not_unlock_anything():
     """Cursar não basta: a eq. (42) exige aprovação — n_{a,x} >= n_min."""
     config = make_config()
-    draw = draw_utilities([student()], config, np.random.default_rng(7))[("a1", 1)]
+    row = draw_utilities([student()], config, np.random.default_rng(7))[("a1", 1)]
     failed = student(grades={"D1": 4.9}, attempts={"D1": 1})
-    assert set(utility_matrix(draw=draw, student=failed, config=config)) == {"D1", "D2", "D3"}
+    assert set(utility_matrix(row=row, student=failed, config=config)) == {"D1", "D2", "D3"}
 
 
-def test_utility_matrix_is_a_pure_function_of_the_draw():
-    """A matriz é parâmetro de entrada: o mesmo sorteio e o mesmo estado do
-    aluno têm de dar sempre a mesma utilidade, chamados em qualquer ordem."""
+def test_utility_matrix_is_a_pure_function_of_the_row():
+    """A matriz é parâmetro de entrada: a mesma linha e o mesmo estado do aluno
+    têm de dar sempre a mesma utilidade, chamados em qualquer ordem."""
     config = make_config()
-    draw = draw_utilities([student()], config, np.random.default_rng(5))[("a1", 1)]
+    row = draw_utilities([student()], config, np.random.default_rng(5))[("a1", 1)]
 
-    first = utility_matrix(draw=draw, student=student(), config=config)
-    utility_matrix(draw=draw, student=student(id="a2", grades={"D2": 9.0}), config=config)
-    assert utility_matrix(draw=draw, student=student(), config=config) == first
+    first = utility_matrix(row=row, student=student(), config=config)
+    utility_matrix(row=row, student=student(id="a2", grades={"D2": 9.0}), config=config)
+    assert utility_matrix(row=row, student=student(), config=config) == first
 
 
-def test_approving_a_discipline_only_redistributes_its_utility():
-    """Aprovar uma disciplina tira ela da matriz, mas as outras continuam
-    vindo do mesmo sorteio — a preferência do aluno não é re-sorteada."""
+def test_approving_a_discipline_only_drops_it_from_the_matrix():
+    """Aprovar uma disciplina tira ela da matriz e **não mexe nas outras**: sem
+    renormalização, o que sobra vale exatamente o que valia. É o que faz a
+    preferência do aluno ser a mesma do início ao fim da simulação."""
     config = make_config()
-    draw = draw_utilities([student()], config, np.random.default_rng(9))[("a1", 1)]
+    row = draw_utilities([student()], config, np.random.default_rng(9))[("a1", 1)]
 
-    before = utility_matrix(draw=draw, student=student(), config=config)
+    before = utility_matrix(row=row, student=student(), config=config)
     # D3 aprovada: D1 e D2 continuam elegíveis, e D5 não entra (falta D2).
-    after = utility_matrix(draw=draw, student=student(grades={"D3": 8.0}), config=config)
+    after = utility_matrix(row=row, student=student(grades={"D3": 8.0}), config=config)
     assert "D3" in before and "D3" not in after
-    assert after["D1"] / after["D2"] == pytest.approx(before["D1"] / before["D2"])
+    assert after["D1"] == before["D1"] and after["D2"] == before["D2"]
+    assert sum(after.values()) == pytest.approx(sum(before.values()) - before["D3"])
 
 
 def test_an_empty_eligible_set_gives_no_utility():
     """Quem aprovou a grade inteira não quer mais nada — e, por isso, já se
     formou antes de chegar a um leilão."""
     config = make_config()
-    draw = draw_utilities([student()], config, np.random.default_rng(2))[("a1", 1)]
+    row = draw_utilities([student()], config, np.random.default_rng(2))[("a1", 1)]
     done = student(grades={name: 9.0 for name in ("D1", "D2", "D3", "D4", "D5", "D6")})
-    assert utility_matrix(draw=draw, student=done, config=config) == {}
+    assert utility_matrix(row=row, student=done, config=config) == {}
 
 
-def test_bids_never_exceed_the_budget():
-    utilities = {"D1": 0.4, "D2": 0.3, "D3": 0.1}
-    bids = compute_bids(
-        utilities=utilities, available=list(utilities), budget=10, spend_fraction=0.8
+def _harmonic_value(bids: dict[str, int], utilities: dict[str, float]) -> float:
+    """O que o aluno extrai de uma repartição: c créditos em x valem u_x vezes o
+    c-ésimo número harmônico, porque o N-ésimo crédito rende u_x / N."""
+    return sum(
+        utilities[name] * sum(1.0 / step for step in range(1, credits + 1))
+        for name, credits in bids.items()
     )
-    # eq. (19): a soma dos lances respeita o orçamento, e eqs. (44)-(46) gastam
-    # exatamente floor(C_a * U_a).
-    assert sum(bids.values()) == 8
 
 
-def test_leftover_credits_go_to_the_most_preferred_disciplines():
-    # Com 3 créditos para 3 disciplinas, cada lance preliminar é truncado para 1
-    # e sobra 0; com 4 créditos, a sobra vai para a disciplina preferida.
+def _splits(total: int, parts: int):
+    """Todas as formas de repartir `total` créditos inteiros entre `parts`
+    disciplinas — a busca exaustiva contra a qual o guloso é conferido."""
+    if parts == 1:
+        yield (total,)
+        return
+    for first in range(total + 1):
+        for rest in _splits(total - first, parts - 1):
+            yield (first, *rest)
+
+
+def test_bids_spend_the_whole_budget():
+    """Não há poupança de créditos: todo crédito a mais tem ganho marginal
+    positivo, e o que sobra não passa para o período seguinte."""
     utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
-    bids = compute_bids(
-        utilities=utilities, available=list(utilities), budget=4, spend_fraction=1.0
-    )
-    assert bids["D1"] > bids["D2"] >= bids.get("D3", 0)
-    assert sum(bids.values()) == 4
+    for budget in range(1, 16):
+        bids = compute_bids(utilities=utilities, available=list(utilities), budget=budget)
+        assert sum(bids.values()) == budget
+        # eq. (18): lance nulo não é demanda — quem aparece recebeu crédito.
+        assert all(credits > 0 for credits in bids.values())
+
+
+def test_the_marginal_utility_decays_with_each_extra_credit():
+    """O N-ésimo crédito numa disciplina vale u_x / N, e é isso que decide a
+    ordem: a preferida só repete quando o que ela ainda rende supera o primeiro
+    crédito da seguinte."""
+    utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
+    common = dict(utilities=utilities, available=list(utilities))
+    # 1º crédito: compara 0,5 com 0,3 e 0,2 — vai para a preferida.
+    assert compute_bids(**common, budget=1) == {"D1": 1}
+    # 2º: o segundo crédito de D1 vale 0,25, menos que o primeiro de D2 (0,3).
+    assert compute_bids(**common, budget=2) == {"D1": 1, "D2": 1}
+    # 3º: agora 0,25 ganha do primeiro de D3 (0,2), e D1 repete.
+    assert compute_bids(**common, budget=3) == {"D1": 2, "D2": 1}
+    assert compute_bids(**common, budget=4) == {"D1": 2, "D2": 1, "D3": 1}
+
+
+def test_a_large_budget_still_reaches_the_least_preferred_discipline():
+    """O decaimento é o que impede o aluno de despejar tudo na preferida: com
+    orçamento folgado, até a de menor utilidade recebe crédito."""
+    utilities = {"D1": 0.7, "D2": 0.2, "D3": 0.1}
+    bids = compute_bids(utilities=utilities, available=list(utilities), budget=20)
+    assert set(bids) == {"D1", "D2", "D3"}
+    assert bids["D1"] > bids["D2"] > bids["D3"]
+
+
+def test_the_greedy_split_matches_an_exhaustive_search():
+    """O guloso é ótimo porque os pesos são unitários e o ganho marginal cai
+    dentro de cada disciplina. Conferido contra todas as repartições possíveis
+    do orçamento."""
+    utilities = {"D1": 0.44, "D2": 0.31, "D3": 0.17, "D4": 0.08}
+    names = list(utilities)
+    for budget in range(1, 10):
+        bids = compute_bids(utilities=utilities, available=names, budget=budget)
+        best = max(
+            _harmonic_value(dict(zip(names, split)), utilities)
+            for split in _splits(budget, len(names))
+        )
+        assert _harmonic_value(bids, utilities) == pytest.approx(best)
+
+
+def test_a_tie_goes_to_the_discipline_listed_first():
+    """Empate de utilidade é resolvido pela ordem global de desempate: a ordem
+    em que o cenário lista as disciplinas, que é a da interface."""
+    tied = {"D1": 0.25, "D2": 0.25, "D3": 0.25, "D4": 0.25}
+    # Com 2 créditos e 4 disciplinas idênticas, levam as duas primeiras.
+    assert compute_bids(utilities=tied, available=list(tied), budget=2) == {
+        "D1": 1,
+        "D2": 1,
+    }
+    # A ordem que decide é a da matriz, não a alfabética nem a de `available`.
+    reversed_grade = {name: 0.25 for name in ("D4", "D3", "D2", "D1")}
+    assert compute_bids(
+        utilities=reversed_grade, available=["D1", "D2", "D3", "D4"], budget=2
+    ) == {"D4": 1, "D3": 1}
+
+
+def test_available_may_arrive_in_any_order():
+    """`available` é um filtro, não uma ordenação: embaralhá-lo não muda lance
+    nenhum, nem no empate."""
+    tied = {"D1": 0.25, "D2": 0.25, "D3": 0.25, "D4": 0.25}
+    straight = compute_bids(utilities=tied, available=["D1", "D2", "D3", "D4"], budget=3)
+    shuffled = compute_bids(utilities=tied, available=["D3", "D1", "D4", "D2"], budget=3)
+    assert straight == shuffled == {"D1": 1, "D2": 1, "D3": 1}
+
+
+def test_a_tie_between_marginal_gains_also_follows_the_grade_order():
+    """O empate pode surgir entre utilidades diferentes: o 2º crédito de uma
+    disciplina de utilidade 0,4 rende o mesmo que o 1º de uma de 0,2. Vale a
+    mesma ordem."""
+    utilities = {"D1": 0.4, "D2": 0.2}
+    # 1º crédito: 0,4 em D1. 2º: 0,4/2 = 0,2 empata com 0,2 de D2 — D1 vem antes.
+    assert compute_bids(utilities=utilities, available=list(utilities), budget=2) == {
+        "D1": 2
+    }
+    flipped = {"D2": 0.2, "D1": 0.4}
+    assert compute_bids(utilities=flipped, available=list(flipped), budget=2) == {
+        "D1": 1,
+        "D2": 1,
+    }
 
 
 def test_bids_only_consider_available_disciplines():
     utilities = {"D1": 0.5, "D2": 0.5}
-    bids = compute_bids(utilities=utilities, available=["D2"], budget=10, spend_fraction=1.0)
-    assert set(bids) == {"D2"}
+    bids = compute_bids(utilities=utilities, available=["D2"], budget=10)
+    assert bids == {"D2": 10}
+
+
+def test_without_pool_or_budget_there_is_no_bid():
+    utilities = {"D1": 0.5, "D2": 0.5}
+    assert compute_bids(utilities=utilities, available=[], budget=10) == {}
+    assert compute_bids(utilities=utilities, available=list(utilities), budget=0) == {}
 
 
 def test_bid_proportions_do_not_depend_on_the_utility_scale():
-    """O que a utilidade zerada fora do elegível torna redundante: o lance usa
-    só razões entre utilidades, então multiplicar a matriz inteira por uma
-    constante não muda lance nenhum. U_a pesa só como fração do orçamento."""
+    """A mochila côncava compara só razões entre utilidades — u_x/N contra
+    u_y/M —, então multiplicar a matriz inteira por uma constante não muda
+    lance nenhum."""
     utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
     scaled = {name: value * 7 for name, value in utilities.items()}
-    common = dict(available=list(utilities), budget=20, spend_fraction=0.9)
+    common = dict(available=list(utilities), budget=20)
     assert compute_bids(utilities=utilities, **common) == compute_bids(
         utilities=scaled, **common
     )

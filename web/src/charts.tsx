@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Line,
   LineChart,
@@ -150,7 +152,7 @@ export function totalColor(label: string, dark: boolean): Record<string, string>
   return { [label]: AGGREGATE[dark ? "dark" : "light"] };
 }
 
-export type SeriesPoint = { x: string } & Record<string, number | string>;
+export type SeriesPoint = { x: string | number } & Record<string, number | string>;
 
 export const formatRatio = (value: number) => value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const formatCount = (value: number) => value.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
@@ -200,6 +202,10 @@ export function MetricChart({
   format = formatRatio,
   zeroLine = false,
   band = false,
+  numericX = false,
+  xTicks,
+  xFormat,
+  xReference,
 }: {
   title: string;
   hint?: string;
@@ -210,6 +216,15 @@ export function MetricChart({
   domain?: [number | "auto", number | "auto"];
   format?: (value: number) => string;
   zeroLine?: boolean;
+  /** Eixo x **numérico**, para uma grandeza contínua — o sigma da varredura. A
+   * diferença para o eixo categórico não é só cosmética: ela é o que permite
+   * posicionar `xReference` proporcionalmente. Exige `x` numérico. */
+  numericX?: boolean;
+  /** Marcas do eixo x, para o passo automático não cair em valores quebrados. */
+  xTicks?: number[];
+  xFormat?: (value: number) => string;
+  /** Linha vertical de referência — o sigma canônico, onde os boxplots medem. */
+  xReference?: number;
   /** Séries que são leituras ordenadas da mesma grandeza (`bandColors`), e não
    * entidades diferentes. */
   band?: boolean;
@@ -247,10 +262,16 @@ export function MetricChart({
           <CartesianGrid stroke={ink.grid} vertical={false} />
           <XAxis
             dataKey="x"
+            type={numericX ? "number" : "category"}
+            domain={numericX ? ["dataMin", "dataMax"] : undefined}
+            ticks={numericX ? xTicks : undefined}
+            tickFormatter={
+              numericX ? (value: number) => (xFormat ?? formatRatio)(value) : undefined
+            }
             tick={{ fill: ink.muted, fontSize: 11 }}
             tickLine={false}
             stroke={ink.axis}
-            interval="preserveStartEnd"
+            interval={numericX ? 0 : "preserveStartEnd"}
           />
           <YAxis
             domain={domain}
@@ -261,6 +282,14 @@ export function MetricChart({
             tickFormatter={format}
           />
           {zeroLine && <ReferenceLine y={0} stroke={ink.axis} />}
+          {xReference !== undefined && (
+            <ReferenceLine
+              x={xReference}
+              stroke={ink.axis}
+              strokeDasharray="4 3"
+              label={{ value: "canônico", fill: ink.muted, fontSize: 10, position: "top" }}
+            />
+          )}
           <Tooltip
             cursor={{ stroke: ink.axis }}
             content={<Tip colors={colors} format={format} dark={dark} />}
@@ -667,6 +696,107 @@ export function BoxPlot({
             ))}
           </div>
         )}
+      </div>
+    </figure>
+  );
+}
+
+
+/** Geometria do histograma. O eixo de divisas é desenhado em HTML, e não pelo
+ * Recharts, porque o eixo categórico dele põe rótulo no **centro** da barra e o
+ * que se quer aqui é o valor **entre** barras. Para alinhar, os rótulos recebem
+ * a mesma caixa de plotagem do gráfico: ela começa depois do eixo y e termina
+ * antes da margem direita. */
+const HISTOGRAM = { height: 150, left: 40, right: 12 };
+
+/** Histograma de uma distribuição: **uma** série, então sem legenda — o título
+ * diz de quem é a barra — e matiz única, porque as barras são faixas da mesma
+ * grandeza e não categorias diferentes.
+ *
+ * O eixo x traz as **divisas** das faixas, de 0 a 1, e não a contagem de 1 a n:
+ * a grandeza é contínua e o que importa é onde a faixa começa e termina. O eixo
+ * y vai de 0 a 1 fixo, porque estes gráficos existem para serem comparados
+ * entre si e um eixo que se ajusta a cada um faria distribuições diferentes
+ * parecerem iguais. */
+export function Histogram({
+  title,
+  hint,
+  fractions,
+  format = formatRatio,
+  domain = [0, 1],
+}: {
+  title: string;
+  hint?: string;
+  /** Uma fração por faixa, em ordem, somando 1. */
+  fractions: number[];
+  format?: (value: number) => string;
+  /** O intervalo que as faixas cobrem, para rotular as divisas. Utilidade
+   * reescalada por linha vai de 0 a 1; nota vai de 0 a 10. */
+  domain?: [number, number];
+}) {
+  const dark = usePrefersDark();
+  const ink = INK[dark ? "dark" : "light"];
+  // Matiz única da paleta: a primeira posição, a mesma de uma série solitária
+  // em qualquer outro gráfico.
+  const fill = (dark ? PALETTE_DARK : PALETTE_LIGHT)[0];
+  const data = fractions.map((value, index) => ({ x: `${index}`, valor: value }));
+  // n faixas têm n + 1 divisas, igualmente espaçadas no domínio.
+  const [low, high] = domain;
+  const edges = Array.from(
+    { length: fractions.length + 1 },
+    (_, i) => low + ((high - low) * i) / fractions.length
+  );
+  // Casas decimais pelo **passo**, e não pelo tamanho do intervalo: [0, 1] em
+  // dez faixas anda de 0,1 e pede uma casa; [0, 10] anda de 1 e não pede
+  // nenhuma. Pelo intervalo, a primeira sairia como "0,10".
+  const step = (high - low) / fractions.length;
+  const edgeDigits = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
+
+  return (
+    <figure className="chart-card">
+      <figcaption>
+        <h3>{title}</h3>
+        {hint && <p>{hint}</p>}
+      </figcaption>
+
+      <ResponsiveContainer width="100%" height={HISTOGRAM.height}>
+        <BarChart
+          data={data}
+          margin={{ top: 8, right: HISTOGRAM.right, bottom: 0, left: 0 }}
+        >
+          <CartesianGrid stroke={ink.grid} vertical={false} />
+          {/* Sem rótulo: quem rotula é a régua de divisas abaixo. */}
+          <XAxis dataKey="x" tick={false} tickLine={false} height={6} stroke={ink.axis} />
+          <YAxis
+            domain={[0, 1]}
+            tick={{ fill: ink.muted, fontSize: 10 }}
+            tickLine={false}
+            stroke={ink.axis}
+            width={HISTOGRAM.left}
+            tickFormatter={format}
+          />
+          <Tooltip
+            cursor={{ fill: ink.grid }}
+            content={<Tip colors={{ valor: fill }} format={format} dark={dark} />}
+          />
+          <Bar dataKey="valor" fill={fill} isAnimationActive={false} radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+
+      <div
+        className="histogram-edges"
+        style={{ marginLeft: HISTOGRAM.left, marginRight: HISTOGRAM.right }}
+      >
+        {edges.map((edge, index) => (
+          <span key={edge} style={{ left: `${(index / fractions.length) * 100}%` }}>
+            {index === 0 || index === fractions.length
+              ? edge.toLocaleString("pt-BR")
+              : edge.toLocaleString("pt-BR", {
+                  minimumFractionDigits: edgeDigits,
+                  maximumFractionDigits: edgeDigits,
+                })}
+          </span>
+        ))}
       </div>
     </figure>
   );

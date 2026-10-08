@@ -14,18 +14,24 @@ aluno só pede um conjunto que já lhe cabe, e por isso atender todos os pedidos
 dele é sempre viável. A varredura não precisa reverificar nada.
 
 O que substitui o orçamento é a carga horária. No leilão o aluno reparte
-C_a^(t,r) entre lances proporcionais à utilidade; aqui ele gasta W_a^(t,r) em
-horas, e U_a^(t) continua sendo a fração daquele teto que ele se dispõe a usar
-(eq. 50). A estratégia deixa de ser "quanto apostar em cada uma" e passa a ser
-"quais pedir": um Problema da Mochila 0-1, com a carga horária w_x como peso e
-a utilidade percebida u_{a,x} como valor.
+C_a^(t,r) entre as disciplinas; aqui ele gasta W_a^(t,r) em horas, e gasta tudo,
+porque hora não cursada não passa para o período seguinte. A estratégia deixa de
+ser "quanto apostar em cada uma" e passa a ser "quais pedir": um Problema da
+Mochila 0-1, com a carga horária w_x como peso e a utilidade percebida u_{a,x}
+como valor.
+
+Os dois mecanismos resolvem, portanto, mochilas de naturezas diferentes. A daqui
+é **0-1**: o item entra ou não, e a utilidade é cobrada uma vez só. A do leilão é
+**côncava** e de pesos unitários (`behavior.compute_bids`): o aluno põe quantos
+créditos quiser na mesma disciplina, com retorno decrescente. Essa é a
+expressividade que a comparação mede — aqui a utilidade só ordena, lá ela também
+dosa.
 
 As duas peças deste módulo são justamente essas: `request_set` (o que o aluno
 pede) e `allocate_by_ranking` (o que a universidade concede).
 """
 from __future__ import annotations
 
-import math
 from math import gcd
 
 
@@ -44,6 +50,12 @@ def _knapsack(
     E, como os pesos são inteiros, dividir todos eles e a capacidade pelo MDC dá
     exatamente o mesmo ótimo numa tabela MDC vezes menor — uma grade de
     disciplinas de 60 e 90 h encolhe a capacidade de 450 para 15.
+
+    **Empate de valor vai para quem vem antes em `names`**, que é a ordem de
+    desempate global descrita em `behavior`. Sai de graça da comparação estrita
+    em `candidate > best[c]`: um item posterior não desloca um valor igual já
+    alcançado pelos anteriores, e a reconstrução de trás para frente respeita
+    isso. Quem chama precisa, portanto, passar `names` na ordem da grade.
     """
     pool = [name for name in names if weights[name] <= capacity]
     if not pool:
@@ -92,34 +104,41 @@ def request_set(
     available: list[str],
     hours: dict[str, int],
     capacity: int,
-    spend_fraction: float,
 ) -> list[str]:
     """D_a^(t,r) — as disciplinas que o aluno solicita nesta rodada, eq. (50).
 
     `available` é B_a^(t,r), o mesmo conjunto que alimenta os lances no leilão:
     disciplinas com vaga livre, que cabem na carga horária restante e que o
     aluno ainda não conquistou no período. `capacity` é W_a^(t,r), a carga
-    horária que lhe sobra, e `spend_fraction` é U_a^(t).
+    horária que lhe sobra, e é o teto do pedido inteiro.
 
-    O teto do pedido é floor(U_a * W_a) — a eq. (50) com os dois lados em horas
-    inteiras. É o análogo exato do que o leilão faz com o orçamento na eq. (44):
-    U_a é a fração do que o aluno tem em mãos que ele se dispõe a comprometer no
-    período, e o que muda entre os mecanismos é só a moeda.
+    O teto é o W_a cheio, e não floor(U_a · W_a) como na eq. (50): com a soma
+    das utilidades fixada em 1 (`behavior.utility_matrix`), U_a deixou de
+    existir como grandeza do aluno. Aqui ele seria **poupança de carga
+    horária**, que não se sustenta — hora não cursada não passa para o período
+    seguinte, então reservá-la é só cursar menos. É a mesma decisão que faz o
+    aluno gastar todo o orçamento no leilão (`behavior.compute_bids`), e manter
+    as duas iguais é o que preserva a comparação: o que separa os mecanismos
+    tem de ser o mecanismo, não quanto cada lado resolveu guardar.
 
     Dentro desse teto o aluno extrai o máximo de utilidade que consegue, e é
     aqui que ele deixa de poder dizer *quanto* quer cada disciplina: a mochila
     só lê a ordem das utilidades e os pesos. Essa perda de expressividade é
-    justamente a hipótese que a comparação testa.
+    justamente a hipótese que a comparação testa — a mochila côncava do leilão
+    recebe as mesmas utilidades e põe mais ou menos crédito conforme o valor
+    delas.
+
+    **Empate vai para a disciplina listada primeiro**, a mesma ordem global que
+    desempata o lance — por isso o `pool` sai de `utilities`, que vem na ordem da
+    grade, e não de `available`, que é só um filtro.
     """
-    pool = [name for name in available if utilities.get(name, 0.0) > 0.0]
+    wanted = set(available)
+    pool = [
+        name for name, utility in utilities.items() if name in wanted and utility > 0.0
+    ]
     if not pool:
         return []
-    return _knapsack(
-        names=pool,
-        values=utilities,
-        weights=hours,
-        capacity=math.floor(spend_fraction * capacity),
-    )
+    return _knapsack(names=pool, values=utilities, weights=hours, capacity=capacity)
 
 
 def allocate_by_ranking(
