@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..auction import AuctionResult
 from ..comparison import MAX_RUNS
-from ..config import MAX_AFFINITY_INTENSITY, AffinityKind, CreditReturnPolicy
+from ..config import MAX_AFFINITY_INTENSITY, AffinityKind, CreditReturnPolicy, Mechanism
 
 
 class AgentIn(BaseModel):
@@ -177,11 +177,13 @@ class SimulateRequest(ScenarioIn):
 
 
 class CompareRequest(ScenarioIn):
-    """Uma comparação entre os dois mecanismos sobre o mesmo cenário.
+    """Uma comparação entre os três modelos sobre o mesmo cenário.
 
-    Não há seed: as seeds são 1..`runs`, e cada uma roda dos dois lados. Fixar
-    uma só mediria aquela população; não parear mediria a variação entre
-    populações junto da variação entre mecanismos.
+    Dois campos do cenário não têm efeito aqui. A **seed**, porque as seeds são
+    1..`runs` e cada uma roda nos três braços: fixar uma só mediria aquela
+    população, e não parear mediria a variação entre populações junto da
+    variação entre modelos. E o **retorno de créditos**, porque ele é o eixo do
+    experimento — um braço o usa proporcional e o outro não o usa.
     """
 
     runs: int = Field(
@@ -197,8 +199,9 @@ class CompareRequest(ScenarioIn):
 
 class RunSummaryOut(BaseModel):
     """Uma execução reduzida a um ponto por métrica — o que vira um valor no
-    boxplot. É a média dos períodos ponderada pelos alunos ativos, de modo que
-    a fase de drenagem não pese como um período cheio."""
+    boxplot. As três de período são a média ponderada pelos alunos medidos, de
+    modo que a fase de drenagem não pese como um período cheio; o tempo de
+    formatura é da execução inteira."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -206,22 +209,44 @@ class RunSummaryOut(BaseModel):
     # Períodos efetivamente publicados; menor que |T| se a população se esvaziou
     # antes do horizonte.
     periods: int
+    # Concluintes da execução — o contexto sem o qual `time_to_graduate` não se
+    # lê: quem forma menos pode exibir um tempo menor só por sobrarem os rápidos.
+    graduates: int
     efficiency: float  # eq. (53)
     fairness: float  # eq. (55)
     correlation: float  # eq. (57)
-    occupancy: float  # eq. (54)
-    semestralization: float
+    # Períodos do ingresso ao diploma, na média dos concluintes. Null quando
+    # ninguém concluiu.
+    time_to_graduate: float | None
+    # Vagas obtidas por aluno em cada rodada (o índice r-1 é a rodada r), com
+    # |R| posições. Mede a **saturação**: o que se lê é o decaimento entre as
+    # rodadas, não o nível de cada uma.
+    allocations_per_round: list[float | None]
+
+
+class ArmResultOut(BaseModel):
+    """Um dos modelos comparados e as suas N execuções.
+
+    `key` é o identificador estável da série; o rótulo em português é da
+    interface, não da API.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    mechanism: Mechanism
+    credit_return: CreditReturnPolicy
+    runs: list[RunSummaryOut]
 
 
 class CompareResponse(BaseModel):
-    """As duas amostras, pareadas pela seed: o i-ésimo elemento de cada lista é
-    a mesma população sob regras de alocação diferentes."""
+    """As amostras dos três braços, pareadas pela seed: o i-ésimo elemento de
+    cada lista é a mesma população sob regras diferentes."""
 
     model_config = ConfigDict(from_attributes=True)
 
     runs: int
-    credits: list[RunSummaryOut]
-    ranking: list[RunSummaryOut]
+    arms: list[ArmResultOut]
 
 
 class MetricsOut(BaseModel):

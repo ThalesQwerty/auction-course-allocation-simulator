@@ -16,8 +16,11 @@ São **dois mecanismos de alocação** sobre o mesmo modelo de universidade: o
 **leilão por créditos** proposto (Seção 7.1) e a **ordenação por CR** que serve
 de linha de base (Seção 7.3.1, eqs. 49-50). E, por isso, dois modos de
 execução — uma simulação, que detalha um mecanismo por dentro, e uma
-**comparação**, que roda o mesmo cenário nos dois, N vezes de cada lado, e
-mostra só as métricas principais em boxplot.
+**comparação**, que roda o mesmo cenário em **três modelos**, N vezes em cada
+um, e mostra só as métricas de alocação em boxplot. Os três são a ordenação por
+CR e o leilão **com** e **sem** retorno de créditos: o retorno entra como eixo
+do experimento porque é ele que pode devolver ao leilão algum senso
+meritocrático.
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade, e **toda
 disciplina é obrigatória** — conclui quem aprova em todas. O que ordena a grade
@@ -154,27 +157,96 @@ Como ali não há crédito, as grandezas de crédito saem **nulas** dos relatór
 `credit_return` continuam no cenário — a comparação roda a mesma configuração
 dos dois lados — mas não têm efeito em `ranking`.
 
+### O calouro conta como gente, não como dado
+
+Quem ingressa num período recebe vaga garantida em **todas** as disciplinas de
+1º período — que são exatamente as elegíveis para ele, já que não aprovou nada.
+Logo ele entra com `ψ = 1,000` e `CR = 0,000`, *sempre*, sem uma única exceção,
+e isso vale igual nos dois mecanismos. Medi-lo é medir a matrícula garantida,
+não a alocação.
+
+No preset Computação ele é **11% de todas as linhas aluno-período**, e sozinho
+invertia o sinal da correlação da eq. (57):
+
+| λ (seed 1) | com calouros | sem calouros |
+| --- | --- | --- |
+| CR (legado) | +0,228 | +0,466 |
+| Créditos | −0,088 | +0,041 |
+
+A regra, portanto: o calouro **fica nas contagens de pessoas** (`active`,
+`population`, `graduated`) e **sai de toda média por aluno** — as métricas e as
+grandezas de crédito. Um recorte só, para que `ψ̄` e "créditos por aluno" na
+mesma tela não falem de populações diferentes.
+
+Duas consequências visíveis:
+
+- `metrics.students <= active`, e os dois números não são o mesmo.
+- **O 1º período de uma simulação não publica métrica nenhuma** (`metrics` é
+  `None`): ali todo mundo é calouro. A série de uma geração começa no período
+  *seguinte* ao seu ingresso.
+
 ### A comparação
 
-`run_comparison` roda o mesmo cenário nos dois mecanismos, `N` vezes de cada
-lado, com as **seeds de 1 a N**. As duas condições da Seção 7.3 saem daí:
+`run_comparison` roda o mesmo cenário em **três braços** (`ARMS`), `N` vezes em
+cada um, com as **seeds de 1 a N**:
 
-1. **Mesma inicialização dos dois lados.** A seed gera a população, as
-   utilidades e as notas, então rodar a mesma seed nos dois é literalmente a
-   mesma gente encontrando regras diferentes. As duas listas da resposta são
+| Braço | Mecanismo | `f_γ` | O que ele é |
+|---|---|---|---|
+| `ranking` | ordenação por CR | — | a linha de base: o histórico *é* o critério |
+| `credits_return` | leilão | `ratio` | quem aprova recupera a fatia do preço correspondente à nota |
+| `credits` | leilão | `none` | o leilão puro: o crédito gasto sai do sistema |
+
+O leilão entra duas vezes porque o **retorno de créditos é o eixo do
+experimento**, não um parâmetro do cenário: a política proporcional é a única
+que premia desempenho acima da nota de corte, e portanto a única com chance de
+recriar o incentivo que o CR dá de graça. Os dois braços do leilão rodam a mesma
+população com a mesma seed e diferem em uma única coisa, de modo que a diferença
+entre eles **é** o efeito do retorno, isolado. Por isso o `credit_return` que
+vier na configuração é ignorado, como a seed.
+
+As duas condições da Seção 7.3 saem daí:
+
+1. **Mesma inicialização em todos os braços.** A seed gera a população, as
+   utilidades e as notas, então rodar a mesma seed nos três é literalmente a
+   mesma gente encontrando regras diferentes. As listas da resposta são
    **pareadas**: o i-ésimo elemento de cada uma é a mesma população.
 2. **Múltiplas configurações de entrada.** As N seeds são essas configurações.
    Uma execução só não diria nada — a diferença poderia ser daquela população.
 
-Cada execução vira **um número por métrica**, que é um valor dentro da caixa:
-a média dos períodos **ponderada pelos alunos ativos**. A simulação termina
-numa fase de drenagem, e uma média simples daria a um período final de vinte
-alunos o mesmo peso de um período cheio de trezentos.
+São **quatro métricas**: eficiência (ψ̄), equidade (φ), correlação (λ) e
+**tempo de formatura**. Nada de crédito, porque não há contraparte do outro
+lado, e nenhum recorte por geração ou perfil, porque o que está em comparação é
+o mecanismo, não o que acontece dentro de cada um.
 
-Só entram as **cinco métricas principais** — eficiência (ψ̄), equidade (φ),
-correlação (λ), ocupação (θ) e semestralização (σ̄). Nada de crédito, porque não
-há contraparte do outro lado, e nenhum recorte por geração ou perfil, porque o
-que está em comparação é o mecanismo, não o que acontece dentro de cada um.
+As três primeiras são de período, e uma execução vira um número pela média
+**ponderada pelos alunos medidos** (`metrics.students`, não `active`): a
+simulação termina numa fase de drenagem, e uma média simples daria a um período
+final de vinte alunos o mesmo peso de um período cheio de trezentos. O 1º
+período, sem métrica, simplesmente não entra.
+
+O **tempo de formatura** não é de período: é a média, sobre os concluintes, de
+quantos períodos cada um levou do ingresso ao diploma (contando o da formatura).
+Ele tem **viés de seleção** — só existe sobre quem concluiu, então um mecanismo
+que forma menos gente pode exibir um tempo *menor* só porque sobraram os
+rápidos. Por isso o resumo carrega `graduates` junto: a média não se lê sem ele.
+
+Além dessas quatro, uma série de **saturação**: as vagas obtidas por aluno em
+**cada rodada**, uma posição por rodada do cenário. Cada posição conta o que foi
+ganho *naquela* rodada, não o acumulado, de modo que as posições somadas dão as
+vagas por aluno do período. O que se lê é o **decaimento** entre elas — um
+mecanismo que atende mais demanda de saída começa alto e cai rápido, porque
+pouco ficou por alocar; um que leva a disputa adiante distribui as vagas pelas
+rodadas. Nenhuma rodada isolada tem lado "melhor": na primeira, mais alto é
+atender mais; nas seguintes, mais alto é ter deixado mais para trás. E a
+matrícula garantida não infla a primeira, porque o calouro está fora do recorte.
+
+Ficaram de fora, por motivos diferentes. A **ocupação** (θ) porque, com o
+calouro fora do recorte, ela deixou de se ler como "o quanto a universidade
+encheu" — as vagas garantidas continuam ocupadas e não entram mais no
+numerador; essa leitura está nos gráficos por disciplina de uma execução. E a
+**semestralização** (σ̄) porque o tempo de formatura mede a mesma coisa —
+progressão na grade — num número que se lê direto, em períodos. As duas
+continuam nos relatórios de uma execução única.
 
 ### Garantias dos relatórios
 
@@ -417,10 +489,12 @@ No topo de "Configurar", **Modo de execução** escolhe o que o botão faz:
 - **uma simulação do leilão por créditos** — o cenário roda uma vez, com a seed
   do formulário, e a tela traz todos os gráficos por período, os recortes por
   geração e perfil e a tela de depuração por aluno.
-- **comparar os dois mecanismos** — o mesmo cenário roda nos dois, `N` vezes de
-  cada lado, com as seeds de 1 a `N`. O campo da seed some (ali ela vira o eixo
-  da amostra) e dá lugar a **execuções por mecanismo (N)**. São `2N` simulações
-  completas: com o preset Computação e `N = 20`, cerca de meio minuto.
+- **comparar os três modelos** — o mesmo cenário roda nos três, `N` vezes em
+  cada um, com as seeds de 1 a `N`. Somem dois campos: o da **seed** (ali ela
+  vira o eixo da amostra) e o do **retorno de créditos** (ali ele vira o eixo do
+  experimento, e cada braço impõe o seu). No lugar entra **execuções por modelo
+  (N)**. São `3N` simulações completas: com o preset Computação e `N = 20`,
+  cerca de meio minuto.
 
 O cenário é o mesmo nos dois modos — trocar de modo não mexe em nada do que
 está configurado.
@@ -528,19 +602,34 @@ sai fora do esperado, é aqui que se vê por quê.
 #### Tela de comparação
 
 Uma comparação não tem gráfico por período, recorte nem tela por aluno: tem
-**cinco boxplots**, um por métrica principal, com uma caixa por mecanismo. A
-linha grossa é a mediana, a caixa é a metade central da amostra (1º ao 3º
-quartil), os bigodes vão até 1,5 IQR e o que sobra aparece como ponto solto.
-Cada valor dentro de uma caixa é uma execução, reduzida à média dos períodos
-ponderada pelos alunos ativos.
+**quatro boxplots** de alocação, um por métrica, mais **um por rodada** na seção
+de saturação — todos com **uma caixa por modelo**. A linha
+grossa é a mediana, a caixa é a metade central da amostra (1º ao 3º quartil),
+os bigodes vão até 1,5 IQR e o que sobra aparece como ponto solto. Cada valor
+dentro de uma caixa é uma execução.
 
-O que se lê é a **sobreposição**: caixas que não se tocam separam os
-mecanismos; caixas sobrepostas dizem que a diferença entre as medianas cabe
-dentro da variação entre populações. Abaixo vêm duas tabelas — o resumo de
-cinco números de cada distribuição, com a diferença entre as medianas e a
-contagem pareada de **seeds a favor**, e a listagem execução a execução, em que
-o pareamento fica à vista: cada linha é uma seed, e os dois valores de cada
-coluna são a mesma população sob regras diferentes.
+O que se lê é a **sobreposição**: caixas que não se tocam separam os modelos;
+caixas sobrepostas dizem que a diferença entre as medianas cabe dentro da
+variação entre populações. Abaixo vêm três tabelas.
+
+**O que o retorno de créditos muda** isola a pergunta que motivou o terceiro
+braço: os dois braços do leilão lado a lado, a diferença entre as medianas e a
+contagem pareada de em quantas seeds a métrica **subiu** com o retorno — uma
+contagem descritiva, que não diz se subir é bom. A mediana da linha de base fica
+ao lado, para localizar os dois no caminho entre ignorar o histórico e deixá-lo
+decidir tudo.
+
+**Resumo das distribuições** traz os cinco números de cada uma, com a diferença
+e a contagem de **seeds a favor** medidas contra a linha de base (em quantas
+aquele modelo saiu *melhor* que o CR — maior em ψ̄ e φ, menor no tempo). Em λ as
+duas colunas vêm vazias: ela descreve se a alocação segue o CR, e qual lado é
+melhor ali depende de alocar por mérito passado ou por necessidade.
+
+**Execução a execução** põe o pareamento à vista: cada linha é uma seed, e os
+três valores de cada coluna são a mesma população sob regras diferentes. A
+coluna **formados** está ali porque o tempo de formatura não se lê sem ela; as
+rodadas ficam de fora desta tabela, que já tem três valores por célula, e estão
+nas duas de cima.
 
 As duas leituras não são equivalentes. Uma diferença pequena de medianas com
 quase todas as seeds a favor é um efeito consistente e pequeno — coisa bem

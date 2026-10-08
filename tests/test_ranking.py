@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-from leilao.comparison import run_comparison, summarize
+from leilao.comparison import ARMS, allocations_per_round, run_comparison, summarize
 from leilao.config import AffinityProfile, Discipline, SimulationConfig
 from leilao.ranking import allocate_by_ranking, request_set
 from leilao.simulation import GUARANTEED_ROUND, run_simulation
@@ -222,11 +222,39 @@ def test_the_credit_return_policy_has_no_effect_on_the_baseline():
 # --- a comparação ----------------------------------------------------------
 
 
-def test_the_comparison_pairs_the_seeds():
+def test_the_comparison_pairs_the_seeds_across_every_arm():
     result = run_comparison(make_config(), runs=3)
     assert result.runs == 3
-    assert [r.seed for r in result.credits] == [1, 2, 3]
-    assert [r.seed for r in result.ranking] == [1, 2, 3]
+    assert [arm.key for arm in result.arms] == [arm.key for arm in ARMS]
+    for arm in result.arms:
+        assert [r.seed for r in arm.runs] == [1, 2, 3]
+
+
+def test_the_comparison_fixes_the_credit_return_per_arm():
+    """O retorno deixa de ser parâmetro do cenário e vira o eixo do
+    experimento: um braço o usa proporcional, os outros dois não o usam."""
+    result = run_comparison(make_config(credit_return="unit"), runs=2)
+
+    assert [(a.mechanism, a.credit_return) for a in result.arms] == [
+        ("ranking", "none"),
+        ("credits", "ratio"),
+        ("credits", "none"),
+    ]
+    # O `unit` do cenário não chegou a lugar nenhum.
+    assert all(arm.credit_return != "unit" for arm in result.arms)
+
+
+def test_the_two_credit_arms_differ_only_by_the_return():
+    """Mesma seed, mesmo mecanismo, mesma população: o que separa os dois é só
+    a política de retorno — e ela precisa separar, senão o braço é redundante."""
+    result = run_comparison(make_config(), runs=4)
+    with_return = next(a for a in result.arms if a.key == "credits_return")
+    without = next(a for a in result.arms if a.key == "credits")
+
+    assert [r.seed for r in with_return.runs] == [r.seed for r in without.runs]
+    assert [r.efficiency for r in with_return.runs] != [
+        r.efficiency for r in without.runs
+    ]
 
 
 def test_the_comparison_ignores_the_scenario_seed():
@@ -253,6 +281,46 @@ def test_the_summary_weights_the_periods_by_the_active_students():
     ]
     assert min(efficiencies) <= summary.efficiency <= max(efficiencies)
     assert summary.periods == len(result.periods)
+
+
+def test_the_saturation_has_one_figure_per_round_and_decays():
+    """Uma posição por rodada, e o que foi ganho *naquela* rodada — não o
+    acumulado. Daí a série cair: a primeira pega o que estava livre, as
+    seguintes o que sobrou."""
+    config = make_config(rounds=3)
+    series = allocations_per_round(run_simulation(config))
+
+    assert len(series) == 3
+    assert all(value is not None for value in series)
+    assert series[0] >= series[1] >= series[2]
+
+
+def test_the_saturation_sums_to_the_allocation_of_the_period():
+    """Somadas, as rodadas dão as vagas por aluno do período — é a mesma
+    grandeza fatiada, não uma contagem à parte."""
+    result = run_simulation(make_config(rounds=2))
+
+    for period in result.periods:
+        aggregate = period.aggregate.overall.metrics
+        if aggregate is None:
+            continue
+        by_round = [
+            report.overall.metrics.allocated
+            for report in period.rounds
+            if report.overall.metrics is not None
+        ]
+        assert sum(by_round) == aggregate.allocated
+
+
+def test_the_saturation_is_measured_in_both_mechanisms():
+    """A linha de base também tem rodadas: o aluno refaz a mochila com a carga
+    horária que lhe sobrou, então ali a saturação também se mede."""
+    for mechanism in ("credits", "ranking"):
+        series = allocations_per_round(
+            run_simulation(make_config(mechanism=mechanism, rounds=2))
+        )
+        assert len(series) == 2
+        assert series[0] > 0
 
 
 def test_the_summary_survives_a_simulation_with_no_active_students():

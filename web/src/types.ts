@@ -142,38 +142,58 @@ export interface SimulateRequest {
  * (Seção 7.3.1, eqs. 49-50). Espelha `leilao.config.Mechanism`. */
 export type Mechanism = "credits" | "ranking";
 
-/** A ordem em que os dois entram no eixo e na legenda: a linha de base
- * primeiro, o mecanismo proposto depois — é contra ela que ele se mede. */
-export const MECHANISMS: {
-  value: Mechanism;
+/** Os três modelos comparados, na ordem em que entram no eixo e na legenda.
+ *
+ * O leilão entra **duas vezes**, com e sem retorno de créditos, porque o
+ * retorno é o que pode devolver ao mecanismo algum senso meritocrático: na
+ * política proporcional o aluno recupera a fatia do preço correspondente à
+ * nota, então ir bem compra poder de compra no período seguinte. A ordenação
+ * por CR faz isso por construção — o histórico *é* o critério — e o leilão sem
+ * retorno não faz de jeito nenhum. Nessa ordem, a correlação (λ) se lê de uma
+ * vez: do mecanismo em que o CR decide tudo ao que o ignora, com o retorno no
+ * meio.
+ *
+ * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas. */
+export const COMPARISON_ARMS: {
+  key: string;
   label: string;
-  /** Rótulo do eixo do boxplot: embaixo da caixa cabe pouco, e o nome inteiro
-   * fica na legenda. */
+  /** Rótulo do eixo do boxplot: embaixo da caixa cabe pouco — com três caixas,
+   * menos ainda —, e o nome inteiro fica na legenda. */
   short: string;
   hint: string;
 }[] = [
   {
-    value: "ranking",
+    key: "ranking",
     label: "CR (legado)",
     short: "CR",
     hint: "as solicitações são atendidas em ordem decrescente do CR do aluno; a carga horária faz o papel do orçamento — eqs. (49)-(50)",
   },
   {
-    value: "credits",
-    label: "Créditos (proposto)",
-    short: "Créditos",
-    hint: "o aluno reparte um orçamento de créditos entre lances e um PLI decide a alocação — Seção 7.1",
+    key: "credits_return",
+    label: "Créditos com retorno",
+    short: "c/ retorno",
+    hint: "o leilão com f_γ proporcional: quem aprova recupera a fatia do preço correspondente à nota, então ir bem compra poder de compra no período seguinte",
+  },
+  {
+    key: "credits",
+    label: "Créditos sem retorno",
+    short: "s/ retorno",
+    hint: "o leilão puro: o crédito gasto sai do sistema, e a única entrada é o Γ_min de cada período — Seção 7.1",
   },
 ];
 
-export const mechanismLabel = (mechanism: Mechanism): string =>
-  MECHANISMS.find((option) => option.value === mechanism)?.label ?? mechanism;
+export const armLabel = (key: string): string =>
+  COMPARISON_ARMS.find((arm) => arm.key === key)?.label ?? key;
 
-/** Uma comparação: o mesmo cenário rodado nos dois mecanismos, N vezes de cada
- * lado. Não tem `seed` — as seeds são 1..N e são pareadas, de modo que a
- * i-ésima execução de um lado e a do outro partem da mesma população, das
- * mesmas utilidades e das mesmas notas (condição metodológica da Seção 7.3). */
-export interface CompareRequest extends Omit<SimulateRequest, "seed"> {
+/** Uma comparação: o mesmo cenário rodado nos três modelos, N vezes em cada um.
+ *
+ * Dois campos do cenário não entram. A **seed**, porque as seeds são 1..N e são
+ * pareadas, de modo que a i-ésima execução de cada braço parte da mesma
+ * população, das mesmas utilidades e das mesmas notas (condição metodológica da
+ * Seção 7.3). E o **retorno de créditos**, porque ele é o eixo do experimento:
+ * cada braço impõe o seu. */
+export interface CompareRequest
+  extends Omit<SimulateRequest, "seed" | "credit_return"> {
   runs: number; // N
 }
 
@@ -181,32 +201,52 @@ export interface CompareRequest extends Omit<SimulateRequest, "seed"> {
 export const MAX_COMPARISON_RUNS = 100;
 
 /** Uma execução reduzida a um ponto por métrica — o que vira um valor dentro
- * de uma caixa. A redução é a média dos períodos **ponderada pelos alunos
- * ativos**: a simulação termina numa fase de drenagem, e uma média simples
- * daria a um período final de vinte alunos o mesmo peso de um período cheio. */
+ * de uma caixa. As três de período são a média **ponderada pelos alunos
+ * medidos**: a simulação termina numa fase de drenagem, e uma média simples
+ * daria a um período final de vinte alunos o mesmo peso de um período cheio. O
+ * tempo de formatura não é de período — é da execução inteira. */
 export interface RunSummary {
   seed: number;
   /** Períodos efetivamente publicados; menor que |T| se a população se
    * esvaziou antes do horizonte. */
   periods: number;
+  /** Concluintes da execução. Não é métrica: é o denominador sem o qual
+   * `time_to_graduate` não se lê — quem forma menos gente pode exibir um tempo
+   * menor só porque sobraram os rápidos. */
+  graduates: number;
   efficiency: number; // ψ̄ — eq. (53)
   fairness: number; // φ — eq. (55)
   correlation: number; // λ — eq. (57)
-  occupancy: number; // θ — eq. (54)
-  semestralization: number; // σ̄
+  /** Períodos do ingresso ao diploma, na média dos concluintes; conta o período
+   * da formatura. `null` quando ninguém concluiu — zero ali se leria como
+   * "formou na hora". */
+  time_to_graduate: number | null;
+  /** Vagas obtidas por aluno **em cada rodada**, na ordem delas: o índice r-1 é
+   * a rodada r, e há |R| posições. Mede a **saturação da demanda** — o que se
+   * lê é o decaimento entre as rodadas, não o nível de cada uma.
+   *
+   * Conta o que foi ganho *naquela* rodada, não o acumulado, então as posições
+   * somadas dão as vagas por aluno do período. E, como o calouro está fora do
+   * recorte, a matrícula garantida não infla a primeira. */
+  allocations_per_round: (number | null)[];
 }
 
-/** As duas amostras, pareadas pela seed: o i-ésimo elemento de cada lista é a
- * mesma população sob regras de alocação diferentes. */
+/** Um dos modelos comparados e as suas N execuções. O rótulo em português está
+ * em `COMPARISON_ARMS`, casado por `key`; a API manda só o identificador e o
+ * que define o braço. */
+export interface ArmResult {
+  key: string;
+  mechanism: Mechanism;
+  credit_return: CreditReturnPolicy;
+  runs: RunSummary[];
+}
+
+/** As amostras dos três braços, pareadas pela seed: o i-ésimo elemento de cada
+ * lista é a mesma população sob regras diferentes. */
 export interface CompareResponse {
   runs: number;
-  credits: RunSummary[];
-  ranking: RunSummary[];
+  arms: ArmResult[];
 }
-
-/** As grandezas de `RunSummary` que são métricas — as cinco principais. Serve
- * de chave para os boxplots e para a tabela. */
-export type ComparisonMetric = Exclude<keyof RunSummary, "seed" | "periods">;
 
 export interface Metrics {
   students: number;

@@ -74,6 +74,20 @@ class GroupSnapshot:
     `None` em vez de 0,0: não havia ninguém, o que é diferente de ninguém ter
     ficado satisfeito. Zero ali seria um ponto falso no gráfico e puxaria para
     baixo qualquer média feita sobre os períodos.
+
+    **O calouro conta como gente, não como dado.** Quem ingressa no período não
+    disputou nada: recebeu vaga garantida em todas as disciplinas de 1º período,
+    que são exatamente as elegíveis para ele. Entra, portanto, com psi = 1,000 e
+    CR = 0,000 — *sempre*, sem exceção —, e medir o mecanismo sobre esse ponto é
+    medir a matrícula garantida, que é igual nos dois mecanismos. No preset
+    Computação ele é 11% de todas as linhas aluno-período, e sozinho invertia o
+    sinal da correlação da eq. (57): -0,09 com ele, +0,04 sem.
+
+    Por isso ele fica de fora de **toda média por aluno** — as métricas e as
+    grandezas de crédito —, e permanece nas **contagens de pessoas**:
+    `active`, `population` e `graduated`. Daí `metrics.students <= active`, e o
+    primeiro período de uma simulação não tem métrica nenhuma: ali todo mundo é
+    calouro.
     """
 
     # Quem é este recorte: `None` na universidade inteira
@@ -308,6 +322,7 @@ def _snapshot_group(
     *,
     group: str | None,
     members: list[Student],
+    measured: list[Student],
     satisfactions: dict[str, float],
     grade_averages: dict[str, float],
     semestralizations: dict[str, float],
@@ -327,16 +342,22 @@ def _snapshot_group(
     """Um recorte qualquer de alunos: a universidade inteira, uma geração ou um
     perfil.
 
+    `members` é quem está matriculado — a contagem de pessoas. `measured` é o
+    subconjunto que de fato disputou: os mesmos, menos os calouros do período,
+    pelo motivo explicado em `GroupSnapshot`. Toda média sai de `measured`, e só
+    `active` sai de `members`; com `measured` vazio o recorte publica a
+    contagem e nenhuma média.
+
     Sem crédito no cenário (linha de base por CR) as cinco grandezas de crédito
     saem `None`, como já saem num recorte vazio: ali não houve ninguém, aqui não
     há moeda. Zero nos dois casos se leria como um fato — "ninguém gastou" — em
     vez da ausência que é.
     """
-    if not members:
+    if not measured:
         return GroupSnapshot(
             group=group,
             metrics=None,
-            active=0,
+            active=len(members),
             population=population,
             graduated=graduated,
             mean_credits=None,
@@ -346,34 +367,34 @@ def _snapshot_group(
             mean_bids=None,
             mean_credit_return=None,
         )
-    group_supply = sum(supply[s.id] for s in members)
+    group_supply = sum(supply[s.id] for s in measured)
     return GroupSnapshot(
         group=group,
         metrics=compute_metrics(
-            satisfactions=[satisfactions[s.id] for s in members],
-            grade_averages=[grade_averages[s.id] for s in members],
-            semestralizations=[semestralizations[s.id] for s in members],
-            scarcities=[scarcities[s.id] for s in members],
-            contentions=[contentions[s.id] for s in members],
-            allocated=sum(len(won[s.id]) for s in members),
+            satisfactions=[satisfactions[s.id] for s in measured],
+            grade_averages=[grade_averages[s.id] for s in measured],
+            semestralizations=[semestralizations[s.id] for s in measured],
+            scarcities=[scarcities[s.id] for s in measured],
+            contentions=[contentions[s.id] for s in measured],
+            allocated=sum(len(won[s.id]) for s in measured),
             total_seats=total_seats,
         ),
         active=len(members),
         population=population,
         graduated=graduated,
         mean_credits=(
-            sum(credits[s.id] for s in members) / len(members) if uses_credits else None
+            sum(credits[s.id] for s in measured) / len(measured) if uses_credits else None
         ),
-        mean_approved_hours=sum(approved_hours[s.id] for s in members) / len(members),
-        credits_per_student=group_supply / len(members) if uses_credits else None,
+        mean_approved_hours=sum(approved_hours[s.id] for s in measured) / len(measured),
+        credits_per_student=group_supply / len(measured) if uses_credits else None,
         credits_per_seat=(
             group_supply / total_seats if uses_credits and total_seats else None
         ),
         mean_bids=(
-            sum(bids[s.id] for s in members) / len(members) if uses_credits else None
+            sum(bids[s.id] for s in measured) / len(measured) if uses_credits else None
         ),
         mean_credit_return=(
-            sum(credit_returns[s.id] for s in members) / len(members)
+            sum(credit_returns[s.id] for s in measured) / len(measured)
             if uses_credits and credit_returns is not None
             else None
         ),
@@ -435,6 +456,9 @@ def _snapshot_groups(
         return _snapshot_group(
             group=group,
             members=members,
+            # O calouro do período sai de toda média: ele não disputou nada, e
+            # pontua psi = 1 contra CR = 0 por construção (ver `GroupSnapshot`).
+            measured=[s for s in members if s.entry_period != period],
             population=population,
             graduated=graduated,
             uses_credits=config.uses_credits,

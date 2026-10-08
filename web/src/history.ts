@@ -136,9 +136,11 @@ export function formatRunDate(at: string): string {
 /** Resumo de uma linha do cenário, para distinguir execuções do mesmo minuto.
  * Vale para os dois tipos: a comparação roda exatamente o mesmo cenário, e é o
  * que ela acrescenta — o número de execuções — que a distingue. */
-function describeScenario(config: SimulateRequest | CompareRequest): string {
-  const { periods, rounds, disciplines, credit_return, aptitude_profiles, affinity_profiles } =
-    config;
+function describeScenario(
+  config: SimulateRequest | CompareRequest,
+  { withCreditReturn }: { withCreditReturn: boolean }
+): string {
+  const { periods, rounds, disciplines, aptitude_profiles, affinity_profiles } = config;
   // Uma geração por período *com ingresso*: a população é o que entra por
   // período vezes L, não vezes |T|.
   const entrySpan = Math.min(config.entry_periods ?? periods, periods);
@@ -157,7 +159,11 @@ function describeScenario(config: SimulateRequest | CompareRequest): string {
   return (
     `${horizonte} × ${rodadas} · ${disciplines.length} disciplinas · ${students} alunos` +
     (perfis.length ? ` · ${perfis.join(", ")}` : "") +
-    ` · retorno ${creditReturnLabel(credit_return)}`
+    // Numa comparação o retorno não é do cenário: é o eixo do experimento, e
+    // dizer "retorno nenhum" ali descreveria só um dos três braços.
+    (withCreditReturn && "credit_return" in config
+      ? ` · retorno ${creditReturnLabel(config.credit_return)}`
+      : "")
   );
 }
 
@@ -165,13 +171,21 @@ export function describeRun(run: SimulationRun): string {
   // A política de retorno entra no resumo porque é o eixo de experimentação da
   // Seção 7.3.2: duas execuções que só diferem nela precisam se distinguir na
   // barra lateral.
-  return describeScenario(run.config);
+  return describeScenario(run.config, { withCreditReturn: true });
 }
+
+/** Quantos modelos uma comparação põe lado a lado. Espelha
+ * `leilao.comparison.ARMS`; fica aqui para o resumo da barra lateral não
+ * depender da tela que desenha os gráficos. */
+const COMPARED_MODELS = 3;
 
 export function describeComparison(run: ComparisonRun): string {
   // O número de execuções vem primeiro: é o que muda a leitura do resultado —
   // com poucas seeds a dispersão da caixa mal se lê.
-  return `${run.config.runs} seeds × 2 mecanismos · ${describeScenario(run.config)}`;
+  return `${run.config.runs} seeds × ${COMPARED_MODELS} modelos · ${describeScenario(
+    run.config,
+    { withCreditReturn: false }
+  )}`;
 }
 
 export const describeEntry = (entry: HistoryEntry): string =>

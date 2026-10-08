@@ -29,6 +29,7 @@ from ..config import (
 from ..entities import Agent, Good, MutualExclusion
 from ..simulation import run_simulation
 from .schemas import (
+    ArmResultOut,
     CompareRequest,
     CompareResponse,
     PeriodReportOut,
@@ -152,15 +153,15 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
 
 @app.post("/compare", response_model=CompareResponse)
 def compare(req: CompareRequest) -> CompareResponse:
-    """Roda o mesmo cenário nos dois mecanismos, N vezes de cada lado.
+    """Roda o mesmo cenário nos três modelos, N vezes em cada um.
 
-    As seeds vão de 1 a N e são pareadas: a execução i de um mecanismo e a do
-    outro partem da mesma população, das mesmas utilidades e das mesmas notas.
-    A resposta traz só as cinco métricas principais, já reduzidas a um valor por
+    As seeds vão de 1 a N e são pareadas: a execução i de um braço e a do outro
+    partem da mesma população, das mesmas utilidades e das mesmas notas. A
+    resposta traz só as métricas de alocação, já reduzidas a um valor por
     execução — nada de crédito e nenhum recorte, porque o que se compara aqui é
-    o mecanismo, não o que acontece dentro de cada um.
+    o modelo, não o que acontece dentro de cada um.
 
-    São 2N simulações completas; com um cenário grande a requisição leva
+    São 3N simulações completas; com um cenário grande a requisição leva
     dezenas de segundos.
     """
     try:
@@ -177,8 +178,15 @@ def compare(req: CompareRequest) -> CompareResponse:
 
     return CompareResponse(
         runs=result.runs,
-        credits=[RunSummaryOut.model_validate(r) for r in result.credits],
-        ranking=[RunSummaryOut.model_validate(r) for r in result.ranking],
+        arms=[
+            ArmResultOut(
+                key=arm.key,
+                mechanism=arm.mechanism,
+                credit_return=arm.credit_return,
+                runs=[RunSummaryOut.model_validate(r) for r in arm.runs],
+            )
+            for arm in result.arms
+        ],
     )
 
 

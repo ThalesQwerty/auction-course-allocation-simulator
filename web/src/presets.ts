@@ -124,12 +124,13 @@ const MAX_HOURS = HOURS.reduce((sum, h) => sum + h * SEATS.length, 0); // 450
  * fila nas de 40 vagas passa de 1,7 e a conclusão cai para 22%. */
 const STUDENTS_PER_PERIOD = 60;
 
-/** Perfis de aptidão: a normal das notas de primeira tentativa. As médias e os
- * desvios separam três populações de desempenho bem distintas — o Exemplar
- * quase nunca reprova, o Instável reprova com frequência e varia muito de uma
- * disciplina para outra. As fatias são escolha de calibragem (o enunciado fixa
- * os parâmetros, não a proporção): metade da população no perfil do meio e um
- * quarto em cada extremo, que é a forma usual de uma turma.
+/** Perfis de aptidão do cenário Computação: a normal das notas de primeira
+ * tentativa. As médias e os desvios separam três populações de desempenho bem
+ * distintas — o Exemplar quase nunca reprova, o Instável reprova com frequência
+ * e varia muito de uma disciplina para outra. As fatias são escolha de
+ * calibragem (o enunciado fixa os parâmetros, não a proporção): metade da
+ * população no perfil do meio e um quarto em cada extremo, que é a forma usual
+ * de uma turma.
  *
  * O incremento por recursada é igual nos três, para que a diferença entre eles
  * seja só a distribuição das notas — é o eixo que o cenário quer isolar. */
@@ -152,6 +153,22 @@ const AFFINITY: AffinityProfileInput[] = [
   { name: "Dispersos", kind: "diluted", intensity: 2, max_hours: MAX_HOURS, share: 50 },
 ];
 
+/** Perfil único de aptidão do cenário Homogêneo. Toda a população sorteia a
+ * nota da mesma normal e aprende o mesmo a cada recursada; os alunos continuam
+ * diferindo entre si, porque a nota é sorteada aluno a aluno, mas não há mais
+ * diferença **sistemática** entre grupos. */
+const FLAT_APTITUDE: AptitudeProfileInput[] = [
+  { name: "Único", mean: 6, stddev: 1, learning_gain: 2, share: 100 },
+];
+
+/** Perfil único de afinidade, e **neutro**: intensidade 1 dá expoente 1 nos
+ * dois sentidos, então a utilidade sorteada vale como saiu, sem concentrar nem
+ * diluir. Por isso o `kind` aqui não decide nada — fica `concentrated` só por
+ * ser o primeiro do formulário. */
+const FLAT_AFFINITY: AffinityProfileInput[] = [
+  { name: "Único", kind: "concentrated", intensity: 1, max_hours: MAX_HOURS, share: 100 },
+];
+
 const toDisciplines = (groups: Entry[][]): DisciplineInput[] =>
   groups.flat().map(([name, hours, seats, prerequisites]) => ({
     name,
@@ -160,29 +177,66 @@ const toDisciplines = (groups: Entry[][]): DisciplineInput[] =>
     prerequisites,
   }));
 
+/** O que os dois presets têm em comum: a mesma universidade, a mesma população
+ * e a mesma calibragem. Eles diferem só nos perfis e em Γ_min, que é
+ * justamente o que faz um servir de controle do outro — qualquer diferença
+ * entre eles vem do que foi declarado na chamada, não da oferta. */
+const commonScenario = (): Omit<
+  SimulateRequest,
+  "aptitude_profiles" | "affinity_profiles" | "base_credits"
+> => ({
+  disciplines: toDisciplines(GRADE),
+  periods: 12,
+  // Ingresso nos 6 primeiros e drenagem nos 6 últimos. Sem a drenagem as
+  // últimas gerações eram cortadas pelo horizonte antes de poderem se formar —
+  // a última geração vivia um período só —, e a série por geração media quanto
+  // tempo de simulação sobrou, não o mecanismo. Seis é o piso teórico da grade:
+  // a cadeia de pré-requisitos tem seis elos, então ninguém conclui em menos
+  // que isso nem no melhor dos casos.
+  entry_periods: 6,
+  students_per_period: STUDENTS_PER_PERIOD,
+  rounds: 2,
+  min_grade: 5,
+  credit_return: "none",
+  seed: 42,
+});
+
 export const PRESETS: Preset[] = [
   {
     id: "computacao",
     name: "Computação",
     hint: "Grade de 6 períodos com 6 disciplinas cada, encadeadas por pré-requisitos; do 2º período em diante repetem-se as combinações de 40/80/120 vagas × 60/90 h. 60 ingressantes por período em 6 períodos, 360 alunos, e mais 6 períodos de drenagem.",
     build: (): SimulateRequest => ({
-      disciplines: toDisciplines(GRADE),
+      ...commonScenario(),
       aptitude_profiles: APTITUDE,
       affinity_profiles: AFFINITY,
-      periods: 12,
-      // Ingresso nos 6 primeiros e drenagem nos 6 últimos. Sem a drenagem as
-      // últimas gerações eram cortadas pelo horizonte antes de poderem se
-      // formar — a última geração vivia um período só —, e a série por geração
-      // media quanto tempo de simulação sobrou, não o mecanismo. Seis é o piso
-      // teórico da grade: a cadeia de pré-requisitos tem seis elos, então
-      // ninguém conclui em menos que isso nem no melhor dos casos.
-      entry_periods: 6,
-      students_per_period: STUDENTS_PER_PERIOD,
-      rounds: 2,
-      min_grade: 5,
       base_credits: 10,
-      credit_return: "none",
-      seed: 42,
+    }),
+  },
+  {
+    id: "homogeneo",
+    name: "Homogêneo",
+    hint: "A mesma universidade do Computação, com um único perfil de aptidão (6 ± 1, ganho 2) e um único de afinidade (neutro, intensidade 1), e Γ_min = 12. Serve de controle: sem diferença sistemática entre alunos, o que a comparação mostrar é do mecanismo.",
+    // Existe para a comparação entre mecanismos. No Computação, parte do vão
+    // entre CR e créditos pode vir de como cada um trata uma população
+    // desigual: a ordenação por CR premia o Exemplar por construção, e o leilão
+    // rende mais a quem concentra a preferência. Aqui não há a quem premiar —
+    // um só perfil em cada eixo, e o de afinidade sem distorção alguma —, então
+    // o que restar de diferença é da regra de alocação, não da composição da
+    // população.
+    //
+    // Rodado (N = 10) antes de entrar na lista, e o cenário não sai degenerado:
+    // ψ̄ 0,795 no CR contra 0,890 nos dois braços de crédito, φ 0,865 contra
+    // 0,969, λ 0,553 contra ~0,05. A mesma forma do Computação, com uma
+    // diferença que vale olhar: aqui o leilão **não forma menos gente** — 116
+    // sem retorno e 120 com, contra 112 do CR, onde no Computação eram 102 e
+    // 111 contra 139. Isto é, o contra-argumento mais forte contra o leilão
+    // anda junto da heterogeneidade dos perfis, não do mecanismo.
+    build: (): SimulateRequest => ({
+      ...commonScenario(),
+      aptitude_profiles: FLAT_APTITUDE,
+      affinity_profiles: FLAT_AFFINITY,
+      base_credits: 12,
     }),
   },
 ];

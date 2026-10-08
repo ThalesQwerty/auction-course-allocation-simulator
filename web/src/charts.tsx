@@ -582,19 +582,28 @@ export function BoxPlot({
                       ))}
                           {/* Rótulo direto: só a mediana, ao lado da caixa — e
                           nunca um número por ponto. Em tinta de texto: a
-                          identidade vem da caixa colorida ao lado. Vai para a
-                          esquerda quando não couber à direita, em vez de
-                          transbordar o cartão. */}
+                          identidade vem da caixa colorida ao lado.
+
+                          Ele só aparece se couber **antes da caixa vizinha**.
+                          Espremer, virar de lado ou deixar transbordar põe o
+                          número de uma caixa em cima da outra, que é pior do
+                          que não ter rótulo: a mediana continua no tooltip e
+                          nas tabelas, e a comparação de posições — que é o que
+                          o gráfico existe para mostrar — não depende dele. */}
                       {(() => {
                         const text = format(box.stats.median);
                         // Largura aproximada do texto a 11px; basta para
-                        // decidir o lado, e medir de verdade exigiria render.
-                        const fits = x + half + 7 + text.length * 6.4 < width - 4;
+                        // decidir, e medir de verdade exigiria render.
+                        const end = x + half + 7 + text.length * 6.4;
+                        const nextBox =
+                          index + 1 < boxes.length
+                            ? center(index + 1) - half
+                            : width - PLOT.right + 12;
+                        if (end > nextBox) return null;
                         return (
                           <text
-                            x={fits ? x + half + 7 : x - half - 7}
+                            x={x + half + 7}
                             y={y(box.stats.median) + 4}
-                            textAnchor={fits ? "start" : "end"}
                             fontSize={11}
                             fill={ink.secondary}
                           >

@@ -165,7 +165,7 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
     charts: [
       {
         title: "Eficiência de alocação (ψ̄)",
-        hint: "Satisfação média dos alunos ativos — eq. (53). A utilidade é zero fora do conjunto elegível, então ψ é a fração do que o aluno podia cursar e conseguiu: 1 é atingível, e é o que a geração que acaba de ingressar obtém, porque entra com vaga garantida",
+        hint: "Satisfação média dos alunos que disputaram — eq. (53). A utilidade é zero fora do conjunto elegível, então ψ é a fração do que o aluno podia cursar e conseguiu: 1 é atingível. Quem acaba de ingressar não entra na conta — recebe vaga garantida em tudo que lhe é elegível e pontuaria 1 sem ter disputado nada",
         accessor: (s) => s.metrics?.efficiency ?? null,
         domain: [0, 1],
       },
@@ -618,8 +618,16 @@ export function Results({
           período) e os dois <strong>perfis</strong> do aluno — a aptidão, que dá a distribuição
           das notas, e a afinidade, que diz o quanto ele concentra a preferência. Somar qualquer um
           deles reproduz a universidade; o que muda de um para o outro é a pergunta. Em todos, o
-          aluno fica na mesma linha do início ao fim. A geração aparece com ψ = 1 no período em que
-          entra — o ingressante tem vaga garantida nas disciplinas de 1º período e não disputa nada.
+          aluno fica na mesma linha do início ao fim.
+        </p>
+        <p className="note">
+          <strong>Quem acabou de ingressar conta como gente, não como dado.</strong> O ingressante
+          recebe vaga garantida nas disciplinas de 1º período — exatamente as elegíveis para ele —,
+          então pontuaria ψ = 1 contra CR = 0 sem ter disputado nada. Ele entra em{" "}
+          <em>alunos ativos</em>, <em>ingressos</em> e <em>formados</em>, que são contagens de
+          pessoas, e fica fora de toda média por aluno. Por isso a série de uma geração só começa
+          no período <em>seguinte</em> ao seu ingresso, e o 1º período da simulação não tem métrica
+          nenhuma — ali todo mundo é calouro.
         </p>
         {drainPeriods > 0 && (
           <p className="note">

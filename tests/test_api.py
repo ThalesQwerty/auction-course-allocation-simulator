@@ -144,9 +144,13 @@ def test_simulate_returns_series_by_period_and_cohort(client):
     assert len(period["rounds"]) == 2
     assert period["aggregate"]["round"] == 0
     assert period["aggregate"]["overall"]["group"] is None
-    # No primeiro período só existe a geração 1.
+    # No primeiro período só existe a geração 1 — e, como ela acabou de
+    # ingressar, o período publica a contagem e nenhuma métrica.
     assert [g["group"] for g in period["aggregate"]["by_cohort"]] == ["1"]
-    assert 0 <= period["aggregate"]["overall"]["metrics"]["efficiency"] <= 1
+    assert period["aggregate"]["overall"]["active"] == 4
+    assert period["aggregate"]["overall"]["metrics"] is None
+    # A partir do 2º há veteranos, e aí sim há o que medir.
+    assert 0 <= payload["periods"][1]["aggregate"]["overall"]["metrics"]["efficiency"] <= 1
     # nomes de disciplina com acento e espaço sobrevivem ao solver
     assert {d["name"] for d in period["disciplines"]} == {
         "Cálculo I", "Física I", "Programação"
@@ -403,39 +407,96 @@ def test_the_discipline_snapshot_carries_the_three_grouping_axes(client):
 # --- /compare: o mesmo cenário nos dois mecanismos (Seção 7.3) -------------
 
 
-def test_compare_returns_one_summary_per_seed_on_each_side(client):
+def test_compare_returns_one_summary_per_seed_in_every_arm(client):
     payload = client.post("/compare", json={**SIMULATE_REQUEST, "runs": 3}).json()
 
     assert payload["runs"] == 3
-    # As seeds vão de 1 a N e são pareadas: a i-ésima execução de um lado e a do
-    # outro partem da mesma população.
-    assert [r["seed"] for r in payload["credits"]] == [1, 2, 3]
-    assert [r["seed"] for r in payload["ranking"]] == [1, 2, 3]
+    # Três modelos: a linha de base por CR e o leilão com e sem retorno.
+    assert [(a["key"], a["mechanism"], a["credit_return"]) for a in payload["arms"]] == [
+        ("ranking", "ranking", "none"),
+        ("credits_return", "credits", "ratio"),
+        ("credits", "credits", "none"),
+    ]
+    # As seeds vão de 1 a N e são pareadas: a i-ésima execução de cada braço
+    # parte da mesma população.
+    for arm in payload["arms"]:
+        assert [r["seed"] for r in arm["runs"]] == [1, 2, 3]
 
 
-def test_compare_returns_only_the_five_main_metrics(client):
+def test_compare_returns_only_the_allocation_metrics(client):
     """Nada de crédito: orçamento, preço e retorno não existem do lado da linha
-    de base, e nenhum recorte — o que se compara é o mecanismo."""
+    de base, e nenhum recorte — o que se compara é o mecanismo. `periods` e
+    `graduates` não são métricas: são o contexto para ler as que são."""
     payload = client.post("/compare", json={**SIMULATE_REQUEST, "runs": 2}).json()
 
-    assert set(payload["credits"][0]) == {
+    assert set(payload["arms"][0]["runs"][0]) == {
         "seed",
         "periods",
+        "graduates",
         "efficiency",
         "fairness",
         "correlation",
-        "occupancy",
-        "semestralization",
+        "time_to_graduate",
+        "allocations_per_round",
     }
 
 
-def test_compare_ignores_the_scenario_seed(client):
-    """A seed do formulário não entra: numa comparação ela vira o eixo da
-    amostra, e fixá-la mediria uma população só."""
-    first = client.post("/compare", json={**SIMULATE_REQUEST, "seed": 1, "runs": 2}).json()
-    second = client.post("/compare", json={**SIMULATE_REQUEST, "seed": 77, "runs": 2}).json()
+def test_compare_reports_the_time_to_graduate_with_its_denominator(client):
+    """O tempo de formatura tem viés de seleção — só existe sobre quem
+    concluiu —, então `graduates` anda junto. Sem concluinte, o tempo é nulo,
+    não zero: zero se leria como 'formou na hora'."""
+    payload = client.post("/compare", json={**SIMULATE_REQUEST, "runs": 2}).json()
+
+    for run in [r for arm in payload["arms"] for r in arm["runs"]]:
+        assert (run["time_to_graduate"] is None) == (run["graduates"] == 0)
+        if run["time_to_graduate"] is not None:
+            # Ninguém conclui em menos de um período, nem em mais do que o
+            # horizonte simulado.
+            assert 1 <= run["time_to_graduate"] <= run["periods"]
+
+
+def test_compare_ignores_the_scenario_seed_and_credit_return(client):
+    """Nenhum dos dois entra: a seed vira o eixo da amostra e o retorno vira o
+    eixo do experimento, imposto por cada braço."""
+    first = client.post(
+        "/compare", json={**SIMULATE_REQUEST, "seed": 1, "credit_return": "none", "runs": 2}
+    ).json()
+    second = client.post(
+        "/compare", json={**SIMULATE_REQUEST, "seed": 77, "credit_return": "unit", "runs": 2}
+    ).json()
 
     assert first == second
+
+
+def test_compare_reports_one_allocation_figure_per_round(client):
+    """A saturação tem uma posição por rodada do cenário, igual em todo braço —
+    é o decaimento entre elas que responde "satura mais rápido?"."""
+    payload = client.post("/compare", json={**SIMULATE_REQUEST, "runs": 2}).json()
+
+    rounds = SIMULATE_REQUEST["rounds"]
+    for run in [r for arm in payload["arms"] for r in arm["runs"]]:
+        assert len(run["allocations_per_round"]) == rounds
+        assert all(value is None or value >= 0 for value in run["allocations_per_round"])
+
+
+def test_the_rounds_add_up_to_the_period_allocation(client):
+    """Cada rodada conta o que foi ganho nela, não o acumulado: somadas, dão as
+    vagas por aluno do período inteiro. Se a soma passasse do total, o relatório
+    de rodada estaria publicando o acumulado e o decaimento seria ilusório."""
+    payload = client.post(
+        "/simulate", json={**SIMULATE_REQUEST, "include_histories": True}
+    ).json()
+
+    for period in payload["periods"]:
+        aggregate = period["aggregate"]["overall"]["metrics"]
+        if aggregate is None:
+            continue
+        by_round = [
+            r["overall"]["metrics"]["allocated"]
+            for r in period["rounds"]
+            if r["overall"]["metrics"] is not None
+        ]
+        assert sum(by_round) == aggregate["allocated"]
 
 
 def test_compare_rejects_an_invalid_run_count(client):

@@ -6,8 +6,8 @@ import {
   AFFINITY_KINDS,
   CREDIT_RETURN_POLICIES,
   MAX_AFFINITY_INTENSITY,
+  COMPARISON_ARMS,
   MAX_COMPARISON_RUNS,
-  MECHANISMS,
   affinityExponent,
 } from "./types";
 import type {
@@ -196,7 +196,7 @@ export function Config({
             <label>O que executar</label>
             <select value={mode} onChange={(e) => setMode(e.target.value as RunMode)}>
               <option value="single">uma simulação do leilão por créditos</option>
-              <option value="compare">comparar os dois mecanismos</option>
+              <option value="compare">comparar os três modelos</option>
             </select>
           </div>
           {comparing && (
@@ -210,8 +210,9 @@ export function Config({
                 onChange={(e) => setRuns(Number(e.target.value))}
               />
               <span className="field-hint">
-                Seeds de 1 a {runs}, as mesmas dos dois lados — {runs * 2} simulações no
-                total. Com poucas seeds a dispersão da caixa mal se lê.
+                Seeds de 1 a {runs}, as mesmas nos três modelos —{" "}
+                {runs * COMPARISON_ARMS.length} simulações no total. Com poucas seeds a dispersão
+                da caixa mal se lê.
               </span>
             </div>
           )}
@@ -225,15 +226,21 @@ export function Config({
               não ao sorteio — a condição metodológica da Seção 7.3.
             </p>
             <ul className="note">
-              {MECHANISMS.map((mechanism) => (
-                <li key={mechanism.value}>
-                  <strong>{mechanism.label}</strong> — {mechanism.hint}
+              {COMPARISON_ARMS.map((arm) => (
+                <li key={arm.key}>
+                  <strong>{arm.label}</strong> — {arm.hint}
                 </li>
               ))}
             </ul>
             <p className="note">
-              O resultado traz só as cinco métricas principais, em boxplot: sem nada de crédito
-              (não existe do lado da linha de base) e sem recorte por geração ou perfil.
+              O leilão entra duas vezes porque o <strong>retorno de créditos</strong> é o eixo do
+              experimento, não um parâmetro do cenário: é ele que pode devolver ao mecanismo algum
+              senso meritocrático, e a única forma de ver quanto é rodar os dois sobre a mesma
+              população. Por isso o campo de retorno some do formulário.
+            </p>
+            <p className="note">
+              O resultado traz só as métricas de alocação, em boxplot: sem nada de crédito (não
+              existe do lado da linha de base) e sem recorte por geração ou perfil.
             </p>
           </>
         ) : (
@@ -318,23 +325,27 @@ export function Config({
             <label>Créditos base por período (Γ<sub>min</sub>)</label>
             <input type="number" min={1} value={config.base_credits} onChange={(e) => patch({ base_credits: Number(e.target.value) })} />
           </div>
-          <div className="field">
-            <label>Retorno de créditos (f<sub>γ</sub>)</label>
-            <select
-              value={config.credit_return}
-              onChange={(e) => patch({ credit_return: e.target.value as CreditReturnPolicy })}
-            >
-              {CREDIT_RETURN_POLICIES.map((policy) => (
-                <option key={policy.value} value={policy.value}>
-                  {policy.label}
-                </option>
-              ))}
-            </select>
-            <span className="field-hint">
-              {CREDIT_RETURN_POLICIES.find((p) => p.value === config.credit_return)?.hint}
-              {comparing && " — vale só do lado do leilão; na linha de base não há preço pago a devolver"}
-            </span>
-          </div>
+          {/* Numa comparação o retorno não é parâmetro: é o eixo do
+              experimento, e cada braço impõe o seu. Deixá-lo editável aqui
+              daria a impressão de que mexer nele muda o resultado. */}
+          {!comparing && (
+            <div className="field">
+              <label>Retorno de créditos (f<sub>γ</sub>)</label>
+              <select
+                value={config.credit_return}
+                onChange={(e) => patch({ credit_return: e.target.value as CreditReturnPolicy })}
+              >
+                {CREDIT_RETURN_POLICIES.map((policy) => (
+                  <option key={policy.value} value={policy.value}>
+                    {policy.label}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">
+                {CREDIT_RETURN_POLICIES.find((p) => p.value === config.credit_return)?.hint}
+              </span>
+            </div>
+          )}
           {!comparing && (
             <div className="field">
               <label>Seed</label>
@@ -346,7 +357,7 @@ export function Config({
           Alunos, nomes, utilidades e notas são sorteados a partir da seed. A mesma configuração sempre
           produz a mesma simulação.{" "}
           {comparing &&
-            "Numa comparação a seed deixa de ser parâmetro e vira o eixo da amostra: são as de 1 a N, e fixar uma só mediria aquela população."}
+            "Numa comparação a seed e o retorno de créditos deixam de ser parâmetros e viram eixos: as seeds são as de 1 a N, e o retorno é o que separa dois dos três modelos."}
         </p>
       </div>
 
@@ -815,8 +826,8 @@ export function Config({
         <button className="primary" disabled={running} onClick={onRun}>
           {comparing
             ? running
-              ? `Comparando — ${runs * 2} simulações...`
-              : "Comparar mecanismos"
+              ? `Comparando — ${runs * COMPARISON_ARMS.length} simulações...`
+              : "Comparar modelos"
             : running
               ? "Simulando..."
               : "Executar simulação"}

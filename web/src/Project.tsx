@@ -29,7 +29,10 @@ export function Project() {
         O simulador implementa os <strong>dois</strong> mecanismos sobre o mesmo modelo de
         universidade, e é essa a razão de existir do modo de <strong>comparação</strong>: a
         hipótese não se verifica olhando um mecanismo isolado, só na diferença entre ele e a linha
-        de base rodando o mesmo cenário.
+        de base rodando o mesmo cenário. A comparação põe <strong>três modelos</strong> lado a
+        lado, porque o leilão entra duas vezes — com e sem retorno de créditos. O retorno é o que
+        pode devolver ao mecanismo algum senso meritocrático, e os dois braços rodando a mesma
+        população isolam exatamente o quanto.
       </p>
 
       <h2>A formalização</h2>
@@ -100,6 +103,16 @@ export function Project() {
         leilão como qualquer outra. Daí os dois limites do ritmo de entrada: a geração não pode
         passar da menor oferta entre as disciplinas de 1º período, nem a carga somada delas pode
         passar de W<sub>a</sub>.
+      </p>
+      <p>
+        E, justamente por isso, <strong>o calouro não entra nas métricas</strong>. As disciplinas
+        de 1º período são exatamente as elegíveis para quem acaba de ingressar, e ele recebe todas:
+        pontua ψ = 1 contra CR = 0 por construção, sem ter disputado coisa alguma. No preset
+        Computação ele é 11% de todas as linhas aluno-período e, sozinho, invertia o sinal da
+        correlação da eq. (57) — −0,09 com ele, +0,04 sem. A regra é que ele{" "}
+        <strong>conta como gente, não como dado</strong>: fica nas contagens de pessoas (ativos,
+        ingressos, formados) e sai de toda média por aluno. Consequência visível: o 1º período de
+        uma simulação não publica métrica nenhuma, porque ali todo mundo é calouro.
       </p>
       <p>
         Os alunos se distinguem por dois <strong>perfis independentes</strong>. A{" "}
@@ -192,10 +205,9 @@ export function Project() {
         <div>
           <dt>Eficiência de alocação (ψ̄) — eq. (53)</dt>
           <dd>
-            Satisfação média dos alunos ativos: quanto da utilidade que o aluno queria ele de fato
-            conseguiu. Como a utilidade é zero fora do conjunto elegível, é a fração do que ele{" "}
-            <em>podia</em> cursar — então 1 é atingível, e é o que a geração que acaba de ingressar
-            obtém. É a medida principal da hipótese.
+            Satisfação média dos alunos que disputaram: quanto da utilidade que o aluno queria
+            ele de fato conseguiu. Como a utilidade é zero fora do conjunto elegível, é a fração do
+            que ele <em>podia</em> cursar — então 1 é atingível. É a medida principal da hipótese.
           </dd>
         </div>
         <div>
@@ -342,13 +354,37 @@ export function Project() {
 
       <h2>Como ler os resultados</h2>
       <p>
-        Uma <strong>comparação</strong> abre cinco boxplots, um por métrica principal, com uma
-        caixa por mecanismo: a linha grossa é a mediana, a caixa é a metade central das N
-        execuções, os bigodes vão até 1,5 IQR. Cada valor é uma execução, reduzida à média dos
-        períodos ponderada pelos alunos ativos. O que se lê é a sobreposição — caixas que não se
-        tocam separam os mecanismos; caixas sobrepostas dizem que a diferença entre as medianas
-        cabe dentro da variação entre populações. Como as seeds são pareadas, a tabela ainda
-        informa em quantas delas o leilão ficou acima, que é uma leitura independente da primeira.
+        Uma <strong>comparação</strong> abre quatro boxplots — satisfação (ψ̄), equidade (φ),
+        correlação (λ) e tempo de formatura —, com uma caixa por modelo: a linha grossa é a
+        mediana, a caixa é a metade central das N execuções, os bigodes vão até 1,5 IQR. Nas três
+        primeiras, cada valor é uma execução reduzida à média dos períodos ponderada pelos alunos
+        medidos; o tempo de formatura é da execução inteira. O que se lê é a sobreposição — caixas
+        que não se tocam separam os mecanismos; caixas sobrepostas dizem que a diferença entre as
+        medianas cabe dentro da variação entre populações. Como as seeds são pareadas, a tabela
+        ainda informa em quantas delas o leilão saiu melhor, que é uma leitura independente da
+        primeira.
+      </p>
+      <p>
+        Uma seção à parte mede a <strong>saturação da demanda</strong>: as vagas obtidas por aluno
+        em cada rodada, um boxplot por rodada. Cada um conta o que foi ganho <em>naquela</em>
+        rodada, não o acumulado, então o que se lê é o <strong>decaimento</strong> entre eles. Uma
+        das hipóteses do trabalho é que o leilão satura mais rápido — atende mais demanda em menos
+        rodadas —, e é aqui que isso aparece: quem atende mais de saída começa alto e cai rápido,
+        porque pouco ficou por alocar. Nenhuma rodada isolada tem lado melhor; na primeira, mais
+        alto é atender mais, e nas seguintes é ter deixado mais para trás.
+      </p>
+      <p>
+        É na <strong>correlação</strong> que o terceiro braço se lê. A ordenação por CR a impõe
+        por construção, o leilão sem retorno a ignora, e o leilão com retorno fica em algum ponto
+        entre os dois — a distância até cada ponta diz o quanto o f<sub>γ</sub> consegue recriar o
+        incentivo que o CR dá de graça. Uma tabela à parte isola essa diferença, porque os dois
+        braços do leilão rodam a mesma população e só diferem na política de retorno.
+      </p>
+      <p>
+        O <strong>tempo de formatura</strong> tem viés de seleção e não se lê sozinho: a média só
+        existe sobre quem concluiu, então um mecanismo que forma menos gente pode exibir um tempo
+        menor só porque sobraram os rápidos. Por isso a tabela traz, ao lado dele, quantos se
+        formaram em cada execução.
       </p>
       <p>
         Uma <strong>simulação</strong> abre os gráficos do cenário, em dois blocos. Os{" "}

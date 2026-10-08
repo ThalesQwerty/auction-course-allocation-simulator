@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from leilao.config import AffinityProfile, Discipline, SimulationConfig
+from leilao.config import AffinityProfile, AptitudeProfile, Discipline, SimulationConfig
 from leilao.grading import credit_return
 from leilao.metrics import demand_per_seat, jain_index, pearson, semestralization
 from leilao.population import generate_students
@@ -25,6 +25,18 @@ GRADE = [
 # 60 h por período, que é o aperto que os testes de escassez pressupõem.
 WORKLOAD = 180
 NEUTRAL = AffinityProfile("Padrão", "concentrated", 1, WORKLOAD, 100)
+
+# O calouro não entra nas métricas (ver `GroupSnapshot`), então o 1º período não
+# publica nenhuma — ali todo mundo acabou de ingressar. Os testes que precisam
+# do caso "ninguém aprovou nada ainda" o reconstroem no 2º período: ingresso só
+# no primeiro (L = 1, todos veteranos em t = 2) e uma nota de corte que ninguém
+# alcança, de modo que o conjunto elegível continue sendo o de 1º período.
+NEVER_APPROVES = dict(
+    periods=2,
+    entry_periods=1,
+    min_grade=10.0,
+    aptitude_profiles=[AptitudeProfile("Fraco", mean=5.0, stddev=0.5, learning_gain=1.0)],
+)
 
 
 def make_config(**overrides) -> SimulationConfig:
@@ -175,6 +187,9 @@ def test_scarcity_and_contention_are_means_over_students_not_sums():
     result = run_simulation(make_config(periods=4))
     for period in result.periods:
         for report in [*period.rounds, period.aggregate]:
+            # O 1º período não tem métrica: ali todo mundo é calouro.
+            if report.overall.metrics is None:
+                continue
             for field in ("scarcity", "contention"):
                 parts = [c for c in report.by_cohort if c.metrics]
                 total = sum(getattr(c.metrics, field) * c.metrics.students for c in parts)
@@ -184,12 +199,12 @@ def test_scarcity_and_contention_are_means_over_students_not_sums():
 
 
 def test_scarcity_only_counts_who_can_actually_take_the_discipline():
-    """No primeiro período ninguém aprovou nada: só as disciplinas sem
-    pré-requisito são elegíveis, e cada uma tem a população inteira disputando
-    as suas vagas. As demais não entram na conta de ninguém."""
-    config = make_config(periods=1)
+    """Enquanto ninguém aprovou nada, só as disciplinas sem pré-requisito são
+    elegíveis, e cada uma tem a população inteira disputando as suas vagas. As
+    demais não entram na conta de ninguém."""
+    config = make_config(**NEVER_APPROVES)
     result = run_simulation(config)
-    overall = result.periods[0].aggregate.overall.metrics
+    overall = result.periods[1].aggregate.overall.metrics
     first = config.first_period_disciplines()
     seats = config.hours_by_discipline()  # só para ter o dict de nomes
     assert set(first) == {"D1", "D2"}
@@ -203,9 +218,15 @@ def test_scarcity_measures_potential_demand_and_contention_the_realized_one():
     """O par: só se pede o que é elegível, então a demanda que se materializa é
     uma fração da potencial — e é a razão entre as duas que diz quanta."""
     result = run_simulation(make_config(periods=6))
+    measured = 0
     for period in result.periods:
         overall = period.aggregate.overall.metrics
+        if overall is None:  # 1º período: só calouros
+            continue
+        measured += 1
         assert 0 < overall.contention <= overall.scarcity
+    assert measured, "nenhum período trouxe métrica para conferir"
+
 
 
 def test_scarcity_ignores_disciplines_with_no_seats_on_offer():
@@ -218,10 +239,10 @@ def test_scarcity_ignores_disciplines_with_no_seats_on_offer():
             Discipline("D2", seats=0, hours=60, prerequisites=("D1",)),
             Discipline("D3", seats=0, hours=60, prerequisites=("D1",)),
         ],
-        periods=1,
+        **NEVER_APPROVES,
     )
     result = run_simulation(config)
-    overall = result.periods[0].aggregate.overall.metrics
+    overall = result.periods[1].aggregate.overall.metrics
     # Sobra uma única disciplina com vaga, disputada por todo mundo.
     assert overall.scarcity == pytest.approx(overall.students / 6)
 
@@ -231,6 +252,8 @@ def test_contention_does_not_move_between_rounds():
     toda rodada mostra o mesmo valor do agregado."""
     result = run_simulation(make_config(periods=3, rounds=3))
     for period in result.periods:
+        if period.aggregate.overall.metrics is None:  # 1º período: só calouros
+            continue
         for report in period.rounds:
             assert report.overall.metrics.contention == pytest.approx(
                 period.aggregate.overall.metrics.contention
@@ -253,14 +276,21 @@ def test_credits_per_seat_is_the_price_a_seat_would_fetch_if_every_credit_were_s
     result = run_simulation(config)
     total_seats = sum(d.seats for d in config.disciplines)
     for period in result.periods:
+        if period.aggregate.overall.credits_per_seat is None:
+            continue  # 1º período: só calouros, e nenhuma média por aluno
         for snapshot in period.aggregate.by_cohort:
-            if snapshot.active == 0:
+            # A geração que acaba de entrar não tem média: o calouro conta como
+            # gente (`active`), não como dado.
+            if snapshot.metrics is None:
                 continue
-            # Oferta da geração = por aluno x alunos; dividida pelas vagas de
-            # toda a universidade dá o preço esperado, cuja soma é global.
-            supply = snapshot.credits_per_student * snapshot.active
+            # Oferta da geração = por aluno x alunos medidos; dividida pelas
+            # vagas de toda a universidade dá o preço esperado, cuja soma é
+            # global.
+            supply = snapshot.credits_per_student * snapshot.metrics.students
             assert snapshot.credits_per_seat == pytest.approx(supply / total_seats)
-        cohorts = [c.credits_per_seat for c in period.aggregate.by_cohort if c.active]
+        cohorts = [
+            c.credits_per_seat for c in period.aggregate.by_cohort if c.metrics
+        ]
         assert period.aggregate.overall.credits_per_seat == pytest.approx(sum(cohorts))
 
 
@@ -435,15 +465,50 @@ def test_students_enter_in_equal_generations_one_per_period():
 def test_every_reported_period_has_at_least_one_student():
     """Invariante dos relatórios: nenhum período é publicado sem aluno, e a
     numeração não tem buraco. Um período vazio só renderia zeros, que num
-    gráfico se leem como queda e numa média puxam o valor para baixo."""
+    gráfico se leem como queda e numa média puxam o valor para baixo.
+
+    Ter aluno não é ter métrica: um período em que *todos* os ativos acabaram de
+    ingressar publica a contagem e nenhuma média, porque nenhum deles disputou
+    coisa alguma."""
     for config in (make_config(), make_config(periods=8), make_config(periods=1)):
         result = run_simulation(config)
         assert result.periods, "a simulação deveria publicar ao menos um período"
         assert [p.period for p in result.periods] == list(range(1, len(result.periods) + 1))
         for period in result.periods:
-            assert period.aggregate.overall.metrics.students >= 1
-            for report in period.rounds:
+            for report in [*period.rounds, period.aggregate]:
+                assert report.overall.active >= 1
+                if report.overall.metrics is None:
+                    continue
                 assert report.overall.metrics.students >= 1
+                assert report.overall.metrics.students <= report.overall.active
+
+
+def test_the_entering_generation_is_left_out_of_the_metrics():
+    """O calouro não disputou nada: recebeu vaga garantida em tudo que lhe era
+    elegível, então entra com psi = 1 e CR = 0 por construção. Medir o mecanismo
+    sobre esse ponto é medir a matrícula garantida, que é igual nos dois."""
+    config = make_config(periods=4)
+    result = run_simulation(config)
+    entry = {s.id: s.entry_period for s in result.students}
+
+    # O 1º período tem gente e não tem métrica: ali todo mundo é calouro.
+    first = result.periods[0].aggregate
+    assert first.overall.active == config.students_per_period
+    assert first.overall.metrics is None
+    assert first.overall.mean_credits is None
+
+    for period in result.periods[1:]:
+        snapshot = period.aggregate.overall
+        entering = sum(1 for s in result.students if entry[s.id] == period.period)
+        assert snapshot.metrics is not None
+        # Exatamente os calouros do período ficaram de fora da conta.
+        assert snapshot.metrics.students == snapshot.active - entering
+        # E a geração que acabou de entrar não publica média nenhuma.
+        entering_cut = next(
+            c for c in period.aggregate.by_cohort if c.group == str(period.period)
+        )
+        assert entering_cut.active == entering
+        assert entering_cut.metrics is None
 
 
 # --- matrícula garantida de quem ingressa ---------------------------------
@@ -752,7 +817,9 @@ def test_credit_return_is_reported_only_at_the_end_of_the_period():
             assert report.overall.mean_credit_return is None
             assert all(c.mean_credit_return is None for c in report.by_cohort)
         for snapshot in period.aggregate.by_cohort:
-            assert (snapshot.mean_credit_return is None) == (snapshot.active == 0)
+            # Nulo também quando o recorte só tem calouros: eles não entram em
+            # média nenhuma.
+            assert (snapshot.mean_credit_return is None) == (snapshot.metrics is None)
 
     # E o recorte é a média do que os alunos daquela geração receberam.
     entry_of = {s.id: s.entry_period for s in result.students}
@@ -765,7 +832,7 @@ def test_credit_return_is_reported_only_at_the_end_of_the_period():
                 for record in history.periods
                 if record.period == period.period
             ]
-            if received:
+            if received and snapshot.metrics is not None:
                 assert snapshot.mean_credit_return == pytest.approx(
                     sum(received) / len(received)
                 )

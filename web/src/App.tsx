@@ -52,10 +52,11 @@ export default function App() {
     try {
       let entry: HistoryEntry;
       if (mode === "compare") {
-        // A seed do formulário não acompanha a comparação: ali as seeds são as
-        // de 1 a N, e carregar a outra junto guardaria um parâmetro que não
-        // teve efeito nenhum no resultado.
-        const { seed: _seed, ...scenario } = config;
+        // Nem a seed nem o retorno de créditos acompanham a comparação: ali
+        // as seeds são as de 1 a N, e o retorno é o que separa dois dos três
+        // modelos. Carregá-los junto guardaria parâmetros que não tiveram
+        // efeito nenhum no resultado.
+        const { seed: _seed, credit_return: _return, ...scenario } = config;
         const request = { ...scenario, runs };
         entry = newComparison(request, await compare(request));
       } else {
