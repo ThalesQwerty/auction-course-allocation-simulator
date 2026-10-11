@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Motor de simulacao de mecanismos de leilao por creditos para alocacao de vagas universitarias (TCC)"
 requires-python = ">=3.11"
 dependencies = [
-    "pulp>=2.8",
+    "pulp>=2.8,<4",
     "numpy>=1.26",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
