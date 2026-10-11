@@ -64,9 +64,9 @@ export function Config({
   onSelectPreset: (presetId: string | null) => void;
 }) {
   const comparing = mode === "compare";
-  // Qual disciplina está com o editor de pré-requisitos aberto. Uma de cada
-  // vez: 36 grades de chips abertas ao mesmo tempo não se leem.
-  const [editingPrerequisites, setEditingPrerequisites] = useState<string | null>(null);
+  // Qual disciplina está com o editor de sucessores aberto. Uma de cada vez:
+  // 36 grades de chips abertas ao mesmo tempo não se leem.
+  const [editingUnlocks, setEditingUnlocks] = useState<string | null>(null);
 
   function patch(values: Partial<SimulateRequest>) {
     setConfig((current) => ({ ...current, ...values }));
@@ -79,8 +79,8 @@ export function Config({
     }));
   }
 
-  /** Renomear arrasta as referências: quem tinha a disciplina como
-   * pré-requisito continua tendo, senão a grade se desmontaria a cada letra. */
+  /** Renomear arrasta as referências: quem listava a disciplina como sucessora
+   * continua listando, senão a grade se desmontaria a cada letra. */
   function renameDiscipline(index: number, name: string) {
     setConfig((current) => {
       const previous = current.disciplines[index].name;
@@ -88,22 +88,22 @@ export function Config({
         ...current,
         disciplines: current.disciplines.map((d, i) => ({
           ...(i === index ? { ...d, name } : d),
-          prerequisites: d.prerequisites.map((p) => (p === previous ? name : p)),
+          unlocks: d.unlocks.map((s) => (s === previous ? name : s)),
         })),
       };
     });
   }
 
-  function togglePrerequisite(index: number, prerequisite: string) {
+  function toggleUnlock(index: number, successor: string) {
     setConfig((current) => ({
       ...current,
       disciplines: current.disciplines.map((d, i) =>
         i === index
           ? {
               ...d,
-              prerequisites: d.prerequisites.includes(prerequisite)
-                ? d.prerequisites.filter((p) => p !== prerequisite)
-                : [...d.prerequisites, prerequisite],
+              unlocks: d.unlocks.includes(successor)
+                ? d.unlocks.filter((s) => s !== successor)
+                : [...d.unlocks, successor],
             }
           : d
       ),
@@ -538,7 +538,7 @@ export function Config({
         </p>
         {hasCycle && (
           <div className="error-banner">
-            Há um ciclo de pré-requisitos: as disciplinas marcadas com <strong>ciclo</strong> não
+            Há um ciclo de sucessores: as disciplinas marcadas com <strong>ciclo</strong> não
             ficariam elegíveis em período nenhum. A simulação recusa o cenário enquanto ele
             existir.
           </div>
@@ -551,14 +551,14 @@ export function Config({
               <th>Nome</th>
               <th style={{ width: 90 }}>Vagas</th>
               <th style={{ width: 110 }}>Carga</th>
-              <th>Pré-requisitos</th>
+              <th>Sucessores</th>
               <th style={{ width: 90 }} />
             </tr>
           </thead>
           <tbody>
             {config.disciplines.map((discipline, i) => {
               const period = periods[discipline.name];
-              const open = editingPrerequisites === discipline.name;
+              const open = editingUnlocks === discipline.name;
               return (
                 <tr key={i}>
                   <td className={period === CYCLIC ? "invalid-text" : "muted-cell"}>
@@ -594,11 +594,11 @@ export function Config({
                   <td>
                     <button
                       className="link"
-                      onClick={() => setEditingPrerequisites(open ? null : discipline.name)}
+                      onClick={() => setEditingUnlocks(open ? null : discipline.name)}
                     >
-                      {discipline.prerequisites.length === 0
-                        ? "nenhum (1º período)"
-                        : discipline.prerequisites.join(", ")}
+                      {discipline.unlocks.length === 0
+                        ? "nenhum (terminal)"
+                        : discipline.unlocks.join(", ")}
                     </button>
                     {open && (
                       <div className="chips">
@@ -608,9 +608,9 @@ export function Config({
                             <button
                               key={other.name}
                               className={`chip ${
-                                discipline.prerequisites.includes(other.name) ? "required" : "free"
+                                discipline.unlocks.includes(other.name) ? "required" : "free"
                               }`}
-                              onClick={() => togglePrerequisite(i, other.name)}
+                              onClick={() => toggleUnlock(i, other.name)}
                             >
                               {other.name}
                             </button>
@@ -630,7 +630,7 @@ export function Config({
                               .filter((_, j) => j !== i)
                               .map((d) => ({
                                 ...d,
-                                prerequisites: d.prerequisites.filter((p) => p !== removed),
+                                unlocks: d.unlocks.filter((s) => s !== removed),
                               })),
                           };
                         })
@@ -659,7 +659,7 @@ export function Config({
                     name: freshName(current.disciplines),
                     seats: 20,
                     hours: 60,
-                    prerequisites: [],
+                    unlocks: [],
                   },
                 ],
               }))

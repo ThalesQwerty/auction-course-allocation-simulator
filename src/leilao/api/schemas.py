@@ -66,11 +66,11 @@ class DisciplineIn(BaseModel):
     name: str
     seats: int = Field(ge=0, description="q_x — vagas")
     hours: int = Field(gt=0, description="w_x — carga horária")
-    prerequisites: list[str] = Field(
+    unlocks: list[str] = Field(
         default_factory=list,
         description=(
-            "disciplinas que precisam estar aprovadas para o aluno disputar vaga aqui. "
-            "Vazio = disciplina de 1º período, em que o ingressante entra direto."
+            "sucessores — disciplinas que esta desbloqueia. Vazio = terminal "
+            "(altura 0). O período da grade e a elegibilidade saem da aresta inversa."
         ),
     )
 

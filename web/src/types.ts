@@ -4,11 +4,10 @@ export interface DisciplineInput {
   name: string;
   seats: number; // q_x — vagas
   hours: number; // w_x — carga horária
-  /** Disciplinas que o aluno precisa ter aprovado para disputar vaga aqui.
-   * Vazio = disciplina de 1º período, em que o ingressante entra direto, sem
-   * leilão. O período de cada disciplina sai daí por indução — ver
-   * `curriculum.ts`. */
-  prerequisites: string[];
+  /** Sucessores — disciplinas que esta desbloqueia. Vazio = terminal (altura
+   * 0). O período da grade e a elegibilidade saem da aresta inversa; a altura
+   * \(s_x\) sai por indução nesta lista — ver `curriculum.ts`. */
+  unlocks: string[];
 }
 
 /** Política de retorno de créditos f_γ — eq. (34). Espelha

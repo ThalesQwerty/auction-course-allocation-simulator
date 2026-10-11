@@ -98,12 +98,17 @@ def draw_utilities(
     """Sorteia a matriz de utilidades inteira na inicialização, a partir da
     seed: uma linha por (aluno, período), sobre a grade inteira.
 
-    Dois passos (eqs. 41-43):
+    Três passos (eqs. 41-43 + invariante de altura):
 
     1. **Valor preliminar** de cada par (aluno, disciplina), tirado de uma
        **log-normal** de média logarítmica 0 e desvio `utility_sigma`. Contínuo,
        portanto distinto dos demais com probabilidade 1, e sempre positivo.
-    2. **Divisão pelo somatório da linha**, que faz a grade inteira valer 1.
+    2. **Deslocamento por altura** s_x: `raw' = raw + M·s_x`, com
+       `M = (max − min) + ε` na linha. Garante s_x > s_y ⇒ u_x > u_y; dentro
+       da mesma altura a ordem do sorteio permanece. O sigma manda *dentro* da
+       camada; entre camadas a ordem é curricular.
+    3. **Divisão pelo somatório da linha**, que faz a grade inteira valer 1.
+       A normalização preserva as desigualdades estritas entre positivos.
 
     A log-normal é o que se obtém quando a grandeza é **produto** de muitos
     fatores independentes — e é assim que se forma o quanto alguém quer uma
@@ -133,7 +138,14 @@ def draw_utilities(
         0.0, config.utility_sigma, size=(len(students), config.periods, len(names))
     )
     raw = np.maximum(raw, UNDERFLOW_GUARD)
-    normalized = raw / raw.sum(axis=2, keepdims=True)
+    # Invariante s_x > s_y ⇒ u_x > u_y: desloca cada camada acima da amplitude
+    # da linha. ε = 1 garante desigualdade estrita no empate max−min.
+    heights = config.heights()
+    height = np.array([heights[name] for name in names], dtype=float)
+    row_max = raw.max(axis=2, keepdims=True)
+    row_min = raw.min(axis=2, keepdims=True)
+    shifted = raw + (row_max - row_min + 1.0) * height.reshape(1, 1, -1)
+    normalized = shifted / shifted.sum(axis=2, keepdims=True)
 
     return {
         (student.id, period + 1): {

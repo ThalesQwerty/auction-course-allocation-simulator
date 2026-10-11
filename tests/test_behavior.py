@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from disciplines import disciplines_from_predecessors
 from leilao.behavior import compute_bids, draw_utilities, utility_matrix
 from leilao.config import Discipline, SimulationConfig
 from leilao.grading import grade_for_attempt
@@ -9,15 +10,15 @@ from leilao.population import Student
 
 
 def make_config(**overrides) -> SimulationConfig:
-    """Grade de três períodos: D1..D3 sem pré-requisito, D4..D6 encadeadas."""
-    disciplines = [
-        Discipline("D1", seats=5, hours=60),
-        Discipline("D2", seats=5, hours=60),
-        Discipline("D3", seats=5, hours=60),
-        Discipline("D4", seats=5, hours=60, prerequisites=("D1",)),
-        Discipline("D5", seats=5, hours=60, prerequisites=("D2", "D3")),
-        Discipline("D6", seats=5, hours=60, prerequisites=("D4",)),
-    ]
+    """Grade de três períodos: D1..D3 de entrada, D4..D6 encadeadas."""
+    disciplines = disciplines_from_predecessors(
+        ("D1", 5, 60),
+        ("D2", 5, 60),
+        ("D3", 5, 60),
+        ("D4", 5, 60, ("D1",)),
+        ("D5", 5, 60, ("D2", "D3")),
+        ("D6", 5, 60, ("D4",)),
+    )
     return SimulationConfig(disciplines=disciplines, students_per_period=3, **overrides)
 
 
@@ -38,36 +39,51 @@ def test_sample_names_returns_distinct_full_names():
     assert len(names) == len(set(names)) == 500
 
 
-def test_curriculum_period_is_induced_from_the_prerequisites():
-    """Sem pré-requisito é 1º período; com pré-requisitos é o maior deles mais
-    um — a cadeia indutiva que substitui a senioridade da eq. (38)."""
+def test_curriculum_period_and_height_are_induced_from_unlocks():
+    """Período conta do ingresso (aresta inversa); altura, dos sucessores."""
     config = make_config()
     assert config.curriculum_periods() == {
         "D1": 1, "D2": 1, "D3": 1, "D4": 2, "D5": 2, "D6": 3
     }
+    assert config.heights() == {
+        "D1": 2, "D2": 1, "D3": 1, "D4": 1, "D5": 0, "D6": 0
+    }
     assert config.first_period_disciplines() == ["D1", "D2", "D3"]
 
 
-def test_a_cycle_of_prerequisites_is_rejected():
-    """Uma cadeia que se fecha não tem período nenhum: as disciplinas dela
+def test_a_cycle_of_unlocks_is_rejected():
+    """Uma cadeia que se fecha não tem altura nem período: as disciplinas dela
     nunca ficariam elegíveis, e o cenário não se conclui por construção."""
-    with pytest.raises(ValueError, match="ciclo de pré-requisitos"):
+    with pytest.raises(ValueError, match="ciclo de sucessores"):
         SimulationConfig(
             disciplines=[
                 Discipline("D1", seats=5, hours=60),
-                Discipline("D2", seats=5, hours=60, prerequisites=("D3",)),
-                Discipline("D3", seats=5, hours=60, prerequisites=("D2",)),
+                Discipline("D2", seats=5, hours=60, unlocks=("D3",)),
+                Discipline("D3", seats=5, hours=60, unlocks=("D2",)),
             ],
         )
-    with pytest.raises(ValueError, match="pré-requisito de si mesma"):
-        Discipline("D1", seats=5, hours=60, prerequisites=("D1",))
+    with pytest.raises(ValueError, match="sucessora de si mesma"):
+        Discipline("D1", seats=5, hours=60, unlocks=("D1",))
 
 
-def test_unknown_prerequisite_is_rejected():
-    with pytest.raises(ValueError, match="pré-requisitos inexistentes"):
+def test_unknown_successor_is_rejected():
+    with pytest.raises(ValueError, match="sucessores inexistentes"):
         SimulationConfig(
-            disciplines=[Discipline("D1", seats=5, hours=60, prerequisites=("D9",))]
+            disciplines=[Discipline("D1", seats=5, hours=60, unlocks=("D9",))]
         )
+
+
+def test_utilities_respect_height_invariant():
+    """s_x > s_y ⇒ u_x > u_y em toda linha sorteada."""
+    config = make_config(periods=4)
+    students = [student(id=f"a{i}") for i in range(5)]
+    rows = draw_utilities(students, config, np.random.default_rng(0))
+    heights = config.heights()
+    for row in rows.values():
+        for x, ux in row.items():
+            for y, uy in row.items():
+                if heights[x] > heights[y]:
+                    assert ux > uy, (x, y, ux, uy, heights[x], heights[y])
 
 
 def test_utility_matrix_covers_only_the_eligible_disciplines():

@@ -89,7 +89,7 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
     """
     return SimulationConfig(
         disciplines=[
-            Discipline(d.name, d.seats, d.hours, tuple(d.prerequisites))
+            Discipline(d.name, d.seats, d.hours, tuple(d.unlocks))
             for d in req.disciplines
         ],
         grade_mean=req.grade_mean,

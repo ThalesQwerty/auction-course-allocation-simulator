@@ -30,19 +30,15 @@ const SEATS = [40, 80, 120] as const;
 const ENTRY_SEATS = 120;
 const HOURS = [60, 90] as const;
 
-/** [nome, carga horária (w_x), vagas (q_x), pré-requisitos].
+/** [nome, carga horária (w_x), vagas (q_x), predecessores na autoria].
  *
- * O período de cada disciplina **não** é declarado: sai por indução dos
- * pré-requisitos (`curriculum.ts`). A grade abaixo está agrupada por período só
- * para ser legível — o que a põe no 3º período é cada uma delas depender de
- * alguma do 2º, não a posição na lista.
+ * A lista final da tupla é só para escrever a grade: "esta depende destas".
+ * `toDisciplines` inverte isso em `unlocks` (sucessores), que é o que o motor
+ * e a API guardam. O período da grade sai da aresta inversa; a altura \(s_x\),
+ * da lista de sucessores (`curriculum.ts`).
  *
- * Cada período soma 450 h, que é a carga horária máxima do cenário (W_a): o
- * aluno em dia cursa as seis disciplinas do seu período e
- * nada mais. Isso importa duas vezes. Faz a disputa ser por *quais* seis, e não
- * por quantas — quem fica para trás tem de escolher entre recuperar o atraso e
- * avançar. E deixa a matrícula garantida do ingressante caber em W_a: ele entra
- * nas seis do 1º período de uma vez, e a eq. (4) tem de continuar valendo. */
+ * Cada período soma 450 h no Computação (390 no Homogêneo), que é o W_a do
+ * preset: o aluno em dia cursa as seis do seu período e nada mais. */
 type Entry = [string, number, number, string[]];
 
 const P1: Entry[] = [
@@ -115,11 +111,11 @@ const FUNNEL_HOURS = [90, 90, 30, 60, 60, 60] as const;
 const withFunnelOffer = (groups: Entry[][]): Entry[][] =>
   groups.map((period, index) =>
     period.map(
-      ([name, , , prerequisites], slot): Entry => [
+      ([name, , , dependsOn], slot): Entry => [
         name,
         FUNNEL_HOURS[slot],
         FUNNEL_SEATS[index],
-        prerequisites,
+        dependsOn,
       ],
     ),
   );
@@ -192,13 +188,22 @@ const FLAT_POPULATION = {
   max_hours: FUNNEL_MAX_HOURS,
 };
 
-const toDisciplines = (groups: Entry[][]): DisciplineInput[] =>
-  groups.flat().map(([name, hours, seats, prerequisites]) => ({
+/** Inverte a autoria por predecessores na lista de sucessores do motor. */
+const toDisciplines = (groups: Entry[][]): DisciplineInput[] => {
+  const flat = groups.flat();
+  const unlocks = new Map<string, string[]>(flat.map(([name]) => [name, []]));
+  for (const [name, , , dependsOn] of flat) {
+    for (const predecessor of dependsOn) {
+      unlocks.get(predecessor)?.push(name);
+    }
+  }
+  return flat.map(([name, hours, seats]) => ({
     name,
     hours,
     seats,
-    prerequisites,
+    unlocks: unlocks.get(name) ?? [],
   }));
+};
 
 /** Horizonte, rodadas e seed que os dois presets compartilham. A oferta e o
  * tamanho da geração entram por argumento: o Computação varia vagas dentro do

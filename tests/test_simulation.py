@@ -1,24 +1,24 @@
 import numpy as np
 import pytest
 
+from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig
 from leilao.grading import credit_return
 from leilao.metrics import demand_per_seat, jain_index, pearson, semestralization
 from leilao.population import generate_students
 from leilao.simulation import GUARANTEED_ROUND, run_simulation
 
-# Grade de três períodos, duas disciplinas por período: D1 e D2 sem
-# pré-requisito (a matrícula garantida de quem ingressa), D3 e D4 atrás delas,
-# D5 e D6 atrás dessas. A cadeia tem três elos, então ninguém conclui em menos
-# de três períodos por mais folgada que seja a oferta.
-GRADE = [
-    Discipline("D1", seats=6, hours=60),
-    Discipline("D2", seats=6, hours=60),
-    Discipline("D3", seats=6, hours=60, prerequisites=("D1",)),
-    Discipline("D4", seats=6, hours=60, prerequisites=("D2",)),
-    Discipline("D5", seats=6, hours=60, prerequisites=("D3",)),
-    Discipline("D6", seats=6, hours=60, prerequisites=("D3", "D4")),
-]
+# Grade de três períodos, duas disciplinas por período: D1 e D2 de entrada
+# (matrícula garantida), D3 e D4 atrás delas, D5 e D6 atrás dessas. A cadeia
+# tem três elos, então ninguém conclui em menos de três períodos.
+GRADE = disciplines_from_predecessors(
+    ("D1", 6, 60),
+    ("D2", 6, 60),
+    ("D3", 6, 60, ("D1",)),
+    ("D4", 6, 60, ("D2",)),
+    ("D5", 6, 60, ("D3",)),
+    ("D6", 6, 60, ("D3", "D4")),
+)
 
 
 # W_a do cenário: 180 h deixa o aluno cursar três disciplinas de 60 h por
@@ -126,7 +126,7 @@ def test_nobody_graduates_faster_than_the_prerequisite_chain():
     """A cadeia impõe um piso que a oferta não compra: a disciplina do n-ésimo
     período da grade não pode ser cursada antes do n-ésimo período do aluno."""
     config = make_config(periods=12, disciplines=[
-        Discipline(d.name, seats=200, hours=d.hours, prerequisites=d.prerequisites)
+        Discipline(d.name, seats=200, hours=d.hours, unlocks=d.unlocks)
         for d in GRADE
     ])
     assert config.minimum_periods_to_graduate() == 3  # três elos
@@ -235,10 +235,12 @@ def test_scarcity_ignores_disciplines_with_no_seats_on_offer():
     aprovou) mas fica fora da razão, que seria divisão por zero."""
     config = make_config(
         disciplines=[
-            Discipline("D1", seats=6, hours=60),
-            # Sem vaga, mas elegíveis assim que D1 sair: ficam fora da razão.
-            Discipline("D2", seats=0, hours=60, prerequisites=("D1",)),
-            Discipline("D3", seats=0, hours=60, prerequisites=("D1",)),
+            *disciplines_from_predecessors(
+                ("D1", 6, 60),
+                # Sem vaga, mas elegíveis assim que D1 sair: ficam fora da razão.
+                ("D2", 0, 60, ("D1",)),
+                ("D3", 0, 60, ("D1",)),
+            ),
         ],
         **NEVER_APPROVES,
     )
@@ -352,10 +354,12 @@ def test_history_separates_refused_requests_from_unbid_ones():
         make_config(
             periods=8,
             disciplines=[
-                Discipline("D1", seats=3, hours=60),
-                Discipline("D2", seats=6, hours=60),
-                Discipline("D3", seats=1, hours=60, prerequisites=("D1",)),
-                Discipline("D4", seats=6, hours=60, prerequisites=("D2",)),
+                *disciplines_from_predecessors(
+                    ("D1", 3, 60),
+                    ("D2", 6, 60),
+                    ("D3", 1, 60, ("D1",)),
+                    ("D4", 6, 60, ("D2",)),
+                ),
             ],
         )
     )
@@ -408,7 +412,7 @@ def test_utilities_come_from_the_seed_not_from_the_simulation_path():
     roomy = run_simulation(
         make_config(
             disciplines=[
-                Discipline(d.name, seats=60, hours=d.hours, prerequisites=d.prerequisites)
+                Discipline(d.name, seats=60, hours=d.hours, unlocks=d.unlocks)
                 for d in GRADE
             ]
         )
@@ -943,13 +947,13 @@ def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
     # Grade rasa e larga: 2 elos só, mas 300 h que não cabem num período. Aqui
     # manda a carga horária.
     wide = SimulationConfig(
-        disciplines=[
-            Discipline("A", seats=5, hours=60),
-            *[
-                Discipline(name, seats=5, hours=60, prerequisites=("A",))
-                for name in ("B", "C", "D", "E")
-            ],
-        ],
+        disciplines=disciplines_from_predecessors(
+            ("A", 5, 60),
+            ("B", 5, 60, ("A",)),
+            ("C", 5, 60, ("A",)),
+            ("D", 5, 60, ("A",)),
+            ("E", 5, 60, ("A",)),
+        ),
         students_per_period=5,
         max_hours=60,
     )

@@ -13,10 +13,12 @@ ser *sistemática*, e com ela sai o recorte dos relatórios por perfil.
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade, e **toda
 disciplina é obrigatória** — só se forma quem aprova em todas. O que ordena a
-grade são os **pré-requisitos**: uma disciplina sem pré-requisito é de 1º
-período, e uma com pré-requisitos é do período seguinte ao mais tardio deles.
-Essa indução substitui a senioridade da eq. (38): em vez de um número dado a
-cada disciplina, o período sai da própria estrutura da grade.
+grade são os **sucessores** (`unlocks`): cada disciplina declara quais outras
+ela desbloqueia. A **altura** s_x sai por indução nessa DAG — 0 se não
+desbloqueia nada, senão 1 + max das alturas dos sucessores — e substitui a
+senioridade da eq. (38) na invariante de preferência. O **período da grade**
+(matrícula garantida, gráficos) continua contado a partir do ingresso, sobre a
+aresta inversa: quem ninguém desbloqueia é 1º período.
 """
 from __future__ import annotations
 
@@ -37,16 +39,17 @@ CreditReturnPolicy = Literal["none", "unit", "full", "ratio"]
 
 @dataclass(frozen=True)
 class Discipline:
-    """Uma disciplina ofertada — o bem escaso x in B (Tabela 1).
+    """Uma disciplina ofertada — o bem escasso x in B (Tabela 1).
 
-    `prerequisites` é a lista de disciplinas que o aluno precisa ter aprovado
-    para ficar elegível a disputar vaga aqui. Vazia = disciplina de 1º período.
+    `unlocks` é a lista de sucessores: disciplinas que esta desbloqueia. Vazia =
+    disciplina terminal (altura 0). O período da grade e a elegibilidade saem da
+    aresta inversa — ver `SimulationConfig`.
     """
 
     name: str
     seats: int  # q_x — vagas
     hours: int  # w_x — carga horária
-    prerequisites: tuple[str, ...] = ()
+    unlocks: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -55,10 +58,10 @@ class Discipline:
             raise ValueError(f"disciplina {self.name!r}: vagas (q_x) deve ser >= 0")
         if self.hours <= 0:
             raise ValueError(f"disciplina {self.name!r}: carga horária (w_x) deve ser > 0")
-        if self.name in self.prerequisites:
-            raise ValueError(f"disciplina {self.name!r} é pré-requisito de si mesma")
-        if len(set(self.prerequisites)) != len(self.prerequisites):
-            raise ValueError(f"disciplina {self.name!r}: pré-requisitos repetidos")
+        if self.name in self.unlocks:
+            raise ValueError(f"disciplina {self.name!r} é sucessora de si mesma")
+        if len(set(self.unlocks)) != len(self.unlocks):
+            raise ValueError(f"disciplina {self.name!r}: sucessores repetidos")
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,9 @@ class SimulationConfig:
     # concentra, pequeno achata**, ao contrário da forma da Gamma que havia
     # antes. O coeficiente de variação é sqrt(exp(sigma^2) - 1), que cresce
     # depressa: a faixa útil inteira cabe entre ~0,25 e ~3.
+    #
+    # Depois do sorteio, `draw_utilities` impõe a invariante de altura:
+    # s_x > s_y ⇒ u_x > u_y. O sigma continua mandando *dentro* da mesma altura.
     utility_sigma: float = 1.0
     # W_a — carga horária máxima por período, eq. (4). Igual para todos.
     max_hours: int = 360
@@ -159,16 +165,15 @@ class SimulationConfig:
             raise ValueError("há disciplinas com nomes repetidos")
         known = set(names)
         for discipline in self.disciplines:
-            unknown = set(discipline.prerequisites) - known
+            unknown = set(discipline.unlocks) - known
             if unknown:
                 raise ValueError(
-                    f"disciplina {discipline.name!r} tem pré-requisitos inexistentes: "
+                    f"disciplina {discipline.name!r} tem sucessores inexistentes: "
                     f"{sorted(unknown)}"
                 )
 
-        # Levanta se houver ciclo: uma cadeia de pré-requisitos que se fecha não
-        # tem período nenhum, e as disciplinas dela seriam inalcançáveis para
-        # sempre — o cenário não se conclui por construção.
+        # Levanta se houver ciclo: uma cadeia de sucessores que se fecha não tem
+        # altura nem período, e as disciplinas dela seriam inalcançáveis.
         first = self.first_period_disciplines()
 
         seats = {d.name: d.seats for d in self.disciplines}
@@ -201,19 +206,55 @@ class SimulationConfig:
         """|A| — uma geração do mesmo tamanho em cada um dos L períodos."""
         return self.students_per_period * self.entry_span
 
-    def curriculum_periods(self) -> dict[str, int]:
-        """O período de cada disciplina na grade, por indução sobre os
-        pré-requisitos: sem pré-requisito é 1º período; com pré-requisitos é o
-        maior período entre eles mais um.
+    def prerequisites_by_discipline(self) -> dict[str, tuple[str, ...]]:
+        """Aresta inversa dos sucessores: quem precisa estar aprovado para
+        disputar cada disciplina. Mantém a ordem do cenário entre os
+        predecessores."""
+        preds: dict[str, list[str]] = {d.name: [] for d in self.disciplines}
+        for discipline in self.disciplines:
+            for successor in discipline.unlocks:
+                preds[successor].append(discipline.name)
+        return {name: tuple(parents) for name, parents in preds.items()}
 
-        Substitui a senioridade s_x da eq. (38): o número não é dado, sai da
-        estrutura da grade. Um ciclo de pré-requisitos não tem solução e é
-        rejeitado aqui — é o único lugar em que a grade é percorrida inteira.
+    def heights(self) -> dict[str, int]:
+        """Altura s_x na DAG de sucessores: 0 se não desbloqueia nada; senão
+        1 + max das alturas dos sucessores. Ciclo é rejeitado — a disciplina
+        nunca ficaria elegível."""
+        unlocks = {d.name: d.unlocks for d in self.disciplines}
+        height: dict[str, int] = {}
+        on_path: set[str] = set()
+        for start in unlocks:
+            if start in height:
+                continue
+            stack = [(start, False)]
+            while stack:
+                name, expanded = stack.pop()
+                if expanded:
+                    on_path.discard(name)
+                    height[name] = 1 + max((height[s] for s in unlocks[name]), default=-1)
+                    continue
+                if name in height:
+                    continue
+                if name in on_path:
+                    raise ValueError(
+                        f"há um ciclo de sucessores envolvendo {name!r}: a disciplina "
+                        "nunca ficaria elegível"
+                    )
+                on_path.add(name)
+                stack.append((name, True))
+                stack.extend((s, False) for s in unlocks[name])
+        return height
+
+    def curriculum_periods(self) -> dict[str, int]:
+        """O período de cada disciplina na grade, por indução sobre a aresta
+        inversa dos sucessores: quem ninguém desbloqueia é 1º período; quem é
+        desbloqueada por outras é o período seguinte ao mais tardio delas.
+
+        É a contagem a partir do ingresso — matrícula garantida e gráficos.
+        A altura (s_x) conta do outro extremo da mesma DAG.
         """
-        requires = {d.name: d.prerequisites for d in self.disciplines}
+        requires = self.prerequisites_by_discipline()
         period: dict[str, int] = {}
-        # DFS iterativa com marcação de caminho: a recursiva estouraria a pilha
-        # numa cadeia longa, e é o caminho aberto que denuncia o ciclo.
         on_path: set[str] = set()
         for start in requires:
             if start in period:
@@ -229,7 +270,7 @@ class SimulationConfig:
                     continue
                 if name in on_path:
                     raise ValueError(
-                        f"há um ciclo de pré-requisitos envolvendo {name!r}: a disciplina "
+                        f"há um ciclo de sucessores envolvendo {name!r}: a disciplina "
                         "nunca ficaria elegível"
                     )
                 on_path.add(name)
@@ -238,18 +279,19 @@ class SimulationConfig:
         return period
 
     def first_period_disciplines(self) -> list[str]:
-        """As disciplinas sem pré-requisito, na ordem do cenário — a matrícula
+        """As disciplinas de 1º período, na ordem do cenário — a matrícula
         garantida de quem ingressa."""
         period = self.curriculum_periods()
         return [d.name for d in self.disciplines if period[d.name] == 1]
 
     def eligible_disciplines(self, approved: set[str]) -> list[str]:
         """Disciplinas que o aluno ainda precisa cursar e já pode disputar:
-        não aprovadas e com todos os pré-requisitos cumpridos."""
+        não aprovadas e com todos os predecessores (aresta inversa) cumpridos."""
+        requires = self.prerequisites_by_discipline()
         return [
             d.name
             for d in self.disciplines
-            if d.name not in approved and all(p in approved for p in d.prerequisites)
+            if d.name not in approved and all(p in approved for p in requires[d.name])
         ]
 
     def hours_by_discipline(self) -> dict[str, int]:
@@ -265,9 +307,9 @@ class SimulationConfig:
         vaga fecha a grade antes disso.
 
         São dois limites, e vale o maior. A **carga horária** impede cursar mais
-        de W_a por período, o que dá ceil(S / W_a). Os
-        **pré-requisitos** impõem a cadeia: a disciplina de n-ésimo período não
-        pode ser cursada antes do n-ésimo período do aluno.
+        de W_a por período, o que dá ceil(S / W_a). A **cadeia** impõe que a
+        disciplina de n-ésimo período não pode ser cursada antes do n-ésimo
+        período do aluno.
 
         Serve para dimensionar a fase de drenagem: abaixo disso nenhuma geração
         tem tempo de chegar ao fim, e a série por geração mediria o horizonte em
