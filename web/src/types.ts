@@ -2,12 +2,10 @@
 
 export interface DisciplineInput {
   name: string;
-  seats: number; // q_x — vagas
-  hours: number; // w_x — carga horária
-  /** Sucessores — disciplinas que esta desbloqueia. Vazio = terminal (altura
-   * 0). O período da grade e a elegibilidade saem da aresta inversa; a altura
-   * \(s_x\) sai por indução nesta lista — ver `curriculum.ts`. */
+  seats: number;
+  hours: number;
   unlocks: string[];
+  entry: boolean;
 }
 
 /** Política de retorno de créditos f_γ — eq. (34). Espelha
@@ -73,8 +71,7 @@ export interface SimulateRequest {
    * geração correspondente. */
   entry_periods: number | null;
   /** Alunos que ingressam em cada período com ingresso; a população é isto × L.
-   * Não pode passar da menor oferta entre as disciplinas de 1º período, porque
-   * o ingressante tem **vaga garantida** em todas elas. */
+   * Não pode passar da menor oferta entre as disciplinas de entrada. */
   students_per_period: number;
   rounds: number; // |R|
   min_grade: number; // n_min
@@ -344,7 +341,7 @@ export interface DisciplineSnapshot {
   seats: number;
   filled: number;
   /** Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
-   * Só é diferente de zero nas disciplinas de 1º período. */
+   * Só é diferente de zero nas disciplinas de entrada. */
   granted: number;
   /** Quantos alunos pediram a disciplina no período — deram lance em alguma
    * rodada, ou a receberam na matrícula garantida. Dividido por `seats` dá a
@@ -457,4 +454,41 @@ export function defaultScenario(): SimulateRequest {
     credit_return: "none",
     seed: 0,
   };
+}
+
+export interface PlaygroundRequest {
+  mechanism: Mechanism;
+  rounds: number;
+  seed: number;
+  grade_mean: number;
+  grade_stddev: number;
+  disciplines: { name: string; seats: number; hours: number }[];
+  students: {
+    id: string;
+    credits: number;
+    cr: number;
+    max_hours: number;
+    utilities: Record<string, number>;
+    eligible: string[];
+  }[];
+}
+
+export interface PlaygroundRoundStudent {
+  id: string;
+  bids: Record<string, number>;
+  utilities: Record<string, number>;
+  won: string[];
+  remaining_hours: number;
+  remaining_credits: number | null;
+}
+
+export interface PlaygroundRound {
+  number: number;
+  prices: Record<string, number> | null;
+  students: PlaygroundRoundStudent[];
+}
+
+export interface PlaygroundResponse {
+  rounds: PlaygroundRound[];
+  grades: { student_id: string; discipline: string; grade: number }[];
 }

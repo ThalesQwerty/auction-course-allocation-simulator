@@ -1,31 +1,50 @@
 import type { DisciplineInput } from "./types";
 
-/** Aceita grade nova (`unlocks`) ou legada (`prerequisites`) e devolve sempre
- * sucessores. Usado ao reler o histórico do navegador. */
-export function withUnlocks(
-  disciplines: Array<
-    Omit<DisciplineInput, "unlocks"> & { unlocks?: string[]; prerequisites?: string[] }
-  >
-): DisciplineInput[] {
-  if (disciplines.every((d) => Array.isArray(d.unlocks))) {
-    return disciplines.map(({ name, seats, hours, unlocks }) => ({
-      name,
-      seats,
-      hours,
-      unlocks: unlocks ?? [],
-    }));
-  }
-  const unlocks = new Map(disciplines.map((d) => [d.name, [] as string[]]));
-  for (const discipline of disciplines) {
-    for (const predecessor of discipline.prerequisites ?? []) {
-      unlocks.get(predecessor)?.push(discipline.name);
+type StoredDiscipline = Omit<DisciplineInput, "unlocks" | "entry"> & {
+  unlocks?: string[];
+  prerequisites?: string[];
+  entry?: boolean;
+};
+
+/** Aceita grade nova (`unlocks`) ou legada (`prerequisites`). Campo `entry`
+ * ausente vale verdadeiro nas raízes — o que o histórico antigo chamava de
+ * 1º período. */
+export function withUnlocks(disciplines: StoredDiscipline[]): DisciplineInput[] {
+  const normalized = disciplines.every((d) => Array.isArray(d.unlocks))
+    ? disciplines.map(({ name, seats, hours, unlocks }) => ({
+        name,
+        seats,
+        hours,
+        unlocks: unlocks ?? [],
+      }))
+    : (() => {
+        const unlocks = new Map(disciplines.map((d) => [d.name, [] as string[]]));
+        for (const discipline of disciplines) {
+          for (const predecessor of discipline.prerequisites ?? []) {
+            unlocks.get(predecessor)?.push(discipline.name);
+          }
+        }
+        return disciplines.map(({ name, seats, hours }) => ({
+          name,
+          seats,
+          hours,
+          unlocks: unlocks.get(name) ?? [],
+        }));
+      })();
+
+  const known = new Set(normalized.map((d) => d.name));
+  const predecessors = new Map(normalized.map((d) => [d.name, [] as string[]]));
+  for (const discipline of normalized) {
+    for (const successor of discipline.unlocks) {
+      if (successor !== discipline.name && known.has(successor)) {
+        predecessors.get(successor)!.push(discipline.name);
+      }
     }
   }
-  return disciplines.map(({ name, seats, hours }) => ({
-    name,
-    seats,
-    hours,
-    unlocks: unlocks.get(name) ?? [],
+  return normalized.map((discipline, index) => ({
+    ...discipline,
+    entry:
+      disciplines[index].entry ?? (predecessors.get(discipline.name)?.length ?? 0) === 0,
   }));
 }
 
@@ -94,8 +113,12 @@ export function curriculumPeriods(disciplines: DisciplineInput[]): Record<string
   return period;
 }
 
-/** Altura \(s_x\) na DAG de sucessores: 0 se não desbloqueia nada; senão
- * \(1 + \max\) das alturas dos sucessores. Espelha `SimulationConfig.heights`. */
+/** Sentinela da altura. `CYCLIC` é 0 porque o período real começa em 1; a altura
+ * 0 é um terminal legítimo, então o ciclo aqui não pode reusar esse número. */
+const HEIGHT_CYCLE = -1;
+
+/** Altura s_x na DAG de sucessores: 0 se não desbloqueia nada; senão
+ * 1 + max das alturas dos sucessores. Ciclo devolve `HEIGHT_CYCLE`. */
 export function curriculumHeights(disciplines: DisciplineInput[]): Record<string, number> {
   const unlocks = new Map(
     disciplines.map((d) => [d.name, d.unlocks.filter((s) => s !== d.name)])
@@ -111,14 +134,14 @@ export function curriculumHeights(disciplines: DisciplineInput[]): Record<string
       if (expanded) {
         onPath.delete(name);
         const successors = (unlocks.get(name) ?? []).filter((s) => unlocks.has(s));
-        height[name] = successors.some((s) => height[s] === CYCLIC)
-          ? CYCLIC
+        height[name] = successors.some((s) => height[s] === HEIGHT_CYCLE)
+          ? HEIGHT_CYCLE
           : 1 + Math.max(-1, ...successors.map((s) => height[s]));
         continue;
       }
       if (height[name] !== undefined) continue;
       if (onPath.has(name)) {
-        height[name] = CYCLIC;
+        height[name] = HEIGHT_CYCLE;
         continue;
       }
       onPath.add(name);
@@ -131,11 +154,8 @@ export function curriculumHeights(disciplines: DisciplineInput[]): Record<string
   return height;
 }
 
-/** As disciplinas de 1º período, na ordem do cenário: a matrícula garantida
- * de quem ingressa. */
-export function firstPeriodDisciplines(disciplines: DisciplineInput[]): DisciplineInput[] {
-  const period = curriculumPeriods(disciplines);
-  return disciplines.filter((d) => period[d.name] === 1);
+export function entryDisciplines(disciplines: DisciplineInput[]): DisciplineInput[] {
+  return disciplines.filter((d) => d.entry);
 }
 
 /** Quantos períodos a grade tem — o maior período alcançado. 0 quando toda a

@@ -27,7 +27,6 @@ interface Metric {
   title: string;
   /** Rótulo curto, para a coluna "Métrica" das tabelas. */
   short: string;
-  hint: string;
   of: (run: RunSummary) => number | null;
   /** Limites naturais da grandeza; o domínio é folgado em torno dos dados mas
    * nunca passa daqui. Ausente quando a grandeza não tem teto. */
@@ -61,7 +60,6 @@ const METRICS: Metric[] = [
     id: "efficiency",
     title: "Eficiência de alocação (ψ̄)",
     short: "Eficiência (ψ̄)",
-    hint: "Satisfação média dos alunos que disputaram — eq. (53). A utilidade é zero fora do conjunto elegível, então ψ é a fração do que o aluno podia cursar e conseguiu",
     of: (run) => run.efficiency,
     bounds: [0, 1],
     betterWhen: "higher",
@@ -71,7 +69,6 @@ const METRICS: Metric[] = [
     id: "fairness",
     title: "Equidade (índice de Jain, φ)",
     short: "Equidade (φ)",
-    hint: "1 = todos igualmente satisfeitos — eq. (55)",
     of: (run) => run.fairness,
     bounds: [0, 1],
     betterWhen: "higher",
@@ -81,7 +78,6 @@ const METRICS: Metric[] = [
     id: "correlation",
     title: "Correlação CR × satisfação (λ)",
     short: "Correlação (λ)",
-    hint: "Positivo = quem tem CR maior se sai melhor — eq. (57). É aqui que se lê o mérito: a linha de base o impõe por construção (o CR é o critério), o leilão sem retorno o ignora, e o leilão com retorno está em algum ponto entre os dois. Descreve, não pontua — qual lado é melhor depende de alocar por mérito passado ou por necessidade, e isso o gráfico não decide",
     of: (run) => run.correlation,
     bounds: [-1, 1],
     betterWhen: null,
@@ -92,7 +88,6 @@ const METRICS: Metric[] = [
     id: "time_to_graduate",
     title: "Tempo de formatura (períodos)",
     short: "Tempo (períodos)",
-    hint: "Períodos do ingresso ao diploma, na média dos concluintes — menor é melhor. Tem viés de seleção: só existe sobre quem concluiu, então um modelo que forma menos gente pode exibir um tempo menor só porque sobraram os rápidos. Não se lê sem a coluna de formados da tabela abaixo",
     of: (run) => run.time_to_graduate,
     betterWhen: "lower",
     format: formatPeriods,
@@ -110,7 +105,6 @@ const GRADUATES: Metric = {
   id: "graduates",
   title: "Formandos",
   short: "Formandos",
-  hint: "Quantos concluíram o curso no horizonte. Sem ele, ψ̄ sozinha diria que concentrar a preferência é sempre melhor — e no extremo ela chega perto de 1 justamente onde ninguém se forma",
   of: (run) => run.graduates,
   bounds: [0, Infinity],
   betterWhen: "higher",
@@ -129,10 +123,6 @@ const roundMetrics = (rounds: number): Metric[] =>
       id: `round-${index}`,
       title: `Alocações por aluno (${ordinal} rodada)`,
       short: `Alocações (${ordinal} rodada)`,
-      hint:
-        index === 0
-          ? "Vagas conquistadas por aluno na primeira rodada. É o que o mecanismo consegue atender de saída, com a oferta ainda intocada — e quanto mais alto, mais da demanda do período já saiu daqui"
-          : `Vagas conquistadas por aluno na ${ordinal} rodada, e só nela — não é acumulado. Quanto mais baixo em relação à primeira, mais a demanda já tinha sido atendida antes de chegar aqui`,
       of: (run) => run.allocations_per_round?.[index] ?? null,
       bounds: [0, Infinity],
       betterWhen: null,
@@ -181,7 +171,6 @@ export function Comparison({
       <Histogram
         key="notas"
         title="Notas de primeira tentativa"
-        hint="a normal do cenário, truncada em [0, 10]"
         fractions={result.grade_distribution}
         domain={[0, 10]}
       />
@@ -190,7 +179,6 @@ export function Comparison({
       <Histogram
         key="utilidades"
         title="Utilidades"
-        hint="como a preferência de um aluno se reparte entre as disciplinas"
         fractions={result.utility_distribution}
       />
     ) : null,
@@ -236,7 +224,6 @@ export function Comparison({
     <MetricChart
       key={`sweep-${metric.id}`}
       title={metric.title}
-      hint={metric.hint}
       data={sweepSeries(metric)}
       series={labels}
       colors={colors}
@@ -380,7 +367,6 @@ export function Comparison({
     <BoxPlot
       key={metric.id}
       title={metric.title}
-      hint={metric.hint}
       groups={COMPARISON_ARMS.map((arm) => ({
         label: arm.label,
         short: arm.short,
@@ -410,54 +396,12 @@ export function Comparison({
           {result.runs} execuções de cada modelo — {result.runs * result.arms.length}{" "}
           simulações
         </h2>
-        <p className="note">
-          Três modelos sobre o mesmo cenário. O leilão entra <strong>duas vezes</strong>, com e sem
-          retorno de créditos, porque o retorno é o que pode devolver ao mecanismo algum senso
-          meritocrático: na política proporcional quem aprova recupera a fatia do preço
-          correspondente à nota, então ir bem compra poder de compra no período seguinte. A
-          ordenação por CR faz isso por construção — o histórico <em>é</em> o critério —, e o
-          leilão sem retorno não faz de jeito nenhum.
-        </p>
-        <ul className="note">
-          {COMPARISON_ARMS.map((arm) => (
-            <li key={arm.key}>
-              <span className="swatch" style={{ background: colors[arm.label] }} />{" "}
-              <strong>{arm.label}</strong> — {arm.hint}
-            </li>
-          ))}
-        </ul>
-        <p className="note">
-          As seeds vão de <strong>1 a {result.runs}</strong> e são <strong>pareadas</strong>: a
-          i-ésima execução de cada modelo parte da mesma população, da mesma matriz de utilidades e
-          da mesma matriz de notas. É a condição metodológica da Seção 7.3 — todos recebem a mesma
-          inicialização, e por isso a diferença entre eles é atribuível ao <strong>modelo</strong>,
-          não ao sorteio nem às particularidades de um cenário.
-        </p>
-        <p className="note">
-          Cada caixa é a distribuição da métrica sobre as {result.runs} execuções daquele modelo: a
-          linha grossa é a <strong>mediana</strong>, a caixa é a metade central da amostra (1º ao 3º
-          quartil), os bigodes vão até 1,5 IQR e o que sobra aparece como ponto solto. Uma execução
-          vale a média dos períodos <strong>ponderada pelos alunos medidos</strong> — a simulação
-          termina numa fase de drenagem, e sem o peso um período final de poucos alunos contaria
-          tanto quanto um período cheio. O tempo de formatura é a exceção: não é de período, é da
-          execução inteira.
-        </p>
-        <p className="note">
-          <strong>Quem acabou de ingressar não entra em métrica nenhuma.</strong> O calouro recebe
-          vaga garantida em todas as disciplinas de 1º período — exatamente as elegíveis para ele
-          —, então pontua ψ = 1 contra CR = 0 por construção, e isso vale igual nos três modelos.
-          Medi-lo seria medir a matrícula garantida, não a alocação.
-        </p>
-      </div>
+                                              </div>
 
       <section className="chart-section">
         <header className="chart-section-head">
           <h2>Métricas de alocação</h2>
-          <p>
-            Caixas que não se tocam separam os modelos; caixas sobrepostas dizem que a diferença
-            entre as medianas cabe dentro da variação entre populações
-          </p>
-        </header>
+</header>
         <div className="chart-grid">{METRICS.map(chartFor)}</div>
       </section>
 
@@ -465,25 +409,8 @@ export function Comparison({
         <section className="chart-section">
           <header className="chart-section-head">
             <h2>Saturação da demanda</h2>
-            <p>
-              Vagas obtidas por aluno em cada rodada, uma caixa por modelo. Cada gráfico conta o
-              que foi ganho <strong>naquela</strong> rodada, não o acumulado — somados, os{" "}
-              {rounds} dão as vagas por aluno do período
-            </p>
-          </header>
-          <p className="note">
-            O que se lê aqui é o <strong>decaimento</strong> entre os gráficos, não o nível de cada
-            um. Um mecanismo que atende mais demanda de saída começa alto e cai rápido: sobra pouco
-            para as rodadas seguintes porque pouco ficou por alocar. Um que leva a disputa adiante
-            distribui as vagas pelas rodadas. Por isso nenhuma rodada isolada tem lado "melhor" —
-            na primeira, mais alto é atender mais; nas seguintes, mais alto é ter deixado mais para
-            trás.
-          </p>
-          <p className="note">
-            A matrícula garantida <strong>não</strong> infla a primeira rodada: o calouro está fora
-            do recorte, então o número é só o que o mecanismo alocou a quem disputou.
-          </p>
-          <div className="chart-grid">{saturation.map(chartFor)}</div>
+</header>
+                              <div className="chart-grid">{saturation.map(chartFor)}</div>
         </section>
       )}
 
@@ -491,27 +418,8 @@ export function Comparison({
         <section className="chart-section">
           <header className="chart-section-head">
             <h2>Dependência da dispersão da preferência</h2>
-            <p>
-              A mesma comparação em vários <em>σ</em>, com {sweep.runs}{" "}
-              {sweep.runs === 1 ? "execução" : "execuções"} por ponto — aqui se lê a{" "}
-              <strong>forma da curva</strong>, não a significância de um ponto, que é o que os
-              boxplots acima respondem no <em>σ</em> canônico, marcado no eixo
-            </p>
-          </header>
-          <p className="note">
-            <em>σ</em> é o desvio da log-normal de onde sai a utilidade: à{" "}
-            <strong>esquerda</strong> o aluno é quase indiferente entre as disciplinas e à{" "}
-            <strong>direita</strong> ele quer uma ou duas e despreza o resto.
-          </p>
-          <p className="note">
-            O que esta seção mostra é a hipótese do trabalho: a linha da{" "}
-            <strong>ordenação por CR é plana</strong> — concentrar a preferência da população não
-            muda nada para um mecanismo que não enxerga intensidade —, enquanto a do leilão sobe.
-            O vão entre elas <em>é</em> o quanto de intensidade há para captar. Em troca, o painel
-            de <strong>formandos</strong> cai na mesma direção: é a taxa de câmbio entre satisfação
-            e diplomas.
-          </p>
-          <div className="chart-grid">{[...METRICS, GRADUATES].map(sweepChartFor)}</div>
+</header>
+                              <div className="chart-grid">{[...METRICS, GRADUATES].map(sweepChartFor)}</div>
         </section>
       )}
 
@@ -519,43 +427,12 @@ export function Comparison({
         <section className="chart-section">
           <header className="chart-section-head">
             <h2>Como a utilidade se reparte em cada σ</h2>
-            <p>
-              O gráfico da <strong>causa</strong>, ao lado dos da consequência: um histograma por
-              ponto da varredura, mostrando como a preferência de um aluno se distribui entre as
-              disciplinas que ele tem diante de si
-            </p>
-          </header>
-          <p className="note">
-            Cada linha (aluno, período) é reescalada ao <strong>próprio</strong> mínimo e máximo e
-            dividida em {sweep.points[0].distribution.length} faixas de mesma largura; a altura é a
-            fração de utilidades que cai em cada faixa, e elas somam 1. Utilidade zero não entra —
-            ela marca o inelegível, não uma preferência fraca.
-          </p>
-          <p className="note">
-            O eixo horizontal traz as <strong>divisas</strong> das faixas. Como a escala é por
-            linha, ele não é o valor da utilidade: <strong>0</strong> é a disciplina que aquele
-            aluno <em>menos</em> quer no período e <strong>1</strong> é a que ele <em>mais</em>{" "}
-            quer, com os valores no meio dizendo onde entre as duas cada disciplina caiu. Massa
-            empilhada à esquerda é um aluno que quer uma coisa e despreza o resto; massa espalhada
-            é um aluno que diferencia pouco.
-          </p>
-          <p className="note">
-            A escala é <strong>por linha</strong>, e não do menor ao maior valor da matriz inteira,
-            porque global degenera: um único extremo define o intervalo e, de σ = 1 em diante, 94%
-            dos valores caem na primeira faixa — todos os gráficos sairiam iguais e nenhum
-            descreveria um aluno. A última faixa guarda sempre o máximo da linha, então ela nunca
-            é vazia: num conjunto de <em>n</em> disciplinas ela vale pelo menos 1/<em>n</em>.
-          </p>
-          <div className="chart-grid">
+</header>
+                                        <div className="chart-grid">
             {sweep.points.map((point) => (
               <Histogram
                 key={`hist-${point.sigma}`}
                 title={`σ = ${formatSigma(point.sigma)}`}
-                hint={
-                  Math.abs(point.sigma - sweep.canonical) < 1e-9
-                    ? "o σ canônico do cenário"
-                    : undefined
-                }
                 fractions={point.distribution}
               />
             ))}
@@ -567,40 +444,14 @@ export function Comparison({
         <section className="chart-section">
           <header className="chart-section-head">
             <h2>As distribuições do cenário</h2>
-            <p>
-              De onde vieram os números: as duas matrizes sorteadas na inicialização, cada uma como
-              a fração de valores que cai em cada faixa
-            </p>
-          </header>
-          <p className="note">
-            As <strong>notas</strong> são as de primeira tentativa, sobre [0, 10] — é a normal do
-            cenário já truncada e arredondada, e o truncamento empilha massa nas pontas sempre que
-            a média estiver perto delas, o que não se lê dos parâmetros. A recursada fica de fora
-            porque ela desloca a média: misturar as tentativas somaria distribuições diferentes, e
-            quantas recursadas acontecem é resultado, não entrada.
-          </p>
-          <p className="note">
-            Nas <strong>utilidades</strong>, cada linha (aluno, período) é reescalada ao{" "}
-            <strong>próprio</strong> mínimo e máximo, então o eixo não é o valor da utilidade:{" "}
-            <strong>0</strong> é a disciplina que aquele aluno menos quer no período e{" "}
-            <strong>1</strong> é a que ele mais quer. Massa à esquerda é um aluno que quer uma
-            coisa e despreza o resto; massa espalhada é um aluno que diferencia pouco.
-          </p>
-          <div className="chart-grid">{scenarioHistograms}</div>
+</header>
+                              <div className="chart-grid">{scenarioHistograms}</div>
         </section>
       )}
 
       <div className="panel">
         <h2>O que o retorno de créditos muda</h2>
-        <p className="note">
-          Os dois braços do leilão rodam o <strong>mesmo cenário com a mesma seed</strong> e
-          diferem em uma única coisa: a política f<sub>γ</sub>. A diferença entre eles é, portanto,
-          o efeito do retorno — isolado. A coluna <strong>subiu</strong> é a contagem pareada, e é
-          descritiva: conta em quantas seeds a métrica ficou maior com retorno, sem dizer se maior
-          é bom. Ao lado, a mediana da linha de base, para localizar os dois no caminho entre
-          ignorar o histórico e deixá-lo decidir tudo.
-        </p>
-        <table>
+                <table>
           <thead>
             <tr>
               <th>Métrica</th>
@@ -617,17 +468,7 @@ export function Comparison({
 
       <div className="panel">
         <h2>Resumo das distribuições</h2>
-        <p className="note">
-          O mesmo conteúdo dos gráficos em números. A <strong>diferença</strong> e as{" "}
-          <strong>seeds a favor</strong> são medidas contra a linha de base por CR: a diferença
-          entre as medianas, e em quantas das {result.runs} populações aquele modelo saiu{" "}
-          <em>melhor</em> que ela — maior em ψ̄ e φ, menor no tempo de formatura. Em λ e nas rodadas
-          as duas colunas vêm vazias de propósito: elas descrevem, não pontuam, e qual lado é
-          melhor ali depende do que se está perguntando. As duas leituras não são equivalentes:
-          uma diferença pequena de medianas com quase todas as seeds a favor é um efeito
-          consistente e pequeno, e é coisa diferente de um empate.
-        </p>
-        <table>
+                <table>
           <thead>
             <tr>
               <th>Métrica</th>
@@ -647,16 +488,7 @@ export function Comparison({
 
       <div className="panel">
         <h2>Execução a execução</h2>
-        <p className="note">
-          O pareamento à vista: cada linha é uma seed, e os três valores de cada coluna são a mesma
-          população sob regras diferentes, na ordem da legenda. <strong>Formados</strong> está aqui
-          porque o tempo de formatura não se lê sem ele — se um modelo forma bem menos gente, o
-          tempo dele é a média de um grupo selecionado. "Períodos" é quantos a simulação publicou:
-          se os braços divergirem aí, a população se esvaziou em momentos diferentes e as médias
-          cobrem horizontes distintos. As rodadas ficam de fora desta tabela, que já tem três
-          valores por célula; elas estão nas duas de cima.
-        </p>
-        <table>
+                <table>
           <thead>
             <tr>
               <th>Seed</th>
@@ -695,17 +527,7 @@ export function Comparison({
             })}
           </tbody>
         </table>
-        <p className="note">
-          Em cada célula, na ordem:{" "}
-          {COMPARISON_ARMS.map((arm, i) => (
-            <span key={arm.key}>
-              {i > 0 && " / "}
-              <span className="swatch" style={{ background: colors[arm.label] }} /> {arm.label}
-            </span>
-          ))}
-          .
-        </p>
-      </div>
+              </div>
     </div>
   );
 }

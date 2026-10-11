@@ -94,22 +94,24 @@ export function Project() {
         desbloqueia. A <strong>altura</strong> s<sub>x</sub> sai por indução nessa DAG (0 se não
         desbloqueia nada; senão 1 + max das alturas dos sucessores) e entra na invariante de
         preferência s<sub>x</sub> &gt; s<sub>y</sub> ⇒ u<sub>x</sub> &gt; u<sub>y</sub>. O período
-        da grade (matrícula garantida, gráficos) conta do outro extremo — a aresta inversa —, e o
-        aluno só fica elegível quando aprovou tudo que a desbloqueia.
+        da grade (gráficos) conta do outro extremo — a aresta inversa —, e o aluno só fica
+        elegível quando aprovou tudo que a desbloqueia. A matrícula garantida não é esse período:
+        é o flag de entrada, e toda disciplina de entrada não tem pré-requisito. O inverso não
+        vale.
       </p>
       <p>
-        Quem <strong>ingressa</strong> não disputa nada: recebe vaga garantida em todas as
-        disciplinas de 1º período e fica de fora do leilão naquele período. O sistema ainda assim
-        lança o gasto na conta dele, repartindo o orçamento igualmente entre essas disciplinas e
-        deixando o resto da divisão no saldo — é esse valor que alimenta o retorno de créditos da
-        eq. (34). A garantia vale só no ingresso: recursar uma dessas disciplinas é disputá-la no
-        leilão como qualquer outra. Daí os dois limites do ritmo de entrada: a geração não pode
-        passar da menor oferta entre as disciplinas de 1º período, nem a carga somada delas pode
-        passar de W<sub>a</sub>.
+        Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada e fica de
+        fora do leilão naquele período para esse conjunto. O sistema ainda assim lança o gasto na
+        conta dele, repartindo o orçamento igualmente entre essas disciplinas e deixando o resto da
+        divisão no saldo — é esse valor que alimenta o retorno de créditos da eq. (34). A garantia
+        vale só no ingresso: recursar uma dessas disciplinas é disputá-la no leilão como qualquer
+        outra. Daí os dois limites do ritmo de entrada: a geração não pode passar da menor oferta
+        entre as disciplinas de entrada, nem a carga somada delas pode passar de W<sub>a</sub>.
       </p>
       <p>
-        E, justamente por isso, <strong>o calouro não entra nas métricas</strong>. As disciplinas
-        de 1º período são exatamente as elegíveis para quem acaba de ingressar, e ele recebe todas:
+        E, justamente por isso, <strong>o calouro não entra nas métricas</strong>. Na grade atual
+        as de entrada são também as únicas sem pré-requisito, logo as elegíveis para quem acaba de
+        ingressar, e ele recebe todas:
         pontua ψ = 1 contra CR = 0 por construção, sem ter disputado coisa alguma. No preset
         Computação ele é 11% de todas as linhas aluno-período e, sozinho, invertia o sinal da
         correlação da eq. (57) — −0,09 com ele, +0,04 sem. A regra é que ele{" "}
@@ -143,7 +145,7 @@ export function Project() {
       <h2>O que a simulação faz em cada período</h2>
       <ol>
         <li>
-          Quem ingressa no período recebe a matrícula garantida nas disciplinas de 1º período, e as
+          Quem ingressa no período recebe a matrícula garantida nas disciplinas de entrada, e as
           vagas saem do estoque antes de o leilão abrir.
         </li>
         <li>
@@ -311,8 +313,8 @@ export function Project() {
         </li>
 
         <li>
-          <strong>Matrícula garantida do ingressante:</strong> entra sem leilão em todas as
-          disciplinas de 1º período, com o orçamento repartido igualmente entre elas e o resto da
+          <strong>Matrícula garantida do ingressante:</strong> entra sem leilão nas disciplinas de
+          entrada, com o orçamento repartido igualmente entre elas e o resto da
           divisão no saldo. O anteprojeto não trata do ingresso.
         </li>
         <li>

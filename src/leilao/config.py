@@ -41,15 +41,16 @@ CreditReturnPolicy = Literal["none", "unit", "full", "ratio"]
 class Discipline:
     """Uma disciplina ofertada — o bem escasso x in B (Tabela 1).
 
-    `unlocks` é a lista de sucessores: disciplinas que esta desbloqueia. Vazia =
-    disciplina terminal (altura 0). O período da grade e a elegibilidade saem da
-    aresta inversa — ver `SimulationConfig`.
+    `unlocks` é a lista de sucessores. Vazia = terminal (altura 0). `entry`
+    marca a matrícula garantida de quem ingressa; exige que a disciplina não
+    tenha pré-requisito, e o inverso não vale.
     """
 
     name: str
     seats: int  # q_x — vagas
     hours: int  # w_x — carga horária
     unlocks: tuple[str, ...] = ()
+    entry: bool = False
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -77,9 +78,8 @@ class SimulationConfig:
     # tempo de chegar ao fim do curso em vez de serem cortadas pelo horizonte.
     entry_periods: int | None = None
     # Alunos que ingressam em cada um dos L períodos com ingresso. O ingressante
-    # tem vaga garantida em todas as disciplinas de 1º período, então o ritmo de
-    # entrada não pode passar da menor oferta entre elas — senão a garantia não
-    # caberia. A população é este número vezes L.
+    # tem vaga garantida nas disciplinas de entrada, então o ritmo de entrada
+    # não pode passar da menor oferta entre elas. A população é este número vezes L.
     students_per_period: int = 1
     # --- as duas distribuições que descrevem um aluno -----------------------
     #
@@ -172,28 +172,33 @@ class SimulationConfig:
                     f"{sorted(unknown)}"
                 )
 
-        # Levanta se houver ciclo: uma cadeia de sucessores que se fecha não tem
-        # altura nem período, e as disciplinas dela seriam inalcançáveis.
-        first = self.first_period_disciplines()
+        # Ciclo: a cadeia que se fecha não tem altura nem período.
+        self.heights()
+        requires = self.prerequisites_by_discipline()
+        for discipline in self.disciplines:
+            if discipline.entry and requires[discipline.name]:
+                raise ValueError(
+                    f"disciplina {discipline.name!r} é de entrada e tem pré-requisitos"
+                )
+        entry = self.entry_disciplines()
+        if not entry:
+            raise ValueError("o cenário precisa de pelo menos uma disciplina de entrada")
 
         seats = {d.name: d.seats for d in self.disciplines}
         hours = {d.name: d.hours for d in self.disciplines}
-        # O ingressante entra direto nas disciplinas de 1º período, sem leilão:
-        # a oferta tem de comportar a geração inteira, e a carga somada tem de
-        # caber em W_a — senão a matrícula garantida violaria a eq. (4).
-        smallest = min(seats[name] for name in first)
+        smallest = min(seats[name] for name in entry)
         if self.students_per_period > smallest:
-            tightest = min(first, key=lambda name: (seats[name], name))
+            tightest = min(entry, key=lambda name: (seats[name], name))
             raise ValueError(
                 f"alunos por período ({self.students_per_period}) passa da menor oferta "
-                f"entre as disciplinas de 1º período ({smallest} vagas em {tightest!r}): "
+                f"entre as disciplinas de entrada ({smallest} vagas em {tightest!r}): "
                 "o ingressante tem vaga garantida em todas elas"
             )
-        entry_hours = sum(hours[name] for name in first)
+        entry_hours = sum(hours[name] for name in entry)
         if entry_hours > self.max_hours:
             raise ValueError(
-                f"as {len(first)} disciplinas de 1º período somam {entry_hours} h e não "
-                f"cabem na carga horária máxima (W_a = {self.max_hours}) — eq. (4); o "
+                f"as {len(entry)} disciplinas de entrada somam {entry_hours} h e não "
+                f"cabem na carga horária máxima (W_a = {self.max_hours}); o "
                 "ingressante cursa todas elas de uma vez"
             )
 
@@ -250,8 +255,8 @@ class SimulationConfig:
         inversa dos sucessores: quem ninguém desbloqueia é 1º período; quem é
         desbloqueada por outras é o período seguinte ao mais tardio delas.
 
-        É a contagem a partir do ingresso — matrícula garantida e gráficos.
-        A altura (s_x) conta do outro extremo da mesma DAG.
+        Contagem a partir das raízes, usada nos gráficos. A matrícula garantida
+        é `entry`, não este período. A altura (s_x) conta do outro extremo.
         """
         requires = self.prerequisites_by_discipline()
         period: dict[str, int] = {}
@@ -278,11 +283,9 @@ class SimulationConfig:
                 stack.extend((p, False) for p in requires[name])
         return period
 
-    def first_period_disciplines(self) -> list[str]:
-        """As disciplinas de 1º período, na ordem do cenário — a matrícula
-        garantida de quem ingressa."""
-        period = self.curriculum_periods()
-        return [d.name for d in self.disciplines if period[d.name] == 1]
+    def entry_disciplines(self) -> list[str]:
+        """Disciplinas de matrícula garantida, na ordem do cenário."""
+        return [d.name for d in self.disciplines if d.entry]
 
     def eligible_disciplines(self, approved: set[str]) -> list[str]:
         """Disciplinas que o aluno ainda precisa cursar e já pode disputar:

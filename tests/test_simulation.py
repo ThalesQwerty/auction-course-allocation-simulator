@@ -126,7 +126,7 @@ def test_nobody_graduates_faster_than_the_prerequisite_chain():
     """A cadeia impõe um piso que a oferta não compra: a disciplina do n-ésimo
     período da grade não pode ser cursada antes do n-ésimo período do aluno."""
     config = make_config(periods=12, disciplines=[
-        Discipline(d.name, seats=200, hours=d.hours, unlocks=d.unlocks)
+        Discipline(d.name, seats=200, hours=d.hours, unlocks=d.unlocks, entry=d.entry)
         for d in GRADE
     ])
     assert config.minimum_periods_to_graduate() == 3  # três elos
@@ -206,7 +206,7 @@ def test_scarcity_only_counts_who_can_actually_take_the_discipline():
     config = make_config(**NEVER_APPROVES)
     result = run_simulation(config)
     overall = result.periods[1].aggregate.overall.metrics
-    first = config.first_period_disciplines()
+    first = config.entry_disciplines()
     seats = config.hours_by_discipline()  # só para ter o dict de nomes
     assert set(first) == {"D1", "D2"}
     by_name = {d.name: d for d in config.disciplines}
@@ -412,7 +412,7 @@ def test_utilities_come_from_the_seed_not_from_the_simulation_path():
     roomy = run_simulation(
         make_config(
             disciplines=[
-                Discipline(d.name, seats=60, hours=d.hours, unlocks=d.unlocks)
+                Discipline(d.name, seats=60, hours=d.hours, unlocks=d.unlocks, entry=d.entry)
                 for d in GRADE
             ]
         )
@@ -533,7 +533,7 @@ def first_period_records(result, students):
 def test_entrants_get_every_first_period_discipline_without_bidding():
     config = make_config(periods=6)
     result = run_simulation(config)
-    first = set(config.first_period_disciplines())
+    first = set(config.entry_disciplines())
     assert first == {"D1", "D2"}
 
     records = first_period_records(result, result.students)
@@ -552,7 +552,7 @@ def test_the_system_charges_the_entrant_an_equal_share_of_the_budget():
     """"Gastaram seus créditos igualmente", com o resto da divisão no saldo."""
     config = make_config(periods=4, base_credits=10)
     result = run_simulation(config)
-    first = config.first_period_disciplines()
+    first = config.entry_disciplines()
     share = config.base_credits // len(first)  # 10 // 2 = 5
 
     for _, record in first_period_records(result, result.students):
@@ -578,7 +578,7 @@ def test_the_entrant_share_feeds_the_credit_return():
     lançado é o `paid` da disciplina, e é sobre ele que a política trabalha."""
     config = make_config(periods=4, credit_return="full", base_credits=10)
     result = run_simulation(config)
-    share = config.base_credits // len(config.first_period_disciplines())
+    share = config.base_credits // len(config.entry_disciplines())
     returned = [
         r
         for _, record in first_period_records(result, result.students)
@@ -589,12 +589,28 @@ def test_the_entrant_share_feeds_the_credit_return():
     assert all(r.returned == share for r in returned)
 
 
+def test_a_root_that_is_not_entry_is_not_granted():
+    """A raiz sem o flag disputa vaga. Só a de entrada sai do estoque antes da rodada."""
+    config = make_config(
+        periods=1,
+        rounds=1,
+        disciplines=disciplines_from_predecessors(
+            ("Entrada", 6, 60),
+            ("Livre", 6, 60, False),
+        ),
+        max_hours=120,
+    )
+    result = run_simulation(config)
+    granted = {d.name: d.granted for d in result.periods[0].disciplines}
+    assert granted == {"Entrada": config.students_per_period, "Livre": 0}
+
+
 def test_guaranteed_seats_leave_the_market_before_the_first_round():
     """A vaga entregue ao ingressante não é ofertada: ela já saiu do estoque
     quando a primeira rodada abre, e é isso que a coluna `granted` mostra."""
     config = make_config(periods=5)
     result = run_simulation(config)
-    first = set(config.first_period_disciplines())
+    first = set(config.entry_disciplines())
     per_period = config.students_per_period
 
     for period in result.periods:
@@ -611,14 +627,17 @@ def test_a_generation_larger_than_the_smallest_first_period_offer_is_rejected():
     with pytest.raises(ValueError, match="menor oferta"):
         SimulationConfig(
             disciplines=[
-                Discipline("D1", seats=5, hours=60),
-                Discipline("D2", seats=3, hours=60),
+                Discipline("D1", seats=5, hours=60, entry=True),
+                Discipline("D2", seats=3, hours=60, entry=True),
             ],
             students_per_period=4,
         )
     # Exatamente no teto passa — e não sobra vaga nenhuma para quem recursa.
     assert SimulationConfig(
-        disciplines=[Discipline("D1", seats=4, hours=60), Discipline("D2", seats=4, hours=60)],
+        disciplines=[
+            Discipline("D1", seats=4, hours=60, entry=True),
+            Discipline("D2", seats=4, hours=60, entry=True),
+        ],
         students_per_period=4,
     ).students_per_period == 4
 
@@ -629,8 +648,8 @@ def test_a_first_period_heavier_than_the_workload_cap_is_rejected():
     with pytest.raises(ValueError, match="não cabem na carga horária máxima"):
         SimulationConfig(
             disciplines=[
-                Discipline("D1", seats=5, hours=60),
-                Discipline("D2", seats=5, hours=60),
+                Discipline("D1", seats=5, hours=60, entry=True),
+                Discipline("D2", seats=5, hours=60, entry=True),
             ],
             students_per_period=2,
             max_hours=100,
@@ -642,7 +661,7 @@ def test_retaking_a_first_period_discipline_goes_through_the_auction():
     qualquer outro, no leilão."""
     config = make_config(periods=8)
     result = run_simulation(config)
-    first = set(config.first_period_disciplines())
+    first = set(config.entry_disciplines())
     entry = {s.id: s.entry_period for s in result.students}
 
     retakes = [

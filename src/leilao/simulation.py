@@ -22,9 +22,9 @@ eq. 31). Somá-lo reproduz o agregado. Os recortes por **aptidão** e **afinidad
 existiram até 08/10/2026 e saíram junto com os perfis de aluno: sem diferença
 sistemática entre alunos, não há o que separar além da senioridade.
 
-**Quem ingressa não disputa.** O aluno novo recebe vaga garantida em todas as
-disciplinas de 1º período — as sem pré-requisito — e fica de fora do leilão
-naquele período. O sistema lança na conta dele o gasto correspondente,
+**Quem ingressa não disputa as disciplinas de entrada.** Recebe vaga garantida
+nelas e fica de fora do leilão naquele período para esse conjunto. O sistema
+lança na conta dele o gasto correspondente,
 repartindo o orçamento igualmente entre essas disciplinas (o resto da divisão
 continua no saldo), e é esse valor que alimenta o retorno de créditos da
 eq. (34). Vale só no período de ingresso: recursar uma dessas disciplinas é
@@ -76,8 +76,8 @@ class GroupSnapshot:
     baixo qualquer média feita sobre os períodos.
 
     **O calouro conta como gente, não como dado.** Quem ingressa no período não
-    disputou nada: recebeu vaga garantida em todas as disciplinas de 1º período,
-    que são exatamente as elegíveis para ele. Entra, portanto, com psi = 1,000 e
+    disputou nada nas disciplinas de entrada, que na grade atual são também as
+    únicas sem pré-requisito — logo, as elegíveis para ele. Entra com psi = 1,000 e
     CR = 0,000 — *sempre*, sem exceção —, e medir o mecanismo sobre esse ponto é
     medir a matrícula garantida, que é igual nos dois mecanismos. No preset
     Computação ele é 11% de todas as linhas aluno-período, e sozinho invertia o
@@ -201,7 +201,7 @@ class DisciplineSnapshot:
     seats: int  # q_x no início do período
     filled: int  # vagas preenchidas no período, contando as garantidas
     # Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
-    # Só é diferente de zero nas disciplinas de 1º período — e é o que explica
+    # Só é diferente de zero nas disciplinas de entrada — e é o que explica
     # uma disciplina chegar à primeira rodada já quase cheia.
     granted: int
     # Quantos alunos pediram a disciplina no período — deram lance em alguma
@@ -512,8 +512,8 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     hours = config.hours_by_discipline()
     total_seats = sum(d.seats for d in config.disciplines)
     curriculum = config.curriculum_periods()
-    # As disciplinas sem pré-requisito: a matrícula garantida de quem ingressa.
-    first_period = config.first_period_disciplines()
+    # Matrícula garantida de quem ingressa.
+    entry_courses = config.entry_disciplines()
     # Conclusão (eq. 40): toda disciplina é obrigatória, então concluir é
     # aprovar na grade inteira — não há mais carga horária mínima a somar.
     curriculum_set = {d.name for d in config.disciplines}
@@ -643,7 +643,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         won_round: dict[tuple[str, str], int] = {}
 
         # Matrícula garantida: quem ingressa neste período entra direto em todas
-        # as disciplinas de 1º período, antes de o leilão abrir. Não dá lance —
+        # as disciplinas de entrada, antes de o leilão abrir. Não dá lance —
         # o sistema reparte o orçamento dele igualmente entre elas e lança o
         # gasto, ficando com o resto da divisão no saldo. É esse valor que o
         # retorno de créditos (eq. 34) tem para trabalhar. A validação do
@@ -654,9 +654,9 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         for student in (s for s in active if s.entry_period == period):
             # Sem crédito não há o que lançar na conta: a vaga garantida é a
             # mesma nos dois mecanismos, e o que muda é só se ela custa algo.
-            share = budget[student.id] // len(first_period) if uses_credits else 0
+            share = budget[student.id] // len(entry_courses) if uses_credits else 0
             marker = share if uses_credits else 1
-            for name in first_period:
+            for name in entry_courses:
                 guaranteed[student.id].append(name)
                 won[student.id].add(name)
                 won_round[(student.id, name)] = GUARANTEED_ROUND

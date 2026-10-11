@@ -197,13 +197,22 @@ const toDisciplines = (groups: Entry[][]): DisciplineInput[] => {
       unlocks.get(predecessor)?.push(name);
     }
   }
+  const entry = new Set(P1.map(([name]) => name));
   return flat.map(([name, hours, seats]) => ({
     name,
     hours,
     seats,
     unlocks: unlocks.get(name) ?? [],
+    entry: entry.has(name),
   }));
 };
+
+export const homogeneousOffer = new Map(
+  toDisciplines(FUNNEL_GRADE).map((discipline) => [
+    discipline.name,
+    { seats: discipline.seats, hours: discipline.hours },
+  ]),
+);
 
 /** Horizonte, rodadas e seed que os dois presets compartilham. A oferta e o
  * tamanho da geração entram por argumento: o Computação varia vagas dentro do

@@ -63,7 +63,7 @@ def test_grades_follow_the_normal_of_the_scenario():
     desvio maior de fato espalha mais. O sorteio sai **cru** — sem truncagem e
     sem arredondamento —, porque quem o transforma em nota é `grade_for_attempt`,
     depois de aplicar o deslocamento da recursada."""
-    disciplines = [Discipline(f"D{i}", seats=50, hours=60) for i in range(1, 41)]
+    disciplines = [Discipline(f"D{i}", seats=50, hours=60, entry=True) for i in range(1, 41)]
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(120)]
 
     def sample(stddev: float) -> list[float]:
@@ -84,7 +84,7 @@ def test_grades_follow_the_normal_of_the_scenario():
 def test_there_is_one_grade_draw_per_period():
     """A matriz de notas é por período: o mesmo par (aluno, disciplina) sorteia
     de novo a cada semestre, em vez de carregar um valor fixo."""
-    disciplines = [Discipline("A", seats=50, hours=60)]
+    disciplines = [Discipline("A", seats=50, hours=60, entry=True)]
     students = [Student(id="a1", name="Fulano", credits=10)]
     config = _grade_config(6.5, 1.5, disciplines, periods=5)
     grades = draw_grades(students, disciplines, config, np.random.default_rng(1))
@@ -115,7 +115,7 @@ def test_a_bigger_learning_gain_recovers_a_failure_faster():
 
     def first_approval(gain: float) -> list[int]:
         config = SimulationConfig(
-            disciplines=[Discipline("A", seats=50, hours=60)],
+            disciplines=[Discipline("A", seats=50, hours=60, entry=True)],
             periods=6,
             students_per_period=10,
             grade_mean=2.0,
@@ -168,10 +168,10 @@ def test_a_wider_sigma_makes_the_student_differentiate_more():
     A grade é plana (altura 0 em todas): entre camadas a invariante de altura
     já ordena a linha, e o sigma só manda *dentro* da mesma altura."""
     flat_grade = [
-        Discipline("A", seats=20, hours=60),
-        Discipline("B", seats=20, hours=60),
-        Discipline("C", seats=20, hours=60),
-        Discipline("D", seats=20, hours=60),
+        Discipline("A", seats=20, hours=60, entry=True),
+        Discipline("B", seats=20, hours=60, entry=True),
+        Discipline("C", seats=20, hours=60, entry=True),
+        Discipline("D", seats=20, hours=60, entry=True),
     ]
     # W_a precisa caber as quatro de uma vez — são todas de 1º período.
     flat_kw = dict(disciplines=flat_grade, max_hours=240)
@@ -231,10 +231,10 @@ def test_the_distribution_histogram_describes_one_students_row():
     Grade plana: a invariante de altura não cria extremos estruturais que
     mascarem o efeito do sigma no histograma."""
     flat_grade = [
-        Discipline("A", seats=20, hours=60),
-        Discipline("B", seats=20, hours=60),
-        Discipline("C", seats=20, hours=60),
-        Discipline("D", seats=20, hours=60),
+        Discipline("A", seats=20, hours=60, entry=True),
+        Discipline("B", seats=20, hours=60, entry=True),
+        Discipline("C", seats=20, hours=60, entry=True),
+        Discipline("D", seats=20, hours=60, entry=True),
     ]
     flat_kw = dict(disciplines=flat_grade, max_hours=240)
     config = make_config(**flat_kw, utility_sigma=1.0)
@@ -294,7 +294,7 @@ def test_the_eligible_sum_is_the_period_utility():
 
     # Numa grade sem pré-requisito nenhum, tudo é elegível de saída e a soma é 1.
     flat = SimulationConfig(
-        disciplines=[Discipline(name, seats=20, hours=60) for name in ("A", "B", "C")],
+        disciplines=[Discipline(name, seats=20, hours=60, entry=True) for name in ("A", "B", "C")],
         students_per_period=8,
         max_hours=WORKLOAD,
     )

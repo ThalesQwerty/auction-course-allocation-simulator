@@ -93,9 +93,9 @@ def test_run_with_no_bids_returns_empty_allocation(client):
 # garantida) e "Física I" desbloqueada por "Cálculo I".
 SIMULATE_REQUEST = {
     "disciplines": [
-        {"name": "Cálculo I", "seats": 6, "hours": 60, "unlocks": ["Física I"]},
-        {"name": "Programação", "seats": 6, "hours": 60, "unlocks": []},
-        {"name": "Física I", "seats": 6, "hours": 60, "unlocks": []},
+        {"name": "Cálculo I", "seats": 6, "hours": 60, "unlocks": ["Física I"], "entry": True},
+        {"name": "Programação", "seats": 6, "hours": 60, "unlocks": [], "entry": True},
+        {"name": "Física I", "seats": 6, "hours": 60, "unlocks": [], "entry": False},
     ],
     "periods": 3,
     "students_per_period": 4,

@@ -48,7 +48,45 @@ def test_curriculum_period_and_height_are_induced_from_unlocks():
     assert config.heights() == {
         "D1": 2, "D2": 1, "D3": 1, "D4": 1, "D5": 0, "D6": 0
     }
-    assert config.first_period_disciplines() == ["D1", "D2", "D3"]
+    assert config.entry_disciplines() == ["D1", "D2", "D3"]
+
+
+def test_a_root_without_the_entry_flag_stays_eligible():
+    """Sem pré-requisito não é entrada. A raiz livre entra no conjunto elegível
+    de quem não aprovou nada e fica fora da matrícula garantida."""
+    config = SimulationConfig(
+        disciplines=disciplines_from_predecessors(
+            ("Entrada", 5, 60),
+            ("Livre", 5, 60, False),
+            ("Seguinte", 5, 60, ("Entrada",)),
+        ),
+        students_per_period=2,
+        max_hours=120,
+    )
+    assert config.entry_disciplines() == ["Entrada"]
+    assert config.curriculum_periods()["Livre"] == 1
+    assert set(config.eligible_disciplines(set())) == {"Entrada", "Livre"}
+
+
+def test_an_entry_discipline_cannot_have_a_prerequisite():
+    with pytest.raises(ValueError, match="pré-requisitos"):
+        SimulationConfig(
+            disciplines=disciplines_from_predecessors(
+                ("Base", 5, 60),
+                ("Depende", 5, 60, ("Base",), True),
+            ),
+            students_per_period=2,
+            max_hours=120,
+        )
+
+
+def test_a_scenario_without_entry_disciplines_is_rejected():
+    with pytest.raises(ValueError, match="disciplina de entrada"):
+        SimulationConfig(
+            disciplines=disciplines_from_predecessors(("Livre", 5, 60, False)),
+            students_per_period=1,
+            max_hours=60,
+        )
 
 
 def test_a_cycle_of_unlocks_is_rejected():
