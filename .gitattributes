@@ -1,0 +1,12 @@
+# Fim de linha normalizado em LF no repositório e na árvore de trabalho.
+#
+# Sem isto, um commit feito no Windows por uma ferramenta que grava com a
+# convenção da plataforma (por exemplo `pathlib.write_text`) converte o arquivo
+# inteiro para CRLF. O conteúdo fica igual, mas **toda linha** passa a diferir
+# da base, e um merge com trabalho feito em Unix marca o arquivo inteiro como
+# conflito — um hunk de mil linhas onde a mudança real era de dez.
+#
+# `text=auto` deixa o git detectar o que é texto; `eol=lf` fixa a convenção dos
+# dois lados, de modo que o mesmo arquivo editado no Windows e no Unix continue
+# comparável linha a linha.
+* text=auto eol=lf
