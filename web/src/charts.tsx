@@ -194,7 +194,6 @@ function Tip({
 
 export function MetricChart({
   title,
-  hint,
   data,
   series,
   colors,
@@ -208,7 +207,6 @@ export function MetricChart({
   xReference,
 }: {
   title: string;
-  hint?: string;
   data: SeriesPoint[];
   /** Os `dataKey` de cada linha, na ordem em que entram na legenda. */
   series: string[];
@@ -245,7 +243,6 @@ export function MetricChart({
     <figure className="chart-card">
       <figcaption>
         <h3>{title}</h3>
-        {hint && <p>{hint}</p>}
       </figcaption>
 
       <div className="legend">
@@ -441,7 +438,6 @@ export const BOX_WIDTH = 30;
 
 export function BoxPlot({
   title,
-  hint,
   groups,
   colors,
   format = formatRatio,
@@ -449,7 +445,6 @@ export function BoxPlot({
   zeroLine = false,
 }: {
   title: string;
-  hint?: string;
   /** Uma caixa por grupo, na ordem em que entram no eixo e na legenda.
    * `short` é o rótulo do eixo: a legenda carrega o nome inteiro, e embaixo da
    * caixa cabe pouco — um nome longo colide com o do vizinho. */
@@ -500,7 +495,6 @@ export function BoxPlot({
     <figure className="chart-card">
       <figcaption>
         <h3>{title}</h3>
-        {hint && <p>{hint}</p>}
       </figcaption>
 
       <div className="legend">
@@ -720,13 +714,11 @@ const HISTOGRAM = { height: 150, left: 40, right: 12 };
  * parecerem iguais. */
 export function Histogram({
   title,
-  hint,
   fractions,
   format = formatRatio,
   domain = [0, 1],
 }: {
   title: string;
-  hint?: string;
   /** Uma fração por faixa, em ordem, somando 1. */
   fractions: number[];
   format?: (value: number) => string;
@@ -756,7 +748,6 @@ export function Histogram({
     <figure className="chart-card">
       <figcaption>
         <h3>{title}</h3>
-        {hint && <p>{hint}</p>}
       </figcaption>
 
       <ResponsiveContainer width="100%" height={HISTOGRAM.height}>

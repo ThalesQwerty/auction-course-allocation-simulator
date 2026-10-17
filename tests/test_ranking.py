@@ -14,17 +14,18 @@ from leilao.comparison import (
     run_sweep,
     summarize,
 )
+from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig
 from leilao.ranking import allocate_by_ranking, request_set
 from leilao.simulation import GUARANTEED_ROUND, run_simulation
 
-GRADE = [
-    Discipline("D1", seats=6, hours=60),
-    Discipline("D2", seats=6, hours=60),
-    Discipline("D3", seats=4, hours=60, prerequisites=("D1",)),
-    Discipline("D4", seats=4, hours=90, prerequisites=("D2",)),
-    Discipline("D5", seats=3, hours=60, prerequisites=("D3",)),
-]
+GRADE = disciplines_from_predecessors(
+    ("D1", 6, 60),
+    ("D2", 6, 60),
+    ("D3", 4, 60, ("D1",)),
+    ("D4", 4, 90, ("D2",)),
+    ("D5", 3, 60, ("D3",)),
+)
 
 WORKLOAD = 180
 HOURS = {d.name: d.hours for d in GRADE}

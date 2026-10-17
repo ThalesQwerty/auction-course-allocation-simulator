@@ -1,6 +1,8 @@
 import type {
   CompareRequest,
   CompareResponse,
+  PlaygroundRequest,
+  PlaygroundResponse,
   SimulateRequest,
   SimulateResponse,
 } from "./types";
@@ -24,6 +26,10 @@ export async function simulate(
  * vez de fingir que foi rápido. */
 export async function compare(request: CompareRequest): Promise<CompareResponse> {
   return post("/compare", request);
+}
+
+export async function playground(request: PlaygroundRequest): Promise<PlaygroundResponse> {
+  return post("/playground", request);
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {

@@ -1,6 +1,11 @@
 import { describeEntry, formatRunDate, HistoryEntry } from "./history";
 
-export type View = { kind: "config" } | { kind: "project" } | { kind: "run"; id: string };
+export type View =
+  | { kind: "config" }
+  | { kind: "project" }
+  | { kind: "graph" }
+  | { kind: "playground" }
+  | { kind: "run"; id: string };
 
 export function Sidebar({
   view,
@@ -36,6 +41,16 @@ export function Sidebar({
             Projeto
           </button>
         </li>
+        <li>
+          <button className={`nav-item ${selected({ kind: "graph" }) ? "current" : ""}`} onClick={() => onNavigate({ kind: "graph" })}>
+            Grade
+          </button>
+        </li>
+        <li>
+          <button className={`nav-item ${selected({ kind: "playground" }) ? "current" : ""}`} onClick={() => onNavigate({ kind: "playground" })}>
+            Submochila
+          </button>
+        </li>
       </ul>
 
       <div className="sidebar-section">
@@ -51,9 +66,6 @@ export function Sidebar({
                   onClick={() => onNavigate({ kind: "run", id: entry.id })}
                   title={describeEntry(entry)}
                 >
-                  {/* A etiqueta distingue os dois tipos de resultado antes de
-                      abrir: uma comparação não tem gráficos por período nem
-                      tela por aluno, e quem procura um deles não deve clicar. */}
                   {formatRunDate(entry.at)}
                   {entry.kind === "comparison" && <em className="nav-tag">comparação</em>}
                   <span>{describeEntry(entry)}</span>

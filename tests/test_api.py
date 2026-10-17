@@ -89,13 +89,13 @@ def test_run_with_no_bids_returns_empty_allocation(client):
     assert response.json()["allocation"] == {}
 
 
-# Grade de dois períodos: "Cálculo I" e "Programação" sem pré-requisito (a
-# matrícula garantida de quem ingressa) e "Física I" atrás de "Cálculo I".
+# Grade de dois períodos: "Cálculo I" e "Programação" de entrada (matrícula
+# garantida) e "Física I" desbloqueada por "Cálculo I".
 SIMULATE_REQUEST = {
     "disciplines": [
-        {"name": "Cálculo I", "seats": 6, "hours": 60, "prerequisites": []},
-        {"name": "Programação", "seats": 6, "hours": 60, "prerequisites": []},
-        {"name": "Física I", "seats": 6, "hours": 60, "prerequisites": ["Cálculo I"]},
+        {"name": "Cálculo I", "seats": 6, "hours": 60, "unlocks": ["Física I"], "entry": True},
+        {"name": "Programação", "seats": 6, "hours": 60, "unlocks": [], "entry": True},
+        {"name": "Física I", "seats": 6, "hours": 60, "unlocks": [], "entry": False},
     ],
     "periods": 3,
     "students_per_period": 4,
@@ -207,12 +207,12 @@ def test_simulate_returns_a_history_per_student(client):
             assert (request["won_round"] is None) == (request["grade"] is None)
 
 
-def test_simulate_rejects_a_prerequisite_cycle(client):
+def test_simulate_rejects_an_unlocks_cycle(client):
     request = {
         **SIMULATE_REQUEST,
         "disciplines": [
-            {"name": "A", "seats": 6, "hours": 60, "prerequisites": ["B"]},
-            {"name": "B", "seats": 6, "hours": 60, "prerequisites": ["A"]},
+            {"name": "A", "seats": 6, "hours": 60, "unlocks": ["B"]},
+            {"name": "B", "seats": 6, "hours": 60, "unlocks": ["A"]},
         ],
     }
     response = client.post("/simulate", json=request)

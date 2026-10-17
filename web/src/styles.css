@@ -134,6 +134,10 @@ th, td {
   text-align: left;
 }
 
+td[rowspan] {
+  vertical-align: top;
+}
+
 th sub, td sub {
   font-size: 0.75em;
 }
@@ -996,4 +1000,82 @@ td.approved {
 
 td.failed {
   color: var(--danger);
+}
+
+.grade-graph {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 56px;
+  width: max-content;
+  min-width: 100%;
+  padding: 8px 0 24px;
+}
+
+.grade-arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.grade-arrows line {
+  stroke: currentColor;
+  stroke-width: 1.25;
+}
+
+.grade-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+.grade-card {
+  flex: 0 0 168px;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.grade-card.is-prereq {
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.grade-card.is-postreq {
+  background: color-mix(in srgb, var(--danger) 16%, var(--panel));
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+}
+
+.grade-card.is-focus {
+  background: color-mix(in srgb, white 18%, var(--panel));
+  border-color: color-mix(in srgb, white 48%, var(--border));
+}
+
+.grade-card h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.grade-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.grade-card em {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--accent);
+  font-style: normal;
 }

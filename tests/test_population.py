@@ -16,17 +16,18 @@ from leilao.behavior import (
     utility_distribution,
     utility_matrix,
 )
+from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig
 from leilao.grading import draw_grades, grade_for_attempt
 from leilao.population import Student, generate_students
 from leilao.simulation import run_simulation
 
-GRADE = [
-    Discipline("D1", seats=20, hours=60),
-    Discipline("D2", seats=20, hours=60),
-    Discipline("D3", seats=20, hours=60, prerequisites=("D1",)),
-    Discipline("D4", seats=20, hours=60, prerequisites=("D2",)),
-]
+GRADE = disciplines_from_predecessors(
+    ("D1", 20, 60),
+    ("D2", 20, 60),
+    ("D3", 20, 60, ("D1",)),
+    ("D4", 20, 60, ("D2",)),
+)
 # W_a: a grade tem 4 disciplinas de 60 h, 2 por período.
 WORKLOAD = 180
 
@@ -62,7 +63,7 @@ def test_grades_follow_the_normal_of_the_scenario():
     desvio maior de fato espalha mais. O sorteio sai **cru** — sem truncagem e
     sem arredondamento —, porque quem o transforma em nota é `grade_for_attempt`,
     depois de aplicar o deslocamento da recursada."""
-    disciplines = [Discipline(f"D{i}", seats=50, hours=60) for i in range(1, 41)]
+    disciplines = [Discipline(f"D{i}", seats=50, hours=60, entry=True) for i in range(1, 41)]
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(120)]
 
     def sample(stddev: float) -> list[float]:
@@ -83,7 +84,7 @@ def test_grades_follow_the_normal_of_the_scenario():
 def test_there_is_one_grade_draw_per_period():
     """A matriz de notas é por período: o mesmo par (aluno, disciplina) sorteia
     de novo a cada semestre, em vez de carregar um valor fixo."""
-    disciplines = [Discipline("A", seats=50, hours=60)]
+    disciplines = [Discipline("A", seats=50, hours=60, entry=True)]
     students = [Student(id="a1", name="Fulano", credits=10)]
     config = _grade_config(6.5, 1.5, disciplines, periods=5)
     grades = draw_grades(students, disciplines, config, np.random.default_rng(1))
@@ -114,7 +115,7 @@ def test_a_bigger_learning_gain_recovers_a_failure_faster():
 
     def first_approval(gain: float) -> list[int]:
         config = SimulationConfig(
-            disciplines=[Discipline("A", seats=50, hours=60)],
+            disciplines=[Discipline("A", seats=50, hours=60, entry=True)],
             periods=6,
             students_per_period=10,
             grade_mean=2.0,
@@ -162,11 +163,22 @@ def test_the_drawn_row_sums_to_one_over_the_whole_grade():
 def test_a_wider_sigma_makes_the_student_differentiate_more():
     """É o que sigma existe para controlar, e o papel que o expoente de afinidade
     tinha antes dos perfis saírem: **grande concentra, pequeno achata**. A razão
-    entre a maior e a menor utilidade da linha lê isso direto."""
-    students = generate_students(make_config(), np.random.default_rng(2))
+    entre a maior e a menor utilidade da linha lê isso direto.
+
+    A grade é plana (altura 0 em todas): entre camadas a invariante de altura
+    já ordena a linha, e o sigma só manda *dentro* da mesma altura."""
+    flat_grade = [
+        Discipline("A", seats=20, hours=60, entry=True),
+        Discipline("B", seats=20, hours=60, entry=True),
+        Discipline("C", seats=20, hours=60, entry=True),
+        Discipline("D", seats=20, hours=60, entry=True),
+    ]
+    # W_a precisa caber as quatro de uma vez — são todas de 1º período.
+    flat_kw = dict(disciplines=flat_grade, max_hours=240)
+    students = generate_students(make_config(**flat_kw), np.random.default_rng(2))
 
     def spread(sigma: float) -> float:
-        config = make_config(utility_sigma=sigma)
+        config = make_config(**flat_kw, utility_sigma=sigma)
         rows = draw_utilities(students, config, np.random.default_rng(2))
         ratios = [max(row.values()) / min(row.values()) for row in rows.values()]
         return sum(ratios) / len(ratios)
@@ -174,10 +186,12 @@ def test_a_wider_sigma_makes_the_student_differentiate_more():
     assert spread(0.25) < spread(1.0) < spread(3.0)
     # Sigma minúsculo é indiferença: a linha converge para 1/|B|.
     flat = draw_utilities(
-        students, make_config(utility_sigma=1e-4), np.random.default_rng(2)
+        students,
+        make_config(**flat_kw, utility_sigma=1e-4),
+        np.random.default_rng(2),
     )
     assert all(
-        value == pytest.approx(1 / len(GRADE), abs=5e-3)
+        value == pytest.approx(1 / len(flat_grade), abs=5e-3)
         for row in flat.values()
         for value in row.values()
     )
@@ -212,8 +226,18 @@ def test_the_guard_never_fires_in_practice():
 def test_the_distribution_histogram_describes_one_students_row():
     """O histograma reescala **cada linha** ao próprio [mínimo, máximo]. Global
     degeneraria: um único extremo da matriz definiria o intervalo e quase tudo
-    cairia na primeira faixa, de modo que sigmas diferentes sairiam iguais."""
-    config = make_config(utility_sigma=1.0)
+    cairia na primeira faixa, de modo que sigmas diferentes sairiam iguais.
+
+    Grade plana: a invariante de altura não cria extremos estruturais que
+    mascarem o efeito do sigma no histograma."""
+    flat_grade = [
+        Discipline("A", seats=20, hours=60, entry=True),
+        Discipline("B", seats=20, hours=60, entry=True),
+        Discipline("C", seats=20, hours=60, entry=True),
+        Discipline("D", seats=20, hours=60, entry=True),
+    ]
+    flat_kw = dict(disciplines=flat_grade, max_hours=240)
+    config = make_config(**flat_kw, utility_sigma=1.0)
     students = generate_students(config, np.random.default_rng(13))
     rows = draw_utilities(students, config, np.random.default_rng(13))
 
@@ -227,7 +251,7 @@ def test_the_distribution_histogram_describes_one_students_row():
     # Sigma maior concentra: mais massa na primeira faixa, porque o máximo da
     # linha se afasta do resto.
     def first_bin(sigma: float) -> float:
-        at = make_config(utility_sigma=sigma)
+        at = make_config(**flat_kw, utility_sigma=sigma)
         return utility_distribution(
             draw_utilities(generate_students(at, np.random.default_rng(13)), at, np.random.default_rng(13))
         )[0]
@@ -270,7 +294,7 @@ def test_the_eligible_sum_is_the_period_utility():
 
     # Numa grade sem pré-requisito nenhum, tudo é elegível de saída e a soma é 1.
     flat = SimulationConfig(
-        disciplines=[Discipline(name, seats=20, hours=60) for name in ("A", "B", "C")],
+        disciplines=[Discipline(name, seats=20, hours=60, entry=True) for name in ("A", "B", "C")],
         students_per_period=8,
         max_hours=WORKLOAD,
     )
@@ -288,14 +312,15 @@ def test_the_workload_cap_bounds_the_enrolled_hours():
     """W_a é do cenário e morde onde há mais elegíveis do que ele comporta: duas
     disciplinas de 1º período e cinco atrás de uma delas, de modo que no 2º
     período sobram 300 h elegíveis."""
-    disciplines = [
-        Discipline("A", seats=50, hours=60),
-        Discipline("B", seats=50, hours=60),
-        *[
-            Discipline(name, seats=50, hours=60, prerequisites=("A",))
-            for name in ("C", "D", "E", "F", "G")
-        ],
-    ]
+    disciplines = disciplines_from_predecessors(
+        ("A", 50, 60),
+        ("B", 50, 60),
+        ("C", 50, 60, ("A",)),
+        ("D", 50, 60, ("A",)),
+        ("E", 50, 60, ("A",)),
+        ("F", 50, 60, ("A",)),
+        ("G", 50, 60, ("A",)),
+    )
 
     def loads(max_hours: int) -> list[int]:
         config = SimulationConfig(

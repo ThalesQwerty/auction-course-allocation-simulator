@@ -30,21 +30,17 @@ const SEATS = [40, 80, 120] as const;
 const ENTRY_SEATS = 120;
 const HOURS = [60, 90] as const;
 
-/** [nome, carga horária (w_x), vagas (q_x), pré-requisitos].
+/** [nome, carga horária (w_x), vagas (q_x), predecessores na autoria].
  *
- * O período de cada disciplina **não** é declarado: sai por indução dos
- * pré-requisitos (`curriculum.ts`). A grade abaixo está agrupada por período só
- * para ser legível — o que a põe no 3º período é cada uma delas depender de
- * alguma do 2º, não a posição na lista.
+ * A lista final da tupla é só para escrever a grade: "esta depende destas".
+ * `toDisciplines` inverte isso em `unlocks` (sucessores), que é o que o motor
+ * e a API guardam. O período da grade sai da aresta inversa; a altura \(s_x\),
+ * da lista de sucessores (`curriculum.ts`).
  *
- * Cada período soma 450 h, que é a carga horária máxima do cenário (W_a): o
- * aluno em dia cursa as seis disciplinas do seu período e
- * nada mais. Isso importa duas vezes. Faz a disputa ser por *quais* seis, e não
- * por quantas — quem fica para trás tem de escolher entre recuperar o atraso e
- * avançar. E deixa a matrícula garantida do ingressante caber em W_a: ele entra
- * nas seis disciplinas de entrada de uma vez, e a eq. (4) tem de continuar
- * valendo. As optativas não entram nessa conta: elas não têm pré-requisito e
- * também caem no 1º período, mas ficam fora da matrícula garantida. */
+ * Cada período soma 450 h no Computação (390 no Homogêneo), que é o W_a do
+ * preset: o aluno em dia cursa as seis do seu período e nada mais. As optativas
+ * não entram nessa conta — não são de entrada, então a eq. (4) da matrícula
+ * garantida só olha as seis. */
 type Entry = [string, number, number, string[]];
 
 const P1: Entry[] = [
@@ -157,7 +153,37 @@ const ELECTIVE_HOURS = 480;
 
 /** Carga horária máxima por período (W_a), igual para todos. É exatamente a
  * soma de um período da grade. */
+/** Vagas do preset Homogêneo, uma por período, iguais para todas as disciplinas
+ * daquele período. O 1º ainda comporta a geração inteira e sobra lugar para
+ * quem recursa. Dali em diante a oferta cai 15 vagas por período e a
+ * concorrência aperta em funil: no 6º cabem menos da metade dos ingressantes. */
+const FUNNEL_SEATS = [120, 105, 90, 75, 60, 45] as const;
+
+/** Carga do Homogêneo, na ordem em que cada período está listado na grade.
+ * As três de 60 h permanecem; das três de 90 h, a última de cada período vira
+ * 30 h. A soma do período cai de 450 para 390. */
+const FUNNEL_HOURS = [90, 90, 30, 60, 60, 60] as const;
+
+const withFunnelOffer = (groups: Entry[][]): Entry[][] =>
+  groups.map((period, index) =>
+    period.map(
+      ([name, , , dependsOn], slot): Entry => [
+        name,
+        FUNNEL_HOURS[slot],
+        FUNNEL_SEATS[index],
+        dependsOn,
+      ],
+    ),
+  );
+
+const FUNNEL_GRADE = withFunnelOffer(GRADE);
+
+/** Carga horária máxima por período (W_a). É a soma de um período da grade de
+ * cada preset: quem está em dia cursa as seis disciplinas do seu período e
+ * nada mais. */
+
 const MAX_HOURS = HOURS.reduce((sum, h) => sum + h * SEATS.length, 0); // 450
+const FUNNEL_MAX_HOURS = FUNNEL_HOURS.reduce((sum, h) => sum + h, 0); // 390
 
 /** Alunos que ingressam por período. O teto formal é a menor oferta de 1º
  * período (120), mas quem dimensiona o cenário é o gargalo seguinte: as
@@ -173,6 +199,11 @@ const MAX_HOURS = HOURS.reduce((sum, h) => sum + h * SEATS.length, 0); // 450
  * (ψ̄ perto de 1); com 70 a conclusão despenca. Como os números andam com σ, é a
  * varredura que os põe em contexto. */
 const STUDENTS_PER_PERIOD = 60;
+
+/** Ingressantes por período no Homogêneo. Cabem nas 120 vagas do 1º período e
+ * já empatam com a oferta do 2º: quem reprova ou recursa disputa vaga com a
+ * geração seguinte, e do 3º em diante a oferta é menor que a turma ingressante. */
+const FUNNEL_STUDENTS_PER_PERIOD = 105;
 
 /** Os alunos do cenário Computação. **Não há perfis**: estas são as duas
  * normais de que toda a população sai, e o que distingue um aluno do outro é só
@@ -190,9 +221,9 @@ const STUDENTS_PER_PERIOD = 60;
  * que havia antes. É o valor **canônico**, o que os boxplots medem; a varredura
  * passa por ele e o marca no eixo. */
 const POPULATION = {
-  grade_mean: 6.5,
-  grade_stddev: 1.5,
-  learning_gain: 2.5,
+  grade_mean: 6,
+  grade_stddev: 1,
+  learning_gain: 0.5,
   utility_sigma: 1,
   max_hours: MAX_HOURS,
 };
@@ -208,54 +239,78 @@ const POPULATION = {
  * não de quem a população é. */
 const FLAT_POPULATION = {
   grade_mean: 6,
-  grade_stddev: 0.5,
-  learning_gain: 2,
+  grade_stddev: 1,
+  learning_gain: 0.5,
   utility_sigma: 0.25,
-  max_hours: MAX_HOURS,
+  max_hours: FUNNEL_MAX_HOURS,
 };
 
-const toDisciplines = (groups: Entry[][]): DisciplineInput[] =>
-  groups.flat().map(([name, hours, seats, prerequisites]) => ({
+/** Inverte a autoria por predecessores na lista de sucessores do motor. */
+const toDisciplines = (groups: Entry[][]): DisciplineInput[] => {
+  const flat = groups.flat();
+  const unlocks = new Map<string, string[]>(flat.map(([name]) => [name, []]));
+  for (const [name, , , dependsOn] of flat) {
+    for (const predecessor of dependsOn) {
+      unlocks.get(predecessor)?.push(name);
+    }
+  }
+  const entry = new Set(P1.map(([name]) => name));
+  return flat.map(([name, hours, seats]) => ({
     name,
     hours,
     seats,
-    prerequisites,
+    unlocks: unlocks.get(name) ?? [],
+    entry: entry.has(name),
   }));
+};
 
 const toElectives = (entries: Entry[]): DisciplineInput[] =>
   entries.map(([name, hours, seats]) => ({
     name,
     hours,
     seats,
-    prerequisites: [],
+    unlocks: [],
+    entry: false,
     elective: true,
   }));
 
-/** O que os dois presets têm em comum: a mesma universidade e a mesma
- * calibragem da oferta. Eles diferem só na dispersão das duas normais e em
- * Γ_min, que é justamente o que faz um servir de controle do outro — qualquer
- * diferença entre eles vem do que foi declarado na chamada, não da oferta. */
-const commonScenario = (): Omit<
+export const homogeneousOffer = new Map(
+  toDisciplines(FUNNEL_GRADE).map((discipline) => [
+    discipline.name,
+    { seats: discipline.seats, hours: discipline.hours },
+  ]),
+);
+
+/** Horizonte, rodadas e seed que os dois presets compartilham. A oferta e o
+ * tamanho da geração entram por argumento: o Computação varia vagas dentro do
+ * período, o Homogêneo iguala as vagas e afunila a oferta.
+ *
+ * `electiveHours` e `periods` também entram por argumento porque andam juntos:
+ * a exigência optativa sobe o piso de períodos (cada hora de optativa desloca
+ * uma hora de obrigatória, já que W_a é exatamente um período da grade), e um
+ * horizonte curto demais faz as gerações tardias não formarem ninguém. O
+ * Homogêneo fica sem optativa de propósito — ele é o controle, e acrescentá-la
+ * lá é decisão de modelagem, não de merge. */
+const commonScenario = (
+  disciplines: DisciplineInput[],
+  studentsPerPeriod: number,
+  electiveHours = 0,
+  periods = 12,
+): Omit<
   SimulateRequest,
   "grade_mean" | "grade_stddev" | "learning_gain" | "utility_sigma" | "max_hours" | "base_credits"
 > => ({
-  disciplines: [...toDisciplines(GRADE), ...toElectives(OPTATIVAS)],
-  elective_hours: ELECTIVE_HOURS,
-  // |T|. O piso para concluir é 8 períodos com as optativas (era 6), e na
-  // prática ele sai um acima do teórico — ninguém quer exatamente as seis
-  // disciplinas do próprio período semestre após semestre. Com L = 6, a última
-  // geração entra em t = 6 e precisa chegar ao fim: 6 - 1 + 9 = 14. Abaixo
-  // disso as gerações tardias não formam ninguém e a série por geração volta a
-  // medir quanto horizonte sobrou, não o mecanismo.
-  periods: 14,
-  // Ingresso nos 6 primeiros e drenagem nos 8 últimos. Sem a drenagem as
+  disciplines,
+  elective_hours: electiveHours,
+  periods,
+  // Ingresso nos 6 primeiros e drenagem no resto. Sem a drenagem as
   // últimas gerações eram cortadas pelo horizonte antes de poderem se formar —
   // a última geração vivia um período só —, e a série por geração media quanto
   // tempo de simulação sobrou, não o mecanismo. Seis é o piso teórico da grade:
   // a cadeia de pré-requisitos tem seis elos, então ninguém conclui em menos
   // que isso nem no melhor dos casos.
   entry_periods: 6,
-  students_per_period: STUDENTS_PER_PERIOD,
+  students_per_period: studentsPerPeriod,
   rounds: 2,
   min_grade: 5,
   credit_return: "none",
@@ -268,7 +323,15 @@ export const PRESETS: Preset[] = [
     name: "Computação",
     hint: "Grade de 6 períodos com 6 disciplinas cada, encadeadas por pré-requisitos; do 2º período em diante repetem-se as combinações de 40/80/120 vagas × 60/90 h. 60 ingressantes por período em 6 períodos, 360 alunos, e mais 6 períodos de drenagem.",
     build: (): SimulateRequest => ({
-      ...commonScenario(),
+      ...commonScenario(
+        [...toDisciplines(GRADE), ...toElectives(OPTATIVAS)],
+        STUDENTS_PER_PERIOD,
+        ELECTIVE_HOURS,
+        // |T| = 14. O piso para concluir é 8 períodos com as optativas (era 6),
+        // e na prática ele sai um acima do teórico. Com L = 6, a última geração
+        // entra em t = 6 e precisa chegar ao fim: 6 - 1 + 9 = 14.
+        14,
+      ),
       ...POPULATION,
       base_credits: 10,
     }),
@@ -276,7 +339,7 @@ export const PRESETS: Preset[] = [
   {
     id: "homogeneo",
     name: "Homogêneo",
-    hint: "A mesma universidade do Computação, com as duas normais bem mais apertadas (notas 6 ± 0,5, utilidades σ 0,02) e Γ_min = 12. Serve de controle: com alunos quase idênticos, o CR tem pouco a ordenar e o leilão tem pouca preferência a captar, então o que a comparação mostrar é da regra de alocação.",
+    hint: "Mesma grade e mesmas normais apertadas, com oferta em funil: todas as disciplinas de um período têm as mesmas vagas (120, 105, 90, 75, 60 e 45 do 1º ao 6º) e entram 105 alunos por período. Cada período tem 2 disciplinas de 90 h, 3 de 60 h e 1 de 30 h (W_a = 390). Γ_min = 12. A concorrência aperta a cada período; com alunos quase idênticos, o que a comparação mostrar é da regra de alocação.",
     // Existe para a comparação entre mecanismos. No Computação, parte do vão
     // entre CR e créditos pode vir de como cada um trata uma população
     // dispersa: a ordenação por CR premia quem tira nota alta por construção, e
@@ -285,22 +348,11 @@ export const PRESETS: Preset[] = [
     //
     // Até 08/10/2026 este preset era o controle da **heterogeneidade dos
     // perfis**; com os perfis fora do modelo, ele passou a ser o controle da
-    // **dispersão**, que é o que restou do mesmo conceito.
-    //
-    // Rodado (N = 10), e o cenário não sai degenerado: ψ̄ 0,784 no CR contra
-    // ~0,82 nos dois braços de crédito, φ 0,841 contra ~0,93, λ 0,628 contra
-    // ~0,03. Com as notas quase iguais quase ninguém reprova, então forma-se
-    // muito mais gente que no Computação (234 no CR contra 138) — é o preço de
-    // ser um controle, e por isso ele não se lê como cenário realista.
-    //
-    // O que ele isola, desde que as matrizes passaram a ser sorteadas por
-    // período: **sem retorno** o vão em conclusões é o mesmo nos dois presets
-    // (−18% aqui, −17% no Computação), mas **com retorno** o leilão empata com
-    // o CR no Computação (+1%) e continua 9% atrás aqui. Ou seja, o retorno
-    // recupera conclusões justamente onde há dispersão de preferência para ele
-    // explorar — e quase nada onde não há.
+    // **dispersão**, que é o que restou do mesmo conceito. A oferta deixou de
+    // ser a do Computação: as vagas são iguais dentro do período e caem em
+    // funil, e a geração (105) já empata com o 2º período.
     build: (): SimulateRequest => ({
-      ...commonScenario(),
+      ...commonScenario(toDisciplines(FUNNEL_GRADE), FUNNEL_STUDENTS_PER_PERIOD),
       ...FLAT_POPULATION,
       base_credits: 12,
     }),

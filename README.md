@@ -594,7 +594,7 @@ em período, com o aviso no subtítulo.
 
 ## Como rodar
 
-```powershell
+```sh
 cd Simulador
 make install   # venv + dependências do motor e da interface (só na primeira vez)
 make dev       # sobe tudo
@@ -612,8 +612,10 @@ por `[api]` e `[web]`; `Ctrl+C` derruba as duas.
 | `make example` | cenário de exemplo direto no terminal |
 | `make install` | venv e dependências |
 
-Os alvos só delegam para o PowerShell (o trabalho está em `dev.ps1`), então
-funcionam igual chamados do PowerShell, do `cmd` ou do Git Bash.
+No Windows os alvos delegam para o PowerShell (`dev.ps1`), então funcionam
+igual chamados do PowerShell, do `cmd` ou do Git Bash. No Mac, Linux e UNIX
+os mesmos alvos rodam no `sh`; o `make install` cria o venv com o `python3`
+do `PATH`.
 
 ### Usando a interface
 

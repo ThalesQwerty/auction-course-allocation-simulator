@@ -14,6 +14,8 @@ import {
   saveHistory,
   SimulationRun,
 } from "./history";
+import { GradeGraph } from "./GradeGraph";
+import { createPlaygroundDraft, Playground, PlaygroundDraft } from "./Playground";
 import { Project } from "./Project";
 import { Results } from "./Results";
 import { Sidebar, View } from "./Sidebar";
@@ -23,6 +25,7 @@ export default function App() {
   const config = choice.config;
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
   const [view, setView] = useState<View>({ kind: "config" });
+  const [playground, setPlayground] = useState<PlaygroundDraft | null>(null);
   // O modo e o número de execuções não são do cenário: o mesmo cenário se roda
   // uma vez ou se compara N vezes, e trocar de modo não pode mexer nele.
   const [mode, setMode] = useState<RunMode>("single");
@@ -164,6 +167,14 @@ export default function App() {
           />
         )}
         {view.kind === "project" && <Project />}
+        {view.kind === "graph" && <GradeGraph disciplines={config.disciplines} />}
+        {view.kind === "playground" && (
+          <Playground
+            config={config}
+            draft={playground ?? createPlaygroundDraft(config)}
+            setDraft={setPlayground}
+          />
+        )}
         {current?.kind === "comparison" && (
           <Comparison
             key={current.id}

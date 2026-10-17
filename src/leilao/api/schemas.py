@@ -66,12 +66,13 @@ class DisciplineIn(BaseModel):
     name: str
     seats: int = Field(ge=0, description="q_x — vagas")
     hours: int = Field(gt=0, description="w_x — carga horária")
-    prerequisites: list[str] = Field(
+    unlocks: list[str] = Field(
         default_factory=list,
-        description=(
-            "disciplinas que precisam estar aprovadas para o aluno disputar vaga aqui. "
-            "Vazio = disciplina de 1º período, em que o ingressante entra direto."
-        ),
+        description="sucessores — disciplinas que esta desbloqueia. Vazio = terminal.",
+    )
+    entry: bool = Field(
+        default=False,
+        description="matrícula garantida de quem ingressa; não pode ter pré-requisito",
     )
     elective: bool = Field(
         default=False,
@@ -131,7 +132,7 @@ class ScenarioIn(BaseModel):
         ge=1,
         description=(
             "alunos que ingressam em cada período com ingresso; a população é isto × L. "
-            "Não pode passar da menor oferta entre as disciplinas de 1º período, porque "
+            "Não pode passar da menor oferta entre as disciplinas de entrada, porque "
             "o ingressante tem vaga garantida em todas elas."
         ),
     )
@@ -478,3 +479,54 @@ class SimulateResponse(BaseModel):
     # 1; as notas vão de 0 a 10.
     utility_distribution: list[float] = []
     grade_distribution: list[float] = []
+
+
+class PlaygroundDisciplineIn(BaseModel):
+    name: str
+    seats: int = Field(ge=0)
+    hours: int = Field(gt=0)
+
+
+class PlaygroundStudentIn(BaseModel):
+    id: str
+    credits: int = Field(default=0, ge=0)
+    cr: float = 0
+    max_hours: int = Field(gt=0)
+    utilities: dict[str, float]
+    eligible: list[str]
+
+
+class PlaygroundRequest(BaseModel):
+    mechanism: Mechanism
+    rounds: int = Field(ge=1, le=10)
+    seed: int = 0
+    grade_mean: float = Field(ge=0, le=10)
+    grade_stddev: float = Field(gt=0)
+    disciplines: list[PlaygroundDisciplineIn]
+    students: list[PlaygroundStudentIn]
+
+
+class PlaygroundRoundStudentOut(BaseModel):
+    id: str
+    bids: dict[str, int]
+    utilities: dict[str, float]
+    won: list[str]
+    remaining_hours: int
+    remaining_credits: int | None
+
+
+class PlaygroundRoundOut(BaseModel):
+    number: int
+    prices: dict[str, int] | None
+    students: list[PlaygroundRoundStudentOut]
+
+
+class PlaygroundGradeOut(BaseModel):
+    student_id: str
+    discipline: str
+    grade: float
+
+
+class PlaygroundResponse(BaseModel):
+    rounds: list[PlaygroundRoundOut]
+    grades: list[PlaygroundGradeOut]

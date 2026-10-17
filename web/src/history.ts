@@ -1,3 +1,4 @@
+import { withUnlocks } from "./curriculum";
 import { creditReturnLabel } from "./types";
 import type {
   CompareRequest,
@@ -88,17 +89,21 @@ export function loadHistory(): HistoryEntry[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
-    return (parsed as HistoryEntry[]).map((entry) =>
+    return (parsed as HistoryEntry[]).map((entry) => {
       // Entradas gravadas antes das comparações existirem não têm `kind`, e
-      // não havia outra coisa que elas pudessem ser.
-      entry.kind === "comparison"
-        ? entry
-        : {
-            ...entry,
-            kind: "simulation",
-            result: { ...entry.result, histories: entry.result?.histories ?? [] },
-          }
-    );
+      // não havia outra coisa que elas pudessem ser. Grade legada ainda pode
+      // trazer `prerequisites` no lugar de `unlocks`.
+      const disciplines = withUnlocks(entry.config.disciplines ?? []);
+      if (entry.kind === "comparison") {
+        return { ...entry, config: { ...entry.config, disciplines } };
+      }
+      return {
+        ...entry,
+        kind: "simulation" as const,
+        config: { ...entry.config, disciplines },
+        result: { ...entry.result, histories: entry.result?.histories ?? [] },
+      };
+    });
   } catch {
     // localStorage indisponível (modo privado) ou conteúdo corrompido
     return [];

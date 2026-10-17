@@ -59,7 +59,6 @@ export function StudentDetail({
       <div className="chart-grid">
         <MetricChart
           title="Progressão curricular"
-          hint={`Carga horária aprovada contra a grade inteira (${student.hours_to_graduate} h) — toda disciplina é obrigatória, então conclui quem aprova em todas`}
           data={series(records, (r) => ({ aprovadas: r.approved_hours, meta: student.hours_to_graduate }))}
           series={["aprovadas", "meta"]}
           colors={charts.colors}
@@ -68,7 +67,6 @@ export function StudentDetail({
         />
         <MetricChart
           title="Coeficiente de rendimento"
-          hint="N_a no início de cada período — eq. (49)"
           data={series(records, (r) => ({ CR: r.grade_average }))}
           series={["CR"]}
           colors={charts.colors}
@@ -76,7 +74,6 @@ export function StudentDetail({
         />
         <MetricChart
           title="Satisfação (ψ)"
-          hint="Fração da utilidade elegível que o aluno obteve — eq. (51). No período de ingresso é 1: a vaga vem garantida"
           data={series(records, (r) => ({ satisfação: r.satisfaction }))}
           series={["satisfação"]}
           colors={charts.colors}
@@ -84,7 +81,6 @@ export function StudentDetail({
         />
         <MetricChart
           title="Créditos"
-          hint="Orçamento no início, consumo no leilão, retorno das disciplinas e saldo carregado — eqs. (27), (34) e (36)"
           data={series(records, (r) => ({
             "no início": r.credits_start,
             gastos: r.credits_spent,
@@ -98,7 +94,6 @@ export function StudentDetail({
         />
         <MetricChart
           title="Disciplinas por período"
-          hint="Quantas pediu, quantas conseguiu e em quantas foi aprovado"
           data={series(records, (r) => ({
             solicitadas: r.requests.filter((q) => q.bids.some((c) => c > 0)).length,
             atendidas: r.requests.filter((q) => q.won_round !== null).length,

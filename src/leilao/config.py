@@ -13,10 +13,12 @@ ser *sistemática*, e com ela sai o recorte dos relatórios por perfil.
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade, e **toda
 disciplina é obrigatória** — só se forma quem aprova em todas. O que ordena a
-grade são os **pré-requisitos**: uma disciplina sem pré-requisito é de 1º
-período, e uma com pré-requisitos é do período seguinte ao mais tardio deles.
-Essa indução substitui a senioridade da eq. (38): em vez de um número dado a
-cada disciplina, o período sai da própria estrutura da grade.
+grade são os **sucessores** (`unlocks`): cada disciplina declara quais outras
+ela desbloqueia. A **altura** s_x sai por indução nessa DAG — 0 se não
+desbloqueia nada, senão 1 + max das alturas dos sucessores — e substitui a
+senioridade da eq. (38) na invariante de preferência. O **período da grade**
+(matrícula garantida, gráficos) continua contado a partir do ingresso, sobre a
+aresta inversa: quem ninguém desbloqueia é 1º período.
 """
 from __future__ import annotations
 
@@ -37,28 +39,30 @@ CreditReturnPolicy = Literal["none", "unit", "full", "ratio"]
 
 @dataclass(frozen=True)
 class Discipline:
-    """Uma disciplina ofertada — o bem escaso x in B (Tabela 1).
+    """Uma disciplina ofertada — o bem escasso x in B (Tabela 1).
 
-    `prerequisites` é a lista de disciplinas que o aluno precisa ter aprovado
-    para ficar elegível a disputar vaga aqui. Vazia = **1º período** na indução
-    de `curriculum_periods` — o que não é a mesma coisa que ser **disciplina de
-    entrada**: a optativa também não tem pré-requisito e também cai no 1º
-    período, mas fica fora da matrícula garantida. Quem é entrada é
-    `entry_disciplines`.
+    `unlocks` é a lista de sucessores. Vazia = terminal (altura 0). `entry`
+    marca a matrícula garantida de quem ingressa; exige que a disciplina não
+    tenha pré-requisito, e o inverso não vale.
 
-    `elective` marca a **optativa**: ela não tem pré-requisito, não é
-    pré-requisito de ninguém, e o ingressante **não** a recebe na matrícula
-    garantida. Concluir não exige aprovar em cada uma delas — exige somar
-    `SimulationConfig.elective_hours` entre as que foram aprovadas, e é isso
-    que as torna substituíveis entre si. Elas ficam elegíveis desde o 1º
-    período e continuam elegíveis depois de a exigência estar cumprida: cursar
-    mais do que o mínimo é escolha do aluno, não erro do modelo.
+    `elective` marca a **optativa**, e é ortogonal a `entry`: uma não implica a
+    outra. A optativa não tem pré-requisito, não desbloqueia nada (`unlocks`
+    vazia, altura 0) e não é de entrada. Concluir não exige aprovar em cada uma
+    delas — exige somar `SimulationConfig.elective_hours` entre as que foram
+    aprovadas, e é isso que as torna substituíveis entre si.
+
+    As duas flags respondem perguntas diferentes sobre a mesma disciplina:
+    `entry` é "o ingressante ganha esta de graça?"; `elective` é "ela conta
+    individualmente para a conclusão, ou só pela carga?". Nenhuma das duas se
+    deriva de não ter pré-requisito, que é o erro que a versão anterior
+    cometia ao chamar de "1º período" o que era entrada.
     """
 
     name: str
     seats: int  # q_x — vagas
     hours: int  # w_x — carga horária
-    prerequisites: tuple[str, ...] = ()
+    unlocks: tuple[str, ...] = ()
+    entry: bool = False
     elective: bool = False
 
     def __post_init__(self) -> None:
@@ -68,15 +72,19 @@ class Discipline:
             raise ValueError(f"disciplina {self.name!r}: vagas (q_x) deve ser >= 0")
         if self.hours <= 0:
             raise ValueError(f"disciplina {self.name!r}: carga horária (w_x) deve ser > 0")
-        if self.name in self.prerequisites:
-            raise ValueError(f"disciplina {self.name!r} é pré-requisito de si mesma")
-        if len(set(self.prerequisites)) != len(self.prerequisites):
-            raise ValueError(f"disciplina {self.name!r}: pré-requisitos repetidos")
-        if self.elective and self.prerequisites:
+        if self.name in self.unlocks:
+            raise ValueError(f"disciplina {self.name!r} é sucessora de si mesma")
+        if len(set(self.unlocks)) != len(self.unlocks):
+            raise ValueError(f"disciplina {self.name!r}: sucessores repetidos")
+        if self.elective and self.unlocks:
             raise ValueError(
-                f"optativa {self.name!r} não pode ter pré-requisito: ela existe para "
-                "estar sempre ao alcance, e um pré-requisito a tiraria do conjunto "
-                "elegível justamente de quem está atrasado"
+                f"optativa {self.name!r} não pode desbloquear nada: a cadeia passaria "
+                "a depender de uma disciplina que ninguém é obrigado a cursar"
+            )
+        if self.elective and self.entry:
+            raise ValueError(
+                f"optativa {self.name!r} não pode ser de entrada: a matrícula garantida "
+                "entregaria parte da exigência em horas antes de o aluno disputar nada"
             )
 
 
@@ -93,9 +101,9 @@ class SimulationConfig:
     # tempo de chegar ao fim do curso em vez de serem cortadas pelo horizonte.
     entry_periods: int | None = None
     # Alunos que ingressam em cada um dos L períodos com ingresso. O ingressante
-    # tem vaga garantida em todas as disciplinas de entrada, então o ritmo de
-    # entrada não pode passar da menor oferta entre elas — senão a garantia não
-    # caberia. A população é este número vezes L.
+    # tem vaga garantida nas disciplinas de entrada, então o ritmo de entrada
+    # não pode passar da menor oferta entre elas — senão a garantia não caberia.
+    # A população é este número vezes L.
     students_per_period: int = 1
     # --- as duas distribuições que descrevem um aluno -----------------------
     #
@@ -120,6 +128,9 @@ class SimulationConfig:
     # concentra, pequeno achata**, ao contrário da forma da Gamma que havia
     # antes. O coeficiente de variação é sqrt(exp(sigma^2) - 1), que cresce
     # depressa: a faixa útil inteira cabe entre ~0,25 e ~3.
+    #
+    # Depois do sorteio, `draw_utilities` impõe a invariante de altura:
+    # s_x > s_y ⇒ u_x > u_y. O sigma continua mandando *dentro* da mesma altura.
     utility_sigma: float = 1.0
     # W_a — carga horária máxima por período, eq. (4). Igual para todos.
     max_hours: int = 360
@@ -184,25 +195,33 @@ class SimulationConfig:
             raise ValueError("há disciplinas com nomes repetidos")
         known = set(names)
         for discipline in self.disciplines:
-            unknown = set(discipline.prerequisites) - known
+            unknown = set(discipline.unlocks) - known
             if unknown:
                 raise ValueError(
-                    f"disciplina {discipline.name!r} tem pré-requisitos inexistentes: "
+                    f"disciplina {discipline.name!r} tem sucessores inexistentes: "
                     f"{sorted(unknown)}"
                 )
 
-        # A optativa não destrava nada: se ela aparecesse como pré-requisito, a
-        # cadeia passaria a depender de uma disciplina que ninguém é obrigado a
-        # cursar, e a grade deixaria de ser concluível por quem cumpriu a
-        # exigência em horas por outro caminho.
-        electives = {d.name for d in self.disciplines if d.elective}
+        # Ciclo: a cadeia que se fecha não tem altura nem período.
+        self.heights()
+        requires = self.prerequisites_by_discipline()
         for discipline in self.disciplines:
-            blocking = electives & set(discipline.prerequisites)
-            if blocking:
+            if discipline.entry and requires[discipline.name]:
                 raise ValueError(
-                    f"disciplina {discipline.name!r} tem optativa como pré-requisito: "
-                    f"{sorted(blocking)} — optativa não destrava nada"
+                    f"disciplina {discipline.name!r} é de entrada e tem pré-requisitos"
                 )
+            # A optativa existe para estar sempre ao alcance; um pré-requisito
+            # a tiraria do elegível justamente de quem está atrasado. O outro
+            # sentido — optativa não desbloqueia nada — é checado na própria
+            # `Discipline`, que já enxerga os `unlocks` dela.
+            if discipline.elective and requires[discipline.name]:
+                raise ValueError(
+                    f"optativa {discipline.name!r} não pode ter pré-requisito: "
+                    f"{sorted(requires[discipline.name])} a desbloqueia"
+                )
+        entry = self.entry_disciplines()
+        if not entry:
+            raise ValueError("o cenário precisa de pelo menos uma disciplina de entrada")
 
         if self.elective_hours < 0:
             raise ValueError("elective_hours (X) deve ser >= 0")
@@ -213,21 +232,8 @@ class SimulationConfig:
                 f"{offered} h ofertadas em optativas: ninguém concluiria"
             )
 
-        # Levanta se houver ciclo: uma cadeia de pré-requisitos que se fecha não
-        # tem período nenhum, e as disciplinas dela seriam inalcançáveis para
-        # sempre — o cenário não se conclui por construção.
-        entry = self.entry_disciplines()
-
         seats = {d.name: d.seats for d in self.disciplines}
         hours = {d.name: d.hours for d in self.disciplines}
-        # O ingressante entra direto nas disciplinas de entrada, sem leilão:
-        # a oferta tem de comportar a geração inteira, e a carga somada tem de
-        # caber em W_a — senão a matrícula garantida violaria a eq. (4).
-        if not entry:
-            # Grade só de optativas: não há matrícula garantida a validar, e o
-            # ingressante disputa como qualquer um. Não é cenário que o preset
-            # use, mas é construível e não deve estourar aqui.
-            return
         smallest = min(seats[name] for name in entry)
         if self.students_per_period > smallest:
             tightest = min(entry, key=lambda name: (seats[name], name))
@@ -253,19 +259,55 @@ class SimulationConfig:
         """|A| — uma geração do mesmo tamanho em cada um dos L períodos."""
         return self.students_per_period * self.entry_span
 
-    def curriculum_periods(self) -> dict[str, int]:
-        """O período de cada disciplina na grade, por indução sobre os
-        pré-requisitos: sem pré-requisito é 1º período; com pré-requisitos é o
-        maior período entre eles mais um.
+    def prerequisites_by_discipline(self) -> dict[str, tuple[str, ...]]:
+        """Aresta inversa dos sucessores: quem precisa estar aprovado para
+        disputar cada disciplina. Mantém a ordem do cenário entre os
+        predecessores."""
+        preds: dict[str, list[str]] = {d.name: [] for d in self.disciplines}
+        for discipline in self.disciplines:
+            for successor in discipline.unlocks:
+                preds[successor].append(discipline.name)
+        return {name: tuple(parents) for name, parents in preds.items()}
 
-        Substitui a senioridade s_x da eq. (38): o número não é dado, sai da
-        estrutura da grade. Um ciclo de pré-requisitos não tem solução e é
-        rejeitado aqui — é o único lugar em que a grade é percorrida inteira.
+    def heights(self) -> dict[str, int]:
+        """Altura s_x na DAG de sucessores: 0 se não desbloqueia nada; senão
+        1 + max das alturas dos sucessores. Ciclo é rejeitado — a disciplina
+        nunca ficaria elegível."""
+        unlocks = {d.name: d.unlocks for d in self.disciplines}
+        height: dict[str, int] = {}
+        on_path: set[str] = set()
+        for start in unlocks:
+            if start in height:
+                continue
+            stack = [(start, False)]
+            while stack:
+                name, expanded = stack.pop()
+                if expanded:
+                    on_path.discard(name)
+                    height[name] = 1 + max((height[s] for s in unlocks[name]), default=-1)
+                    continue
+                if name in height:
+                    continue
+                if name in on_path:
+                    raise ValueError(
+                        f"há um ciclo de sucessores envolvendo {name!r}: a disciplina "
+                        "nunca ficaria elegível"
+                    )
+                on_path.add(name)
+                stack.append((name, True))
+                stack.extend((s, False) for s in unlocks[name])
+        return height
+
+    def curriculum_periods(self) -> dict[str, int]:
+        """O período de cada disciplina na grade, por indução sobre a aresta
+        inversa dos sucessores: quem ninguém desbloqueia é 1º período; quem é
+        desbloqueada por outras é o período seguinte ao mais tardio delas.
+
+        Contagem a partir das raízes, usada nos gráficos. A matrícula garantida
+        é `entry`, não este período. A altura (s_x) conta do outro extremo.
         """
-        requires = {d.name: d.prerequisites for d in self.disciplines}
+        requires = self.prerequisites_by_discipline()
         period: dict[str, int] = {}
-        # DFS iterativa com marcação de caminho: a recursiva estouraria a pilha
-        # numa cadeia longa, e é o caminho aberto que denuncia o ciclo.
         on_path: set[str] = set()
         for start in requires:
             if start in period:
@@ -281,7 +323,7 @@ class SimulationConfig:
                     continue
                 if name in on_path:
                     raise ValueError(
-                        f"há um ciclo de pré-requisitos envolvendo {name!r}: a disciplina "
+                        f"há um ciclo de sucessores envolvendo {name!r}: a disciplina "
                         "nunca ficaria elegível"
                     )
                 on_path.add(name)
@@ -290,29 +332,20 @@ class SimulationConfig:
         return period
 
     def entry_disciplines(self) -> list[str]:
-        """As **disciplinas de entrada**, na ordem do cenário: a matrícula
-        garantida de quem ingressa.
+        """Disciplinas de matrícula garantida, na ordem do cenário.
 
-        Não confundir com "disciplinas de 1º período". Ser de 1º período é
-        resultado da indução de `curriculum_periods` — não ter pré-requisito —,
-        e a **optativa também não tem**, então ela cai no 1º período e não é
-        entrada. Dar todas as optativas de graça ao ingressante entregaria a
-        exigência em horas antes de ele disputar coisa alguma, e a carga somada
-        estouraria W_a (eq. 4).
-
-        É este conjunto, e não o do 1º período, que dimensiona as validações de
-        `students_per_period` e `max_hours`: o que a oferta precisa comportar é
-        a geração inteira entrando de uma vez, e isso só vale para a entrada.
+        Vem da flag `entry`, e **não** de não ter pré-requisito: a optativa
+        também não tem e não é entrada. É este conjunto que dimensiona as
+        validações de `students_per_period` e `max_hours` — o que a oferta
+        precisa comportar é a geração inteira entrando de uma vez.
         """
-        period = self.curriculum_periods()
-        return [
-            d.name for d in self.disciplines if period[d.name] == 1 and not d.elective
-        ]
+        return [d.name for d in self.disciplines if d.entry]
 
     def eligible_disciplines(self, approved: set[str]) -> list[str]:
         """Disciplinas que o aluno ainda precisa cursar e já pode disputar:
-        não aprovadas, com todos os pré-requisitos cumpridos, e — no caso da
-        optativa — **enquanto a exigência X não estiver cumprida**.
+        não aprovadas, com todos os predecessores (aresta inversa) cumpridos,
+        e — no caso da optativa — **enquanto a exigência X não estiver
+        cumprida**.
 
         O teto nas optativas não é detalhe de calibragem, é o que faz `X`
         significar alguma coisa. Sem ele a optativa fica elegível para sempre
@@ -325,6 +358,7 @@ class SimulationConfig:
         Com `elective_hours = 0` nenhuma optativa é elegível, o que é a leitura
         consistente: sem exigência, elas não contam para coisa alguma.
         """
+        requires = self.prerequisites_by_discipline()
         met = (
             sum(d.hours for d in self.disciplines if d.elective and d.name in approved)
             >= self.elective_hours
@@ -333,7 +367,7 @@ class SimulationConfig:
             d.name
             for d in self.disciplines
             if d.name not in approved
-            and all(p in approved for p in d.prerequisites)
+            and all(p in approved for p in requires[d.name])
             and not (d.elective and met)
         ]
 
@@ -364,9 +398,9 @@ class SimulationConfig:
         vaga fecha a grade antes disso.
 
         São dois limites, e vale o maior. A **carga horária** impede cursar mais
-        de W_a por período, o que dá ceil(S / W_a). Os
-        **pré-requisitos** impõem a cadeia: a disciplina de n-ésimo período não
-        pode ser cursada antes do n-ésimo período do aluno.
+        de W_a por período, o que dá ceil(S / W_a). A **cadeia** impõe que a
+        disciplina de n-ésimo período não pode ser cursada antes do n-ésimo
+        período do aluno.
 
         Serve para dimensionar a fase de drenagem: abaixo disso nenhuma geração
         tem tempo de chegar ao fim, e a série por geração mediria o horizonte em

@@ -20,6 +20,7 @@ from ..auction import AuctionInput, Bid, run_auction
 from ..comparison import run_comparison, run_sweep
 from ..config import Discipline, SimulationConfig
 from ..entities import Agent, Good, MutualExclusion
+from ..playground import PlaygroundDiscipline, PlaygroundStudent, run_playground
 from ..simulation import run_simulation
 from .schemas import (
     ArmResultOut,
@@ -31,6 +32,11 @@ from .schemas import (
     RunSummaryOut,
     SweepOut,
     SweepPointOut,
+    PlaygroundRequest,
+    PlaygroundResponse,
+    PlaygroundRoundOut,
+    PlaygroundRoundStudentOut,
+    PlaygroundGradeOut,
     ScenarioIn,
     SimulateRequest,
     SimulateResponse,
@@ -89,7 +95,7 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
     """
     return SimulationConfig(
         disciplines=[
-            Discipline(d.name, d.seats, d.hours, tuple(d.prerequisites), d.elective)
+            Discipline(d.name, d.seats, d.hours, tuple(d.unlocks), d.entry, d.elective)
             for d in req.disciplines
         ],
         grade_mean=req.grade_mean,
@@ -218,6 +224,65 @@ def compare(req: CompareRequest) -> CompareResponse:
             if sweep is not None
             else None
         ),
+    )
+
+
+@app.post("/playground", response_model=PlaygroundResponse)
+def playground(req: PlaygroundRequest) -> PlaygroundResponse:
+    try:
+        result = run_playground(
+            mechanism=req.mechanism,
+            rounds=req.rounds,
+            seed=req.seed,
+            grade_mean=req.grade_mean,
+            grade_stddev=req.grade_stddev,
+            disciplines=[
+                PlaygroundDiscipline(d.name, d.seats, d.hours) for d in req.disciplines
+            ],
+            students=[
+                PlaygroundStudent(
+                    s.id,
+                    s.credits,
+                    s.cr,
+                    s.max_hours,
+                    s.utilities,
+                    tuple(s.eligible),
+                )
+                for s in req.students
+            ],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"falha no playground: {exc}") from exc
+
+    return PlaygroundResponse(
+        rounds=[
+            PlaygroundRoundOut(
+                number=round_.number,
+                prices=round_.prices,
+                students=[
+                    PlaygroundRoundStudentOut(
+                        id=student.id,
+                        bids=student.bids,
+                        utilities=student.utilities,
+                        won=list(student.won),
+                        remaining_hours=student.remaining_hours,
+                        remaining_credits=student.remaining_credits,
+                    )
+                    for student in round_.students
+                ],
+            )
+            for round_ in result.rounds
+        ],
+        grades=[
+            PlaygroundGradeOut(
+                student_id=grade.student_id,
+                discipline=grade.discipline,
+                grade=grade.grade,
+            )
+            for grade in result.grades
+        ],
     )
 
 

@@ -80,7 +80,7 @@ export function Project() {
         das utilidades —, e é exatamente essa perda que a comparação põe à prova.
       </p>
       <p>
-        Tudo o mais é idêntico: população, utilidades, notas, pré-requisitos, matrícula garantida,
+        Tudo o mais é idêntico: população, utilidades, notas, sucessores, matrícula garantida,
         conclusão e métricas. Como ali não existe crédito, as grandezas de crédito saem{" "}
         <strong>nulas</strong> dos relatórios — orçamento, saldo, lances, retorno e preço —, e não
         zeradas: zero se leria como "ninguém gastou", e o certo é "não há o que gastar".
@@ -90,27 +90,30 @@ export function Project() {
       <p>
         Não há cursos: todo aluno é da universidade e cursa a mesma grade, e{" "}
         <strong>toda disciplina é obrigatória</strong> — conclui quem aprova em todas. O que ordena
-        a grade são os <strong>pré-requisitos</strong>: uma disciplina sem pré-requisito é de 1º
-        período, e uma com pré-requisitos é do período seguinte ao mais tardio deles. Essa indução
-        toma o lugar da senioridade s<sub>x</sub> da eq. (38) — em vez de um número atribuído a cada
-        disciplina, o período sai da própria estrutura da grade, e o aluno só fica elegível a
-        disputar uma vaga quando aprovou tudo que ela exige.
+        a grade são os <strong>sucessores</strong>: cada disciplina declara quais outras
+        desbloqueia. A <strong>altura</strong> s<sub>x</sub> sai por indução nessa DAG (0 se não
+        desbloqueia nada; senão 1 + max das alturas dos sucessores) e entra na invariante de
+        preferência s<sub>x</sub> &gt; s<sub>y</sub> ⇒ u<sub>x</sub> &gt; u<sub>y</sub>. O período
+        da grade (gráficos) conta do outro extremo — a aresta inversa —, e o aluno só fica
+        elegível quando aprovou tudo que a desbloqueia. A matrícula garantida não é esse período:
+        é o flag de entrada, e toda disciplina de entrada não tem pré-requisito. O inverso não
+        vale.
       </p>
       <p>
-        Quem <strong>ingressa</strong> não disputa nada: recebe vaga garantida nas{" "}
-        <strong>disciplinas de entrada</strong> — as obrigatórias sem pré-requisito — e fica de
-        fora do leilão naquele período. Optativa não entra na garantia, mesmo não tendo
-        pré-requisito. O sistema ainda assim
-        lança o gasto na conta dele, repartindo o orçamento igualmente entre essas disciplinas e
-        deixando o resto da divisão no saldo — é esse valor que alimenta o retorno de créditos da
-        eq. (34). A garantia vale só no ingresso: recursar uma dessas disciplinas é disputá-la no
-        leilão como qualquer outra. Daí os dois limites do ritmo de entrada: a geração não pode
-        passar da menor oferta entre as disciplinas de entrada, nem a carga somada delas pode
-        passar de W<sub>a</sub>.
+Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada e fica de
+        fora do leilão naquele período para esse conjunto. Entrada é uma <em>flag</em>, não uma
+        dedução: optativa também não tem pré-requisito e não entra na garantia. O sistema ainda
+        assim lança o gasto na conta dele, repartindo o orçamento igualmente entre essas
+        disciplinas e deixando o resto da divisão no saldo — é esse valor que alimenta o retorno
+        de créditos da eq. (34). A garantia vale só no ingresso: recursar uma dessas disciplinas é
+        disputá-la no leilão como qualquer outra. Daí os dois limites do ritmo de entrada: a
+        geração não pode passar da menor oferta entre as disciplinas de entrada, nem a carga
+        somada delas pode passar de W<sub>a</sub>.
       </p>
       <p>
-        E, justamente por isso, <strong>o calouro não entra nas métricas</strong>. As disciplinas
-        de 1º período são exatamente as elegíveis para quem acaba de ingressar, e ele recebe todas:
+        E, justamente por isso, <strong>o calouro não entra nas métricas</strong>. Na grade atual
+        as de entrada são também as únicas sem pré-requisito, logo as elegíveis para quem acaba de
+        ingressar, e ele recebe todas:
         pontua ψ = 1 contra CR = 0 por construção, sem ter disputado coisa alguma. No preset
         Computação ele é 11% de todas as linhas aluno-período e, sozinho, invertia o sinal da
         correlação da eq. (57) — −0,09 com ele, +0,04 sem. A regra é que ele{" "}
@@ -144,13 +147,13 @@ export function Project() {
       <h2>O que a simulação faz em cada período</h2>
       <ol>
         <li>
-          Quem ingressa no período recebe a matrícula garantida nas disciplinas de 1º período, e as
+          Quem ingressa no período recebe a matrícula garantida nas disciplinas de entrada, e as
           vagas saem do estoque antes de o leilão abrir.
         </li>
         <li>
           Cada aluno ativo lê sua linha da matriz de utilidades — já sorteada na inicialização —
           sobre o seu conjunto elegível: as disciplinas que ainda não aprovou e cujos
-          pré-requisitos já cumpriu (eqs. 41–43). Fora dele a utilidade é zero. A linha é
+          predecessores já cumpriu (eqs. 41–43). Fora dele a utilidade é zero. A linha é
           sorteada de novo a cada período — o que ele quis no semestre passado não determina o que
           quer neste — e não é renormalizada, então a soma do que está ao alcance dele é o
           U<sub>a</sub><sup>(t)</sup> da eq. (43). Não há poupança: saldo de créditos e carga
@@ -197,7 +200,7 @@ export function Project() {
         As <strong>da disciplina</strong> — concorrência, preço, ocupação e taxa de aprovação —
         pedem o recorte oposto: as disciplinas se agrupam por uma propriedade que compartilham, e
         disciplinas com o mesmo valor caem no mesmo grupo. São três eixos: o período na grade (que
-        vem dos pré-requisitos), o número de vagas e a carga horária. É assim que se vê, por
+        vem dos sucessores), o número de vagas e a carga horária. É assim que se vê, por
         exemplo, que as disciplinas de turma pequena formam preço e as de turma grande ficam no
         piso — uma média sobre a universidade inteira esconderia a gradação. Concorrência e preço
         são do bem, então o grupo é a média delas; ocupação e aprovação são razões de contagens,
@@ -208,9 +211,23 @@ export function Project() {
         <div>
           <dt>Eficiência de alocação (ψ̄) — eq. (53)</dt>
           <dd>
-            Satisfação média dos alunos que disputaram: quanto da utilidade que o aluno queria
-            ele de fato conseguiu. Como a utilidade é zero fora do conjunto elegível, é a fração do
-            que ele <em>podia</em> cursar — então 1 é atingível. É a medida principal da hipótese.
+            Satisfação média dos alunos que disputaram: a soma das utilidades atendidas. A linha
+            de utilidades é normalizada sobre a grade, então o denominador vale 1 e ψ é a fração
+            do desejo <em>total</em> do aluno que foi servida — e não a do que estava ao alcance
+            dele. ψ = 1 exigiria cursar a grade inteira num período, então a escala é baixa de
+            propósito, e igual para todos: o denominador não se move de aluno para aluno nem de
+            período para período. É a medida principal da hipótese.
+          </dd>
+        </div>
+        <div>
+          <dt>Aproveitamento da carga — fora do anteprojeto</dt>
+          <dd>
+            Carga horária obtida no período dividida por W<sub>a</sub>, na média de quem disputou.
+            É a contraparte em <em>carga</em> do ψ, que é em <em>utilidade</em>, e as duas se
+            separam exatamente onde está a patologia que interessa: quem concentra o lance numa
+            disciplina que ama, ganha só ela e deixa o resto de W<sub>a</sub> ocioso pontua ψ alto
+            e aproveitamento baixo. Sozinho o ψ não distingue "consegui o que amava" de "consegui
+            pouco".
           </dd>
         </div>
         <div>
@@ -233,7 +250,7 @@ export function Project() {
           <dt>Demanda por vaga — fora do anteprojeto</dt>
           <dd>
             Alunos por vaga — a razão candidato/vaga do vestibular. A <em>escassez</em> conta quem
-            poderia cursar cada disciplina (não aprovada e com os pré-requisitos cumpridos): é a
+            poderia cursar cada disciplina (não aprovada e com os predecessores cumpridos): é a
             demanda <em>potencial</em>, e quase não depende do mecanismo. A{" "}
             <em>concorrência</em> faz a mesma conta sobre quem de fato a pediu: é a{" "}
             <em>efetiva</em>, e a razão entre as duas diz quanto da potencial virou pedido. Nos
@@ -312,8 +329,8 @@ export function Project() {
         </li>
 
         <li>
-          <strong>Matrícula garantida do ingressante:</strong> entra sem leilão em todas as
-          disciplinas de 1º período, com o orçamento repartido igualmente entre elas e o resto da
+          <strong>Matrícula garantida do ingressante:</strong> entra sem leilão nas disciplinas de
+          entrada, com o orçamento repartido igualmente entre elas e o resto da
           divisão no saldo. O anteprojeto não trata do ingresso.
         </li>
         <li>

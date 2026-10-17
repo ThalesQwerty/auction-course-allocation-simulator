@@ -1,24 +1,24 @@
 import numpy as np
 import pytest
 
+from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig
 from leilao.grading import credit_return
 from leilao.metrics import demand_per_seat, jain_index, pearson, semestralization
 from leilao.population import generate_students
 from leilao.simulation import GUARANTEED_ROUND, run_simulation
 
-# Grade de três períodos, duas disciplinas por período: D1 e D2 sem
-# pré-requisito (a matrícula garantida de quem ingressa), D3 e D4 atrás delas,
-# D5 e D6 atrás dessas. A cadeia tem três elos, então ninguém conclui em menos
-# de três períodos por mais folgada que seja a oferta.
-GRADE = [
-    Discipline("D1", seats=6, hours=60),
-    Discipline("D2", seats=6, hours=60),
-    Discipline("D3", seats=6, hours=60, prerequisites=("D1",)),
-    Discipline("D4", seats=6, hours=60, prerequisites=("D2",)),
-    Discipline("D5", seats=6, hours=60, prerequisites=("D3",)),
-    Discipline("D6", seats=6, hours=60, prerequisites=("D3", "D4")),
-]
+# Grade de três períodos, duas disciplinas por período: D1 e D2 de entrada
+# (matrícula garantida), D3 e D4 atrás delas, D5 e D6 atrás dessas. A cadeia
+# tem três elos, então ninguém conclui em menos de três períodos.
+GRADE = disciplines_from_predecessors(
+    ("D1", 6, 60),
+    ("D2", 6, 60),
+    ("D3", 6, 60, ("D1",)),
+    ("D4", 6, 60, ("D2",)),
+    ("D5", 6, 60, ("D3",)),
+    ("D6", 6, 60, ("D3", "D4")),
+)
 
 
 # W_a do cenário: 180 h deixa o aluno cursar três disciplinas de 60 h por
@@ -126,7 +126,7 @@ def test_nobody_graduates_faster_than_the_prerequisite_chain():
     """A cadeia impõe um piso que a oferta não compra: a disciplina do n-ésimo
     período da grade não pode ser cursada antes do n-ésimo período do aluno."""
     config = make_config(periods=12, disciplines=[
-        Discipline(d.name, seats=200, hours=d.hours, prerequisites=d.prerequisites)
+        Discipline(d.name, seats=200, hours=d.hours, unlocks=d.unlocks, entry=d.entry)
         for d in GRADE
     ])
     assert config.minimum_periods_to_graduate() == 3  # três elos
@@ -235,10 +235,12 @@ def test_scarcity_ignores_disciplines_with_no_seats_on_offer():
     aprovou) mas fica fora da razão, que seria divisão por zero."""
     config = make_config(
         disciplines=[
-            Discipline("D1", seats=6, hours=60),
-            # Sem vaga, mas elegíveis assim que D1 sair: ficam fora da razão.
-            Discipline("D2", seats=0, hours=60, prerequisites=("D1",)),
-            Discipline("D3", seats=0, hours=60, prerequisites=("D1",)),
+            *disciplines_from_predecessors(
+                ("D1", 6, 60),
+                # Sem vaga, mas elegíveis assim que D1 sair: ficam fora da razão.
+                ("D2", 0, 60, ("D1",)),
+                ("D3", 0, 60, ("D1",)),
+            ),
         ],
         **NEVER_APPROVES,
     )
@@ -352,10 +354,12 @@ def test_history_separates_refused_requests_from_unbid_ones():
         make_config(
             periods=8,
             disciplines=[
-                Discipline("D1", seats=3, hours=60),
-                Discipline("D2", seats=6, hours=60),
-                Discipline("D3", seats=1, hours=60, prerequisites=("D1",)),
-                Discipline("D4", seats=6, hours=60, prerequisites=("D2",)),
+                *disciplines_from_predecessors(
+                    ("D1", 3, 60),
+                    ("D2", 6, 60),
+                    ("D3", 1, 60, ("D1",)),
+                    ("D4", 6, 60, ("D2",)),
+                ),
             ],
         )
     )
@@ -408,7 +412,7 @@ def test_utilities_come_from_the_seed_not_from_the_simulation_path():
     roomy = run_simulation(
         make_config(
             disciplines=[
-                Discipline(d.name, seats=60, hours=d.hours, prerequisites=d.prerequisites)
+                Discipline(d.name, seats=60, hours=d.hours, unlocks=d.unlocks, entry=d.entry)
                 for d in GRADE
             ]
         )
@@ -590,6 +594,22 @@ def test_the_entrant_share_feeds_the_credit_return():
     assert all(r.returned == share for r in returned)
 
 
+def test_a_root_that_is_not_entry_is_not_granted():
+    """A raiz sem o flag disputa vaga. Só a de entrada sai do estoque antes da rodada."""
+    config = make_config(
+        periods=1,
+        rounds=1,
+        disciplines=disciplines_from_predecessors(
+            ("Entrada", 6, 60),
+            ("Livre", 6, 60, False),
+        ),
+        max_hours=120,
+    )
+    result = run_simulation(config)
+    granted = {d.name: d.granted for d in result.periods[0].disciplines}
+    assert granted == {"Entrada": config.students_per_period, "Livre": 0}
+
+
 def test_guaranteed_seats_leave_the_market_before_the_first_round():
     """A vaga entregue ao ingressante não é ofertada: ela já saiu do estoque
     quando a primeira rodada abre, e é isso que a coluna `granted` mostra."""
@@ -612,14 +632,17 @@ def test_a_generation_larger_than_the_smallest_entry_offer_is_rejected():
     with pytest.raises(ValueError, match="menor oferta"):
         SimulationConfig(
             disciplines=[
-                Discipline("D1", seats=5, hours=60),
-                Discipline("D2", seats=3, hours=60),
+                Discipline("D1", seats=5, hours=60, entry=True),
+                Discipline("D2", seats=3, hours=60, entry=True),
             ],
             students_per_period=4,
         )
     # Exatamente no teto passa — e não sobra vaga nenhuma para quem recursa.
     assert SimulationConfig(
-        disciplines=[Discipline("D1", seats=4, hours=60), Discipline("D2", seats=4, hours=60)],
+        disciplines=[
+            Discipline("D1", seats=4, hours=60, entry=True),
+            Discipline("D2", seats=4, hours=60, entry=True),
+        ],
         students_per_period=4,
     ).students_per_period == 4
 
@@ -630,8 +653,8 @@ def test_entry_disciplines_heavier_than_the_workload_cap_are_rejected():
     with pytest.raises(ValueError, match="não cabem na carga horária máxima"):
         SimulationConfig(
             disciplines=[
-                Discipline("D1", seats=5, hours=60),
-                Discipline("D2", seats=5, hours=60),
+                Discipline("D1", seats=5, hours=60, entry=True),
+                Discipline("D2", seats=5, hours=60, entry=True),
             ],
             students_per_period=2,
             max_hours=100,
@@ -948,13 +971,13 @@ def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
     # Grade rasa e larga: 2 elos só, mas 300 h que não cabem num período. Aqui
     # manda a carga horária.
     wide = SimulationConfig(
-        disciplines=[
-            Discipline("A", seats=5, hours=60),
-            *[
-                Discipline(name, seats=5, hours=60, prerequisites=("A",))
-                for name in ("B", "C", "D", "E")
-            ],
-        ],
+        disciplines=disciplines_from_predecessors(
+            ("A", 5, 60),
+            ("B", 5, 60, ("A",)),
+            ("C", 5, 60, ("A",)),
+            ("D", 5, 60, ("A",)),
+            ("E", 5, 60, ("A",)),
+        ),
         students_per_period=5,
         max_hours=60,
     )
@@ -1055,17 +1078,30 @@ def test_hours_to_graduate_counts_required_plus_the_quota():
 
 
 def test_an_elective_cannot_have_prerequisites():
+    """A optativa existe para estar sempre ao alcance; quem desbloqueia uma
+    tiraria do elegível justamente quem está atrasado. Com a aresta de
+    sucessores, o pré-requisito vem do outro lado — então a checagem é do
+    cenário, não da disciplina."""
     with pytest.raises(ValueError, match="optativa .* não pode ter pré-requisito"):
-        Discipline("OPT", seats=1, hours=60, prerequisites=("D1",), elective=True)
+        make_config(
+            disciplines=[
+                Discipline("D1", seats=6, hours=60, unlocks=("OPT",), entry=True),
+                Discipline("OPT", seats=6, hours=60, elective=True),
+            ],
+            elective_hours=60,
+        )
 
 
 def test_an_elective_cannot_unlock_anything():
-    with pytest.raises(ValueError, match="optativa como pré-requisito"):
-        make_config(
-            disciplines=GRADE
-            + [Discipline("OPT", seats=1, hours=60, elective=True)]
-            + [Discipline("D7", seats=1, hours=60, prerequisites=("OPT",))]
-        )
+    """Se destravasse, a cadeia passaria a depender de uma disciplina que
+    ninguém é obrigado a cursar. Isso a própria `Discipline` enxerga."""
+    with pytest.raises(ValueError, match="não pode desbloquear nada"):
+        Discipline("OPT", seats=1, hours=60, unlocks=("D3",), elective=True)
+
+
+def test_an_elective_cannot_be_an_entry_discipline():
+    with pytest.raises(ValueError, match="não pode ser de entrada"):
+        Discipline("OPT", seats=1, hours=60, elective=True, entry=True)
 
 
 def test_the_elective_requirement_must_fit_the_offer():

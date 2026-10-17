@@ -22,9 +22,10 @@ eq. 31). Somá-lo reproduz o agregado. Os recortes por **aptidão** e **afinidad
 existiram até 08/10/2026 e saíram junto com os perfis de aluno: sem diferença
 sistemática entre alunos, não há o que separar além da senioridade.
 
-**Quem ingressa não disputa.** O aluno novo recebe vaga garantida em todas as
-disciplinas de entrada — as sem pré-requisito — e fica de fora do leilão
-naquele período. O sistema lança na conta dele o gasto correspondente,
+**Quem ingressa não disputa as disciplinas de entrada.** Recebe vaga garantida
+nelas e fica de fora do leilão naquele período para esse conjunto. Entrada é
+uma flag do cenário, e não "não ter pré-requisito": a optativa também não tem e
+fica fora da garantia. O sistema lança na conta dele o gasto correspondente,
 repartindo o orçamento igualmente entre essas disciplinas (o resto da divisão
 continua no saldo), e é esse valor que alimenta o retorno de créditos da
 eq. (34). Vale só no período de ingresso: recursar uma dessas disciplinas é
@@ -536,8 +537,8 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     hours = config.hours_by_discipline()
     total_seats = sum(d.seats for d in config.disciplines)
     curriculum = config.curriculum_periods()
-    # As disciplinas sem pré-requisito: a matrícula garantida de quem ingressa.
-    entry_set = config.entry_disciplines()
+    # Matrícula garantida de quem ingressa.
+    entry_courses = config.entry_disciplines()
     # Conclusão (eq. 40, estendida pelas optativas): aprovar em **todas** as
     # obrigatórias **e** somar `elective_hours` entre as optativas aprovadas.
     # Sem optativa no cenário a segunda condição é vacuamente verdadeira (0 >= 0)
@@ -681,9 +682,9 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         for student in (s for s in active if s.entry_period == period):
             # Sem crédito não há o que lançar na conta: a vaga garantida é a
             # mesma nos dois mecanismos, e o que muda é só se ela custa algo.
-            share = budget[student.id] // len(entry_set) if uses_credits else 0
+            share = budget[student.id] // len(entry_courses) if uses_credits else 0
             marker = share if uses_credits else 1
-            for name in entry_set:
+            for name in entry_courses:
                 guaranteed[student.id].append(name)
                 won[student.id].add(name)
                 won_round[(student.id, name)] = GUARANTEED_ROUND

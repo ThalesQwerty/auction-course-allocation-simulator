@@ -4,15 +4,15 @@ export interface DisciplineInput {
   name: string;
   seats: number; // q_x — vagas
   hours: number; // w_x — carga horária
-  /** Disciplinas que o aluno precisa ter aprovado para disputar vaga aqui.
-   * Vazio = 1º período na indução (ver `curriculum.ts`) — o que não é o mesmo
-   * que ser **disciplina de entrada**: a optativa também não tem pré-requisito
-   * e também cai no 1º período, mas fica fora da matrícula garantida. */
-  prerequisites: string[];
-  /** Optativa: sem pré-requisito, não é pré-requisito de ninguém, e fica fora
-   * da matrícula garantida do ingressante. Concluir não exige aprovar em cada
-   * uma — exige somar `elective_hours` entre as aprovadas, e é isso que as
-   * torna substituíveis entre si. */
+  /** Sucessores: disciplinas que esta desbloqueia. Vazio = terminal, altura 0. */
+  unlocks: string[];
+  /** Matrícula garantida de quem ingressa. É **flag**, não dedução: não ter
+   * pré-requisito não faz a disciplina ser de entrada — a optativa também não
+   * tem e fica fora da garantia. */
+  entry: boolean;
+  /** Optativa: não desbloqueia nada, não é de entrada, e concluir não exige
+   * aprovar em cada uma — exige somar `elective_hours` entre as aprovadas. É
+   * isso que as torna substituíveis entre si. Ortogonal a `entry`. */
   elective?: boolean;
 }
 
@@ -79,8 +79,8 @@ export interface SimulateRequest {
    * geração correspondente. */
   entry_periods: number | null;
   /** Alunos que ingressam em cada período com ingresso; a população é isto × L.
-   * Não pode passar da menor oferta entre as **disciplinas de entrada**, porque
-   * o ingressante tem **vaga garantida** em todas elas. */
+   * Não pode passar da menor oferta entre as disciplinas de entrada, porque o
+   * ingressante tem vaga garantida em todas elas. */
   students_per_period: number;
   rounds: number; // |R|
   min_grade: number; // n_min
@@ -360,7 +360,7 @@ export interface DisciplineSnapshot {
   seats: number;
   filled: number;
   /** Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
-   * Só é diferente de zero nas disciplinas de 1º período. */
+   * Só é diferente de zero nas disciplinas de entrada. */
   granted: number;
   /** Quantos alunos pediram a disciplina no período — deram lance em alguma
    * rodada, ou a receberam na matrícula garantida. Dividido por `seats` dá a
@@ -474,4 +474,41 @@ export function defaultScenario(): SimulateRequest {
     credit_return: "none",
     seed: 0,
   };
+}
+
+export interface PlaygroundRequest {
+  mechanism: Mechanism;
+  rounds: number;
+  seed: number;
+  grade_mean: number;
+  grade_stddev: number;
+  disciplines: { name: string; seats: number; hours: number }[];
+  students: {
+    id: string;
+    credits: number;
+    cr: number;
+    max_hours: number;
+    utilities: Record<string, number>;
+    eligible: string[];
+  }[];
+}
+
+export interface PlaygroundRoundStudent {
+  id: string;
+  bids: Record<string, number>;
+  utilities: Record<string, number>;
+  won: string[];
+  remaining_hours: number;
+  remaining_credits: number | null;
+}
+
+export interface PlaygroundRound {
+  number: number;
+  prices: Record<string, number> | null;
+  students: PlaygroundRoundStudent[];
+}
+
+export interface PlaygroundResponse {
+  rounds: PlaygroundRound[];
+  grades: { student_id: string; discipline: string; grade: number }[];
 }

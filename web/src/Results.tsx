@@ -134,7 +134,6 @@ const spentOf = (snapshot: GroupSnapshot): number | null =>
 
 interface ChartStyle {
   title: string;
-  hint: string;
   domain?: [number | "auto", number | "auto"];
   format?: (value: number) => string;
   zeroLine?: boolean;
@@ -161,32 +160,27 @@ type ChartSpec = ChartStyle &
  * o leilão alocou bem? (métricas principais), a população anda na grade?
  * (progressão), e o que acontece com o dinheiro? (economia). Dentro de um
  * bloco os eixos são comparáveis entre si. */
-const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
+const CHART_GROUPS: { title: string; charts: ChartSpec[] }[] = [
   {
     title: "Métricas principais",
-    hint: "Qualidade da alocação — é por aqui que se compara um mecanismo com outro",
     charts: [
       {
         title: "Eficiência de alocação (ψ̄)",
-        hint: "Satisfação média dos alunos que disputaram — eq. (53): a soma das utilidades atendidas. A linha de utilidades é normalizada sobre a grade, então o denominador é 1 e ψ é a fração do desejo **total** do aluno que foi servida — não do que estava ao alcance dele. ψ = 1 exigiria cursar a grade inteira num período, então a escala é baixa de propósito e igual para todos. Quem acaba de ingressar não entra na conta: recebe um pacote fixo e o ψ dele mede coincidência de gosto, não alocação",
         accessor: (s) => s.metrics?.efficiency ?? null,
         domain: [0, 1],
       },
       {
         title: "Aproveitamento da carga",
-        hint: "Carga horária obtida no período dividida por W_a, na média dos alunos que disputaram. É a contraparte em carga do ψ, que é em utilidade: quem concentra o lance numa disciplina que ama e deixa o resto de W_a ocioso pontua ψ alto e aproveitamento baixo. 1 = todo mundo encheu a carga",
         accessor: (s) => s.metrics?.utilization ?? null,
         domain: [0, 1],
       },
       {
         title: "Equidade (índice de Jain, φ)",
-        hint: "1 = todos igualmente satisfeitos — eq. (55)",
         accessor: (s) => s.metrics?.fairness ?? null,
         domain: [0, 1],
       },
       {
         title: "Correlação CR × satisfação (λ)",
-        hint: "Positivo = quem tem CR maior se sai melhor — eq. (57)",
         accessor: (s) => s.metrics?.correlation ?? null,
         domain: [-1, 1],
         zeroLine: true,
@@ -196,14 +190,12 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
         // ocupação de um recorte é a fatia que ele levou e os parciais somam o
         // total. É o que a separa das outras métricas da oferta.
         title: "Taxa de ocupação (θ)",
-        hint: "Fatia das vagas ofertadas que foi preenchida — eq. (54). O total é a soma dos parciais: cada recorte levou a sua parte das mesmas vagas",
         accessor: (s) => s.metrics?.occupancy ?? null,
         total: true,
         domain: [0, 1],
       },
       {
         title: "Semestralização (σ̄)",
-        hint: "Carga aprovada ÷ máximo possível desde o ingresso; 1 = ninguém atrasado",
         accessor: (s) => s.metrics?.semestralization ?? null,
         domain: [0, 1],
       },
@@ -211,37 +203,31 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
   },
   {
     title: "Progressão",
-    hint: "Como a população avança na grade ao longo dos períodos",
     charts: [
       {
         title: "Vagas obtidas por aluno",
-        hint: "Disciplinas conquistadas por aluno ativo, contando a matrícula garantida de quem ingressa",
         accessor: (s) => s.metrics?.allocations_per_student ?? null,
         domain: [0, "auto"],
         format: formatCount,
       },
       {
         title: "CR médio (N̄)",
-        hint: "Coeficiente de rendimento no início do período — eq. (56)",
         accessor: (s) => s.metrics?.mean_grade_average ?? null,
         domain: [0, 10],
       },
       {
         title: "Alunos ativos",
-        hint: "Matriculados no período — |A^(t)|",
         accessor: (s) => s.active,
         domain: [0, "auto"],
         format: formatCount,
       },
       {
         title: "Formados (fração do recorte)",
-        hint: "Concluintes acumulados ÷ alunos que já ingressaram. Concluir é aprovar em todas as disciplinas da grade — eq. (40)",
         accessor: (s) => (s.population > 0 ? s.graduated / s.population : null),
         domain: [0, 1],
       },
       {
         title: "Carga horária aprovada (média)",
-        hint: "Progressão curricular média dos alunos ativos",
         accessor: (s) => s.mean_approved_hours,
         domain: [0, "auto"],
         format: formatCount,
@@ -250,7 +236,6 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
   },
   {
     title: "Economia de créditos",
-    hint: "De onde vem o crédito, quanto dele circula e o que ele compra",
     charts: [
       {
         // As quatro na mesma unidade e no mesmo eixo: o que se lê é o vão entre
@@ -259,7 +244,6 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
         // sobrepostas. Medidas diferentes, não as pontas de uma faixa: paleta
         // categórica, não a rampa.
         title: "Créditos por aluno",
-        hint: "A contabilidade do período, por aluno ativo: o orçamento no início (C_a^(t,1)), quanto dele foi apostado, quanto virou gasto de fato e o retorno das disciplinas cursadas (Σγ, eq. 34; não inclui Γ_min). O vão orçamento→gasto é o saldo que sobrou; o vão lances→gasto é o que foi comprometido e não pago — lance perdedor, ou o desconto de pagar o preço no lugar do lance. Lances pode passar do orçamento: perder não consome crédito, então o mesmo crédito é apostado de novo na rodada seguinte. A matrícula garantida entra como lance e gasto pelo mesmo valor, que é o que o sistema lança na conta do ingressante. As quatro dividem o eixo, então aqui são a média da universidade — por recorte, ver a tabela",
         overall: [
           { label: "Orçamento", of: (report) => report.overall.credits_per_student },
           { label: "Lances", of: (report) => report.overall.mean_bids },
@@ -274,7 +258,6 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
         // A leitura normalizada do mesmo fato, e a única comparável entre
         // cenários: o nível em créditos depende de Γ_min, a fração não.
         title: "Fração do orçamento gasta",
-        hint: "Quanto do crédito em mãos o aluno conseguiu gastar. Cai quando o crédito entra mais rápido do que a oferta de vagas deixa gastar — o estoque incha e a moeda perde poder, que é o que o preço do leilão reflete",
         accessor: (s) =>
           s.credits_per_student !== null && s.credits_per_student > 0 && s.mean_credits !== null
             ? (s.credits_per_student - s.mean_credits) / s.credits_per_student
@@ -376,34 +359,29 @@ interface DisciplineChart extends ChartStyle {
   of: (group: DisciplineGroup) => number | null;
 }
 
-const DISCIPLINE_CHARTS: { title: string; hint: string; charts: DisciplineChart[] }[] = [
+const DISCIPLINE_CHARTS: { title: string; charts: DisciplineChart[] }[] = [
   {
     title: "Oferta e disputa",
-    hint: "O que cada tipo de disciplina viveu no período — é aqui que a gradação de escassez embutida na grade aparece",
     charts: [
       {
         title: "Concorrência por vaga",
-        hint: "Candidatos por vaga de cada disciplina (quantos a pediram ÷ vagas), na média do grupo. A matrícula garantida conta como pedido: o ingressante não disputou, mas ocupa a vaga, e para quem recursa a pressão é a mesma",
         of: (g) => mean(g.contentions),
         domain: [0, "auto"],
         format: formatCount,
       },
       {
         title: "Preço de disciplina (π)",
-        hint: "Maior lance mal-sucedido de cada disciplina, ou 1 — eq. (24) —, na média do grupo. Só entram as que ainda tinham vaga: a esgotada não recebe lance e cairia no piso, o que leria como barata justamente a que todo mundo quis",
         of: (g) => mean(g.prices),
         domain: [0, "auto"],
         format: formatCount,
       },
       {
         title: "Taxa de ocupação",
-        hint: "Vagas preenchidas ÷ vagas ofertadas do grupo. É a razão das somas, não a média das razões: senão uma disciplina de 40 vagas pesaria o mesmo que uma de 120. Diferente da ocupação por aluno, esta não é fatia de nada — é o quanto cada tipo de oferta encheu",
         of: (g) => (g.seats > 0 ? g.filled / g.seats : null),
         domain: [0, 1],
       },
       {
         title: "Taxa de aprovação",
-        hint: "Aprovados ÷ matriculados do grupo ao fim do período. Mede a dificuldade do que foi cursado, não a alocação — serve para ver se um tipo de disciplina represa a fila por reprovação em vez de por falta de vaga",
         of: (g) => (g.filled > 0 ? g.approvals / g.filled : null),
         domain: [0, 1],
       },
@@ -448,13 +426,6 @@ export function Results({
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const hasRounds = result.periods.some((period) => period.rounds.length > 1);
-  // Fases do horizonte, lidas da configuração desta execução: os L primeiros
-  // períodos recebem geração nova, os demais drenam. Só há L gerações.
-  const entrySpan = Math.min(
-    run.config.entry_periods ?? run.config.periods,
-    run.config.periods
-  );
-  const drainPeriods = result.periods.length - entrySpan;
 
   // As gerações da execução. O agregado do último período basta: toda geração
   // que já ingressou continua na lista até o fim.
@@ -575,31 +546,6 @@ export function Results({
         <>
       <div className="panel">
         <h2>Resultado — {result.periods.length} períodos simulados</h2>
-        <p className="note">
-          Três recortes da mesma população: a <strong>geração</strong> (quem ingressou num mesmo
-          período) e os dois <strong>perfis</strong> do aluno — a aptidão, que dá a distribuição
-          das notas, e a afinidade, que diz o quanto ele concentra a preferência. Somar qualquer um
-          deles reproduz a universidade; o que muda de um para o outro é a pergunta. Em todos, o
-          aluno fica na mesma linha do início ao fim.
-        </p>
-        <p className="note">
-          <strong>Quem acabou de ingressar conta como gente, não como dado.</strong> O ingressante
-          recebe vaga garantida nas disciplinas de 1º período — exatamente as elegíveis para ele —,
-          então pontuaria ψ = 1 contra CR = 0 sem ter disputado nada. Ele entra em{" "}
-          <em>alunos ativos</em>, <em>ingressos</em> e <em>formados</em>, que são contagens de
-          pessoas, e fica fora de toda média por aluno. Por isso a série de uma geração só começa
-          no período <em>seguinte</em> ao seu ingresso, e o 1º período da simulação não tem métrica
-          nenhuma — ali todo mundo é calouro.
-        </p>
-        {drainPeriods > 0 && (
-          <p className="note">
-            Ingresso nos {entrySpan} primeiros períodos e drenagem nos {drainPeriods} últimos: há{" "}
-            <strong>{entrySpan} gerações</strong>, e os períodos de drenagem não têm geração
-            correspondente — ninguém entra e a população só diminui. As curvas por período caem no
-            fim porque há menos gente disputando, não porque o mecanismo melhorou; o recorte por
-            geração não tem essa distorção.
-          </p>
-        )}
         <div className="field-row">
           <div className="field">
             <label>Eixo horizontal</label>
@@ -632,7 +578,6 @@ export function Results({
         <section className="chart-section" key={group.title}>
           <header className="chart-section-head">
             <h2>{group.title}</h2>
-            <p>{group.hint}</p>
           </header>
           <div className="chart-grid">
             {group.charts.map((chart) => (
@@ -643,11 +588,6 @@ export function Results({
               <MetricChart
                 key={chart.title}
                 title={chart.title}
-                hint={
-                  byRound && chart.periodOnly
-                    ? `${chart.hint} · só existe ao fim do período, então este gráfico segue em período`
-                    : chart.hint
-                }
                 data={
                   "overall" in chart
                     ? buildOverallSeries(result, byRound && !chart.periodOnly, chart.overall)
@@ -688,30 +628,11 @@ export function Results({
         <section className="chart-section">
           <header className="chart-section-head">
             <h2>As distribuições do cenário</h2>
-            <p>
-              De onde vieram os números: as duas matrizes sorteadas na inicialização, cada uma como
-              a fração de valores que cai em cada faixa
-            </p>
-          </header>
-          <p className="note">
-            As <strong>notas</strong> são as de primeira tentativa, sobre [0, 10] — é a normal do
-            cenário já truncada e arredondada, e o truncamento empilha massa nas pontas sempre que
-            a média estiver perto delas, o que não se lê dos parâmetros. A recursada fica de fora
-            porque ela desloca a média: misturar as tentativas somaria distribuições diferentes, e
-            quantas recursadas acontecem é resultado, não entrada.
-          </p>
-          <p className="note">
-            Nas <strong>utilidades</strong>, cada linha (aluno, período) é reescalada ao{" "}
-            <strong>próprio</strong> mínimo e máximo, então o eixo não é o valor da utilidade:{" "}
-            <strong>0</strong> é a disciplina que aquele aluno menos quer no período e{" "}
-            <strong>1</strong> é a que ele mais quer. Massa à esquerda é um aluno que quer uma
-            coisa e despreza o resto; massa espalhada é um aluno que diferencia pouco.
-          </p>
-          <div className="chart-grid">
+</header>
+                              <div className="chart-grid">
             {result.grade_distribution?.length ? (
               <Histogram
                 title="Notas de primeira tentativa"
-                hint="a normal do cenário, truncada em [0, 10]"
                 fractions={result.grade_distribution}
                 domain={[0, 10]}
               />
@@ -719,7 +640,6 @@ export function Results({
             {result.utility_distribution?.length ? (
               <Histogram
                 title="Utilidades"
-                hint="como a preferência de um aluno se reparte entre as disciplinas"
                 fractions={result.utility_distribution}
               />
             ) : null}
@@ -730,13 +650,7 @@ export function Results({
       <h2 className="chart-part-head">Gráficos por disciplina</h2>
 
       <div className="panel">
-        <p className="note">
-          Aqui o recorte é da <strong>oferta</strong>, não da população: as disciplinas se agrupam
-          por uma propriedade que compartilham, e disciplinas com o mesmo valor caem no mesmo
-          grupo. Sempre por período — a disciplina só fecha preço, ocupação e aprovações ao fim
-          dele.
-        </p>
-        <div className="field-row">
+                <div className="field-row">
           <div className="field">
             <label>Linhas do gráfico</label>
             <select
@@ -772,14 +686,12 @@ export function Results({
         <section className="chart-section" key={group.title}>
           <header className="chart-section-head">
             <h2>{group.title}</h2>
-            <p>{group.hint}</p>
           </header>
           <div className="chart-grid">
             {group.charts.map((chart) => (
               <MetricChart
                 key={chart.title}
                 title={chart.title}
-                hint={chart.hint}
                 data={buildDisciplineSeries(result, disciplineAxis, chart.of)}
                 series={visibleDisciplineSeries}
                 colors={disciplineColors}
@@ -830,16 +742,7 @@ export function Results({
 
       <div className="panel">
         <h2>Por {axis.legend.split(" no gráfico")[0].toLowerCase()} e período</h2>
-        <p className="note">
-          Escassez, concorrência e preço não entram aqui: as duas primeiras são médias de razões
-          por aluno e o preço é do bem, não de quem o comprou — somar recortes não reconstrói
-          nenhum dos três, e eles só se leem na tabela acima. A ocupação fica, porque é aditiva: o
-          parcial é a fatia das vagas que o recorte levou, e os parciais somam o total. O crédito
-          também fica — orçamento, lances, gasto, saldo e retorno são por aluno e se recortam —, e
-          é aqui que ele se lê por recorte: no gráfico as quatro grandezas dividem o eixo, e por
-          isso só cabe ali a média da universidade.
-        </p>
-        <table>
+                <table>
           <thead>
             <tr>
               <th>Recorte</th><th>Período</th><th>Ativos</th><th>Ingressos</th><th>Concluintes</th>
@@ -883,12 +786,7 @@ export function Results({
       {lastPeriod && (
         <div className="panel">
           <h2>Disciplinas no último período simulado</h2>
-          <p className="note">
-            "Garantidas" são as vagas entregues aos ingressantes antes de o leilão abrir: só as
-            disciplinas de 1º período têm, e é o que explica uma delas chegar à primeira rodada
-            já quase cheia. Sem vaga sobrando, a disciplina sai do mercado e não forma preço.
-          </p>
-          <table>
+                    <table>
             <thead>
               <tr>
                 <th>Disciplina</th><th>Período</th><th>Carga</th><th>Vagas</th>
