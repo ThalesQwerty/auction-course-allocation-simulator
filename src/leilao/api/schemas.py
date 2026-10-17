@@ -73,6 +73,14 @@ class DisciplineIn(BaseModel):
             "Vazio = disciplina de 1º período, em que o ingressante entra direto."
         ),
     )
+    elective: bool = Field(
+        default=False,
+        description=(
+            "optativa: sem pré-requisito, não é pré-requisito de ninguém, e fica fora "
+            "da matrícula garantida. Concluir exige somar `elective_hours` entre as "
+            "optativas aprovadas, e não aprovar em cada uma."
+        ),
+    )
 
 
 class ScenarioIn(BaseModel):
@@ -129,6 +137,11 @@ class ScenarioIn(BaseModel):
     )
     rounds: int = Field(default=1, ge=1, le=10, description="|R| — rodadas por período")
     min_grade: float = Field(default=5.0, gt=0, le=10, description="n_min")
+    elective_hours: int = Field(
+        default=0,
+        ge=0,
+        description="X — carga horária optativa exigida para concluir",
+    )
     base_credits: int = Field(default=10, ge=1, description="Gamma_min — créditos base")
     # f_gamma — eq. (34); as políticas estão em `grading.credit_return`.
     # Este e o `base_credits` acima são do leilão por créditos e não têm efeito
@@ -305,6 +318,9 @@ class MetricsOut(BaseModel):
     allocated: int
     allocations_per_student: float
     efficiency: float  # eq. (53)
+    # Aproveitamento: carga horária obtida no período ÷ W_a, média dos medidos.
+    # A contraparte em carga do psi, que é em utilidade.
+    utilization: float
     fairness: float  # eq. (55)
     occupancy: float  # eq. (54)
     scarcity: float  # escassez — elegíveis por vaga, média dos alunos

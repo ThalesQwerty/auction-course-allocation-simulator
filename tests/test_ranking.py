@@ -212,7 +212,7 @@ def test_the_baseline_has_no_credits_anywhere():
                 assert group.mean_credit_return is None
 
 
-def test_the_baseline_still_grants_the_entrants_their_first_period_seats():
+def test_the_baseline_still_grants_the_entrants_their_entry_seats():
     """A matrícula garantida é do modelo da universidade, não do mecanismo:
     vale igual nos dois lados."""
     result = run_simulation(make_config())

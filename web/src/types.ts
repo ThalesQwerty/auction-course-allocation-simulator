@@ -5,10 +5,15 @@ export interface DisciplineInput {
   seats: number; // q_x — vagas
   hours: number; // w_x — carga horária
   /** Disciplinas que o aluno precisa ter aprovado para disputar vaga aqui.
-   * Vazio = disciplina de 1º período, em que o ingressante entra direto, sem
-   * leilão. O período de cada disciplina sai daí por indução — ver
-   * `curriculum.ts`. */
+   * Vazio = 1º período na indução (ver `curriculum.ts`) — o que não é o mesmo
+   * que ser **disciplina de entrada**: a optativa também não tem pré-requisito
+   * e também cai no 1º período, mas fica fora da matrícula garantida. */
   prerequisites: string[];
+  /** Optativa: sem pré-requisito, não é pré-requisito de ninguém, e fica fora
+   * da matrícula garantida do ingressante. Concluir não exige aprovar em cada
+   * uma — exige somar `elective_hours` entre as aprovadas, e é isso que as
+   * torna substituíveis entre si. */
+  elective?: boolean;
 }
 
 /** Política de retorno de créditos f_γ — eq. (34). Espelha
@@ -74,11 +79,15 @@ export interface SimulateRequest {
    * geração correspondente. */
   entry_periods: number | null;
   /** Alunos que ingressam em cada período com ingresso; a população é isto × L.
-   * Não pode passar da menor oferta entre as disciplinas de 1º período, porque
+   * Não pode passar da menor oferta entre as **disciplinas de entrada**, porque
    * o ingressante tem **vaga garantida** em todas elas. */
   students_per_period: number;
   rounds: number; // |R|
   min_grade: number; // n_min
+  /** X — carga horária optativa exigida para concluir, somada entre as
+   * optativas aprovadas. Concluir é aprovar em todas as obrigatórias e chegar
+   * a este total; o aluno escolhe *quais* optativas. */
+  elective_hours: number;
   base_credits: number; // Γ_min
   credit_return: CreditReturnPolicy;
   seed: number;
@@ -250,10 +259,16 @@ export interface Metrics {
   students: number;
   allocated: number;
   allocations_per_student: number;
-  /** ψ̄ — eq. (53). A utilidade do aluno é zero fora do conjunto elegível, então
-   * ψ é a fração do que ele **podia** cursar e conseguiu: 1 é atingível, e é o
-   * que o ingressante com matrícula garantida obtém. */
+  /** ψ̄ — eq. (53): a soma das utilidades atendidas. A linha é normalizada
+   * sobre a grade, então o denominador vale 1 e ψ é a fração do desejo
+   * **total** do aluno que foi servida — não do que estava ao alcance dele.
+   * ψ = 1 exigiria cursar a grade inteira num período. */
   efficiency: number;
+  /** Aproveitamento — carga horária obtida no período ÷ W_a, média dos alunos
+   * medidos. É a contraparte em **carga** do ψ, que é em **utilidade**: o
+   * aluno que concentra o lance, ganha a disciplina que amava e deixa o resto
+   * de W_a ocioso pontua ψ alto e aproveitamento baixo. Em [0, 1]. */
+  utilization: number;
   fairness: number; // φ — Jain, eq. (55)
   occupancy: number; // θ — eq. (54)
   /** Escassez: elegíveis por vaga. Para cada disciplina que o aluno ainda pode
@@ -454,6 +469,7 @@ export function defaultScenario(): SimulateRequest {
     students_per_period: 1,
     rounds: 1,
     min_grade: 5,
+    elective_hours: 0,
     base_credits: 10,
     credit_return: "none",
     seed: 0,

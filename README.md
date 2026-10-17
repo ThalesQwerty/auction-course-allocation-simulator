@@ -235,11 +235,25 @@ dos dois lados — mas não têm efeito em `ranking`.
 
 ### O calouro conta como gente, não como dado
 
-Quem ingressa num período recebe vaga garantida em **todas** as disciplinas de
-1º período — que são exatamente as elegíveis para ele, já que não aprovou nada.
-Logo ele entra com `ψ = 1,000` e `CR = 0,000`, *sempre*, sem uma única exceção,
-e isso vale igual nos dois mecanismos. Medi-lo é medir a matrícula garantida,
-não a alocação.
+Quem ingressa num período recebe vaga garantida nas **disciplinas de entrada**
+— as obrigatórias sem pré-requisito. É um **pacote fixo**, igual para todo
+mundo e indiferente à preferência, e ele entra com `CR = 0,000` sempre. Medi-lo
+é medir a matrícula garantida, não a alocação, e isso vale igual nos dois
+mecanismos.
+
+O `ψ` do calouro depende de haver optativa no cenário, e vale saber qual dos
+dois casos você está lendo:
+
+| | conjunto elegível do calouro | ψ |
+| --- | --- | --- |
+| sem optativa | só as de entrada — exatamente o pacote | **1,000**, sem exceção |
+| com optativa | entrada + todo o catálogo de optativas | **~0,2**, nunca 1,000 |
+
+Com optativa a garantia deixa de cobrir o elegível: no preset são 6 vagas
+garantidas contra 30 elegíveis, e as 450 h do pacote já esgotam `W_a`, então o
+calouro não disputa o resto. O `ψ` dele passa a medir o quanto a preferência
+sorteada coincidiu com o pacote — **ruído**, onde antes era constante. A regra
+de excluí-lo não muda; o motivo, sim.
 
 No preset Computação ele é **11% de todas as linhas aluno-período**, e sozinho
 invertia o sinal da correlação da eq. (57):

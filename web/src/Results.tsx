@@ -168,8 +168,14 @@ const CHART_GROUPS: { title: string; hint: string; charts: ChartSpec[] }[] = [
     charts: [
       {
         title: "Eficiência de alocação (ψ̄)",
-        hint: "Satisfação média dos alunos que disputaram — eq. (53). A utilidade é zero fora do conjunto elegível, então ψ é a fração do que o aluno podia cursar e conseguiu: 1 é atingível. Quem acaba de ingressar não entra na conta — recebe vaga garantida em tudo que lhe é elegível e pontuaria 1 sem ter disputado nada",
+        hint: "Satisfação média dos alunos que disputaram — eq. (53): a soma das utilidades atendidas. A linha de utilidades é normalizada sobre a grade, então o denominador é 1 e ψ é a fração do desejo **total** do aluno que foi servida — não do que estava ao alcance dele. ψ = 1 exigiria cursar a grade inteira num período, então a escala é baixa de propósito e igual para todos. Quem acaba de ingressar não entra na conta: recebe um pacote fixo e o ψ dele mede coincidência de gosto, não alocação",
         accessor: (s) => s.metrics?.efficiency ?? null,
+        domain: [0, 1],
+      },
+      {
+        title: "Aproveitamento da carga",
+        hint: "Carga horária obtida no período dividida por W_a, na média dos alunos que disputaram. É a contraparte em carga do ψ, que é em utilidade: quem concentra o lance numa disciplina que ama e deixa o resto de W_a ocioso pontua ψ alto e aproveitamento baixo. 1 = todo mundo encheu a carga",
+        accessor: (s) => s.metrics?.utilization ?? null,
         domain: [0, 1],
       },
       {
@@ -791,7 +797,7 @@ export function Results({
           <thead>
             <tr>
               <th>Período</th><th>Ativos</th><th>Concluintes</th><th>Vagas preenchidas</th>
-              <th>Eficiência</th><th>Equidade</th><th>Ocupação</th><th>Escassez</th><th>Concorrência</th><th>Preço esperado</th><th>Semestralização</th>
+              <th>Eficiência</th><th>Aproveitamento</th><th>Equidade</th><th>Ocupação</th><th>Escassez</th><th>Concorrência</th><th>Preço esperado</th><th>Semestralização</th>
               <th>CR médio</th><th>Correlação</th>
             </tr>
           </thead>
@@ -806,6 +812,7 @@ export function Results({
                   <td>{period.graduated_now}</td>
                   <td>{m?.allocated ?? "—"}</td>
                   <td>{cell(m?.efficiency ?? null, formatRatio)}</td>
+                  <td>{cell(m?.utilization ?? null, formatRatio)}</td>
                   <td>{cell(m?.fairness ?? null, formatRatio)}</td>
                   <td>{cell(m?.occupancy ?? null, formatRatio)}</td>
                   <td>{cell(m?.scarcity ?? null, formatCount)}</td>
@@ -836,7 +843,7 @@ export function Results({
           <thead>
             <tr>
               <th>Recorte</th><th>Período</th><th>Ativos</th><th>Ingressos</th><th>Concluintes</th>
-              <th>Eficiência</th><th>Equidade</th><th>Ocupação</th><th>Semestralização</th><th>Vagas/aluno</th>
+              <th>Eficiência</th><th>Aproveitamento</th><th>Equidade</th><th>Ocupação</th><th>Semestralização</th><th>Vagas/aluno</th>
               <th>Orçamento</th><th>Lances</th><th>Gasto</th><th>Saldo</th><th>Retorno</th><th>Horas aprovadas</th>
             </tr>
           </thead>
@@ -854,6 +861,7 @@ export function Results({
                     <td>{snapshot.population}</td>
                     <td>{snapshot.graduated}</td>
                     <td>{cell(snapshot.metrics?.efficiency ?? null, formatRatio)}</td>
+                    <td>{cell(snapshot.metrics?.utilization ?? null, formatRatio)}</td>
                     <td>{cell(snapshot.metrics?.fairness ?? null, formatRatio)}</td>
                     <td>{cell(snapshot.metrics?.occupancy ?? null, formatRatio)}</td>
                     <td>{cell(snapshot.metrics?.semestralization ?? null, formatRatio)}</td>

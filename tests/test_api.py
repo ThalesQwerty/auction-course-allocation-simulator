@@ -145,7 +145,7 @@ def test_simulate_returns_series_by_period_and_cohort(client):
     }
 
 
-def test_simulate_grants_the_entrants_their_first_period_seats(client):
+def test_simulate_grants_the_entrants_their_entry_seats(client):
     """Quem ingressa entra sem leilão nas disciplinas sem pré-requisito, e o
     sistema lança o gasto correspondente."""
     payload = client.post(
@@ -169,7 +169,12 @@ def test_simulate_grants_the_entrants_their_first_period_seats(client):
             # 10 créditos repartidos em duas disciplinas: 5 em cada.
             assert all(r["paid"] == 5 for r in record["requests"])
             assert record["credits_spent"] == 10
-            assert record["satisfaction"] == pytest.approx(1.0)
+            # psi é a soma das utilidades atendidas (eq. 51 com denominador 1,
+            # a linha é normalizada sobre a grade). Para o calouro é a
+            # utilidade do pacote de entrada, menor que 1.
+            served = sum(r["utility"] for r in record["requests"])
+            assert record["satisfaction"] == pytest.approx(served)
+            assert 0 < record["satisfaction"] < 1
 
 
 def test_simulate_omits_histories_unless_asked(client):
@@ -288,9 +293,9 @@ def test_the_workload_cap_bounds_every_student(client):
             assert record["enrolled_hours"] <= POPULATION["max_hours"]
 
 
-def test_simulate_rejects_a_first_period_heavier_than_the_workload_cap(client):
+def test_simulate_rejects_entry_disciplines_heavier_than_the_workload_cap(client):
     """A matrícula garantida não escolhe quem a recebe, então a carga das
-    disciplinas de 1º período tem de caber em W_a."""
+    disciplinas de entrada tem de caber em W_a."""
     response = client.post(
         "/simulate", json={**SIMULATE_REQUEST, "max_hours": 90}
     )

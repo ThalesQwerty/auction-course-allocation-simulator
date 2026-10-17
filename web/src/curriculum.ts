@@ -57,11 +57,17 @@ export function curriculumPeriods(disciplines: DisciplineInput[]): Record<string
   return period;
 }
 
-/** As disciplinas sem pré-requisito, na ordem do cenário: a matrícula garantida
- * de quem ingressa. */
-export function firstPeriodDisciplines(disciplines: DisciplineInput[]): DisciplineInput[] {
+/** As **disciplinas de entrada**, na ordem do cenário: a matrícula garantida
+ * de quem ingressa.
+ *
+ * Não é o mesmo que "disciplinas de 1º período". Ser de 1º período sai da
+ * indução — não ter pré-requisito —, e a **optativa também não tem**, então
+ * ela cai no 1º período e não é entrada. É este conjunto, e não o do 1º
+ * período, que dimensiona `students_per_period` e `max_hours`. Espelha
+ * `SimulationConfig.entry_disciplines`. */
+export function entryDisciplines(disciplines: DisciplineInput[]): DisciplineInput[] {
   const period = curriculumPeriods(disciplines);
-  return disciplines.filter((d) => period[d.name] === 1);
+  return disciplines.filter((d) => period[d.name] === 1 && !d.elective);
 }
 
 /** Quantos períodos a grade tem — o maior período alcançado. 0 quando toda a

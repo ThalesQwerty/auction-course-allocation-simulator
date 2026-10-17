@@ -443,10 +443,12 @@ export function Comparison({
           execução inteira.
         </p>
         <p className="note">
-          <strong>Quem acabou de ingressar não entra em métrica nenhuma.</strong> O calouro recebe
-          vaga garantida em todas as disciplinas de 1º período — exatamente as elegíveis para ele
-          —, então pontua ψ = 1 contra CR = 0 por construção, e isso vale igual nos três modelos.
-          Medi-lo seria medir a matrícula garantida, não a alocação.
+          <strong>Quem acabou de ingressar não entra em métrica nenhuma.</strong> O calouro
+          recebe um pacote fixo — as disciplinas de entrada —, igual para todo mundo e indiferente
+          à preferência, e pontua CR = 0 por construção. O ψ dele mede só o quanto o gosto
+          sorteado coincidiu com o pacote (vale 1 quando não há optativa no cenário, e cai para a
+          faixa de 0,2 quando há). Nos dois casos é a matrícula garantida que estaria sendo
+          medida, e não a alocação — igual nos três modelos.
         </p>
       </div>
 

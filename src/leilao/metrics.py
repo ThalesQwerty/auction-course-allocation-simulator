@@ -14,6 +14,13 @@ class Metrics:
     allocated: int  # total de vagas obtidas pelo recorte
     allocations_per_student: float
     efficiency: float  # psi-barra — satisfação média, eq. (53)
+    # Aproveitamento — carga horária obtida no período dividida por W_a, média
+    # dos alunos medidos. É a contraparte em **carga** do psi, que é em
+    # **utilidade**, e as duas se separam exatamente onde está a patologia que
+    # importa: o aluno que concentra o lance, ganha uma disciplina que amava e
+    # deixa o resto de W_a ocioso pontua psi alto e aproveitamento baixo.
+    # Em [0, 1] por construção — a eq. (4) é restrição dos dois mecanismos.
+    utilization: float
     fairness: float  # phi — índice de equidade de Jain, eq. (55)
     occupancy: float  # theta — fração das vagas ofertadas, eq. (54)
     # As duas têm a mesma forma — `demand_per_seat` — sobre conjuntos
@@ -27,24 +34,34 @@ class Metrics:
 
 
 def satisfaction(*, utilities: dict[str, float], allocated: list[str]) -> float:
-    """psi_a = (1/U_a) * soma_x u_{a,x} * z_{a,x} — eq. (51), em [0, 1].
+    """psi_a = soma_x u_{a,x} * z_{a,x} — eq. (51), em [0, 1]: a fração do
+    **desejo total** do aluno naquele período que foi atendida.
 
-    `utilities` traz só o conjunto elegível (`behavior.utility_matrix`), e U_a é
-    a soma dele — eq. (43). A razão é então a fração do que o aluno **podia**
-    cursar e de fato cursou, e não a fração de um desejo que incluía disciplinas
-    fora do alcance dele: psi = 1 é atingível, e é o que o ingressante com
-    matrícula garantida obtém.
+    O denominador da eq. (51) é a linha inteira da matriz de utilidades, e ela
+    **vale 1 por construção** — `behavior.draw_utilities` normaliza sobre a
+    grade —, então a divisão some e psi é a soma simples das utilidades
+    atendidas. A invariante está travada em
+    `test_a_utility_row_sums_to_one_over_the_whole_curriculum`: se a
+    normalização mudar, aquele teste quebra antes de psi passar a mentir.
 
-    O denominador é 1 por construção, já que a utilidade é normalizada sobre o
-    conjunto elegível. A divisão continua escrita porque é a eq. (51) e porque
-    mantém o valor em [0, 1] mesmo com o resíduo do ponto flutuante acumulado na
-    normalização; `U_a <= 0` só acontece com o conjunto elegível vazio, de quem
-    já aprovou a grade inteira e nem chega a disputar.
+    **Mudou em relação à versão anterior**, e vale saber qual você está lendo.
+    Antes o denominador era `U_a` — a soma só sobre o conjunto **elegível**
+    (eq. 43) —, e psi media "do que eu podia cursar, quanto cursei". Como U_a
+    varia de ~0,002 a ~0,65 entre linhas, aquilo era uma razão de denominador
+    móvel: maximizá-la premiava estar num período pobre de opções, o que a
+    inviabilizava como função de aptidão num experimento evolutivo.
+
+    As duas leituras são recuperáveis uma da outra enquanto `U_a` estiver no
+    relatório: `psi_elegível = psi / U_a`. O que se perde com o denominador
+    fixo é que **psi = 1 deixa de ser atingível** — ela exigiria cursar a grade
+    inteira num período —, e o que se ganha é que a escala é a mesma para todo
+    mundo, em todo período.
+
+    `allocated` pode trazer disciplina fora de `utilities` (já aprovada, por
+    exemplo); `.get(name, 0.0)` a ignora, que é o certo: ela não é desejo deste
+    período.
     """
-    total = sum(utilities.values())
-    if total <= 0:
-        return 0.0
-    return sum(utilities.get(name, 0.0) for name in allocated) / total
+    return sum(utilities.get(name, 0.0) for name in allocated)
 
 
 def demand_per_seat(*, demands: list[float]) -> float:
@@ -133,6 +150,7 @@ def pearson(xs: list[float], ys: list[float]) -> float:
 def compute_metrics(
     *,
     satisfactions: list[float],
+    utilizations: list[float],
     grade_averages: list[float],
     semestralizations: list[float],
     scarcities: list[float],
@@ -154,6 +172,7 @@ def compute_metrics(
         allocated=allocated,
         allocations_per_student=allocated / count if count else 0.0,
         efficiency=sum(satisfactions) / count if count else 0.0,
+        utilization=sum(utilizations) / count if count else 0.0,
         fairness=jain_index(satisfactions),
         occupancy=allocated / total_seats if total_seats else 0.0,
         scarcity=sum(scarcities) / count if count else 0.0,

@@ -206,7 +206,7 @@ def test_scarcity_only_counts_who_can_actually_take_the_discipline():
     config = make_config(**NEVER_APPROVES)
     result = run_simulation(config)
     overall = result.periods[1].aggregate.overall.metrics
-    first = config.first_period_disciplines()
+    first = config.entry_disciplines()
     seats = config.hours_by_discipline()  # só para ter o dict de nomes
     assert set(first) == {"D1", "D2"}
     by_name = {d.name: d for d in config.disciplines}
@@ -515,7 +515,7 @@ def test_the_entering_generation_is_left_out_of_the_metrics():
 # --- matrícula garantida de quem ingressa ---------------------------------
 
 
-def first_period_records(result, students):
+def entry_records(result, students):
     """O registro do período de ingresso de cada aluno."""
     entry = {s.id: s.entry_period for s in students}
     return [
@@ -526,13 +526,13 @@ def first_period_records(result, students):
     ]
 
 
-def test_entrants_get_every_first_period_discipline_without_bidding():
+def test_entrants_get_every_entry_discipline_without_bidding():
     config = make_config(periods=6)
     result = run_simulation(config)
-    first = set(config.first_period_disciplines())
+    first = set(config.entry_disciplines())
     assert first == {"D1", "D2"}
 
-    records = first_period_records(result, result.students)
+    records = entry_records(result, result.students)
     assert records, "toda geração deveria ter um período de ingresso registrado"
     for student_id, record in records:
         granted = {r.discipline for r in record.requests if r.won_round == GUARANTEED_ROUND}
@@ -540,18 +540,23 @@ def test_entrants_get_every_first_period_discipline_without_bidding():
         # Nada mais é elegível para quem acabou de entrar, então o pedido é
         # exatamente a matrícula garantida.
         assert {r.discipline for r in record.requests} == first
-        # E a satisfação é plena: ele obteve tudo que podia querer — eq. (51).
-        assert record.satisfaction == pytest.approx(1.0)
+        # E psi é a soma das utilidades atendidas — eq. (51) com o
+        # denominador fixo em 1 (a linha é normalizada sobre a grade). Para o
+        # calouro isso é a utilidade do pacote de entrada, que **não** é 1:
+        # o resto da grade continua sendo desejo dele, só que fora de alcance.
+        served = sum(r.utility for r in record.requests if r.won_round is not None)
+        assert record.satisfaction == pytest.approx(served)
+        assert 0 < record.satisfaction < 1
 
 
 def test_the_system_charges_the_entrant_an_equal_share_of_the_budget():
     """"Gastaram seus créditos igualmente", com o resto da divisão no saldo."""
     config = make_config(periods=4, base_credits=10)
     result = run_simulation(config)
-    first = config.first_period_disciplines()
+    first = config.entry_disciplines()
     share = config.base_credits // len(first)  # 10 // 2 = 5
 
-    for _, record in first_period_records(result, result.students):
+    for _, record in entry_records(result, result.students):
         assert record.credits_start == config.base_credits
         assert all(r.paid == share for r in record.requests)
         assert record.credits_spent == share * len(first)
@@ -564,7 +569,7 @@ def test_an_indivisible_budget_leaves_the_remainder_with_the_entrant():
     """Divisão inteira: com 7 créditos e 2 disciplinas, 3 em cada e 1 de sobra."""
     config = make_config(periods=2, base_credits=7)
     result = run_simulation(config)
-    for _, record in first_period_records(result, result.students):
+    for _, record in entry_records(result, result.students):
         assert record.credits_spent == 6
         assert record.credits_end == 1 + 7 + record.credits_returned
 
@@ -574,10 +579,10 @@ def test_the_entrant_share_feeds_the_credit_return():
     lançado é o `paid` da disciplina, e é sobre ele que a política trabalha."""
     config = make_config(periods=4, credit_return="full", base_credits=10)
     result = run_simulation(config)
-    share = config.base_credits // len(config.first_period_disciplines())
+    share = config.base_credits // len(config.entry_disciplines())
     returned = [
         r
-        for _, record in first_period_records(result, result.students)
+        for _, record in entry_records(result, result.students)
         for r in record.requests
         if r.approved
     ]
@@ -590,7 +595,7 @@ def test_guaranteed_seats_leave_the_market_before_the_first_round():
     quando a primeira rodada abre, e é isso que a coluna `granted` mostra."""
     config = make_config(periods=5)
     result = run_simulation(config)
-    first = set(config.first_period_disciplines())
+    first = set(config.entry_disciplines())
     per_period = config.students_per_period
 
     for period in result.periods:
@@ -601,9 +606,9 @@ def test_guaranteed_seats_leave_the_market_before_the_first_round():
                 assert snapshot.granted == 0
 
 
-def test_a_generation_larger_than_the_smallest_first_period_offer_is_rejected():
+def test_a_generation_larger_than_the_smallest_entry_offer_is_rejected():
     """A garantia só é garantia se couber: o ritmo de ingresso não pode passar
-    da menor oferta entre as disciplinas de 1º período."""
+    da menor oferta entre as disciplinas de entrada."""
     with pytest.raises(ValueError, match="menor oferta"):
         SimulationConfig(
             disciplines=[
@@ -619,7 +624,7 @@ def test_a_generation_larger_than_the_smallest_first_period_offer_is_rejected():
     ).students_per_period == 4
 
 
-def test_a_first_period_heavier_than_the_workload_cap_is_rejected():
+def test_entry_disciplines_heavier_than_the_workload_cap_are_rejected():
     """O ingressante cursa as de 1º período todas de uma vez: a carga somada
     delas tem de caber em W_a, senão a eq. (4) seria violada na entrada."""
     with pytest.raises(ValueError, match="não cabem na carga horária máxima"):
@@ -633,12 +638,12 @@ def test_a_first_period_heavier_than_the_workload_cap_is_rejected():
         )
 
 
-def test_retaking_a_first_period_discipline_goes_through_the_auction():
+def test_retaking_an_entry_discipline_goes_through_the_auction():
     """A garantia vale só no ingresso: quem reprova em D1 disputa a vaga como
     qualquer outro, no leilão."""
     config = make_config(periods=8)
     result = run_simulation(config)
-    first = set(config.first_period_disciplines())
+    first = set(config.entry_disciplines())
     entry = {s.id: s.entry_period for s in result.students}
 
     retakes = [
@@ -964,3 +969,167 @@ def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
 
 
 
+
+
+# --- optativas -------------------------------------------------------------
+#
+# Quatro optativas de 60 h sobre a mesma grade, com exigência de 120 h: o aluno
+# precisa de duas das quatro, e escolhe quais. É essa folga entre catálogo e
+# exigência que torna as optativas substituíveis entre si — a propriedade que a
+# ordenação por CR não consegue expressar e o lance consegue.
+ELECTIVES = [
+    Discipline(f"OPT{i}", seats=36, hours=60, elective=True) for i in range(1, 5)
+]
+ELECTIVE_QUOTA = 120
+
+
+def make_elective_config(**overrides) -> SimulationConfig:
+    return make_config(
+        disciplines=GRADE + ELECTIVES,
+        elective_hours=ELECTIVE_QUOTA,
+        periods=12,
+        **overrides,
+    )
+
+
+def test_electives_stay_out_of_the_guaranteed_enrollment():
+    """A optativa é de 1º período na indução (não tem pré-requisito), mas dar
+    todas de graça ao ingressante entregaria a exigência antes de ele disputar
+    coisa alguma — e a carga somada estouraria W_a."""
+    config = make_elective_config()
+    first = config.entry_disciplines()
+    assert first == ["D1", "D2"]
+    assert all(config.curriculum_periods()[d.name] == 1 for d in ELECTIVES)
+
+    result = run_simulation(config)
+    guaranteed = {
+        record.discipline
+        for history in result.histories
+        for period in history.periods
+        for record in period.requests
+        if record.won_round == GUARANTEED_ROUND
+    }
+    assert guaranteed == {"D1", "D2"}
+
+
+def test_graduating_requires_the_elective_hours_not_every_elective():
+    """A eq. (40) estendida: todas as obrigatórias, mais X horas somadas entre
+    as optativas aprovadas. Quem conclui não cursou o catálogo inteiro."""
+    config = make_elective_config()
+    result = run_simulation(config)
+    names = {d.name for d in ELECTIVES}
+    done = [s for s in result.students if s.graduated_at is not None]
+    assert done, "ninguém concluiu o curso"
+
+    by_id = {h.student_id: h for h in result.histories}
+    for student in done:
+        approved = {
+            record.discipline
+            for period in by_id[student.id].periods
+            for record in period.requests
+            if record.approved
+        }
+        assert {d.name for d in GRADE} <= approved
+        taken = approved & names
+        assert sum(60 for _ in taken) >= ELECTIVE_QUOTA
+        # O teto do elegível limita o excesso a uma disciplina: ele some do
+        # conjunto assim que a exigência é alcançada, não antes.
+        assert len(taken) < len(names)
+
+
+def test_electives_leave_the_eligible_set_once_the_requirement_is_met():
+    config = make_elective_config()
+    assert "OPT1" in config.eligible_disciplines(set())
+    assert "OPT3" in config.eligible_disciplines({"OPT1"})  # 60 h < 120 h
+    met = config.eligible_disciplines({"OPT1", "OPT2"})  # 120 h >= 120 h
+    assert not any(name.startswith("OPT") for name in met)
+    assert "D1" in met  # a obrigatória continua elegível
+
+
+def test_hours_to_graduate_counts_required_plus_the_quota():
+    """Não é a carga da grade inteira: o catálogo de optativas é maior que a
+    exigência de propósito."""
+    config = make_elective_config()
+    assert config.hours_to_graduate() == 6 * 60 + ELECTIVE_QUOTA
+    assert sum(d.hours for d in config.disciplines) == 10 * 60
+
+
+def test_an_elective_cannot_have_prerequisites():
+    with pytest.raises(ValueError, match="optativa .* não pode ter pré-requisito"):
+        Discipline("OPT", seats=1, hours=60, prerequisites=("D1",), elective=True)
+
+
+def test_an_elective_cannot_unlock_anything():
+    with pytest.raises(ValueError, match="optativa como pré-requisito"):
+        make_config(
+            disciplines=GRADE
+            + [Discipline("OPT", seats=1, hours=60, elective=True)]
+            + [Discipline("D7", seats=1, hours=60, prerequisites=("OPT",))]
+        )
+
+
+def test_the_elective_requirement_must_fit_the_offer():
+    with pytest.raises(ValueError, match="não cabe nas .* h ofertadas"):
+        make_config(disciplines=GRADE + ELECTIVES, elective_hours=10 * 60)
+
+
+def test_entry_validations_ignore_electives():
+    """Os dois limites do ingresso — geração contra a menor oferta e carga
+    somada contra W_a — se medem sobre as **disciplinas de entrada**, não sobre
+    as de 1º período. A optativa cai no 1º período na indução (não tem
+    pré-requisito) e contá-la recusaria cenário que o motor aceita, com o erro
+    crescendo junto com o catálogo."""
+    config = make_elective_config()
+    entry = config.entry_disciplines()
+    assert entry == ["D1", "D2"]
+    assert sum(d.hours for d in GRADE if d.name in entry) <= config.max_hours
+
+    # As quatro optativas somam 240 h sobre um W_a de 180: se entrassem na
+    # conta, este cenário seria recusado.
+    assert sum(d.hours for d in ELECTIVES) > config.max_hours
+
+    # E uma optativa com menos vagas que a geração também não pode barrar nada:
+    # ninguém tem vaga garantida nela.
+    tight = make_config(
+        disciplines=GRADE + [Discipline("OPT_RARA", seats=1, hours=60, elective=True)],
+        elective_hours=60,
+        periods=12,
+    )
+    assert tight.entry_disciplines() == ["D1", "D2"]
+
+
+def test_utilization_is_the_share_of_the_workload_cap_that_was_filled():
+    """Aproveitamento = carga obtida ÷ W_a. Ele vem da alocação, não do
+    desempenho: a disciplina conta assim que a vaga é obtida, reprove o aluno
+    nela ou não. É a contraparte em carga do ψ, que é em utilidade."""
+    config = make_config(periods=6)
+    result = run_simulation(config)
+    hours = config.hours_by_discipline()
+
+    reported = {
+        (period.period, snapshot.group): snapshot.metrics
+        for period in result.periods
+        for snapshot in [period.aggregate.overall]
+    }
+    assert any(m is not None for m in reported.values())
+    for metrics in reported.values():
+        if metrics is not None:
+            assert 0.0 <= metrics.utilization <= 1.0
+
+    # Reconstrução a partir das linhas individuais: o agregado de um período é
+    # a média de (horas obtidas ÷ W_a) sobre quem não é calouro ali.
+    entry = {s.id: s.entry_period for s in result.students}
+    by_period: dict[int, list[float]] = {}
+    for history in result.histories:
+        for record in history.periods:
+            if record.period == entry[history.student_id]:
+                continue
+            won = sum(
+                hours[r.discipline] for r in record.requests if r.won_round is not None
+            )
+            assert won == record.enrolled_hours
+            by_period.setdefault(record.period, []).append(won / config.max_hours)
+    for period, shares in by_period.items():
+        metrics = reported[(period, None)]
+        assert metrics is not None
+        assert metrics.utilization == pytest.approx(sum(shares) / len(shares))

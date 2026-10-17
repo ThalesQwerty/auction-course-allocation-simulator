@@ -40,13 +40,26 @@ class Discipline:
     """Uma disciplina ofertada — o bem escaso x in B (Tabela 1).
 
     `prerequisites` é a lista de disciplinas que o aluno precisa ter aprovado
-    para ficar elegível a disputar vaga aqui. Vazia = disciplina de 1º período.
+    para ficar elegível a disputar vaga aqui. Vazia = **1º período** na indução
+    de `curriculum_periods` — o que não é a mesma coisa que ser **disciplina de
+    entrada**: a optativa também não tem pré-requisito e também cai no 1º
+    período, mas fica fora da matrícula garantida. Quem é entrada é
+    `entry_disciplines`.
+
+    `elective` marca a **optativa**: ela não tem pré-requisito, não é
+    pré-requisito de ninguém, e o ingressante **não** a recebe na matrícula
+    garantida. Concluir não exige aprovar em cada uma delas — exige somar
+    `SimulationConfig.elective_hours` entre as que foram aprovadas, e é isso
+    que as torna substituíveis entre si. Elas ficam elegíveis desde o 1º
+    período e continuam elegíveis depois de a exigência estar cumprida: cursar
+    mais do que o mínimo é escolha do aluno, não erro do modelo.
     """
 
     name: str
     seats: int  # q_x — vagas
     hours: int  # w_x — carga horária
     prerequisites: tuple[str, ...] = ()
+    elective: bool = False
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -59,6 +72,12 @@ class Discipline:
             raise ValueError(f"disciplina {self.name!r} é pré-requisito de si mesma")
         if len(set(self.prerequisites)) != len(self.prerequisites):
             raise ValueError(f"disciplina {self.name!r}: pré-requisitos repetidos")
+        if self.elective and self.prerequisites:
+            raise ValueError(
+                f"optativa {self.name!r} não pode ter pré-requisito: ela existe para "
+                "estar sempre ao alcance, e um pré-requisito a tiraria do conjunto "
+                "elegível justamente de quem está atrasado"
+            )
 
 
 @dataclass(frozen=True)
@@ -74,7 +93,7 @@ class SimulationConfig:
     # tempo de chegar ao fim do curso em vez de serem cortadas pelo horizonte.
     entry_periods: int | None = None
     # Alunos que ingressam em cada um dos L períodos com ingresso. O ingressante
-    # tem vaga garantida em todas as disciplinas de 1º período, então o ritmo de
+    # tem vaga garantida em todas as disciplinas de entrada, então o ritmo de
     # entrada não pode passar da menor oferta entre elas — senão a garantia não
     # caberia. A população é este número vezes L.
     students_per_period: int = 1
@@ -106,6 +125,12 @@ class SimulationConfig:
     max_hours: int = 360
     rounds: int = 1  # |R| — rodadas de alocação por período
     min_grade: float = 5.0  # n_min — nota mínima de aprovação
+    # X — carga horária optativa exigida para concluir, somada entre as
+    # optativas aprovadas. Concluir é aprovar em **todas** as obrigatórias e
+    # chegar a este total nas optativas (eq. 40 estendida). O aluno escolhe
+    # *quais*, e é essa substituibilidade — "qualquer X horas serve" — que a
+    # ordenação por CR não consegue capturar e o lance consegue.
+    elective_hours: int = 0
     # Os dois parâmetros abaixo são do leilão por créditos e **não têm efeito**
     # com `mechanism="ranking"`: ali não há orçamento a repor nem preço pago a
     # devolver. Ficam no cenário assim mesmo porque a comparação entre os dois
@@ -166,28 +191,55 @@ class SimulationConfig:
                     f"{sorted(unknown)}"
                 )
 
+        # A optativa não destrava nada: se ela aparecesse como pré-requisito, a
+        # cadeia passaria a depender de uma disciplina que ninguém é obrigado a
+        # cursar, e a grade deixaria de ser concluível por quem cumpriu a
+        # exigência em horas por outro caminho.
+        electives = {d.name for d in self.disciplines if d.elective}
+        for discipline in self.disciplines:
+            blocking = electives & set(discipline.prerequisites)
+            if blocking:
+                raise ValueError(
+                    f"disciplina {discipline.name!r} tem optativa como pré-requisito: "
+                    f"{sorted(blocking)} — optativa não destrava nada"
+                )
+
+        if self.elective_hours < 0:
+            raise ValueError("elective_hours (X) deve ser >= 0")
+        offered = sum(d.hours for d in self.disciplines if d.elective)
+        if self.elective_hours > offered:
+            raise ValueError(
+                f"a exigência de {self.elective_hours} h optativas não cabe nas "
+                f"{offered} h ofertadas em optativas: ninguém concluiria"
+            )
+
         # Levanta se houver ciclo: uma cadeia de pré-requisitos que se fecha não
         # tem período nenhum, e as disciplinas dela seriam inalcançáveis para
         # sempre — o cenário não se conclui por construção.
-        first = self.first_period_disciplines()
+        entry = self.entry_disciplines()
 
         seats = {d.name: d.seats for d in self.disciplines}
         hours = {d.name: d.hours for d in self.disciplines}
-        # O ingressante entra direto nas disciplinas de 1º período, sem leilão:
+        # O ingressante entra direto nas disciplinas de entrada, sem leilão:
         # a oferta tem de comportar a geração inteira, e a carga somada tem de
         # caber em W_a — senão a matrícula garantida violaria a eq. (4).
-        smallest = min(seats[name] for name in first)
+        if not entry:
+            # Grade só de optativas: não há matrícula garantida a validar, e o
+            # ingressante disputa como qualquer um. Não é cenário que o preset
+            # use, mas é construível e não deve estourar aqui.
+            return
+        smallest = min(seats[name] for name in entry)
         if self.students_per_period > smallest:
-            tightest = min(first, key=lambda name: (seats[name], name))
+            tightest = min(entry, key=lambda name: (seats[name], name))
             raise ValueError(
                 f"alunos por período ({self.students_per_period}) passa da menor oferta "
-                f"entre as disciplinas de 1º período ({smallest} vagas em {tightest!r}): "
+                f"entre as disciplinas de entrada ({smallest} vagas em {tightest!r}): "
                 "o ingressante tem vaga garantida em todas elas"
             )
-        entry_hours = sum(hours[name] for name in first)
+        entry_hours = sum(hours[name] for name in entry)
         if entry_hours > self.max_hours:
             raise ValueError(
-                f"as {len(first)} disciplinas de 1º período somam {entry_hours} h e não "
+                f"as {len(entry)} disciplinas de entrada somam {entry_hours} h e não "
                 f"cabem na carga horária máxima (W_a = {self.max_hours}) — eq. (4); o "
                 "ingressante cursa todas elas de uma vez"
             )
@@ -237,28 +289,75 @@ class SimulationConfig:
                 stack.extend((p, False) for p in requires[name])
         return period
 
-    def first_period_disciplines(self) -> list[str]:
-        """As disciplinas sem pré-requisito, na ordem do cenário — a matrícula
-        garantida de quem ingressa."""
+    def entry_disciplines(self) -> list[str]:
+        """As **disciplinas de entrada**, na ordem do cenário: a matrícula
+        garantida de quem ingressa.
+
+        Não confundir com "disciplinas de 1º período". Ser de 1º período é
+        resultado da indução de `curriculum_periods` — não ter pré-requisito —,
+        e a **optativa também não tem**, então ela cai no 1º período e não é
+        entrada. Dar todas as optativas de graça ao ingressante entregaria a
+        exigência em horas antes de ele disputar coisa alguma, e a carga somada
+        estouraria W_a (eq. 4).
+
+        É este conjunto, e não o do 1º período, que dimensiona as validações de
+        `students_per_period` e `max_hours`: o que a oferta precisa comportar é
+        a geração inteira entrando de uma vez, e isso só vale para a entrada.
+        """
         period = self.curriculum_periods()
-        return [d.name for d in self.disciplines if period[d.name] == 1]
+        return [
+            d.name for d in self.disciplines if period[d.name] == 1 and not d.elective
+        ]
 
     def eligible_disciplines(self, approved: set[str]) -> list[str]:
         """Disciplinas que o aluno ainda precisa cursar e já pode disputar:
-        não aprovadas e com todos os pré-requisitos cumpridos."""
+        não aprovadas, com todos os pré-requisitos cumpridos, e — no caso da
+        optativa — **enquanto a exigência X não estiver cumprida**.
+
+        O teto nas optativas não é detalhe de calibragem, é o que faz `X`
+        significar alguma coisa. Sem ele a optativa fica elegível para sempre
+        (nunca aprovada, sem pré-requisito), o aluno continua apostando nela
+        por utilidade, e medindo-se o cenário quem conclui tinha aprovado o
+        catálogo **inteiro**: 1 560 h de optativa onde 480 h eram exigidas.
+        A exigência não restringia nada e a substituibilidade — escolher
+        *quais* optativas — nunca chegava a ser exercida.
+
+        Com `elective_hours = 0` nenhuma optativa é elegível, o que é a leitura
+        consistente: sem exigência, elas não contam para coisa alguma.
+        """
+        met = (
+            sum(d.hours for d in self.disciplines if d.elective and d.name in approved)
+            >= self.elective_hours
+        )
         return [
             d.name
             for d in self.disciplines
-            if d.name not in approved and all(p in approved for p in d.prerequisites)
+            if d.name not in approved
+            and all(p in approved for p in d.prerequisites)
+            and not (d.elective and met)
         ]
 
     def hours_by_discipline(self) -> dict[str, int]:
         return {d.name: d.hours for d in self.disciplines}
 
+    def required_disciplines(self) -> set[str]:
+        """As obrigatórias — o que a eq. (40) exige aprovar uma a uma."""
+        return {d.name for d in self.disciplines if not d.elective}
+
+    def elective_hours_by_discipline(self) -> dict[str, int]:
+        """Carga de cada optativa, para somar o que o aluno já cumpriu de X."""
+        return {d.name: d.hours for d in self.disciplines if d.elective}
+
     def hours_to_graduate(self) -> int:
-        """S — a carga horária da grade inteira. Como toda disciplina é
-        obrigatória, concluir é aprovar em todas, e a meta é a soma de w_x."""
-        return sum(d.hours for d in self.disciplines)
+        """S — a carga horária mínima para concluir: a soma de w_x de **todas
+        as obrigatórias** mais a exigência optativa X.
+
+        Não é a carga da grade inteira desde que há optativa: o catálogo delas
+        é maior que a exigência de propósito, e é essa folga que dá ao aluno o
+        que escolher.
+        """
+        required = sum(d.hours for d in self.disciplines if not d.elective)
+        return required + self.elective_hours
 
     def minimum_periods_to_graduate(self) -> int:
         """Piso de períodos para concluir: nem quem nunca reprova nem perde uma

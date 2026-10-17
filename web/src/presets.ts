@@ -42,7 +42,9 @@ const HOURS = [60, 90] as const;
  * nada mais. Isso importa duas vezes. Faz a disputa ser por *quais* seis, e não
  * por quantas — quem fica para trás tem de escolher entre recuperar o atraso e
  * avançar. E deixa a matrícula garantida do ingressante caber em W_a: ele entra
- * nas seis do 1º período de uma vez, e a eq. (4) tem de continuar valendo. */
+ * nas seis disciplinas de entrada de uma vez, e a eq. (4) tem de continuar
+ * valendo. As optativas não entram nessa conta: elas não têm pré-requisito e
+ * também caem no 1º período, mas ficam fora da matrícula garantida. */
 type Entry = [string, number, number, string[]];
 
 const P1: Entry[] = [
@@ -100,6 +102,58 @@ const P6: Entry[] = [
 ];
 
 const GRADE = [P1, P2, P3, P4, P5, P6];
+
+/** As **optativas**: sem pré-requisito, não destravam nada, e ficam de fora da
+ * matrícula garantida. Concluir exige somar `ELECTIVE_HOURS` entre as que o
+ * aluno aprovar — ele escolhe *quais*, e é essa substituibilidade que a
+ * ordenação por CR não consegue expressar e o lance consegue.
+ *
+ * O catálogo é deliberadamente maior que a exigência: 1 560 h ofertadas contra
+ * 480 h cobradas, o que deixa centenas de formas de cumprir o requisito e
+ * mantém o conjunto elegível apertando a carga horária até o fim do curso.
+ *
+ * Três cargas em vez de duas. As de **30 h** não são variedade: com W_a = 450
+ * divisível por 30, sobras de carga passam a ser preenchíveis exatamente, e a
+ * mochila 0-1 da linha de base — que hoje quase nunca tem o que decidir —
+ * ganha trabalho. Por isso mesmo elas serão procuradas por *caber*, e não por
+ * serem desejadas: vão todas com 120 vagas, senão viram a coisa mais disputada
+ * do cenário por um motivo que nada tem a ver com preferência. */
+const OPTATIVAS: Entry[] = [
+  // 12 x 60 h — o corpo do catálogo, vagas em 40/80/120
+  ["Interação Humano-Computador", 60, 40, []],
+  ["Desenvolvimento Web", 60, 80, []],
+  ["Desenvolvimento Mobile", 60, 120, []],
+  ["Programação Competitiva", 60, 40, []],
+  ["Jogos Digitais", 60, 80, []],
+  ["Robótica", 60, 120, []],
+  ["Sistemas Embarcados", 60, 40, []],
+  ["Bioinformática", 60, 80, []],
+  ["Computação Quântica", 60, 120, []],
+  ["Ética e Computação", 60, 40, []],
+  ["Empreendedorismo em TI", 60, 80, []],
+  ["Computação Musical", 60, 120, []],
+  // 8 x 90 h — as caras, que ocupam um quinto da carga de um período
+  ["Visão Computacional", 90, 40, []],
+  ["Mineração de Dados", 90, 80, []],
+  ["Computação Paralela", 90, 120, []],
+  ["Otimização Combinatória", 90, 40, []],
+  ["Teoria dos Jogos", 90, 80, []],
+  ["Lógica para Computação", 90, 120, []],
+  ["Linguagens Formais", 90, 40, []],
+  ["Processamento de Imagens", 90, 80, []],
+  // 4 x 30 h — as de encaixe, todas abundantes de propósito
+  ["Seminários de Pesquisa", 30, 120, []],
+  ["Oficina de Escrita Técnica", 30, 120, []],
+  ["Tópicos em Software Livre", 30, 120, []],
+  ["Introdução à Extensão", 30, 120, []],
+];
+
+/** X — carga horária optativa exigida para concluir. Com 2 700 h de
+ * obrigatórias, o piso de períodos vai de ceil(2700/450) = 6 para
+ * ceil(3180/450) = **8**: como W_a é exatamente um período da grade, cada hora
+ * de optativa desloca uma hora de obrigatória. É por isso que |T| sobe junto. */
+const ELECTIVE_HOURS = 480;
+
 
 /** Carga horária máxima por período (W_a), igual para todos. É exatamente a
  * soma de um período da grade. */
@@ -168,6 +222,15 @@ const toDisciplines = (groups: Entry[][]): DisciplineInput[] =>
     prerequisites,
   }));
 
+const toElectives = (entries: Entry[]): DisciplineInput[] =>
+  entries.map(([name, hours, seats]) => ({
+    name,
+    hours,
+    seats,
+    prerequisites: [],
+    elective: true,
+  }));
+
 /** O que os dois presets têm em comum: a mesma universidade e a mesma
  * calibragem da oferta. Eles diferem só na dispersão das duas normais e em
  * Γ_min, que é justamente o que faz um servir de controle do outro — qualquer
@@ -176,9 +239,16 @@ const commonScenario = (): Omit<
   SimulateRequest,
   "grade_mean" | "grade_stddev" | "learning_gain" | "utility_sigma" | "max_hours" | "base_credits"
 > => ({
-  disciplines: toDisciplines(GRADE),
-  periods: 12,
-  // Ingresso nos 6 primeiros e drenagem nos 6 últimos. Sem a drenagem as
+  disciplines: [...toDisciplines(GRADE), ...toElectives(OPTATIVAS)],
+  elective_hours: ELECTIVE_HOURS,
+  // |T|. O piso para concluir é 8 períodos com as optativas (era 6), e na
+  // prática ele sai um acima do teórico — ninguém quer exatamente as seis
+  // disciplinas do próprio período semestre após semestre. Com L = 6, a última
+  // geração entra em t = 6 e precisa chegar ao fim: 6 - 1 + 9 = 14. Abaixo
+  // disso as gerações tardias não formam ninguém e a série por geração volta a
+  // medir quanto horizonte sobrou, não o mecanismo.
+  periods: 14,
+  // Ingresso nos 6 primeiros e drenagem nos 8 últimos. Sem a drenagem as
   // últimas gerações eram cortadas pelo horizonte antes de poderem se formar —
   // a última geração vivia um período só —, e a série por geração media quanto
   // tempo de simulação sobrou, não o mecanismo. Seis é o piso teórico da grade:

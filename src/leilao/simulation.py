@@ -23,7 +23,7 @@ existiram até 08/10/2026 e saíram junto com os perfis de aluno: sem diferença
 sistemática entre alunos, não há o que separar além da senioridade.
 
 **Quem ingressa não disputa.** O aluno novo recebe vaga garantida em todas as
-disciplinas de 1º período — as sem pré-requisito — e fica de fora do leilão
+disciplinas de entrada — as sem pré-requisito — e fica de fora do leilão
 naquele período. O sistema lança na conta dele o gasto correspondente,
 repartindo o orçamento igualmente entre essas disciplinas (o resto da divisão
 continua no saldo), e é esse valor que alimenta o retorno de créditos da
@@ -76,12 +76,21 @@ class GroupSnapshot:
     baixo qualquer média feita sobre os períodos.
 
     **O calouro conta como gente, não como dado.** Quem ingressa no período não
-    disputou nada: recebeu vaga garantida em todas as disciplinas de 1º período,
-    que são exatamente as elegíveis para ele. Entra, portanto, com psi = 1,000 e
-    CR = 0,000 — *sempre*, sem exceção —, e medir o mecanismo sobre esse ponto é
-    medir a matrícula garantida, que é igual nos dois mecanismos. No preset
-    Computação ele é 11% de todas as linhas aluno-período, e sozinho invertia o
-    sinal da correlação da eq. (57): -0,09 com ele, +0,04 sem.
+    disputou nada: recebeu um **pacote fixo** — as disciplinas de entrada —,
+    igual para todo mundo e independente da preferência. Entra, portanto, com
+    CR = 0,000 sempre, e com um psi que não diz nada sobre alocação: ele mede
+    só o quanto a preferência sorteada daquele aluno por acaso coincidiu com o
+    pacote. Medir o mecanismo sobre esse ponto é medir a matrícula garantida,
+    que é igual nos dois mecanismos.
+
+    **Sem optativa no cenário**, o pacote *é* o conjunto elegível inteiro e o
+    psi do calouro vale 1,000 sem exceção. **Com optativa**, não: ela é
+    elegível desde o ingresso e não entra na garantia, então o calouro recebe
+    6 de 30 elegíveis e o psi dele cai para a faixa de 0,2 — variando com o
+    sorteio, nunca em 1,000. A regra não muda por isso; o que muda é o motivo,
+    de "constante por construção" para "ruído por construção". No preset
+    Computação ele é ~11% das linhas aluno-período, e sozinho invertia o sinal
+    da correlação da eq. (57): -0,09 com ele, +0,04 sem.
 
     Por isso ele fica de fora de **toda média por aluno** — as métricas e as
     grandezas de crédito —, e permanece nas **contagens de pessoas**:
@@ -201,7 +210,7 @@ class DisciplineSnapshot:
     seats: int  # q_x no início do período
     filled: int  # vagas preenchidas no período, contando as garantidas
     # Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
-    # Só é diferente de zero nas disciplinas de 1º período — e é o que explica
+    # Só é diferente de zero nas disciplinas de entrada — e é o que explica
     # uma disciplina chegar à primeira rodada já quase cheia.
     granted: int
     # Quantos alunos pediram a disciplina no período — deram lance em alguma
@@ -325,6 +334,7 @@ def _snapshot_group(
     members: list[Student],
     measured: list[Student],
     satisfactions: dict[str, float],
+    utilizations: dict[str, float],
     grade_averages: dict[str, float],
     semestralizations: dict[str, float],
     scarcities: dict[str, float],
@@ -373,6 +383,7 @@ def _snapshot_group(
         group=group,
         metrics=compute_metrics(
             satisfactions=[satisfactions[s.id] for s in measured],
+            utilizations=[utilizations[s.id] for s in measured],
             grade_averages=[grade_averages[s.id] for s in measured],
             semestralizations=[semestralizations[s.id] for s in measured],
             scarcities=[scarcities[s.id] for s in measured],
@@ -445,6 +456,17 @@ def _snapshot_groups(
         )
         for s in active
     }
+    # Aproveitamento: quanto de W_a o aluno encheu **neste** recorte. Vem de
+    # `won`, e não de `approved_hours`, porque mede alocação e não desempenho —
+    # a disciplina conta assim que a vaga é obtida, reprove ele nela ou não.
+    utilizations = {
+        s.id: (
+            sum(hours[name] for name in won[s.id]) / config.max_hours
+            if config.max_hours
+            else 0.0
+        )
+        for s in active
+    }
 
     def snapshot(
         *,
@@ -456,13 +478,15 @@ def _snapshot_groups(
         return _snapshot_group(
             group=group,
             members=members,
-            # O calouro do período sai de toda média: ele não disputou nada, e
-            # pontua psi = 1 contra CR = 0 por construção (ver `GroupSnapshot`).
+            # O calouro do período sai de toda média: ele não disputou nada —
+            # recebeu um pacote fixo, e o psi dele mede coincidência de gosto
+            # com esse pacote, não alocação (ver `GroupSnapshot`).
             measured=[s for s in members if s.entry_period != period],
             population=population,
             graduated=graduated,
             uses_credits=config.uses_credits,
             satisfactions=satisfactions,
+            utilizations=utilizations,
             grade_averages=grade_averages,
             semestralizations=semestralizations,
             scarcities=scarcities,
@@ -513,10 +537,13 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     total_seats = sum(d.seats for d in config.disciplines)
     curriculum = config.curriculum_periods()
     # As disciplinas sem pré-requisito: a matrícula garantida de quem ingressa.
-    first_period = config.first_period_disciplines()
-    # Conclusão (eq. 40): toda disciplina é obrigatória, então concluir é
-    # aprovar na grade inteira — não há mais carga horária mínima a somar.
-    curriculum_set = {d.name for d in config.disciplines}
+    entry_set = config.entry_disciplines()
+    # Conclusão (eq. 40, estendida pelas optativas): aprovar em **todas** as
+    # obrigatórias **e** somar `elective_hours` entre as optativas aprovadas.
+    # Sem optativa no cenário a segunda condição é vacuamente verdadeira (0 >= 0)
+    # e a regra volta a ser "aprovar na grade inteira".
+    curriculum_set = config.required_disciplines()
+    elective_hours_by = config.elective_hours_by_discipline()
     hours_to_graduate = config.hours_to_graduate()
 
     base_grades = draw_grades(students, config.disciplines, config, rng)
@@ -643,7 +670,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         won_round: dict[tuple[str, str], int] = {}
 
         # Matrícula garantida: quem ingressa neste período entra direto em todas
-        # as disciplinas de 1º período, antes de o leilão abrir. Não dá lance —
+        # as disciplinas de entrada, antes de o leilão abrir. Não dá lance —
         # o sistema reparte o orçamento dele igualmente entre elas e lança o
         # gasto, ficando com o resto da divisão no saldo. É esse valor que o
         # retorno de créditos (eq. 34) tem para trabalhar. A validação do
@@ -654,9 +681,9 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         for student in (s for s in active if s.entry_period == period):
             # Sem crédito não há o que lançar na conta: a vaga garantida é a
             # mesma nos dois mecanismos, e o que muda é só se ela custa algo.
-            share = budget[student.id] // len(first_period) if uses_credits else 0
+            share = budget[student.id] // len(entry_set) if uses_credits else 0
             marker = share if uses_credits else 1
-            for name in first_period:
+            for name in entry_set:
                 guaranteed[student.id].append(name)
                 won[student.id].add(name)
                 won_round[(student.id, name)] = GUARANTEED_ROUND
@@ -933,9 +960,16 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                     student.credits - spent[student.id] + config.base_credits + returned
                 )
 
-            # Conclusão — eq. (40): toda disciplina é obrigatória, então conclui
-            # quem aprovou na grade inteira.
-            if curriculum_set <= student.approved(config.min_grade):
+            # Conclusão — eq. (40): aprovou em todas as obrigatórias e somou a
+            # exigência optativa. As duas condições são independentes: dá para
+            # fechar as obrigatórias e continuar no curso só por causa de X, e
+            # é isso que faz o aluno ter de gastar carga com optativa em vez de
+            # empurrá-la para sempre.
+            approved = student.approved(config.min_grade)
+            if curriculum_set <= approved and (
+                sum(h for name, h in elective_hours_by.items() if name in approved)
+                >= config.elective_hours
+            ):
                 student.graduated_at = period
                 graduated_now += 1
 

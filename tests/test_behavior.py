@@ -5,7 +5,7 @@ from leilao.behavior import compute_bids, draw_utilities, utility_matrix
 from leilao.config import Discipline, SimulationConfig
 from leilao.grading import grade_for_attempt
 from leilao.names import FIRST_NAMES, LAST_NAMES, sample_names
-from leilao.population import Student
+from leilao.population import Student, generate_students
 
 
 def make_config(**overrides) -> SimulationConfig:
@@ -45,7 +45,7 @@ def test_curriculum_period_is_induced_from_the_prerequisites():
     assert config.curriculum_periods() == {
         "D1": 1, "D2": 1, "D3": 1, "D4": 2, "D5": 2, "D6": 3
     }
-    assert config.first_period_disciplines() == ["D1", "D2", "D3"]
+    assert config.entry_disciplines() == ["D1", "D2", "D3"]
 
 
 def test_a_cycle_of_prerequisites_is_rejected():
@@ -288,3 +288,18 @@ def test_retake_raises_the_grade_by_the_learning_gain():
     assert grade_for_attempt(9.5, 3, 2.5) == 10.0
     with pytest.raises(ValueError):
         grade_for_attempt(5.0, 0, 2.5)
+
+
+def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
+    """A linha inteira vale 1, e é essa invariante que `metrics.satisfaction`
+    usa para dispensar a divisão: com o denominador da eq. (51) fixo em 1, psi
+    é a soma simples das utilidades atendidas. Se a normalização mudar, é aqui
+    que se descobre — antes de psi passar a mentir."""
+    config = make_config()
+    rng = np.random.default_rng(config.seed)
+    students = generate_students(config, rng)
+    rows = draw_utilities(students, config, rng)
+    assert rows, "nenhuma linha sorteada"
+    for row in rows.values():
+        assert set(row) == {d.name for d in config.disciplines}
+        assert sum(row.values()) == pytest.approx(1.0)

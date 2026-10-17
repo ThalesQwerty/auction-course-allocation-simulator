@@ -97,13 +97,15 @@ export function Project() {
         disputar uma vaga quando aprovou tudo que ela exige.
       </p>
       <p>
-        Quem <strong>ingressa</strong> não disputa nada: recebe vaga garantida em todas as
-        disciplinas de 1º período e fica de fora do leilão naquele período. O sistema ainda assim
+        Quem <strong>ingressa</strong> não disputa nada: recebe vaga garantida nas{" "}
+        <strong>disciplinas de entrada</strong> — as obrigatórias sem pré-requisito — e fica de
+        fora do leilão naquele período. Optativa não entra na garantia, mesmo não tendo
+        pré-requisito. O sistema ainda assim
         lança o gasto na conta dele, repartindo o orçamento igualmente entre essas disciplinas e
         deixando o resto da divisão no saldo — é esse valor que alimenta o retorno de créditos da
         eq. (34). A garantia vale só no ingresso: recursar uma dessas disciplinas é disputá-la no
         leilão como qualquer outra. Daí os dois limites do ritmo de entrada: a geração não pode
-        passar da menor oferta entre as disciplinas de 1º período, nem a carga somada delas pode
+        passar da menor oferta entre as disciplinas de entrada, nem a carga somada delas pode
         passar de W<sub>a</sub>.
       </p>
       <p>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CYCLIC, curriculumLength, curriculumPeriods } from "./curriculum";
+import { CYCLIC, curriculumLength, curriculumPeriods, entryDisciplines } from "./curriculum";
 import { PresetList } from "./PresetList";
 import {
   CREDIT_RETURN_POLICIES,
@@ -117,13 +117,15 @@ export function Config({
   const periods = useMemo(() => curriculumPeriods(config.disciplines), [config.disciplines]);
   const hasCycle = Object.values(periods).some((p) => p === CYCLIC);
   const gradeLength = curriculumLength(config.disciplines);
-  const firstPeriod = config.disciplines.filter((d) => periods[d.name] === 1);
-  const entryHours = firstPeriod.reduce((sum, d) => sum + d.hours, 0);
-  // O ingressante entra direto em todas as de 1º período: a geração tem de
-  // caber na menor oferta delas, e a carga somada tem de caber em W_a (eq. 4).
-  const smallestEntrySeats = firstPeriod.length
-    ? Math.min(...firstPeriod.map((d) => d.seats))
-    : 0;
+  // **Entrada**, não "1º período": a optativa também não tem pré-requisito e
+  // também cai no 1º período na indução, mas fica fora da matrícula garantida.
+  // Validar contra o conjunto errado acusaria erro em cenário que o motor
+  // aceita, e o erro cresceria com o tamanho do catálogo de optativas.
+  const entry = entryDisciplines(config.disciplines);
+  const entryHours = entry.reduce((sum, d) => sum + d.hours, 0);
+  // O ingressante entra direto em todas as de entrada: a geração tem de caber
+  // na menor oferta delas, e a carga somada tem de caber em W_a (eq. 4).
+  const smallestEntrySeats = entry.length ? Math.min(...entry.map((d) => d.seats)) : 0;
   const entryTooLarge = config.students_per_period > smallestEntrySeats;
   const entryTooHeavy = entryHours > config.max_hours;
 
@@ -348,13 +350,13 @@ export function Config({
               {entrySpan === 1 ? "geração" : "gerações"}.{" "}
               {entryTooLarge ? (
                 <span className="invalid-text">
-                  Passa das {smallestEntrySeats} vagas da disciplina de 1º período mais
+                  Passa das {smallestEntrySeats} vagas da disciplina de entrada mais
                   apertada: o ingressante tem vaga garantida em todas elas.
                 </span>
               ) : (
                 <>
                   Teto de {smallestEntrySeats} — a menor oferta entre as{" "}
-                  {firstPeriod.length} disciplinas de 1º período, em que o ingressante
+                  {entry.length} disciplinas de entrada, em que o ingressante
                   entra sem disputar. Sobram {smallestEntrySeats - config.students_per_period}{" "}
                   vagas ali para quem recursa.
                 </>
@@ -509,14 +511,14 @@ export function Config({
           <p className="note">
             {entryTooHeavy ? (
               <span className="invalid-text">
-                As {firstPeriod.length} disciplinas de 1º período somam {entryHours} h e não cabem
+                As {entry.length} disciplinas de entrada somam {entryHours} h e não cabem
                 na carga horária máxima — o ingressante cursa todas de uma vez, e a eq. (4) tem de
                 continuar valendo.
               </span>
             ) : (
               <>
-                A carga máxima (W<sub>a</sub>) precisa comportar as {firstPeriod.length}{" "}
-                disciplinas de 1º período, que somam {entryHours} h: é a matrícula garantida de
+                A carga máxima (W<sub>a</sub>) precisa comportar as {entry.length}{" "}
+                disciplinas de entrada, que somam {entryHours} h: é a matrícula garantida de
                 quem ingressa.
               </>
             )}
@@ -533,8 +535,10 @@ export function Config({
           Toda disciplina é obrigatória: conclui o curso quem aprova em todas as{" "}
           {config.disciplines.length}. O <strong>período</strong> não é configurado — sai dos
           pré-requisitos: sem nenhum é 1º período, com pré-requisitos é o período seguinte ao
-          mais tardio deles. As de 1º período são a matrícula garantida de quem ingressa, que
-          entra nelas sem leilão.
+          mais tardio deles. As de 1º período <em>que não forem optativas</em> são as{" "}
+          <strong>disciplinas de entrada</strong> — a matrícula garantida de quem ingressa, que
+          entra nelas sem leilão. A optativa também não tem pré-requisito, mas fica de fora da
+          garantia.
         </p>
         {hasCycle && (
           <div className="error-banner">
