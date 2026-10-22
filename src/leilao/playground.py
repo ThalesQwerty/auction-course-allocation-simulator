@@ -12,7 +12,7 @@ from .auction import AuctionInput, Bid, run_auction
 from .behavior import compute_bids
 from .config import Mechanism
 from .entities import Agent, Good
-from .grading import grade_for_attempt
+from .grading import APTITUDE_GUARD, grade_for_attempt
 from .ranking import allocate_by_ranking, request_set
 from .tie_breaking import stochastic_perturbations
 
@@ -76,8 +76,8 @@ def run_playground(
     mechanism: Mechanism,
     rounds: int,
     seed: int,
-    grade_mean: float,
-    grade_stddev: float,
+    aptitude_alpha: float = 4.0,
+    aptitude_beta: float = 2.0,
     disciplines: list[PlaygroundDiscipline],
     students: list[PlaygroundStudent],
 ) -> PlaygroundResult:
@@ -190,14 +190,19 @@ def run_playground(
                 asked = request_set(
                     utilities=utilities[student.id],
                     available=available[student.id],
-                    hours=hours,
-                    capacity=capacity[student.id],
                 )
                 posted[student.id] = {name: 1 for name in asked}
                 requests.extend((student.id, name) for name in asked)
-            priority = {key: cr[key[0]] + epsilon.get(key, 0.0) for key in requests}
+            # A prioridade é do aluno; dentro dele quem ordena é a própria
+            # preferência, que já veio na ordem de `requests`. A carga é
+            # verificada na concessão, não no pedido.
+            priority = {s.id: cr[s.id] + epsilon.get((s.id, s.id), 0.0) for s in students}
             for student_id, name in allocate_by_ranking(
-                requests=requests, priority=priority, seats=seats
+                requests=requests,
+                priority=priority,
+                seats=seats,
+                hours=hours,
+                capacity={s.id: int(capacity[s.id]) for s in students},
             ):
                 won_now[student_id].append(name)
                 won[student_id].add(name)
@@ -229,12 +234,24 @@ def run_playground(
         for name in names:
             if name not in won[student.id]:
                 continue
-            drawn = float(rng.normal(grade_mean, grade_stddev))
+            # O sandbox não guarda aptidão entre rodadas: ele sorteia uma por
+            # (aluno, disciplina) na hora, que é o bastante para a tela mostrar
+            # nota plausível. A simulação de verdade persiste a aptidão.
+            drawn = float(np.clip(rng.beta(aptitude_alpha, aptitude_beta),
+                                  APTITUDE_GUARD, 1.0 - APTITUDE_GUARD))
             grades.append(
                 PlaygroundGrade(
                     student_id=student.id,
                     discipline=name,
-                    grade=grade_for_attempt(drawn, 1, 0.0),
+                    grade=grade_for_attempt(
+                        aptitude=drawn,
+                        difficulty=1.0,
+                        relative_utility=1.0,
+                        attempt=1,
+                        coupling=0.0,
+                        noise=0.0,
+                        noise_sigma=0.0,
+                    ),
                 )
             )
 

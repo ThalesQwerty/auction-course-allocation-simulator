@@ -99,7 +99,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .behavior import draw_utilities, utility_distribution
-from .grading import draw_grades, grade_distribution
+from .grading import draw_aptitudes, grade_distribution, grade_for_attempt
 from .config import CreditReturnPolicy, Mechanism, SimulationConfig
 from .population import generate_students
 from .simulation import SimulationResult, run_simulation
@@ -419,15 +419,32 @@ def sample_grade_distribution(config: SimulationConfig) -> list[float]:
     """O histograma de notas de primeira tentativa, pelo mesmo motivo e do mesmo
     jeito que `sample_distribution`.
 
-    Diferente das utilidades, ele **não** entra em cada ponto da varredura: a
-    normal das notas não depende de sigma, então o gráfico seria o mesmo doze
-    vezes.
+    Diferente das utilidades, ele **não** entra em cada ponto da varredura: com
+    o acoplamento `w` desligado a nota não depende de sigma, e o gráfico seria
+    o mesmo doze vezes. (Com `w > 0` ele passaria a depender — é mais uma razão
+    para o acoplamento ser parâmetro reportado, e não suposição silenciosa.)
+
+    A nota mostrada é a de **primeira tentativa, dificuldade 1 e sem ruído**:
+    `a^1`, ou seja, a própria aptidão. É o retrato da população que o cenário
+    descreve, antes de a disciplina e a sorte entrarem.
     """
     students = generate_students(config, np.random.default_rng(SAMPLE_SEED))
-    draws = draw_grades(
+    aptitudes = draw_aptitudes(
         students, config.disciplines, config, np.random.default_rng(SAMPLE_SEED)
     )
-    return grade_distribution(draws, config)
+    grades = [
+        grade_for_attempt(
+            aptitude=aptitude,
+            difficulty=1.0,
+            relative_utility=1.0,
+            attempt=1,
+            coupling=0.0,
+            noise=0.0,
+            noise_sigma=0.0,
+        )
+        for aptitude in aptitudes.values()
+    ]
+    return grade_distribution(grades)
 
 
 def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:

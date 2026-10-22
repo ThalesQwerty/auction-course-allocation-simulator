@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 
 from .entities import Agent, Allocation, Demand, Good, MutualExclusion, Problem
 from .tie_breaking import rectify_bias, stochastic_perturbations, tie_break_factor
-from .wdp_solver import solve_wdp
+from .config import Resolver
+from .wdp_solver import solve_wdp, solve_wdp_greedy
 
 
 @dataclass(frozen=True)
@@ -115,8 +116,15 @@ def _compute_consumption(
     return consumption
 
 
-def run_auction(auction_input: AuctionInput) -> AuctionResult:
-    """Executa uma rodada de leilão: resolve o WDP e liquida preços/consumo."""
+def run_auction(
+    auction_input: AuctionInput, *, resolver: Resolver = "ilp"
+) -> AuctionResult:
+    """Executa uma rodada de leilão: resolve o WDP e liquida preços/consumo.
+
+    `resolver` escolhe quem decide a alocação — a PLI global do anteprojeto ou
+    a varredura gulosa por lance decrescente, que é o mecanismo de *bidding
+    points*. É o único ponto em que as duas células do leilão diferem.
+    """
     bids = {(b.agent_id, b.good_id): b.credits for b in auction_input.bids}
     initial_capacity = {a.id: a.capacity for a in auction_input.agents}
     if not bids:
@@ -158,7 +166,11 @@ def run_auction(auction_input: AuctionInput) -> AuctionResult:
         demands=demands,
         exclusions=auction_input.exclusions,
     )
-    allocation = solve_wdp(problem)
+    # O resolvedor é o segundo eixo da comparação. Tudo o mais — a preferência
+    # da eq. (22), o preço de 2º preço da eq. (24) e o consumo da eq. (27) — é
+    # calculado igual nos dois, de modo que a diferença entre as duas células
+    # seja só quem decidiu a alocação.
+    allocation = (solve_wdp if resolver == "ilp" else solve_wdp_greedy)(problem)
 
     # Preços de mercado e consumo de créditos — eq. (24)-(26)
     prices = _compute_prices(goods=auction_input.goods, bids=bids, allocation=allocation)

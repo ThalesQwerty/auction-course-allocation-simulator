@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..auction import AuctionResult
 from ..comparison import MAX_RUNS
-from ..config import CreditReturnPolicy, Mechanism
+from ..config import CreditMemory, CreditReturnPolicy, Mechanism, Resolver
 
 
 class AgentIn(BaseModel):
@@ -74,6 +74,14 @@ class DisciplineIn(BaseModel):
         default=False,
         description="matrícula garantida de quem ingressa; não pode ter pré-requisito",
     )
+    difficulty: float = Field(
+        default=1.0,
+        gt=0,
+        description=(
+            "D_x — quantas tentativas a disciplina custa para render o que uma de "
+            "dificuldade 1 rende de primeira"
+        ),
+    )
     elective: bool = Field(
         default=False,
         description=(
@@ -95,12 +103,26 @@ class ScenarioIn(BaseModel):
     """
 
     disciplines: list[DisciplineIn] = Field(default_factory=list)
-    # As duas normais que descrevem a população. Não há perfis: todo aluno sai
+    # As distribuições que descrevem a população. Não há perfis: todo aluno sai
     # daqui, e a diferença entre dois alunos é só o que a seed sorteou.
-    grade_mean: float = Field(default=6.5, ge=0, le=10, description="média das notas")
-    grade_stddev: float = Field(default=1.5, gt=0, description="desvio padrão das notas")
-    learning_gain: float = Field(
-        default=2.5, gt=0, le=10, description="ganho de nota por recursada — eq. (33)"
+    aptitude_alpha: float = Field(
+        default=4.0, gt=0, description="alpha da Beta da aptidão"
+    )
+    aptitude_beta: float = Field(
+        default=2.0, gt=0, description="beta da Beta da aptidão"
+    )
+    interest_coupling: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "w — o quanto o interesse mexe na nota, como expoente sobre u_rel. "
+            "0 desliga o acoplamento e deixa a função de nota neutra entre os "
+            "mecanismos; é o controle a reportar ao lado de qualquer resultado "
+            "em conclusões."
+        ),
+    )
+    grade_noise: float = Field(
+        default=0.25, ge=0, description="desvio do choque log-normal por tentativa"
     )
     utility_sigma: float = Field(
         default=1.0,
@@ -138,6 +160,16 @@ class ScenarioIn(BaseModel):
     )
     rounds: int = Field(default=1, ge=1, le=10, description="|R| — rodadas por período")
     min_grade: float = Field(default=5.0, gt=0, le=10, description="n_min")
+    resolver: Resolver = Field(
+        default="ilp",
+        description="quem decide a alocação: PLI global ou varredura gulosa",
+    )
+    credit_memory: CreditMemory = Field(
+        default="carry",
+        description=(
+            "se o orçamento carrega entre períodos (eq. 36) ou recomeça em Gamma_min"
+        ),
+    )
     elective_hours: int = Field(
         default=0,
         ge=0,
@@ -322,6 +354,9 @@ class MetricsOut(BaseModel):
     # Aproveitamento: carga horária obtida no período ÷ W_a, média dos medidos.
     # A contraparte em carga do psi, que é em utilidade.
     utilization: float
+    # Fidelidade da mensagem: cosseno entre o lance normalizado e a utilidade.
+    # Mede quanto da preferência sobrevive à tradução. Descreve, não pontua.
+    fidelity: float
     fairness: float  # eq. (55)
     occupancy: float  # eq. (54)
     scarcity: float  # escassez — elegíveis por vaga, média dos alunos
@@ -500,8 +535,8 @@ class PlaygroundRequest(BaseModel):
     mechanism: Mechanism
     rounds: int = Field(ge=1, le=10)
     seed: int = 0
-    grade_mean: float = Field(ge=0, le=10)
-    grade_stddev: float = Field(gt=0)
+    aptitude_alpha: float = Field(default=12.0, gt=0)
+    aptitude_beta: float = Field(default=2.0, gt=0)
     disciplines: list[PlaygroundDisciplineIn]
     students: list[PlaygroundStudentIn]
 

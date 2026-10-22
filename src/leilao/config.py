@@ -5,7 +5,7 @@ e a simulação deriva o resto (alunos, nomes, matriz de utilidades, notas)
 aleatoriamente a partir da `seed`.
 
 **Não há perfis de aluno.** Toda a população sai das mesmas duas normais — a das
-notas (`grade_mean`, `grade_stddev`, `learning_gain`) e a das utilidades
+notas (a Beta da aptidão) e a das utilidades
 (`utility_sigma`) —, e o que distingue um aluno do outro é só o que a seed
 sorteou para ele. Os eixos de aptidão e afinidade existiram até
 08/10/2026 e foram removidos a pedido: a heterogeneidade continua, mas deixa de
@@ -32,10 +32,42 @@ from typing import Literal
 # aluno, e a carga horária faz o papel do orçamento.
 Mechanism = Literal["credits", "ranking"]
 
+# Quem decide a alocação, dada a mensagem dos alunos — o segundo eixo da
+# comparação. Cruzado com `mechanism`, dá as quatro células:
+#
+#                  ordenação (guloso)            PLI (global)
+#   CR        matrícula por CR (a linha      CR como peso num ótimo
+#             de base brasileira)            global
+#   lance     *bidding points* dos           o leilão do anteprojeto
+#             business schools
+#
+# As duas células de fora da diagonal são mecanismos reais, não construções:
+# o *bidding points* é o mais implantado do mundo. Os dois resolvedores só
+# divergem onde a restrição de carga aperta — sem ela o problema se separa por
+# disciplina e o guloso é ótimo —, então o eixo só tem conteúdo em cenário com
+# conjunto elegível maior que W_a.
+Resolver = Literal["ilp", "greedy"]
+
 # Política de retorno de créditos f_gamma — eq. (34). O anteprojeto deixa a
 # forma concreta em aberto e trata as políticas como eixo de experimentação
 # (Seção 7.3.2) — as quatro comparadas estão em `grading.credit_return`.
 CreditReturnPolicy = Literal["none", "unit", "full", "ratio"]
+
+# Quanta memória o orçamento tem de um período para o outro — o eixo da ideia 1.
+#
+# `"none"`: o período começa sempre em Gamma_min. O leilão não tem memória
+# nenhuma, e é o único braço em que o passado do aluno não entra no poder de
+# compra dele por via alguma.
+# `"carry"`: a eq. (36) — o que sobrou é carregado. Note que isso **não** é
+# poupança: o aluno aposta o orçamento inteiro e paga o segundo preço, então o
+# que sobra é o que ele não foi cobrado, não o que ele guardou.
+#
+# Cruzado com `credit_return`, dá a escada de três degraus: sem acúmulo
+# ("none"), só sobra ("carry" + retorno "none") e sobra + retorno ("carry" +
+# "ratio"). O degrau do meio separa as duas fontes de memória, que têm sinais
+# opostos de incentivo: a sobra premia quem pagou barato, o retorno premia quem
+# aprovou.
+CreditMemory = Literal["none", "carry"]
 
 @dataclass(frozen=True)
 class Discipline:
@@ -61,6 +93,12 @@ class Discipline:
     name: str
     seats: int  # q_x — vagas
     hours: int  # w_x — carga horária
+    # D_x — a dificuldade, lida em **quantas tentativas a disciplina custa**
+    # para render o que uma de dificuldade 1 rende de primeira: na fórmula da
+    # nota ela entra como a razão D/t, então D = 2 na 2ª tentativa equivale a
+    # D = 1 na 1ª. Ela não precisa ser pública: o que o aluno lê é a taxa de
+    # aprovação do período anterior, que é D filtrada pela população.
+    difficulty: float = 1.0
     unlocks: tuple[str, ...] = ()
     entry: bool = False
     elective: bool = False
@@ -72,6 +110,8 @@ class Discipline:
             raise ValueError(f"disciplina {self.name!r}: vagas (q_x) deve ser >= 0")
         if self.hours <= 0:
             raise ValueError(f"disciplina {self.name!r}: carga horária (w_x) deve ser > 0")
+        if self.difficulty <= 0:
+            raise ValueError(f"disciplina {self.name!r}: dificuldade deve ser > 0")
         if self.name in self.unlocks:
             raise ValueError(f"disciplina {self.name!r} é sucessora de si mesma")
         if len(set(self.unlocks)) != len(self.unlocks):
@@ -109,16 +149,29 @@ class SimulationConfig:
     #
     # Todo aluno é igual a todos os outros *em distribuição*: não há mais perfis,
     # e o que o distingue dos colegas é só o que saiu da seed para ele. São duas
-    # normais, e nenhuma delas consta no anteprojeto.
+    # distribuições, e nenhuma delas consta no anteprojeto.
     #
-    # **Notas** (eq. 33): cada par (aluno, disciplina) sorteia desta normal em
-    # **cada período**, e a recursada desloca a média em `learning_gain` por
-    # tentativa já feita — ver `grading.draw_grades`. Sem dispersão de
-    # desempenho o CR vira ruído e a correlação da eq. (57) não mede nada.
-    grade_mean: float = 6.5
-    grade_stddev: float = 1.5
-    # Quanto a nota sobe a cada recursada — eq. (33).
-    learning_gain: float = 2.5
+    # **Notas**: a nota sai da aptidão elevada à demanda da disciplina — ver
+    # `grading`. A aptidão de cada par (aluno, disciplina) vem de uma Beta,
+    # sorteada uma vez e persistente: é traço, não sorte.
+    #
+    # **Beta(4, 2)** é a calibragem contra o modelo que ela substitui: média
+    # 0,67 (nota 6,7, contra 6,5 da normal antiga) e 82% de aprovação numa
+    # disciplina de dificuldade 1 (contra ~84%). Sem isso a população fica
+    # boa demais, ninguém reprova e a recursada some do cenário.
+    aptitude_alpha: float = 4.0
+    aptitude_beta: float = 2.0
+    # w — o quanto o interesse mexe no desempenho, como expoente sobre u_rel.
+    # **Padrão 0: desligado.** É a única peça da fórmula de nota sem forma
+    # justificada, e a única que mexe no resultado principal — em w = 1 ela
+    # fabrica sozinha ~40% de vão em aprovações a favor do leilão. Em w = 0 a
+    # função de nota é neutra entre os mecanismos, e qualquer vão em conclusões
+    # é do mecanismo, inteiro. Varrer w é a análise de sensibilidade que
+    # transforma a suposição em número reportado.
+    interest_coupling: float = 0.0
+    # O desvio do choque log-normal sobre o expoente, por tentativa. Sem ele a
+    # nota seria exata e recursar garantiria nota maior.
+    grade_noise: float = 0.25
     # **Utilidades** (u, eqs. 41-43): o desvio da log-normal de onde saem os
     # valores preliminares, antes da normalização de `behavior.draw_utilities`.
     # É o único parâmetro: a média do logaritmo é fixa em 0 porque some na
@@ -148,7 +201,9 @@ class SimulationConfig:
     # mecanismos roda a mesma configuração nos dois lados.
     base_credits: int = 10  # Gamma_min — créditos base por período, eq. (35)/(37)
     credit_return: CreditReturnPolicy = "none"
+    credit_memory: CreditMemory = "carry"
     mechanism: Mechanism = "credits"
+    resolver: Resolver = "ilp"
     seed: int = 0
 
     @property
@@ -179,12 +234,12 @@ class SimulationConfig:
             raise ValueError("o cenário precisa de pelo menos uma disciplina")
         if self.students_per_period < 1:
             raise ValueError("o cenário precisa de pelo menos um aluno por período de ingresso")
-        if not 0 <= self.grade_mean <= 10:
-            raise ValueError("média das notas deve estar em [0, 10]")
-        if self.grade_stddev <= 0:
-            raise ValueError("desvio padrão das notas deve ser > 0")
-        if not 0 < self.learning_gain <= 10:
-            raise ValueError("incremento de aprendizado deve estar em (0, 10]")
+        if self.aptitude_alpha <= 0 or self.aptitude_beta <= 0:
+            raise ValueError("os parâmetros da Beta da aptidão devem ser > 0")
+        if self.interest_coupling < 0:
+            raise ValueError("o acoplamento interesse-desempenho (w) deve ser >= 0")
+        if self.grade_noise < 0:
+            raise ValueError("o desvio do choque de nota deve ser >= 0")
         if self.utility_sigma <= 0:
             raise ValueError("desvio da utilidade (sigma) deve ser > 0")
         if self.max_hours < 1:
@@ -330,6 +385,31 @@ class SimulationConfig:
                 stack.append((name, True))
                 stack.extend((p, False) for p in requires[name])
         return period
+
+    def reach(self) -> dict[str, int]:
+        """Quantas disciplinas cada uma desbloqueia, **transitivamente** — o
+        "quanto avanço se passar" do termo de progresso.
+
+        Não é a altura: altura é o comprimento da cadeia mais longa à frente,
+        alcance é o tamanho do que fica para trás destravado. Uma disciplina
+        pode ter altura 1 e alcance 10 se destrava dez terminais de uma vez, e
+        o que interessa ao aluno que quer avançar é o alcance.
+        """
+        unlocks = {d.name: d.unlocks for d in self.disciplines}
+        memo: dict[str, set[str]] = {}
+
+        def descend(name: str) -> set[str]:
+            if name in memo:
+                return memo[name]
+            memo[name] = set()  # corta ciclo; a validação já o rejeita
+            out: set[str] = set()
+            for successor in unlocks.get(name, ()):
+                out.add(successor)
+                out |= descend(successor)
+            memo[name] = out
+            return out
+
+        return {name: len(descend(name)) for name in unlocks}
 
     def entry_disciplines(self) -> list[str]:
         """Disciplinas de matrícula garantida, na ordem do cenário.

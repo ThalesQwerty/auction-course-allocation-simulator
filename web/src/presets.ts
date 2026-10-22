@@ -221,9 +221,8 @@ const FUNNEL_STUDENTS_PER_PERIOD = 105;
  * que havia antes. É o valor **canônico**, o que os boxplots medem; a varredura
  * passa por ele e o marca no eixo. */
 const POPULATION = {
-  grade_mean: 6,
-  grade_stddev: 1,
-  learning_gain: 0.5,
+  aptitude_alpha: 4,
+  aptitude_beta: 2,
   utility_sigma: 1,
   max_hours: MAX_HOURS,
 };
@@ -238,9 +237,11 @@ const POPULATION = {
  * preferência a captar: o que a comparação mostrar aqui é da regra de alocação,
  * não de quem a população é. */
 const FLAT_POPULATION = {
-  grade_mean: 6,
-  grade_stddev: 1,
-  learning_gain: 0.5,
+  // Aptidão apertada: o controle de dispersão vale para as duas distribuições,
+  // e com Beta(40, 14) a nota fica em torno de 7,4 com pouca variação, então o
+  // CR tem pouco a ordenar.
+  aptitude_alpha: 40,
+  aptitude_beta: 14,
   utility_sigma: 0.25,
   max_hours: FUNNEL_MAX_HOURS,
 };
@@ -298,7 +299,7 @@ const commonScenario = (
   periods = 12,
 ): Omit<
   SimulateRequest,
-  "grade_mean" | "grade_stddev" | "learning_gain" | "utility_sigma" | "max_hours" | "base_credits"
+  "aptitude_alpha" | "aptitude_beta" | "utility_sigma" | "max_hours" | "base_credits"
 > => ({
   disciplines,
   elective_hours: electiveHours,
@@ -313,6 +314,12 @@ const commonScenario = (
   students_per_period: studentsPerPeriod,
   rounds: 2,
   min_grade: 5,
+  // Padrões dos dois eixos novos: PLI global (o leilão do anteprojeto) e
+  // orçamento que carrega entre períodos (eq. 36). A comparação os varia.
+  resolver: "ilp",
+  credit_memory: "carry",
+  interest_coupling: 0,
+  grade_noise: 0.25,
   credit_return: "none",
   seed: 42,
 });
@@ -333,7 +340,12 @@ export const PRESETS: Preset[] = [
         14,
       ),
       ...POPULATION,
-      base_credits: 10,
+      // Γ_min = 40. Com ~12 elegíveis na fase em que a exigência optativa
+      // ainda está pendente, 10 créditos truncavam o lance em 65% das linhas
+      // por falta de crédito, e não por escolha: o aluno não conseguia nem pôr
+      // 1 crédito em cada. Em 40 a truncagem cai para ~41% e volta a ser
+      // decisão dele.
+      base_credits: 40,
     }),
   },
   {

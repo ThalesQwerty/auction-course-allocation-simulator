@@ -4,6 +4,10 @@ export interface DisciplineInput {
   name: string;
   seats: number; // q_x — vagas
   hours: number; // w_x — carga horária
+  /** D_x — quantas tentativas a disciplina custa para render o que uma de
+   * dificuldade 1 rende de primeira. Na fórmula da nota entra como a razão
+   * D/t. Opcional: ausente é 1. */
+  difficulty?: number;
   /** Sucessores: disciplinas que esta desbloqueia. Vazio = terminal, altura 0. */
   unlocks: string[];
   /** Matrícula garantida de quem ingressa. É **flag**, não dedução: não ter
@@ -54,14 +58,21 @@ export const cohortLabel = (entryPeriod: number): string => `Geração ${entryPe
 
 export interface SimulateRequest {
   disciplines: DisciplineInput[];
-  /** A normal de onde cada par (aluno, disciplina) sorteia a nota em cada
-   * período, e o quanto a recursada desloca essa média (eq. 33). É o que dá
-   * heterogeneidade de desempenho — sem ela o CR vira ruído e a correlação da
-   * eq. (57) não mede nada. Não há perfis: todo aluno sorteia daqui, e a
-   * diferença entre dois alunos é só a sorte. */
-  grade_mean: number; // em [0, 10]
-  grade_stddev: number; // > 0
-  learning_gain: number;
+  /** A nota sai da **aptidão** do aluno naquela disciplina, elevada à demanda
+   * que ela lhe faz: `round(100 · a^(D/(u_rel^w · t)))/10`. A aptidão vem de
+   * uma Beta por par (aluno, disciplina), sorteada uma vez e persistente —
+   * traço, não sorte. Beta(4, 2) é a calibragem contra o modelo anterior:
+   * nota média 6,7 e 82% de aprovação em dificuldade 1. */
+  aptitude_alpha: number; // > 0
+  aptitude_beta: number; // > 0
+  /** w — o quanto o interesse mexe no desempenho, como expoente sobre u_rel.
+   * **0 desliga**, e é o padrão: é a única peça da fórmula de nota sem forma
+   * justificada e a única que mexe no resultado principal, então ela é
+   * parâmetro reportado e não suposição silenciosa. */
+  interest_coupling: number; // >= 0
+  /** Desvio do choque log-normal por tentativa. Sem ele a nota seria exata e
+   * recursar garantiria nota maior. */
+  grade_noise: number; // >= 0
   /** Desvio da log-normal de onde saem os valores preliminares das utilidades.
    * Controla o quanto o aluno diferencia as disciplinas: sigma **grande**
    * concentra (quer uma ou duas e despreza o resto), **pequeno** achata. A
@@ -84,6 +95,12 @@ export interface SimulateRequest {
   students_per_period: number;
   rounds: number; // |R|
   min_grade: number; // n_min
+  /** Quem decide a alocação — o segundo eixo da comparação. Cruzado com o
+   * mecanismo dá as quatro células; os dois resolvedores só divergem onde a
+   * carga horária aperta. */
+  resolver: "ilp" | "greedy";
+  /** Se o orçamento carrega entre períodos (eq. 36) ou recomeça em Γ_min. */
+  credit_memory: "none" | "carry";
   /** X — carga horária optativa exigida para concluir, somada entre as
    * optativas aprovadas. Concluir é aprovar em todas as obrigatórias e chegar
    * a este total; o aluno escolhe *quais* optativas. */
@@ -269,6 +286,13 @@ export interface Metrics {
    * aluno que concentra o lance, ganha a disciplina que amava e deixa o resto
    * de W_a ocioso pontua ψ alto e aproveitamento baixo. Em [0, 1]. */
   utilization: number;
+  /** Fidelidade da mensagem — o cosseno entre o vetor de lances normalizado e
+   * o de utilidades, sobre o elegível. O mecanismo nunca vê `u`: vê a
+   * mensagem, e isto mede quanto da preferência sobrevive à tradução. A linha
+   * de base só diz um conjunto (peso uniforme); o leilão diz o quanto.
+   * **Descreve, não pontua.** O piso é 1/√n, então compare braços dentro do
+   * mesmo período. */
+  fidelity: number;
   fairness: number; // φ — Jain, eq. (55)
   occupancy: number; // θ — eq. (54)
   /** Escassez: elegíveis por vaga. Para cada disciplina que o aluno ainda pode
@@ -459,9 +483,12 @@ export interface SimulateResponse {
 export function defaultScenario(): SimulateRequest {
   return {
     disciplines: [],
-    grade_mean: 6.5,
-    grade_stddev: 1.5,
-    learning_gain: 2.5,
+    aptitude_alpha: 4,
+    aptitude_beta: 2,
+    interest_coupling: 0,
+    grade_noise: 0.25,
+    resolver: "ilp",
+    credit_memory: "carry",
     utility_sigma: 1,
     max_hours: 360,
     periods: 1,
@@ -480,8 +507,8 @@ export interface PlaygroundRequest {
   mechanism: Mechanism;
   rounds: number;
   seed: number;
-  grade_mean: number;
-  grade_stddev: number;
+  aptitude_alpha: number;
+  aptitude_beta: number;
   disciplines: { name: string; seats: number; hours: number }[];
   students: {
     id: string;

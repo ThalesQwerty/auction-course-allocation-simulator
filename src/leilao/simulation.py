@@ -53,13 +53,32 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .auction import AuctionInput, Bid, run_auction
-from .behavior import compute_bids, draw_utilities, utility_distribution, utility_matrix
+from .behavior import (
+    Signals,
+    compute_bids,
+    draw_utilities,
+    utility_distribution,
+    utility_matrix,
+)
 from .config import SimulationConfig
 from .entities import Agent, Good
-from .grading import credit_return, draw_grades, grade_distribution, grade_for_attempt
-from .metrics import Metrics, compute_metrics, demand_per_seat, satisfaction, semestralization
+from .grading import (
+    credit_return,
+    draw_aptitudes,
+    draw_grade_noise,
+    grade_distribution,
+    grade_for_attempt,
+)
+from .metrics import (
+    Metrics,
+    compute_metrics,
+    demand_per_seat,
+    message_fidelity,
+    satisfaction,
+    semestralization,
+)
 from .population import Student, generate_students
-from .ranking import allocate_by_ranking, request_set
+from .ranking import allocate_by_ilp, allocate_by_ranking, request_set
 from .tie_breaking import stochastic_perturbations
 
 # `RequestRecord.won_round` quando a vaga não veio de rodada nenhuma: é a
@@ -336,6 +355,7 @@ def _snapshot_group(
     measured: list[Student],
     satisfactions: dict[str, float],
     utilizations: dict[str, float],
+    fidelities: dict[str, float],
     grade_averages: dict[str, float],
     semestralizations: dict[str, float],
     scarcities: dict[str, float],
@@ -385,6 +405,7 @@ def _snapshot_group(
         metrics=compute_metrics(
             satisfactions=[satisfactions[s.id] for s in measured],
             utilizations=[utilizations[s.id] for s in measured],
+            fidelities=[fidelities[s.id] for s in measured],
             grade_averages=[grade_averages[s.id] for s in measured],
             semestralizations=[semestralizations[s.id] for s in measured],
             scarcities=[scarcities[s.id] for s in measured],
@@ -426,6 +447,8 @@ def _snapshot_groups(
     scarcities: dict[str, float],
     contentions: dict[str, float],
     won: dict[str, set[str]],
+    messages: dict[str, dict[str, float]],
+    utility_rows_now: dict[str, dict[str, float]],
     total_seats: int,
     credits: dict[str, int],
     supply: dict[str, int],
@@ -460,6 +483,12 @@ def _snapshot_groups(
     # Aproveitamento: quanto de W_a o aluno encheu **neste** recorte. Vem de
     # `won`, e não de `approved_hours`, porque mede alocação e não desempenho —
     # a disciplina conta assim que a vaga é obtida, reprove ele nela ou não.
+    fidelities = {
+        s.id: message_fidelity(
+            utilities=utility_rows_now[s.id], message=messages.get(s.id, {})
+        )
+        for s in active
+    }
     utilizations = {
         s.id: (
             sum(hours[name] for name in won[s.id]) / config.max_hours
@@ -488,6 +517,7 @@ def _snapshot_groups(
             uses_credits=config.uses_credits,
             satisfactions=satisfactions,
             utilizations=utilizations,
+            fidelities=fidelities,
             grade_averages=grade_averages,
             semestralizations=semestralizations,
             scarcities=scarcities,
@@ -547,7 +577,19 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     elective_hours_by = config.elective_hours_by_discipline()
     hours_to_graduate = config.hours_to_graduate()
 
-    base_grades = draw_grades(students, config.disciplines, config, rng)
+    # Aptidão: um sorteio por par, persistente — é o traço do aluno. O choque
+    # é por par e período, e é ele que devolve sorte à tentativa.
+    aptitudes = draw_aptitudes(students, config.disciplines, config, rng)
+    grade_noise = draw_grade_noise(students, config.disciplines, config, rng)
+    difficulty = {d.name: d.difficulty for d in config.disciplines}
+    # u_rel: a utilidade em múltiplos da indiferença. `|disciplinas|` é o que
+    # põe a indiferença em 1 e faz o parâmetro sobreviver ao catálogo crescer.
+    catalogue = len(config.disciplines)
+    reach = config.reach()
+    # Os sinais que a universidade publica: no 1º período não há histórico, e
+    # os dois P̂ valem 1 — o termo de progresso cai no neutro sozinho.
+    signals = Signals(win={}, pass_rate={}, hours=hours, reach=reach)
+    first_grades: list[float] = []
     # u^(t) inteira, sorteada aqui e não dentro do loop: é parâmetro de
     # entrada, como as notas. Ver `behavior.draw_utilities`.
     utility_rows = draw_utilities(students, config, rng)
@@ -741,6 +783,9 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                         utilities=utilities[student.id],
                         available=available[student.id],
                         budget=budget[student.id],
+                        behavior=student.behavior,
+                        signals=signals,
+                        catalogue=catalogue,
                     )
                     for name, credits in student_bids.items():
                         bid_log[student.id].setdefault(name, [0] * config.rounds)[
@@ -769,7 +814,8 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                             tie_break_order=tie_break_order,
                             epsilon=epsilon,
                             seed=config.seed,
-                        )
+                        ),
+                        resolver=config.resolver,
                     )
                     for (student_id, name), allocated in result.allocation.items():
                         if allocated:
@@ -788,31 +834,43 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                         if name in round_prices:
                             round_prices[name] = price
             else:
-                # Linha de base: o aluno resolve a carga horária em casa
-                # (eq. 50, com o teto em W_a cheio) e a universidade atende por
-                # ordem de CR (eq. 49).
-                # Não há lance, orçamento nem preço — e, como cada pedido já
-                # cabe no que resta de W_a, atender todos os de um aluno é
-                # viável por construção e a varredura não reverifica nada.
+                # Linha de base: o aluno pede **tudo que lhe é elegível**, na
+                # própria ordem de preferência, e a restrição de carga (eq. 4)
+                # é resolvida pelo alocador, não em casa. Era a pré-resolução
+                # local que impedia o eixo ordenação × PLI de existir deste
+                # lado: com o pedido já cabendo em W_a por construção, os dois
+                # resolvedores davam sempre a mesma coisa.
+                # Não há lance, orçamento nem preço.
                 requests: list[tuple[str, str]] = []
                 for student in active:
                     for name in request_set(
                         utilities=utilities[student.id],
                         available=available[student.id],
-                        hours=hours,
-                        capacity=int(capacity[student.id]),
+                        behavior=student.behavior,
+                        signals=signals,
+                        catalogue=catalogue,
                     ):
                         bid_log[student.id].setdefault(name, [0] * config.rounds)[
                             round_number - 1
                         ] = 1
                         requests.append((student.id, name))
                 # A prioridade é do **aluno**, não do par: o mesmo CR vale em
-                # todas as disciplinas que ele pediu. O epsilon só desempata.
+                # todas as disciplinas que ele pediu. O epsilon desempata entre
+                # alunos; dentro de um aluno quem ordena é a preferência dele,
+                # que já veio na ordem de `requests`.
                 priority = {
-                    key: grade_averages[key[0]] + epsilon.get(key, 0.0) for key in requests
+                    s.id: grade_averages[s.id] + epsilon.get((s.id, s.id), 0.0)
+                    for s in active
                 }
-                for student_id, name in allocate_by_ranking(
-                    requests=requests, priority=priority, seats=seats
+                allocate = (
+                    allocate_by_ilp if config.resolver == "ilp" else allocate_by_ranking
+                )
+                for student_id, name in allocate(
+                    requests=requests,
+                    priority=priority,
+                    seats=seats,
+                    hours=hours,
+                    capacity={s.id: int(capacity[s.id]) for s in active},
                 ):
                     won_now[student_id].append(name)
                     won[student_id].add(name)
@@ -887,6 +945,13 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 scarcities=scarcities,
                 contentions=contentions,
                 won=state.won,
+                # A mensagem que o mecanismo recebeu até aqui: créditos
+                # apostados no leilão, 1 por disciplina pedida na linha de base.
+                messages={
+                    sid: {n: float(sum(rounds)) for n, rounds in log.items()}
+                    for sid, log in bid_log.items()
+                },
+                utility_rows_now=utilities,
                 total_seats=total_seats,
                 credits=state.budget,
                 supply=credits_start,
@@ -922,10 +987,16 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 attempt = student.attempts.get(name, 0) + 1
                 student.attempts[name] = attempt
                 grade = grade_for_attempt(
-                    base_grades[(student.id, name, period)],
-                    attempt,
-                    config.learning_gain,
+                    aptitude=aptitudes[(student.id, name)],
+                    difficulty=difficulty[name],
+                    relative_utility=utility_rows[(student.id, period)][name] * catalogue,
+                    attempt=attempt,
+                    coupling=config.interest_coupling,
+                    noise=grade_noise[(student.id, name, period)],
+                    noise_sigma=config.grade_noise,
                 )
+                if attempt == 1:
+                    first_grades.append(grade)
                 # `grades` guarda a **maior** nota já obtida — é ela que conta
                 # para o CR e para a aprovação. O histórico, ao contrário,
                 # guarda a nota **desta** tentativa: com a matriz sorteada por
@@ -956,10 +1027,22 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             # retorno total Gamma_a^(t) = Gamma_min + soma gamma_{a,x} (eq. 35).
             # Fora do leilão o saldo não se move — nada foi gasto, e inflá-lo
             # com Gamma_min a cada período daria um número sem significado.
+            #
+            # Com `credit_memory = "none"` a eq. (36) é substituída por um
+            # orçamento que recomeça em Gamma_min todo período: nem a sobra nem
+            # o retorno atravessam, e o leilão fica sem memória. É o degrau de
+            # baixo da escada de acúmulo, e o único braço em que o passado do
+            # aluno não entra no poder de compra dele por via alguma.
             if uses_credits:
-                student.credits = (
-                    student.credits - spent[student.id] + config.base_credits + returned
-                )
+                if config.credit_memory == "none":
+                    student.credits = config.base_credits
+                else:
+                    student.credits = (
+                        student.credits
+                        - spent[student.id]
+                        + config.base_credits
+                        + returned
+                    )
 
             # Conclusão — eq. (40): aprovou em todas as obrigatórias e somou a
             # exigência optativa. As duas condições são independentes: dá para
@@ -1035,6 +1118,11 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             scarcities=scarcities,
             contentions=contentions,
             won=won,
+            messages={
+                sid: {n: float(sum(rounds)) for n, rounds in log.items()}
+                for sid, log in bid_log.items()
+            },
+            utility_rows_now=utilities,
             total_seats=total_seats,
             credits=budget,
             supply=credits_start,
@@ -1080,6 +1168,29 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             )
         )
 
+        # Os sinais do próximo período saem do que **este** acabou de publicar:
+        # a concorrência (vagas por solicitante) e a taxa de aprovação de cada
+        # disciplina. É todo o conjunto de informação do aluno, e é o mesmo que
+        # um aluno real lê. O viés é diferente em cada mecanismo, e isso é
+        # característica, não defeito: no CR a disciplina escassa é cursada por
+        # quem tem CR alto, então ela parece mais fácil do que é.
+        signals = Signals(
+            win={
+                d.name: min(1.0, d.seats / demand[d.name]) if demand.get(d.name) else 1.0
+                for d in config.disciplines
+            },
+            pass_rate={
+                d.name: (
+                    approvals[d.name] / (d.seats - seats[d.name])
+                    if d.seats - seats[d.name] > 0
+                    else 1.0
+                )
+                for d in config.disciplines
+            },
+            hours=hours,
+            reach=reach,
+        )
+
     return SimulationResult(
         periods=periods,
         students=[
@@ -1108,5 +1219,5 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         disciplines=[d.name for d in config.disciplines],
         curriculum_periods=curriculum,
         utility_distribution=utility_distribution(utility_rows),
-        grade_distribution=grade_distribution(base_grades, config),
+        grade_distribution=grade_distribution(first_grades),
     )

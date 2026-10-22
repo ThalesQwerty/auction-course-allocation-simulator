@@ -261,40 +261,65 @@ export function Config({
 
         <div className="subpanel">
           <h3>Notas</h3>
+          <p className="note">
+            A nota sai da <strong>aptidão</strong> do aluno naquela disciplina, elevada à demanda
+            que ela lhe faz: com dificuldade 1, primeira tentativa e sem acoplamento, o expoente é
+            1 e a <em>nota é a aptidão</em>. A aptidão vem de uma Beta por par (aluno, disciplina),
+            sorteada uma vez e permanente — é traço, não sorte. Dificuldade e tentativa entram como
+            a razão <em>D/t</em>: dificuldade 2 na segunda tentativa equivale a dificuldade 1 na
+            primeira.
+          </p>
           <div className="field-row">
             <div className="field">
-              <label>Média</label>
+              <label>Aptidão: α</label>
+              <input
+                type="number"
+                min={0.1}
+                step={0.5}
+                value={config.aptitude_alpha}
+                onChange={(e) => patch({ aptitude_alpha: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Aptidão: β</label>
+              <input
+                type="number"
+                min={0.1}
+                step={0.5}
+                value={config.aptitude_beta}
+                onChange={(e) => patch({ aptitude_beta: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Ruído por tentativa</label>
               <input
                 type="number"
                 min={0}
-                max={10}
-                step={0.1}
-                value={config.grade_mean}
-                onChange={(e) => patch({ grade_mean: Number(e.target.value) })}
+                step={0.05}
+                value={config.grade_noise}
+                onChange={(e) => patch({ grade_noise: Number(e.target.value) })}
               />
             </div>
             <div className="field">
-              <label>Desvio padrão</label>
+              <label>
+                Acoplamento com o interesse (<em>w</em>)
+              </label>
               <input
                 type="number"
-                min={0.1}
-                step={0.1}
-                value={config.grade_stddev}
-                onChange={(e) => patch({ grade_stddev: Number(e.target.value) })}
-              />
-            </div>
-            <div className="field">
-              <label>Ganho por recursada</label>
-              <input
-                type="number"
-                min={0.1}
-                max={10}
-                step={0.1}
-                value={config.learning_gain}
-                onChange={(e) => patch({ learning_gain: Number(e.target.value) })}
+                min={0}
+                step={0.25}
+                value={config.interest_coupling}
+                onChange={(e) => patch({ interest_coupling: Number(e.target.value) })}
               />
             </div>
           </div>
+          <p className="note">
+            <strong>w = 0 desliga o acoplamento</strong>, e é o padrão. Ele é a única peça da
+            fórmula de nota sem forma justificada e a única que mexe no resultado principal: em{" "}
+            <em>w</em> = 1 ela fabrica sozinha ~40% de vão em aprovações a favor do leilão, antes
+            de qualquer alocação ter sido avaliada. Em 0 a função de nota é neutra entre os
+            mecanismos, e qualquer vão em conclusões é do mecanismo, inteiro.
+          </p>
         </div>
 
         <div className="subpanel">

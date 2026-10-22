@@ -95,12 +95,17 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
     """
     return SimulationConfig(
         disciplines=[
-            Discipline(d.name, d.seats, d.hours, tuple(d.unlocks), d.entry, d.elective)
+            Discipline(
+                d.name, d.seats, d.hours, d.difficulty, tuple(d.unlocks), d.entry, d.elective
+            )
             for d in req.disciplines
         ],
-        grade_mean=req.grade_mean,
-        grade_stddev=req.grade_stddev,
-        learning_gain=req.learning_gain,
+        aptitude_alpha=req.aptitude_alpha,
+        aptitude_beta=req.aptitude_beta,
+        interest_coupling=req.interest_coupling,
+        grade_noise=req.grade_noise,
+        resolver=req.resolver,
+        credit_memory=req.credit_memory,
         utility_sigma=req.utility_sigma,
         max_hours=req.max_hours,
         periods=req.periods,
@@ -234,8 +239,8 @@ def playground(req: PlaygroundRequest) -> PlaygroundResponse:
             mechanism=req.mechanism,
             rounds=req.rounds,
             seed=req.seed,
-            grade_mean=req.grade_mean,
-            grade_stddev=req.grade_stddev,
+            aptitude_alpha=req.aptitude_alpha,
+            aptitude_beta=req.aptitude_beta,
             disciplines=[
                 PlaygroundDiscipline(d.name, d.seats, d.hours) for d in req.disciplines
             ],

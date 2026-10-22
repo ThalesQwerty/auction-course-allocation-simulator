@@ -37,8 +37,6 @@ def test_auction_bids_match_the_knapsack_and_the_higher_bid_takes_the_seat():
         mechanism="credits",
         rounds=1,
         seed=1,
-        grade_mean=7,
-        grade_stddev=1,
         disciplines=disciplines,
         students=[ana, bia],
     )
@@ -60,8 +58,6 @@ def test_the_higher_cr_takes_the_last_seat():
         mechanism="ranking",
         rounds=1,
         seed=2,
-        grade_mean=6,
-        grade_stddev=0.5,
         disciplines=[discipline("A")],
         students=[
             student("baixo", utilities={"A": 9}, cr=4, max_hours=60),
@@ -80,8 +76,6 @@ def test_an_ineligible_discipline_is_not_bid_even_with_high_utility():
         mechanism="credits",
         rounds=1,
         seed=3,
-        grade_mean=6,
-        grade_stddev=1,
         disciplines=[discipline("Querida", seats=2), discipline("Marcada", seats=2)],
         students=[
             student(
@@ -105,8 +99,6 @@ def test_the_second_round_skips_what_was_won_and_what_no_longer_fits():
         mechanism="credits",
         rounds=2,
         seed=4,
-        grade_mean=8,
-        grade_stddev=0.2,
         disciplines=[discipline("A"), discipline("B")],
         students=[
             student(
@@ -134,8 +126,6 @@ def test_grades_are_seeded_and_only_cover_what_was_won():
         mechanism="ranking",
         rounds=1,
         seed=11,
-        grade_mean=6.5,
-        grade_stddev=1.5,
         disciplines=[discipline("A", seats=1), discipline("B", seats=1)],
         students=[
             student("ana", utilities={"A": 2, "B": 1}, cr=8, max_hours=60),
@@ -157,8 +147,6 @@ def test_a_non_positive_utility_is_rejected():
             mechanism="credits",
             rounds=1,
             seed=0,
-            grade_mean=6,
-            grade_stddev=1,
             disciplines=[discipline("A")],
             students=[student("ana", utilities={"A": 0}, credits=1, max_hours=60)],
         )

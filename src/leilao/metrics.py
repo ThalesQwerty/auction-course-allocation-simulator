@@ -21,6 +21,12 @@ class Metrics:
     # deixa o resto de W_a ocioso pontua psi alto e aproveitamento baixo.
     # Em [0, 1] por construção — a eq. (4) é restrição dos dois mecanismos.
     utilization: float
+    # Fidelidade da mensagem — o cosseno entre o vetor de lances normalizado e
+    # o vetor de utilidades, sobre o elegível. O mecanismo nunca vê `u`: ele vê
+    # a **mensagem**, e isto mede quanto da preferência sobrevive à tradução.
+    # A linha de base só consegue dizer um conjunto (peso uniforme); o leilão
+    # diz o quanto. **Descreve, não pontua** — como lambda.
+    fidelity: float
     fairness: float  # phi — índice de equidade de Jain, eq. (55)
     occupancy: float  # theta — fração das vagas ofertadas, eq. (54)
     # As duas têm a mesma forma — `demand_per_seat` — sobre conjuntos
@@ -62,6 +68,43 @@ def satisfaction(*, utilities: dict[str, float], allocated: list[str]) -> float:
     período.
     """
     return sum(utilities.get(name, 0.0) for name in allocated)
+
+
+def message_fidelity(
+    *, utilities: dict[str, float], message: dict[str, float]
+) -> float:
+    """O cosseno entre a mensagem e a preferência, sobre o conjunto elegível.
+
+    `message` é o que o mecanismo de fato recebeu: os créditos apostados no
+    leilão, ou 1 por disciplina pedida na linha de base — onde o peso é
+    uniforme por construção, porque um conjunto não sabe dizer *quanto*.
+
+    O cosseno é invariante a escala (só a direção importa, que é o que
+    sobrevive à normalização), fica em [0, 1] com vetores não-negativos, e é a
+    régua mais simples de defender. Serviriam também a distância de variação
+    total ou a divergência KL; a leitura não muda.
+
+    **Como ler.** O piso depende de quantas disciplinas estão em jogo: com a
+    mensagem uniforme ele vale 1 quando o aluno é indiferente entre todas e cai
+    a 1/raiz(n) quando ele quer uma só. Então compare braços **dentro do mesmo
+    período**, onde n é comparável; a série ao longo do tempo sobe em parte só
+    porque o conjunto elegível encolheu.
+
+    Duas ressalvas de escrita. Ela mistura duas decisões — com que peso o aluno
+    pede e *quais* ele pede. E hoje ela mede a **resolução da linguagem**,
+    porque o aluno é sincero por construção; com os genes evoluindo, ela passa
+    a misturar resolução com deturpação deliberada, e aí precisa de outro nome.
+    """
+    names = [n for n, u in utilities.items() if u > 0.0]
+    if not names:
+        return 0.0
+    us = [utilities[n] for n in names]
+    ms = [message.get(n, 0.0) for n in names]
+    norm_u = math.sqrt(sum(v * v for v in us))
+    norm_m = math.sqrt(sum(v * v for v in ms))
+    if norm_u <= 0.0 or norm_m <= 0.0:
+        return 0.0
+    return sum(a * b for a, b in zip(us, ms)) / (norm_u * norm_m)
 
 
 def demand_per_seat(*, demands: list[float]) -> float:
@@ -144,13 +187,16 @@ def pearson(xs: list[float], ys: list[float]) -> float:
     variance_y = sum((y - mean_y) ** 2 for y in ys)
     if variance_x == 0 or variance_y == 0:
         return 0.0
-    return covariance / math.sqrt(variance_x * variance_y)
+    # O resíduo de ponto flutuante pode passar de 1 em módulo (visto:
+    # -1,0000000000000002), e coeficiente fora de [-1, 1] não é correlação.
+    return max(-1.0, min(1.0, covariance / math.sqrt(variance_x * variance_y)))
 
 
 def compute_metrics(
     *,
     satisfactions: list[float],
     utilizations: list[float],
+    fidelities: list[float],
     grade_averages: list[float],
     semestralizations: list[float],
     scarcities: list[float],
@@ -173,6 +219,7 @@ def compute_metrics(
         allocations_per_student=allocated / count if count else 0.0,
         efficiency=sum(satisfactions) / count if count else 0.0,
         utilization=sum(utilizations) / count if count else 0.0,
+        fidelity=sum(fidelities) / count if count else 0.0,
         fairness=jain_index(satisfactions),
         occupancy=allocated / total_seats if total_seats else 0.0,
         scarcity=sum(scarcities) / count if count else 0.0,

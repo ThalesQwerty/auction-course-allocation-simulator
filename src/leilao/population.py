@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .behavior import NEUTRAL, Behavior
+
 import numpy as np
 
 from .config import SimulationConfig
@@ -36,6 +38,11 @@ class Student:
     # Período em que concluiu o curso — eq. (40). É a **única** porta de saída:
     # quem não concluiu continua disputando até o fim do horizonte.
     graduated_at: int | None = None
+    # Como este aluno traduz utilidade em mensagem — ver `behavior.Behavior`.
+    # Hoje **todo mundo carrega o neutro**, que reproduz o modelo sem
+    # comportamento bit a bit; o campo existe para que a evolução desses
+    # coeficientes seja um experimento, e não uma reescrita.
+    behavior: Behavior = NEUTRAL
 
     @property
     def taken(self) -> set[str]:

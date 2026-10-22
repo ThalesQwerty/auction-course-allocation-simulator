@@ -67,12 +67,18 @@ alunos continua sendo alpha/epsilon (eq. 20, `tie_breaking`).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
 import heapq
 
 import numpy as np
 
 from .config import SimulationConfig
-from .population import Student
+if TYPE_CHECKING:  # pragma: no cover - só para a anotação
+    # `population` importa `Behavior` daqui, então a dependência só pode
+    # existir em tempo de verificação de tipo — senão fecha ciclo no import.
+    from .population import Student
 
 # Guarda contra underflow, **não** parâmetro de modelagem. A log-normal só
 # chega a 0,0 com expoente abaixo de -745, o que não acontece em sigma nenhum
@@ -92,8 +98,113 @@ UNDERFLOW_GUARD = float(np.finfo(float).tiny)
 DISTRIBUTION_BINS = 10
 
 
+@dataclass(frozen=True)
+class Behavior:
+    """O comportamento de um aluno: como ele traduz utilidade em mensagem.
+
+    **É função, não matriz.** A utilidade é resorteada a cada período, então um
+    genoma com um valor por par (aluno, disciplina) descreveria o que fazer com
+    a linha deste semestre e não diria nada sobre a do próximo. Comportamento
+    tem de ser uma regra que funcione sobre uma linha que ela nunca viu.
+
+    São três coeficientes, e os dois primeiros são o dilema que atravessa o
+    trabalho:
+
+    - **`concentration` (β)** — o viés de satisfação: o quanto o aluno exagera
+      as diferenças de gosto ao apostar. β = 1 é apostar as intensidades
+      relativas verdadeiras; β > 1 concentra, β → 0 achata até a mensagem
+      virar um conjunto, que é exatamente o que a linha de base por CR envia.
+      β é, portanto, a **razão de distorção**, medida em unidades de σ.
+    - **`progress` (ρ)** — o viés de progresso: o peso do *avanço esperado* da
+      vaga, que é uma grandeza só — `P(obter) · P(aprovar) · (quanto avanço se
+      passar)`. Um coeficiente sobre ela é melhor que quatro sobre as partes, e
+      como as partes ficam dentro do mesmo produto elas podem se correlacionar
+      sem criar crista entre genes.
+    - **`reserve` (r)** — a utilidade de reserva: o aluno compra crédito
+      enquanto o ganho marginal exceder `r`. Numa regra só ela decide *quais*
+      disciplinas entram (as de ganho acima de r), *quantos* créditos cada uma
+      recebe e *quanto* se gasta no total — o orçamento vira teto, não meta.
+
+    Os valores neutros reproduzem o modelo sem comportamento, bit a bit: β = 1
+    deixa o score igual à utilidade, ρ = 0 apaga o termo de progresso e r = 0
+    nunca para a compra pela reserva. **É assim que a população roda hoje** —
+    a evolução desses coeficientes é experimento à parte.
+    """
+
+    concentration: float = 1.0
+    progress: float = 0.0
+    reserve: float = 0.0
+
+
+NEUTRAL = Behavior()
+
+
+@dataclass(frozen=True)
+class Signals:
+    """O que a universidade publicou no período anterior, por disciplina.
+
+    É todo o conjunto de informação do aluno, e ele é deliberadamente pobre:
+    nada de conhecer a dificuldade declarada nem a própria aptidão por matéria.
+    O que existe é o que um aluno real lê — a concorrência e a taxa de
+    aprovação do semestre passado — mais o próprio histórico.
+
+    `win` é P̂(obter): vagas ÷ solicitantes no leilão, ou a comparação do CR do
+    aluno com a nota de corte na linha de base. `pass_rate` é P̂(aprovar): a
+    taxa publicada da disciplina, que é a dificuldade já filtrada pela
+    população. **Sem histórico (1º período) os dois valem 1**, e o termo de
+    progresso cai no neutro sozinho.
+
+    Um efeito colateral que é bom: o sinal é enviesado de forma diferente em
+    cada mecanismo. No CR a disciplina escassa é cursada por quem tem CR alto,
+    então ela *parece* mais fácil do que é.
+    """
+
+    win: dict[str, float] = field(default_factory=dict)
+    pass_rate: dict[str, float] = field(default_factory=dict)
+    hours: dict[str, int] = field(default_factory=dict)
+    reach: dict[str, int] = field(default_factory=dict)
+
+
+def decision_scores(
+    *,
+    utilities: dict[str, float],
+    behavior: Behavior = NEUTRAL,
+    signals: Signals | None = None,
+    catalogue: int = 0,
+) -> dict[str, float]:
+    """O score que o aluno usa para decidir, em cima da linha de utilidades:
+
+        ln score_x = β·ln u_rel_x + ρ·ln[ P̂(obter)·P̂(aprovar)·w_x·(1+d_x) ]
+
+    `u_rel` é a utilidade em múltiplos da indiferença (`u · |disciplinas|`), a
+    mesma normalização da fórmula de nota: ela vale 1 quando o aluno é
+    indiferente, e sobrevive ao catálogo crescer.
+
+    Com os valores neutros (β = 1, ρ = 0) o score **é** `u_rel`, que é
+    proporcional à utilidade — então a mochila côncava decide exatamente o que
+    decidia antes, e a ordem de desempate da grade é preservada porque a
+    iteração segue a ordem de `utilities`.
+    """
+    scale = catalogue or len(utilities) or 1
+    out: dict[str, float] = {}
+    for name, utility in utilities.items():
+        if utility <= 0.0:
+            continue
+        value = (utility * scale) ** behavior.concentration
+        if behavior.progress and signals is not None:
+            advance = (
+                signals.win.get(name, 1.0)
+                * signals.pass_rate.get(name, 1.0)
+                * max(signals.hours.get(name, 1), 1)
+                * (1 + signals.reach.get(name, 0))
+            )
+            value *= max(advance, UNDERFLOW_GUARD) ** behavior.progress
+        out[name] = value
+    return out
+
+
 def draw_utilities(
-    students: list[Student], config: SimulationConfig, rng: np.random.Generator
+    students: list["Student"], config: SimulationConfig, rng: np.random.Generator
 ) -> dict[tuple[str, int], dict[str, float]]:
     """Sorteia a matriz de utilidades inteira na inicialização, a partir da
     seed: uma linha por (aluno, período), sobre a grade inteira.
@@ -197,7 +308,7 @@ def utility_distribution(
 
 
 def utility_matrix(
-    *, row: dict[str, float], student: Student, config: SimulationConfig
+    *, row: dict[str, float], student: "Student", config: SimulationConfig
 ) -> dict[str, float]:
     """u_{a,·}^(t): o recorte elegível da linha do aluno — eqs. (41)-(43).
 
@@ -229,7 +340,13 @@ def utility_matrix(
 
 
 def compute_bids(
-    *, utilities: dict[str, float], available: list[str], budget: int
+    *,
+    utilities: dict[str, float],
+    available: list[str],
+    budget: int,
+    behavior: Behavior = NEUTRAL,
+    signals: Signals | None = None,
+    catalogue: int = 0,
 ) -> dict[str, int]:
     """Converte utilidades em lances inteiros numa rodada — a estratégia do
     aluno no leilão.
@@ -271,12 +388,16 @@ def compute_bids(
     `available` pode chegar em qualquer ordem: quem decide é a matriz.
     """
     wanted = set(available)
+    scores = decision_scores(
+        utilities=utilities,
+        behavior=behavior,
+        signals=signals,
+        catalogue=catalogue,
+    )
     # Iterar `utilities`, e não `available`, é o que ancora o desempate na ordem
     # da grade: a posição no `pool` passa a ser a posição no cenário, restrita
     # ao que ainda está em disputa.
-    pool = [
-        name for name, utility in utilities.items() if name in wanted and utility > 0.0
-    ]
+    pool = [name for name in utilities if name in wanted and scores.get(name, 0.0) > 0.0]
     if not pool or budget <= 0:
         return {}
 
@@ -286,16 +407,24 @@ def compute_bids(
     # utilidades diferentes (u_x/2 = u_y/1, por exemplo). Como o posto é único,
     # a comparação nunca chega aos dois últimos campos.
     rank = {name: index for index, name in enumerate(pool)}
-    frontier = [(-utilities[name], rank[name], name, 1) for name in pool]
+    frontier = [(-scores[name], rank[name], name, 1) for name in pool]
     heapq.heapify(frontier)
 
     bids: dict[str, int] = {}
     for _ in range(budget):
-        _, _, name, position = heapq.heappop(frontier)
+        gain, _, name, position = heapq.heappop(frontier)
+        # A **utilidade de reserva**: o aluno compra enquanto o ganho marginal
+        # exceder `r`, e para quando não. Numa regra só isso decide quais
+        # disciplinas entram (as de ganho acima de r, no 1º crédito), quantos
+        # créditos cada uma recebe e quanto se gasta no total — o orçamento
+        # vira teto, e não meta. Com r = 0 (neutro) ela nunca dispara, e o
+        # aluno gasta tudo como antes.
+        if -gain <= behavior.reserve:
+            break
         bids[name] = bids.get(name, 0) + 1
         following = position + 1
         heapq.heappush(
-            frontier, (-utilities[name] / following, rank[name], name, following)
+            frontier, (-scores[name] / following, rank[name], name, following)
         )
 
     # Toda disciplina presente recebeu ao menos um crédito, então a eq. (18) —

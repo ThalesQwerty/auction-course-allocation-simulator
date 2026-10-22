@@ -162,7 +162,7 @@ function describeScenario(
   // As duas normais entram só quando saem do default: num cenário montado a
   // partir de um preset elas distinguem execuções que, de resto, são iguais.
   const populacao = [
-    `n ~ ${config.grade_mean.toLocaleString("pt-BR")} ± ${config.grade_stddev.toLocaleString("pt-BR")}`,
+    `a ~ Beta(${config.aptitude_alpha.toLocaleString("pt-BR")}, ${config.aptitude_beta.toLocaleString("pt-BR")})`,
     `u σ ${config.utility_sigma.toLocaleString("pt-BR")}`,
   ];
   return (

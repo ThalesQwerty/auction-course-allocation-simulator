@@ -2,7 +2,15 @@ import numpy as np
 import pytest
 
 from disciplines import disciplines_from_predecessors
-from leilao.behavior import compute_bids, draw_utilities, utility_matrix
+from leilao.behavior import (
+    NEUTRAL,
+    Behavior,
+    Signals,
+    compute_bids,
+    decision_scores,
+    draw_utilities,
+    utility_matrix,
+)
 from leilao.config import Discipline, SimulationConfig
 from leilao.grading import grade_for_attempt
 from leilao.names import FIRST_NAMES, LAST_NAMES, sample_names
@@ -332,17 +340,25 @@ def test_bid_proportions_do_not_depend_on_the_utility_scale():
     )
 
 
-def test_retake_raises_the_grade_by_the_learning_gain():
-    assert grade_for_attempt(4.2, 1, 2.5) == 4.2
-    assert grade_for_attempt(4.2, 2, 2.5) == 6.7
-    assert grade_for_attempt(4.2, 3, 2.5) == 9.2
-    # o ganho é configurável
-    assert grade_for_attempt(4.2, 3, 1.0) == 6.2
-    # a nota satura em 10
-    assert grade_for_attempt(9.5, 3, 2.5) == 10.0
-    with pytest.raises(ValueError):
-        grade_for_attempt(5.0, 0, 2.5)
+def test_the_retake_lowers_the_demand_of_the_discipline():
+    """A recursada não soma incremento à nota: ela divide a demanda por `t`.
+    Com D = 1, a segunda tentativa é tão fácil quanto uma disciplina de
+    dificuldade 1/2 seria de primeira."""
+    def grade(attempt, difficulty=1.0):
+        return grade_for_attempt(
+            aptitude=0.5,
+            difficulty=difficulty,
+            relative_utility=1.0,
+            attempt=attempt,
+            coupling=0.0,
+            noise=0.0,
+            noise_sigma=0.0,
+        )
 
+    assert grade(1) < grade(2) < grade(3)
+    assert grade(2) == grade(1, difficulty=0.5)
+    with pytest.raises(ValueError):
+        grade(0)
 
 def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
     """A linha inteira vale 1, e é essa invariante que `metrics.satisfaction`
@@ -357,3 +373,82 @@ def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
     for row in rows.values():
         assert set(row) == {d.name for d in config.disciplines}
         assert sum(row.values()) == pytest.approx(1.0)
+
+
+# --- os genes de comportamento --------------------------------------------
+
+
+def test_the_neutral_behavior_reproduces_the_model_without_genes():
+    """β = 1, ρ = 0, r = 0 têm de dar exatamente o que o modelo dava antes de
+    haver comportamento — é a regressão que garante que acrescentar os genes
+    não mudou nada por acidente. Hoje **toda a população roda no neutro**."""
+    utilities = {"D1": 0.4, "D2": 0.3, "D3": 0.2, "D4": 0.1}
+    pool = list(utilities)
+    assert compute_bids(
+        utilities=utilities, available=pool, budget=10
+    ) == compute_bids(
+        utilities=utilities, available=pool, budget=10, behavior=NEUTRAL
+    )
+    # E o score neutro é proporcional à utilidade: a mochila decide igual.
+    scores = decision_scores(utilities=utilities, catalogue=len(utilities))
+    ratios = [scores[n] / utilities[n] for n in utilities]
+    assert max(ratios) == pytest.approx(min(ratios))
+
+
+def test_the_concentration_gene_moves_the_budget_to_the_favourite():
+    """β é o viés de satisfação: grande concentra, e β → 0 achata a mensagem
+    até ela virar um conjunto — que é exatamente o que o CR envia."""
+    utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
+    pool = list(utilities)
+
+    def bids(beta):
+        return compute_bids(
+            utilities=utilities,
+            available=pool,
+            budget=20,
+            behavior=Behavior(concentration=beta),
+        )
+
+    assert bids(3.0)["D1"] > bids(1.0)["D1"] > bids(0.2)["D1"]
+    # Achatado, os três recebem quase o mesmo.
+    flat = bids(0.05)
+    assert max(flat.values()) - min(flat.values()) <= 1
+
+
+def test_the_reserve_gene_stops_the_spending():
+    """A reserva corta no ganho marginal, e numa regra só decide quais entram,
+    quantos créditos cada uma recebe e quanto se gasta no total: o orçamento
+    vira teto, não meta."""
+    utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
+    pool = list(utilities)
+    full = compute_bids(utilities=utilities, available=pool, budget=20)
+    assert sum(full.values()) == 20  # neutro gasta tudo
+
+    thrifty = compute_bids(
+        utilities=utilities, available=pool, budget=20, behavior=Behavior(reserve=1.0)
+    )
+    assert sum(thrifty.values()) < 20  # sobra crédito
+    assert set(thrifty) <= set(full)  # e ele pede menos disciplinas, nunca mais
+
+
+def test_the_progress_gene_reads_the_published_signals():
+    """ρ pesa o avanço esperado — `P(obter)·P(aprovar)·carga·(1+alcance)`. Com
+    ρ = 0 os sinais são ignorados; com ρ > 0, duas disciplinas de utilidade
+    igual se separam pelo que a universidade publicou."""
+    utilities = {"D1": 0.5, "D2": 0.5}
+    signals = Signals(
+        win={"D1": 0.2, "D2": 1.0},  # D1 é disputada
+        pass_rate={"D1": 1.0, "D2": 1.0},
+        hours={"D1": 60, "D2": 60},
+        reach={"D1": 0, "D2": 0},
+    )
+    neutral = decision_scores(utilities=utilities, signals=signals, catalogue=2)
+    assert neutral["D1"] == pytest.approx(neutral["D2"])
+
+    aware = decision_scores(
+        utilities=utilities,
+        behavior=Behavior(progress=1.0),
+        signals=signals,
+        catalogue=2,
+    )
+    assert aware["D2"] > aware["D1"]  # foge do congestionamento

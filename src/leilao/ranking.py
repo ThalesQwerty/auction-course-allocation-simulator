@@ -32,6 +32,10 @@ pede) e `allocate_by_ranking` (o que a universidade concede).
 """
 from __future__ import annotations
 
+from .behavior import NEUTRAL, Behavior, Signals, decision_scores
+from .entities import Agent, Demand, Good, Problem
+from .wdp_solver import solve_wdp
+
 from math import gcd
 
 
@@ -102,77 +106,133 @@ def request_set(
     *,
     utilities: dict[str, float],
     available: list[str],
-    hours: dict[str, int],
-    capacity: int,
+    behavior: Behavior = NEUTRAL,
+    signals: Signals | None = None,
+    catalogue: int = 0,
 ) -> list[str]:
-    """D_a^(t,r) — as disciplinas que o aluno solicita nesta rodada, eq. (50).
+    """D_a^(t,r) — as disciplinas que o aluno solicita nesta rodada, eq. (50),
+    **na ordem de preferência dele**.
 
     `available` é B_a^(t,r), o mesmo conjunto que alimenta os lances no leilão:
-    disciplinas com vaga livre, que cabem na carga horária restante e que o
-    aluno ainda não conquistou no período. `capacity` é W_a^(t,r), a carga
-    horária que lhe sobra, e é o teto do pedido inteiro.
+    disciplinas com vaga livre que o aluno ainda não conquistou no período. Ele
+    pede **todas**, da que mais quer para a que menos quer.
 
-    O teto é o W_a cheio, e não floor(U_a · W_a) como na eq. (50): com a soma
-    das utilidades fixada em 1 (`behavior.utility_matrix`), U_a deixou de
-    existir como grandeza do aluno. Aqui ele seria **poupança de carga
-    horária**, que não se sustenta — hora não cursada não passa para o período
-    seguinte, então reservá-la é só cursar menos. É a mesma decisão que faz o
-    aluno gastar todo o orçamento no leilão (`behavior.compute_bids`), e manter
-    as duas iguais é o que preserva a comparação: o que separa os mecanismos
-    tem de ser o mecanismo, não quanto cada lado resolveu guardar.
+    **A mochila 0-1 saiu daqui.** Antes o aluno resolvia a carga horária em
+    casa, escolhendo *ex-ante* o subconjunto que coubesse em W_a; agora ele
+    apresenta a lista inteira e a restrição é resolvida na concessão. Três
+    razões, e a primeira é a que motivou a mudança:
 
-    Dentro desse teto o aluno extrai o máximo de utilidade que consegue, e é
-    aqui que ele deixa de poder dizer *quanto* quer cada disciplina: a mochila
-    só lê a ordem das utilidades e os pesos. Essa perda de expressividade é
-    justamente a hipótese que a comparação testa — a mochila côncava do leilão
-    recebe as mesmas utilidades e põe mais ou menos crédito conforme o valor
-    delas.
+    1. **Sem isso o eixo ordenação × PLI não existe deste lado.** Com o pedido
+       já cabendo em W_a por construção, a carga nunca apertava no alocador, o
+       problema se separava por disciplina e os dois resolvedores davam sempre
+       a mesma alocação.
+    2. **É à prova de estratégia.** Pedido recusado não custa nada e a
+       prioridade do aluno não depende do que ele pede, então listar tudo na
+       ordem verdadeira é dominante — não há o que o aluno ganhe mentindo.
+    3. **É o que a universidade real faz**: o aluno se inscreve numa lista
+       ordenada maior do que cabe, e o sistema para quando a grade enche.
 
-    **Empate vai para a disciplina listada primeiro**, a mesma ordem global que
-    desempata o lance — por isso o `pool` sai de `utilities`, que vem na ordem da
-    grade, e não de `available`, que é só um filtro.
+    Pedir tudo não quer dizer levar tudo: quem corta é o alocador, e o aluno
+    perde o que menos queria (na ditadura serial) ou o que o ótimo global
+    dispensar (na PLI).
     """
     wanted = set(available)
-    pool = [
-        name for name, utility in utilities.items() if name in wanted and utility > 0.0
-    ]
-    if not pool:
-        return []
-    return _knapsack(names=pool, values=utilities, weights=hours, capacity=capacity)
+    scores = decision_scores(
+        utilities=utilities,
+        behavior=behavior,
+        signals=signals,
+        catalogue=catalogue,
+    )
+    # Ordenação **estável** sobre um dicionário que já vem na ordem da grade:
+    # scores empatados saem na ordem de listagem do cenário, a mesma que
+    # desempata o lance (ver `ORDEM DE DESEMPATE`, em `behavior`). Pôr o nome
+    # na chave desempataria por alfabeto, que não é critério nenhum.
+    #
+    # A reserva corta aqui também: pedir o que se quer pouco custa carga, e com
+    # r > 0 o aluno deixa de pedir abaixo do limiar.
+    ordered = sorted(
+        ((name, score) for name, score in scores.items() if name in wanted),
+        key=lambda item: -item[1],
+    )
+    return [name for name, score in ordered if score > behavior.reserve]
 
 
 def allocate_by_ranking(
     *,
     requests: list[tuple[str, str]],
-    priority: dict[tuple[str, str], float],
+    priority: dict[str, float],
     seats: dict[str, int],
+    hours: dict[str, int],
+    capacity: dict[str, int],
 ) -> list[tuple[str, str]]:
-    """Atende as solicitações em ordem decrescente de prioridade, enquanto
-    houver vaga — a distribuição da Seção 7.3.1.
+    """Ditadura serial: os alunos entram em ordem decrescente de CR e cada um
+    leva o que quer, na própria ordem de preferência, enquanto houver vaga e
+    carga — a distribuição da Seção 7.3.1.
 
-    `priority` é N_a^(t) + epsilon_{a,x}: o CR do aluno (eq. 49) mais a mesma
-    matriz de perturbações estocásticas que o leilão usa. O epsilon está aqui
-    pelo mesmo motivo de lá — dar a cada solicitação um valor único, de modo que
-    a ordem não dependa de como a lista chegou. Sem ele dois alunos de CR igual
-    disputando a última vaga seriam decididos pela ordem de iteração, que não é
-    critério nenhum.
+    `requests` vem **já na ordem de preferência de cada aluno**, e `priority` é
+    por **aluno** (N_a da eq. 49 mais a perturbação de desempate), não por par.
+    Essa separação é o que torna a regra lexicográfica de verdade: o CR decide
+    *quem* escolhe antes, e a utilidade decide *o que* cada um escolhe. Com uma
+    ordenação achatada sobre os pares, o epsilon por par embaralharia a ordem
+    interna do aluno e ele levaria o que calhasse, não o que preferia.
 
-    Note que o CR é **do aluno**, não do par: um aluno de CR alto passa na
-    frente em *todas* as disciplinas que pediu, e é essa concentração de
-    vantagem que o leilão por créditos se propõe a dissolver, obrigando quem
-    quer muito uma vaga a abrir mão de outra.
+    **A carga horária é verificada aqui, não em casa.** O aluno pede tudo que
+    lhe é elegível e a restrição da eq. (4) é resolvida *ex-post*, na concessão
+    — que é o que torna comparável a célula gulosa com a de PLI: as duas
+    recebem a mesma mensagem e só diferem em quem decide.
 
-    `seats` não é modificado — a vaga concedida é descontada numa cópia, e quem
-    chamou aplica o resultado ao próprio estado, como faz com a alocação do
-    leilão.
+    `seats` e `capacity` não são modificados: a concessão é descontada em
+    cópias, e quem chamou aplica o resultado ao próprio estado.
     """
     remaining = dict(seats)
+    room = dict(capacity)
+    by_student: dict[str, list[str]] = {}
+    for student_id, name in requests:
+        by_student.setdefault(student_id, []).append(name)
+
     granted: list[tuple[str, str]] = []
-    # O desempate pelo próprio par é redundante enquanto epsilon for distinto
-    # por par, e está aqui para que a ordenação siga total mesmo se alguém
-    # passar prioridades repetidas.
-    for key in sorted(requests, key=lambda k: (-priority[k], k)):
-        if remaining.get(key[1], 0) > 0:
-            remaining[key[1]] -= 1
-            granted.append(key)
+    for student_id in sorted(by_student, key=lambda s: (-priority[s], s)):
+        for name in by_student[student_id]:
+            if remaining.get(name, 0) > 0 and room.get(student_id, 0) >= hours[name]:
+                remaining[name] -= 1
+                room[student_id] -= hours[name]
+                granted.append((student_id, name))
     return granted
+
+
+def allocate_by_ilp(
+    *,
+    requests: list[tuple[str, str]],
+    priority: dict[str, float],
+    seats: dict[str, int],
+    hours: dict[str, int],
+    capacity: dict[str, int],
+) -> list[tuple[str, str]]:
+    """A mesma linha de base, resolvida globalmente: maximiza a soma dos CRs
+    atendidos sujeito às vagas (eq. 3) e à carga de cada aluno (eq. 4).
+
+    É a célula "CR × PLI" do 2x2, e ela usa **o mesmo resolvedor do leilão** —
+    só muda o peso da preferência, que ali é o lance e aqui é o CR. Isso torna
+    o eixo exato por construção: nada além do resolvedor difere entre as
+    células de uma linha.
+
+    **Um defeito a declarar**, e ele é do mecanismo, não da implementação: como
+    todas as demandas de um aluno têm o mesmo peso `N_a`, a PLI é indiferente
+    sobre *qual* dos pedidos dele cortar quando a carga aperta, e usa essa
+    liberdade para liberar vaga aos outros. O aluno não tem voz sobre o que
+    perde — ao contrário da ditadura serial, em que ele perde o que menos
+    queria. É a diferença entre tratar o CR como fila e como peso.
+    """
+    if not requests:
+        return []
+    demands = [
+        Demand(student_id, name, priority[student_id])
+        for student_id, name in requests
+    ]
+    problem = Problem(
+        agents=[Agent(student_id, capacity[student_id]) for student_id in capacity],
+        goods=[Good(name, seats[name], hours[name]) for name in seats],
+        demands=demands,
+    )
+    allocation = solve_wdp(problem)
+    return [key for key, taken in allocation.items() if taken]

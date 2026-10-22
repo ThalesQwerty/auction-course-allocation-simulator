@@ -107,9 +107,10 @@ SIMULATE_REQUEST = {
 # até 08/10/2026. Notas baixas e ganho alto para o cenário produzir recursadas
 # dentro do horizonte; W_a de 120 h para o teto morder.
 POPULATION = {
-    "grade_mean": 5,
-    "grade_stddev": 2,
-    "learning_gain": 3,
+    # Aptidão dura: Beta(2, 3) tem média 0,4, então reprova-se bastante e há
+    # recursada o bastante para o teste da razão D/t ter amostra.
+    "aptitude_alpha": 2,
+    "aptitude_beta": 3,
     "utility_sigma": 1,
     "max_hours": 120,
 }
@@ -303,39 +304,31 @@ def test_simulate_rejects_entry_disciplines_heavier_than_the_workload_cap(client
     assert "não cabem na carga horária máxima" in response.json()["detail"]
 
 
-def test_the_scenario_sets_the_learning_gain(client):
-    """O incremento por recursada é do cenário e vale para todo aluno — mas ele
-    desloca a **média** do sorteio, não a nota anterior: a matriz de notas é
-    sorteada por período, então a recursada é uma nota nova, de uma normal
-    centrada `learning_gain` acima.
+def test_the_retake_divides_the_demand_of_the_discipline(client):
+    """A recursada não soma incremento à nota: `D` e `t` entram como a razão
+    `D/t`, então a tentativa n+1 enfrenta uma demanda menor e tira, **em
+    média**, nota maior.
 
-    Por isso a prova é sobre a média e não sobre cada par: a nota média da
-    tentativa n+1 fica um ganho acima da n (menos o que satura em 10), e nenhuma
-    nota isolada precisa subir. Que a recursada *pode* sair pior está em
-    `test_population.py::test_a_retake_shifts_the_mean_of_the_draw` — aqui não,
-    porque um cenário deste tamanho tem poucas recursadas e o caso é raro
-    demais para não virar teste intermitente.
+    A prova é sobre a média e não sobre cada par, porque o choque por tentativa
+    é justamente o que faz a recursada deixar de garantir nota maior — que é
+    comportamento desejado, e está coberto em
+    `test_population.py::test_a_retake_no_longer_guarantees_a_higher_grade`.
     """
     payload = client.post(
         "/simulate",
         json={**SIMULATE_REQUEST, **POPULATION, "periods": 8, "include_histories": True},
     ).json()
-    step = POPULATION["learning_gain"]
 
     by_attempt: dict[int, list[float]] = {}
     for history in payload["histories"]:
         for record in history["periods"]:
             for request in record["requests"]:
-                if request["attempt"] is not None:
+                if request["attempt"] is not None and request["grade"] is not None:
                     by_attempt.setdefault(request["attempt"], []).append(request["grade"])
 
     assert len(by_attempt.get(2, [])) > 20, "o cenário deveria ter recursadas"
     mean = lambda values: sum(values) / len(values)  # noqa: E731
-    # Monotônica na média, e o salto da 1ª para a 2ª é o ganho — a saturação em
-    # 10 come um pedaço, daí a folga.
     assert mean(by_attempt[2]) > mean(by_attempt[1])
-    assert mean(by_attempt[2]) - mean(by_attempt[1]) == pytest.approx(step, abs=0.8)
-
 
 def test_compare_returns_the_sweep_when_asked(client):
     """A varredura é opcional: pedida, vem um ponto por expoente, cada um com os

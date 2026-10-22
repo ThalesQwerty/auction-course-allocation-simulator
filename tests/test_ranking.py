@@ -16,7 +16,7 @@ from leilao.comparison import (
 )
 from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig
-from leilao.ranking import allocate_by_ranking, request_set
+from leilao.ranking import allocate_by_ilp, allocate_by_ranking, request_set
 from leilao.simulation import GUARANTEED_ROUND, run_simulation
 
 GRADE = disciplines_from_predecessors(
@@ -48,130 +48,116 @@ def make_config(**overrides) -> SimulationConfig:
 # --- o pedido do aluno: mochila 0-1 sobre a carga horária, eq. (50) ---------
 
 
-def test_the_request_never_exceeds_the_remaining_workload():
-    """Σ w_x <= W_a^(t,r): o teto do pedido é a carga horária que sobra, cheia
-    — não há mais poupança de horas, porque hora não cursada não passa para o
-    período seguinte."""
+def test_the_request_is_everything_eligible_in_preference_order():
+    """A mochila 0-1 saiu: o aluno pede tudo que lhe é elegível, da que mais
+    quer para a que menos quer, e a carga horária é resolvida na concessão.
+    Sem isso o eixo ordenação × PLI não existe do lado do CR — o pedido já
+    caberia em W_a por construção e os dois resolvedores empatariam sempre."""
     utilities = {"D1": 0.3, "D2": 0.25, "D3": 0.2, "D4": 0.15, "D5": 0.1}
-    wanted = request_set(
-        utilities=utilities,
-        available=list(utilities),
-        hours=HOURS,
-        capacity=WORKLOAD,
-    )
-    assert sum(HOURS[name] for name in wanted) <= WORKLOAD
-    # E com as 180 h cheias cabem três de 60 h: o aluno não guarda nada.
-    assert sum(HOURS[name] for name in wanted) == WORKLOAD
+    wanted = request_set(utilities=utilities, available=list(utilities))
+    assert wanted == ["D1", "D2", "D3", "D4", "D5"]
+    # E ele pede muito mais do que cabe: é esse excesso que dá o que decidir
+    # ao alocador.
+    assert sum(HOURS[name] for name in wanted) > WORKLOAD
 
 
-def test_the_request_maximises_utility_within_the_budget():
-    """Com 120 h de teto cabem duas de 60 h; a mochila pega as duas de maior
-    utilidade, e não a de 90 h sozinha, ainda que ela seja a preferida."""
-    utilities = {"D4": 0.4, "D1": 0.35, "D2": 0.3, "D3": 0.05}
-    wanted = request_set(
-        utilities=utilities,
-        available=list(utilities),
-        hours=HOURS,
-        capacity=120,
-    )
-    assert sorted(wanted) == ["D1", "D2"]
-
-
-def test_the_request_takes_everything_when_everything_fits():
-    utilities = {"D1": 0.6, "D2": 0.4}
-    wanted = request_set(
-        utilities=utilities,
-        available=list(utilities),
-        hours=HOURS,
-        capacity=WORKLOAD,
-    )
-    assert sorted(wanted) == ["D1", "D2"]
-
-
-def test_an_empty_or_unaffordable_set_asks_for_nothing():
-    assert (
-        request_set(
-            utilities={"D1": 0.5},
-            available=[],
-            hours=HOURS,
-            capacity=WORKLOAD,
-        )
-        == []
-    )
-    # Sobraram 30 h, que não comportam nem a disciplina mais leve.
-    assert (
-        request_set(
-            utilities={"D1": 0.5},
-            available=["D1"],
-            hours=HOURS,
-            capacity=30,
-        )
-        == []
-    )
+def test_the_request_covers_only_what_is_available_and_wanted():
+    utilities = {"D1": 0.6, "D2": 0.0, "D3": 0.4}
+    assert request_set(utilities=utilities, available=["D1", "D3"]) == ["D1", "D3"]
+    # Utilidade zero é o que marca o inelegível, e não entra no pedido.
+    assert request_set(utilities=utilities, available=list(utilities)) == ["D1", "D3"]
+    assert request_set(utilities={"D1": 0.5}, available=[]) == []
 
 
 def test_a_tie_in_the_request_goes_to_the_discipline_listed_first():
-    """A mochila 0-1 segue a mesma ordem global de desempate do lance: entre
-    conjuntos de valor igual, ganha o que usa as disciplinas listadas antes."""
-    # Quatro de 60 h e valor idêntico, com 120 h de teto: cabem duas.
-    tied = {"D1": 0.25, "D2": 0.25, "D3": 0.25, "D5": 0.25}
-    assert request_set(
-        utilities=tied, available=list(tied), hours=HOURS, capacity=120
-    ) == ["D1", "D2"]
-    # A ordem que decide é a da matriz, não a de `available`.
-    reversed_grade = {name: 0.25 for name in ("D5", "D3", "D2", "D1")}
-    assert sorted(
-        request_set(
-            utilities=reversed_grade,
-            available=["D1", "D2", "D3", "D5"],
-            hours=HOURS,
-            capacity=120,
-        )
-    ) == ["D3", "D5"]
+    """Empate sai na ordem da grade, a mesma que desempata o lance — e não na
+    ordem alfabética nem na de `available`."""
+    tied = {"D2": 0.25, "D1": 0.25, "D5": 0.25, "D3": 0.25}
+    assert request_set(utilities=tied, available=list(tied)) == ["D2", "D1", "D5", "D3"]
+    shuffled = request_set(utilities=tied, available=["D5", "D3", "D1", "D2"])
+    assert shuffled == ["D2", "D1", "D5", "D3"]
 
 
-def test_the_request_does_not_depend_on_the_order_of_available():
-    tied = {"D1": 0.25, "D2": 0.25, "D3": 0.25, "D5": 0.25}
-    straight = request_set(
-        utilities=tied, available=["D1", "D2", "D3", "D5"], hours=HOURS, capacity=120
-    )
-    shuffled = request_set(
-        utilities=tied, available=["D5", "D3", "D1", "D2"], hours=HOURS, capacity=120
-    )
-    assert straight == shuffled
-
-
-# --- a alocação: ordem decrescente de CR -----------------------------------
+# --- a alocação: ditadura serial por CR, carga resolvida ex-post -----------
 
 
 def test_the_higher_grade_average_takes_the_last_seat():
-    requests = [("baixo", "D5"), ("alto", "D5")]
     granted = allocate_by_ranking(
-        requests=requests,
-        priority={("baixo", "D5"): 6.0, ("alto", "D5"): 8.5},
+        requests=[("baixo", "D5"), ("alto", "D5")],
+        priority={"baixo": 6.0, "alto": 8.5},
         seats={"D5": 1},
+        hours=HOURS,
+        capacity={"baixo": WORKLOAD, "alto": WORKLOAD},
     )
     assert granted == [("alto", "D5")]
+
+
+def test_the_student_loses_what_he_wanted_least_when_the_workload_binds():
+    """Ditadura serial: o aluno entra na ordem do CR e leva o que quer, na
+    própria ordem. Com 120 h de teto e três pedidos de 60 h, ele fica com os
+    dois primeiros da *lista dele* — não com os que calharem."""
+    granted = allocate_by_ranking(
+        requests=[("a", "D1"), ("a", "D2"), ("a", "D3")],
+        priority={"a": 7.0},
+        seats={"D1": 5, "D2": 5, "D3": 5},
+        hours=HOURS,
+        capacity={"a": 120},
+    )
+    assert granted == [("a", "D1"), ("a", "D2")]
 
 
 def test_the_sweep_never_hands_out_more_seats_than_there_are():
     requests = [(f"a{i}", "D5") for i in range(10)]
     granted = allocate_by_ranking(
         requests=requests,
-        priority={key: float(i) for i, key in enumerate(requests)},
+        priority={f"a{i}": float(i) for i in range(10)},
         seats={"D5": 3},
+        hours=HOURS,
+        capacity={f"a{i}": WORKLOAD for i in range(10)},
     )
     assert len(granted) == 3
-    # Os três de maior prioridade, na ordem em que foram atendidos.
     assert granted == [("a9", "D5"), ("a8", "D5"), ("a7", "D5")]
 
 
 def test_the_sweep_leaves_the_seat_count_untouched():
     seats = {"D5": 2}
+    capacity = {"a": WORKLOAD}
     allocate_by_ranking(
-        requests=[("a", "D5")], priority={("a", "D5"): 7.0}, seats=seats
+        requests=[("a", "D5")],
+        priority={"a": 7.0},
+        seats=seats,
+        hours=HOURS,
+        capacity=capacity,
     )
     assert seats == {"D5": 2}
+    assert capacity == {"a": WORKLOAD}
+
+
+def test_the_two_resolvers_agree_when_the_workload_is_slack():
+    """Sem a carga apertando, o problema se separa por disciplina e o guloso é
+    ótimo — então as duas células da linha do CR coincidem. É a razão de o eixo
+    só ter conteúdo em cenário com elegível maior que W_a."""
+    requests = [("a", "D1"), ("a", "D2"), ("b", "D1"), ("b", "D2")]
+    kwargs = dict(
+        requests=requests,
+        priority={"a": 8.0, "b": 6.0},
+        seats={"D1": 1, "D2": 2},
+        hours=HOURS,
+        capacity={"a": WORKLOAD, "b": WORKLOAD},
+    )
+    assert sorted(allocate_by_ranking(**kwargs)) == sorted(allocate_by_ilp(**kwargs))
+
+
+def test_the_ilp_respects_the_workload_and_the_seats():
+    granted = allocate_by_ilp(
+        requests=[("a", "D1"), ("a", "D2"), ("a", "D3")],
+        priority={"a": 7.0},
+        seats={"D1": 5, "D2": 5, "D3": 5},
+        hours=HOURS,
+        capacity={"a": 120},
+    )
+    assert len(granted) == 2
+    assert all(student == "a" for student, _ in granted)
 
 
 # --- a simulação inteira sob a linha de base -------------------------------

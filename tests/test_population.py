@@ -18,7 +18,7 @@ from leilao.behavior import (
 )
 from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig
-from leilao.grading import draw_grades, grade_for_attempt
+from leilao.grading import draw_aptitudes, draw_grade_noise, grade_for_attempt
 from leilao.population import Student, generate_students
 from leilao.simulation import run_simulation
 
@@ -46,96 +46,121 @@ def make_config(**overrides) -> SimulationConfig:
 # --- a matriz de notas -----------------------------------------------------
 
 
-def _grade_config(mean: float, stddev: float, disciplines, **overrides):
+def _grade_config(disciplines, **overrides):
     return SimulationConfig(
         disciplines=disciplines,
-        grade_mean=mean,
-        grade_stddev=stddev,
-        # As 40 disciplinas são todas de 1º período: o ingressante cursaria as
-        # 40 de uma vez, e a eq. (4) tem de caber.
+        # As 40 disciplinas são todas de entrada: o ingressante cursaria as 40
+        # de uma vez, e a eq. (4) tem de caber.
         max_hours=40 * 60,
         **overrides,
     )
 
 
-def test_grades_follow_the_normal_of_the_scenario():
-    """Muitos sorteios: a média amostral cai perto da média do cenário, e o
-    desvio maior de fato espalha mais. O sorteio sai **cru** — sem truncagem e
-    sem arredondamento —, porque quem o transforma em nota é `grade_for_attempt`,
-    depois de aplicar o deslocamento da recursada."""
+def test_aptitude_is_drawn_once_per_pair_and_persists():
+    """A aptidão é **traço**: um sorteio por (aluno, disciplina), sem dimensão
+    de período. O que varia por período é o choque, não ela."""
     disciplines = [Discipline(f"D{i}", seats=50, hours=60, entry=True) for i in range(1, 41)]
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(120)]
+    config = _grade_config(disciplines, periods=3)
 
-    def sample(stddev: float) -> list[float]:
-        config = _grade_config(6.5, stddev, disciplines, periods=3)
-        return list(draw_grades(students, disciplines, config, np.random.default_rng(0)).values())
+    aptitudes = draw_aptitudes(students, disciplines, config, np.random.default_rng(0))
+    assert len(aptitudes) == 120 * 40
+    assert all(0.0 < a < 1.0 for a in aptitudes.values())
+    # Beta(4, 2) tem média 4/6.
+    assert abs(sum(aptitudes.values()) / len(aptitudes) - 4 / 6) < 0.01
 
-    tight, wide = sample(0.5), sample(2.0)
-    # Uma linha por (aluno, disciplina, período).
-    assert len(tight) == 120 * 40 * 3
-    for values in (tight, wide):
-        assert abs(sum(values) / len(values) - 6.5) < 0.1
-    assert np.std(wide) > np.std(tight)
-    # Cru: a cauda larga passa dos dois lados do domínio das notas.
-    assert min(wide) < 0 and max(wide) > 10
-    assert all(0 <= grade_for_attempt(v, 1, 2.5) <= 10 for v in wide)
+    noise = draw_grade_noise(students, disciplines, config, np.random.default_rng(0))
+    assert len(noise) == 120 * 40 * 3  # este sim é por período
 
 
-def test_there_is_one_grade_draw_per_period():
-    """A matriz de notas é por período: o mesmo par (aluno, disciplina) sorteia
-    de novo a cada semestre, em vez de carregar um valor fixo."""
-    disciplines = [Discipline("A", seats=50, hours=60, entry=True)]
-    students = [Student(id="a1", name="Fulano", credits=10)]
-    config = _grade_config(6.5, 1.5, disciplines, periods=5)
-    grades = draw_grades(students, disciplines, config, np.random.default_rng(1))
-
-    assert set(grades) == {("a1", "A", t) for t in range(1, 6)}
-    assert len(set(grades.values())) == 5
-
-
-def test_a_retake_shifts_the_mean_of_the_draw():
-    """eq. (33): a recursada não soma o incremento à nota anterior — ela desloca
-    a **média** de onde a nota nova é sorteada. Em distribuição dá no mesmo que
-    somar o incremento ao sorteio do período, e é assim que a conta é feita."""
-    rng = np.random.default_rng(4)
-    draws = rng.normal(5.0, 1.0, size=20000)
-    first = [grade_for_attempt(v, 1, 2.0) for v in draws]
-    third = [grade_for_attempt(v, 3, 2.0) for v in draws]
-    # Duas recursadas sobem a média em 2 x 2,0 — menos o que satura em 10.
-    assert np.mean(third) - np.mean(first) == pytest.approx(4.0, abs=0.15)
-    # E não é mais monotônico por sorteio: a nota de uma recursada pode sair
-    # abaixo da tentativa anterior, porque o sorteio é novo.
-    later = [grade_for_attempt(v, 2, 2.0) for v in rng.normal(5.0, 1.0, size=20000)]
-    assert any(b < a for a, b in zip(first, later))
+def test_the_grade_is_the_aptitude_when_the_demand_is_standard():
+    """Com dificuldade 1, primeira tentativa, sem acoplamento e sem ruído, o
+    expoente é 1 e a nota **é** a aptidão. É o que lhe dá leitura direta."""
+    for aptitude in (0.2, 0.55, 0.86, 0.99):
+        assert grade_for_attempt(
+            aptitude=aptitude,
+            difficulty=1.0,
+            relative_utility=1.0,
+            attempt=1,
+            coupling=0.0,
+            noise=0.0,
+            noise_sigma=0.0,
+        ) == round(100 * aptitude) / 10
 
 
-def test_a_bigger_learning_gain_recovers_a_failure_faster():
-    """O incremento é do cenário: com a mesma nota de partida, quem tem o ganho
-    maior volta a passar antes."""
-
-    def first_approval(gain: float) -> list[int]:
-        config = SimulationConfig(
-            disciplines=[Discipline("A", seats=50, hours=60, entry=True)],
-            periods=6,
-            students_per_period=10,
-            grade_mean=2.0,
-            grade_stddev=0.1,
-            learning_gain=gain,
-            seed=8,
+def test_difficulty_and_attempt_enter_as_a_ratio():
+    """D e t entram como D/t: dificuldade 2 na **segunda** tentativa equivale a
+    dificuldade 1 na primeira. É o que faz a dificuldade se ler em tentativas."""
+    def grade(difficulty, attempt):
+        return grade_for_attempt(
+            aptitude=0.7,
+            difficulty=difficulty,
+            relative_utility=1.0,
+            attempt=attempt,
+            coupling=0.0,
+            noise=0.0,
+            noise_sigma=0.0,
         )
-        attempts = []
-        for history in run_simulation(config).histories:
-            for record in history.periods:
-                hit = next((r for r in record.requests if r.approved), None)
-                if hit is not None:
-                    attempts.append(hit.attempt)
-                    break
-        return attempts
 
-    fast, slow = first_approval(3.0), first_approval(0.5)
-    assert fast, "com ganho 3,0 alguém deveria aprovar dentro do horizonte"
-    mean = lambda values: sum(values) / len(values)  # noqa: E731
-    assert not slow or mean(fast) < mean(slow)
+    assert grade(1.0, 1) == grade(2.0, 2) == grade(3.0, 3)
+    # E não é "dificuldade 2 ≡ dificuldade 1 na segunda tentativa".
+    assert grade(2.0, 1) != grade(1.0, 2)
+    # Mais difícil derruba; recursar levanta.
+    assert grade(2.0, 1) < grade(1.0, 1) < grade(1.0, 2)
+
+
+def test_the_interest_coupling_is_off_by_default():
+    """Com w = 0 a utilidade some da fórmula — é o controle que deixa a função
+    de nota neutra entre os mecanismos."""
+    def grade(u_rel, coupling):
+        return grade_for_attempt(
+            aptitude=0.7,
+            difficulty=1.0,
+            relative_utility=u_rel,
+            attempt=1,
+            coupling=coupling,
+            noise=0.0,
+            noise_sigma=0.0,
+        )
+
+    assert grade(0.1, 0.0) == grade(1.0, 0.0) == grade(5.0, 0.0)
+    # Ligado, querer mais rende mais, e querer pouco é quase reprovação certa.
+    assert grade(0.3, 1.0) < grade(1.0, 1.0) < grade(3.0, 1.0)
+
+
+def test_a_retake_no_longer_guarantees_a_higher_grade():
+    """O choque por tentativa é o que devolve sorte à recursada. Sem ele a nota
+    seria exata e recursar sempre melhoraria — revertendo uma decisão do
+    modelo — e a variância das notas passaria a vir do resorteio da utilidade,
+    amarrando a nota ao parâmetro de estabilidade da preferência."""
+    rng = np.random.default_rng(4)
+    first, second = [], []
+    for _ in range(20000):
+        kwargs = dict(
+            aptitude=0.6, difficulty=1.0, relative_utility=1.0,
+            coupling=0.0, noise_sigma=0.3,
+        )
+        first.append(grade_for_attempt(attempt=1, noise=rng.normal(), **kwargs))
+        second.append(grade_for_attempt(attempt=2, noise=rng.normal(), **kwargs))
+    # Em média a recursada melhora...
+    assert np.mean(second) > np.mean(first)
+    # ...mas não em cada sorteio.
+    assert any(b < a for a, b in zip(first, second))
+
+
+def test_the_grade_stays_on_the_scale_and_reaches_the_top():
+    """Limitada por construção, sem truncagem: `a^E` nunca sai de (0, 1). E o
+    arredondamento é `round`, não `floor` — com `floor` o teto seria 9,9."""
+    grades = [
+        grade_for_attempt(
+            aptitude=a, difficulty=d, relative_utility=1.0, attempt=1,
+            coupling=0.0, noise=0.0, noise_sigma=0.0,
+        )
+        for a in (0.01, 0.3, 0.7, 0.999)
+        for d in (0.5, 1.0, 4.0)
+    ]
+    assert all(0.0 <= g <= 10.0 for g in grades)
+    assert max(grades) == 10.0
 
 
 # --- a matriz de utilidades ------------------------------------------------
@@ -327,8 +352,6 @@ def test_the_workload_cap_bounds_the_enrolled_hours():
             disciplines=disciplines,
             periods=4,
             students_per_period=10,
-            grade_mean=9.0,
-            grade_stddev=0.5,
             max_hours=max_hours,
             seed=5,
         )

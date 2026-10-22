@@ -1,59 +1,108 @@
 """Notas e retorno de créditos (Seção 7.2.2).
 
-As notas são um parâmetro de entrada, não um sorteio em tempo de execução: a
-matriz com o sorteio de cada par (aluno, disciplina) em **cada período** é
-gerada junto com a população, a partir da normal do cenário. Em tempo de
-execução só se aplica o deslocamento da recursada, que é determinístico — nenhum
-sorteio dentro do loop, como exige a Seção 7.3.
+A nota não sai de uma normal: ela sai da **aptidão** do aluno naquela
+disciplina, elevada à demanda que a disciplina lhe faz.
 
-**Uma matriz por período, e a recursada desloca a média.** O aluno que repete
-uma disciplina não recebe a nota anterior mais um incremento: ele tira uma nota
-nova, de uma normal cuja **média** subiu `learning_gain` por tentativa já feita.
-Em distribuição é a mesma coisa que somar o incremento ao sorteio do período, e
-é assim que a conta é feita — o sorteio sai cru de `draw_grades` e
-`grade_for_attempt` desloca, arredonda e trunca.
+    nota = round( 100 · a ^ ( D · ruído / (u_rel^w · t) ) ) / 10
 
-A diferença em relação ao modelo anterior (um sorteio por par, fixo, mais o
-incremento) é que **a recursada deixa de garantir nota maior**: o aluno aprende,
-mas pode ter um dia pior. O que continua garantido é que `Student.grades` guarda
-a **maior** nota já obtida, então o histórico não regride, e que a média sobe a
-cada tentativa — de modo que a probabilidade de aprovar tende a 1 e ninguém fica
-preso numa disciplina para sempre. A monotonicidade da eq. (33) vale no
-esperado e no registro, não em cada sorteio.
+- **a** é a aptidão, sorteada de uma Beta por par (aluno, disciplina) e
+  **persistente**: é o traço, não a sorte. Com expoente 1 a nota *é* a
+  aptidão, o que lhe dá leitura direta — "a nota que este aluno tiraria nesta
+  disciplina, de dificuldade padrão, de primeira".
+- **D** é a dificuldade da disciplina, e **t** a tentativa. Eles entram como a
+  razão `D/t`, então **dificuldade 2 na segunda tentativa equivale a
+  dificuldade 1 na primeira**: a dificuldade se lê em *quantas tentativas a
+  disciplina custa* para render o que uma de dificuldade 1 rende de saída. É
+  a lei de potência da prática, e substitui o incremento aditivo por recursada
+  do modelo anterior, que não tinha respaldo nenhum.
+- **u_rel** é a utilidade da disciplina para o aluno, em múltiplos da
+  indiferença (`u · |disciplinas|`, que vale 1 quando ele é indiferente), e
+  **w** é o quanto o interesse mexe no desempenho.
+- **ruído** é um choque log-normal por tentativa, sem o qual a nota seria
+  determinística dado `(a, D, u_rel, t)` — e aí recursar *garantiria* nota
+  maior, revertendo uma decisão deliberada do modelo.
+
+**Por que a forma de potência.** Ela tem história generativa, da mesma classe
+da que sustenta a log-normal das utilidades: se a disciplina são E unidades
+independentes e o aluno domina cada uma com probabilidade `a`, então `a^E` é a
+chance de dominar todas. De quebra ela respeita os limites **por construção** —
+`a^E` nunca sai de (0, 1) —, ao contrário da normal truncada, que empilhava
+massa nas pontas sempre que a média chegava perto delas.
+
+**O `w` não é opcional, e é por isso que ele é parâmetro de cenário.** O
+acoplamento entre interesse e desempenho é a única peça da fórmula sem forma
+justificada, e é a única que mexe no resultado principal: medido, `w = 0`
+deixa a função de nota neutra entre os mecanismos (vão de 0% em aprovações) e
+`w = 1` fabrica sozinha ~40% de vão a favor do leilão, antes de qualquer
+alocação ter sido avaliada. Com `w` varrido e `w = 0` reportado ao lado, a
+suposição deixa de ser ad-hoc e vira sensibilidade medida.
+
+Nada é sorteado dentro do loop: a aptidão e os choques saem da seed na
+inicialização, como exige a Seção 7.3.
 """
 from __future__ import annotations
+
+import math
 
 import numpy as np
 
 from .config import CreditReturnPolicy, Discipline, SimulationConfig
 from .population import Student
 
+# Abaixo disto a aptidão produziria 0,0 ou 1,0 exatos, e a nota degeneraria. O
+# gerador de Beta devolve as duas pontas para parâmetros pequenos.
+APTITUDE_GUARD = 1e-9
 
-def draw_grades(
+
+def draw_aptitudes(
+    students: list[Student],
+    disciplines: list[Discipline],
+    config: SimulationConfig,
+    rng: np.random.Generator,
+) -> dict[tuple[str, str], float]:
+    """a_{a,x} — a aptidão de cada par (aluno, disciplina), sorteada **uma vez**
+    na inicialização.
+
+    É traço, não sorte: ela não é resorteada por período nem por tentativa, e é
+    o que faz "este aluno é bom em matemática e ruim em escrita" significar
+    alguma coisa. A Beta é a família natural porque aptidão é uma fração
+    limitada — que parcela do máximo esta pessoa alcança —, e ela já nasce em
+    (0, 1) sem truncagem.
+    """
+    draws = rng.beta(
+        config.aptitude_alpha,
+        config.aptitude_beta,
+        size=(len(students), len(disciplines)),
+    )
+    draws = np.clip(draws, APTITUDE_GUARD, 1.0 - APTITUDE_GUARD)
+    return {
+        (student.id, discipline.name): float(draws[i, j])
+        for i, student in enumerate(students)
+        for j, discipline in enumerate(disciplines)
+    }
+
+
+def draw_grade_noise(
     students: list[Student],
     disciplines: list[Discipline],
     config: SimulationConfig,
     rng: np.random.Generator,
 ) -> dict[tuple[str, str, int], float]:
-    """Sorteia a matriz de notas inteira — todo par (aluno, disciplina), todo
-    período — na inicialização, a partir da seed.
+    """O choque normal padrão de cada (aluno, disciplina, período) — o dia bom
+    ou ruim.
 
-    O valor sai **cru**: da normal do cenário (`grade_mean`, `grade_stddev`),
-    sem deslocamento, sem arredondamento e sem truncagem. Quem o transforma em
-    nota é `grade_for_attempt`, porque o deslocamento da recursada depende de
-    quantas vezes o aluno já cursou aquela disciplina — informação que só existe
-    em tempo de execução. Truncar aqui e deslocar depois mudaria a conta: uma
-    nota negativa viraria 0 antes de receber o incremento.
+    Sem ele a nota seria exata dado `(a, D, u_rel, t)`, e duas coisas
+    quebrariam: a recursada voltaria a **garantir** nota maior, e a variância
+    das notas passaria a vir só do resorteio da utilidade, de modo que o
+    parâmetro de estabilidade da preferência controlaria também o acaso das
+    notas — dois botões que devem ser independentes.
 
-    Todo par sorteia da **mesma** normal: dois alunos diferem por sorteio, não
-    por construção. A dispersão que o CR precisa para não virar ruído vem de
-    `grade_stddev`. A distribuição não é fixada pelo anteprojeto; a normal é
-    escolha de modelagem, e seus parâmetros são do cenário.
+    Sai padrão (média 0, desvio 1); a escala é `config.grade_noise`, aplicada
+    em `grade_for_attempt`. É a mesma separação do `ε` das utilidades: a régua
+    fica num lugar só.
     """
     draws = rng.normal(
-        config.grade_mean,
-        config.grade_stddev,
-        size=(len(students), len(disciplines), config.periods),
+        0.0, 1.0, size=(len(students), len(disciplines), config.periods)
     )
     return {
         (student.id, discipline.name, period + 1): float(draws[i, j, period])
@@ -63,6 +112,36 @@ def draw_grades(
     }
 
 
+def grade_for_attempt(
+    *,
+    aptitude: float,
+    difficulty: float,
+    relative_utility: float,
+    attempt: int,
+    coupling: float,
+    noise: float,
+    noise_sigma: float,
+) -> float:
+    """A nota da `attempt`-ésima tentativa (1 = primeira) — eq. (33).
+
+    `relative_utility` é `u_rel`, a utilidade em múltiplos da indiferença. Com
+    `coupling = 0` ela some da conta (qualquer coisa elevada a 0 é 1) e a nota
+    passa a depender só de aptidão, dificuldade e tentativa — que é o controle
+    a reportar ao lado de qualquer resultado em conclusões.
+
+    O arredondamento é `round`, e não `floor`: com `a < 1` e expoente positivo
+    o produto nunca chega a 100, e truncando o teto da escala seria 9,9.
+    """
+    if attempt < 1:
+        raise ValueError("attempt deve ser >= 1")
+    a = min(1.0 - APTITUDE_GUARD, max(APTITUDE_GUARD, aptitude))
+    weight = relative_utility**coupling if relative_utility > 0.0 else 1.0
+    if weight <= 0.0:
+        weight = 1.0
+    exponent = difficulty * math.exp(noise_sigma * noise) / (weight * attempt)
+    return round(100.0 * a**exponent) / 10.0
+
+
 # Faixas do histograma de notas — as mesmas dez das utilidades, de modo que os
 # dois gráficos se leiam do mesmo jeito. Aqui elas também caem bem na escala:
 # as divisas são 0, 1, 2 ... 10, que é como se lê uma nota.
@@ -70,45 +149,24 @@ DISTRIBUTION_BINS = 10
 
 
 def grade_distribution(
-    draws: dict[tuple[str, str, int], float],
-    config: SimulationConfig,
+    grades: list[float],
     bins: int = DISTRIBUTION_BINS,
 ) -> list[float]:
     """Como as notas de **primeira tentativa** se distribuem, em `bins` faixas
     de mesma largura sobre [0, 10].
 
-    É a normal do cenário já passada por `grade_for_attempt` — truncada e
-    arredondada —, que é o que a torna visível: o truncamento empilha massa nas
-    pontas sempre que a média estiver perto delas, e isso não se lê dos
-    parâmetros.
-
-    Primeira tentativa, e não todas: a recursada desloca a média pelo incremento
-    de aprendizado, então misturar as tentativas somaria distribuições
-    diferentes e o gráfico deixaria de descrever a normal do cenário. Quantas
-    recursadas acontecem é resultado, não entrada.
+    Recebe as notas já calculadas, e não o sorteio cru: com a nota saindo de
+    uma potência da aptidão, não há mais "valor cru" que se leia como nota. O
+    que o gráfico mostra é o que a fórmula de fato produz.
     """
-    counts = [0] * bins
-    for drawn in draws.values():
-        grade = grade_for_attempt(drawn, 1, config.learning_gain)
-        counts[min(bins - 1, int(grade / 10 * bins))] += 1
-    total = sum(counts)
-    if not total:
+    if not grades:
         return [0.0] * bins
+    counts = [0] * bins
+    for grade in grades:
+        index = min(bins - 1, max(0, int(grade / 10.0 * bins)))
+        counts[index] += 1
+    total = len(grades)
     return [count / total for count in counts]
-
-
-def grade_for_attempt(drawn: float, attempt: int, gain: float) -> float:
-    """Nota da `attempt`-ésima tentativa (1 = primeira), a partir do sorteio
-    cru daquele período — eq. (33).
-
-    O deslocamento é de `gain` pontos por tentativa **já feita**, o que equivale
-    a sortear de uma normal de média `grade_mean + gain * (attempt - 1)`. Só
-    depois a nota é arredondada a 0,1 e truncada em [0, 10], que é o domínio das
-    notas da Seção 7.2.2.
-    """
-    if attempt < 1:
-        raise ValueError("attempt deve ser >= 1")
-    return min(10.0, max(0.0, round(drawn + gain * (attempt - 1), 1)))
 
 
 def credit_return(

@@ -89,3 +89,55 @@ def solve_wdp(problem: Problem, *, msg: bool = False) -> Allocation:
         raise InfeasibleOrUnsolvedError(f"WDP solver returned status {status_name!r}")
 
     return {key: int(round(var.value())) for key, var in z.items()}
+
+
+def solve_wdp_greedy(problem: Problem, *, msg: bool = False) -> Allocation:
+    """A varredura gulosa: atende as demandas em ordem decrescente de
+    preferência, concedendo enquanto houver vaga, carga e exclusão livre.
+
+    Mesma assinatura e mesmo retorno de `solve_wdp`, de propósito — é o que
+    torna o eixo **ordenação × PLI** um eixo de verdade: o lance, o preço de 2º
+    preço (eq. 24) e o consumo (eq. 27) são calculados do mesmo jeito dos dois
+    lados, e a única coisa que muda é quem decide a alocação.
+
+    Com lance como preferência, isto **é** o mecanismo de *bidding points* dos
+    business schools: o aluno reparte pontos, os lances são processados em
+    ordem decrescente, e cada um é atendido se a disciplina tem vaga e a grade
+    do aluno ainda comporta. A restrição de carga não volta a ser resolvida
+    pelo aluno em casa — ela é resolvida aqui, ex-post, como na PLI.
+
+    O guloso é **ótimo da relaxação sem a restrição de carga**: sem ela o
+    problema se separa por bem, e tomar os q_x maiores lances de cada um é
+    exatamente o que esta varredura faz. Os dois resolvedores só divergem,
+    portanto, onde a carga aperta — e é por isso que o eixo só tem conteúdo em
+    cenário com conjunto elegível maior que W_a.
+    """
+    if not problem.demands:
+        return {}
+
+    quantity = {g.id: g.quantity for g in problem.goods}
+    weight = {g.id: g.weight for g in problem.goods}
+    room = {a.id: a.capacity for a in problem.agents}
+    # Cliques de exclusão mútua (eq. 5): no máximo um bem de cada clique por
+    # agente. O guloso respeita olhando o que já concedeu.
+    taken: dict[str, set[str]] = {a.id: set() for a in problem.agents}
+
+    allocation: Allocation = {(d.agent_id, d.good_id): 0 for d in problem.demands}
+    for demand in sorted(
+        problem.demands, key=lambda d: (-d.preference, d.agent_id, d.good_id)
+    ):
+        good_id, agent_id = demand.good_id, demand.agent_id
+        if quantity.get(good_id, 0) <= 0:
+            continue
+        if room.get(agent_id, 0) < weight.get(good_id, 0):
+            continue
+        if any(
+            good_id in exclusion.goods and taken[agent_id] & set(exclusion.goods)
+            for exclusion in problem.exclusions
+        ):
+            continue
+        quantity[good_id] -= 1
+        room[agent_id] -= weight[good_id]
+        taken[agent_id].add(good_id)
+        allocation[(agent_id, good_id)] = 1
+    return allocation

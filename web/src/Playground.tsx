@@ -16,8 +16,8 @@ export interface PlaygroundDraft {
   rounds: number;
   seats: number;
   seed: number;
-  gradeMean: number;
-  gradeStddev: number;
+  aptitudeAlpha: number;
+  aptitudeBeta: number;
   selected: number;
   students: PlaygroundStudent[];
 }
@@ -28,8 +28,8 @@ export function createPlaygroundDraft(config: SimulateRequest): PlaygroundDraft 
     rounds: 1,
     seats: 1,
     seed: 1,
-    gradeMean: config.grade_mean,
-    gradeStddev: config.grade_stddev,
+    aptitudeAlpha: config.aptitude_alpha,
+    aptitudeBeta: config.aptitude_beta,
     selected: 0,
     students: [newStudent("voce", "Você", config)],
   };
@@ -106,8 +106,8 @@ export function Playground({
           mechanism: draft.mechanism,
           rounds: draft.rounds,
           seed: draft.seed,
-          grade_mean: draft.gradeMean,
-          grade_stddev: draft.gradeStddev,
+          aptitude_alpha: draft.aptitudeAlpha,
+          aptitude_beta: draft.aptitudeBeta,
           disciplines: config.disciplines.map(({ name, hours }) => ({
             name,
             seats: draft.seats ?? 1,
@@ -178,8 +178,8 @@ export function Playground({
               min={0}
               max={10}
               step={0.1}
-              value={draft.gradeMean}
-              onChange={(e) => setDraft({ ...draft, gradeMean: Number(e.target.value) })}
+              value={draft.aptitudeAlpha}
+              onChange={(e) => setDraft({ ...draft, aptitudeAlpha: Number(e.target.value) })}
             />
           </div>
           <div className="field">
@@ -188,8 +188,8 @@ export function Playground({
               type="number"
               min={0.1}
               step={0.1}
-              value={draft.gradeStddev}
-              onChange={(e) => setDraft({ ...draft, gradeStddev: Number(e.target.value) })}
+              value={draft.aptitudeBeta}
+              onChange={(e) => setDraft({ ...draft, aptitudeBeta: Number(e.target.value) })}
             />
           </div>
           <div className="field">
