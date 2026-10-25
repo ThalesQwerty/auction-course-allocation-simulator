@@ -110,24 +110,25 @@ class Behavior:
     São três coeficientes, e os dois primeiros são o dilema que atravessa o
     trabalho:
 
-    - **`concentration` (β)** — o viés de satisfação: o quanto o aluno exagera
-      as diferenças de gosto ao apostar. β = 1 é apostar as intensidades
-      relativas verdadeiras; β > 1 concentra, β → 0 achata até a mensagem
+    - **`concentration`** — o viés de satisfação: o quanto o aluno exagera
+      as diferenças de gosto ao apostar. Um é apostar as intensidades
+      relativas verdadeiras; acima de 1 concentra, perto de 0 achata até a mensagem
       virar um conjunto, que é exatamente o que a linha de base por CR envia.
-      β é, portanto, a **razão de distorção**, medida em unidades de σ.
-    - **`progress` (ρ)** — o viés de progresso: o peso do *avanço esperado* da
+      É, portanto, a **razão de distorção**, medida em unidades do desvio
+      da preferência.
+    - **`progress`** — o viés de progresso: o peso do *avanço esperado* da
       vaga, que é uma grandeza só — `P(obter) · P(aprovar) · (quanto avanço se
       passar)`. Um coeficiente sobre ela é melhor que quatro sobre as partes, e
       como as partes ficam dentro do mesmo produto elas podem se correlacionar
       sem criar crista entre genes.
-    - **`reserve` (r)** — a utilidade de reserva: o aluno compra crédito
+    - **`reserve`** — a utilidade de reserva: o aluno compra crédito
       enquanto o ganho marginal exceder `r`. Numa regra só ela decide *quais*
       disciplinas entram (as de ganho acima de r), *quantos* créditos cada uma
       recebe e *quanto* se gasta no total — o orçamento vira teto, não meta.
 
-    Os valores neutros reproduzem o modelo sem comportamento, bit a bit: β = 1
-    deixa o score igual à utilidade, ρ = 0 apaga o termo de progresso e r = 0
-    nunca para a compra pela reserva. **É assim que a população roda hoje** —
+    Os valores neutros reproduzem o modelo sem comportamento, bit a bit: a
+    concentração em 1 deixa o score igual à utilidade, o progresso em 0 apaga
+    aquele termo, e a reserva em 0 nunca para a compra. **É assim que a população roda hoje** —
     a evolução desses coeficientes é experimento à parte.
     """
 
@@ -180,7 +181,7 @@ def decision_scores(
     mesma normalização da fórmula de nota: ela vale 1 quando o aluno é
     indiferente, e sobrevive ao catálogo crescer.
 
-    Com os valores neutros (β = 1, ρ = 0) o score **é** `u_rel`, que é
+    Com os valores neutros o score **é** `u_rel`, que é
     proporcional à utilidade — então a mochila côncava decide exatamente o que
     decidia antes, e a ordem de desempate da grade é preservada porque a
     iteração segue a ordem de `utilities`.
@@ -245,10 +246,36 @@ def draw_utilities(
     aluno quer"; 1,94 não é nada) e o U_a^(t) da eq. (43) com significado.
     """
     names = [d.name for d in config.disciplines]
-    raw = rng.lognormal(
-        0.0, config.utility_sigma, size=(len(students), config.periods, len(names))
+    shape = (len(students), config.periods, len(names))
+    # A preferência se reparte em duas peças: uma **permanente** por par
+    # (aluno, disciplina), sorteada uma vez, e um **ruído do semestre**,
+    # sorteado a cada período. A estabilidade diz quanto da variância fica na
+    # primeira.
+    #
+    # Os pesos são raiz(s) e raiz(1 - s), e não s e 1 - s, porque as duas
+    # peças são independentes: o que se soma são as variâncias, não as
+    # amplitudes. Com os pesos "intuitivos" a dispersão vazaria a cada período
+    # (0,58 do original em s = 0,5), e a estabilidade viraria um segundo botão
+    # de sigma — confundida justamente com o parâmetro de que ela precisa ser
+    # independente. Assim, cada período continua tendo exatamente a dispersão
+    # de sigma, e o que s controla é só a correlação entre semestres, que vale
+    # literalmente s.
+    #
+    # A estabilidade é por disciplina quando o cenário a declara: é a
+    # sincronia entre concorrentes que trava a fila, não a persistência em si.
+    stability = np.array(
+        [
+            config.utility_stability if d.stability is None else d.stability
+            for d in config.disciplines
+        ],
+        dtype=float,
+    ).reshape(1, 1, -1)
+    permanent = rng.normal(0.0, 1.0, size=(len(students), 1, len(names)))
+    seasonal = rng.normal(0.0, 1.0, size=shape)
+    log = config.utility_sigma * (
+        np.sqrt(stability) * permanent + np.sqrt(1.0 - stability) * seasonal
     )
-    raw = np.maximum(raw, UNDERFLOW_GUARD)
+    raw = np.maximum(np.exp(log), UNDERFLOW_GUARD)
     # Invariante s_x > s_y ⇒ u_x > u_y: desloca cada camada acima da amplitude
     # da linha. ε = 1 garante desigualdade estrita no empate max−min.
     heights = config.heights()
@@ -417,7 +444,7 @@ def compute_bids(
         # exceder `r`, e para quando não. Numa regra só isso decide quais
         # disciplinas entram (as de ganho acima de r, no 1º crédito), quantos
         # créditos cada uma recebe e quanto se gasta no total — o orçamento
-        # vira teto, e não meta. Com r = 0 (neutro) ela nunca dispara, e o
+        # vira teto, e não meta. Com reserva 0 (o neutro) ela nunca dispara, e o
         # aluno gasta tudo como antes.
         if -gain <= behavior.reserve:
             break

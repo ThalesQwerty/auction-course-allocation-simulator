@@ -396,3 +396,93 @@ def test_every_generation_has_the_same_size():
     for student in students:
         sizes[student.entry_period] += 1
     assert sizes == {1: 8, 2: 8, 3: 8}
+
+
+# --- a estabilidade da preferência ----------------------------------------
+
+
+def _rows(stability, periods=8, **overrides):
+    disciplines = [
+        Discipline(f"D{i}", seats=50, hours=60, entry=True) for i in range(1, 21)
+    ]
+    config = SimulationConfig(
+        disciplines=disciplines,
+        periods=periods,
+        max_hours=20 * 60,
+        utility_stability=stability,
+        **overrides,
+    )
+    students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(400)]
+    return config, draw_utilities(students, config, np.random.default_rng(3))
+
+
+def test_stability_does_not_touch_the_dispersion_of_a_period():
+    """A divisão preserva a variância: cada período continua com a dispersão de
+    sigma, qualquer que seja a estabilidade. É o que a torna **ortogonal ao
+    sigma** — com os pesos "intuitivos" (s e 1-s) a dispersão vazaria, e a
+    estabilidade viraria um segundo botão do parâmetro de que ela precisa ser
+    independente."""
+    spreads = []
+    for stability in (0.0, 0.5, 0.9):
+        _, rows = _rows(stability)
+        # Desvio do log, que é onde a divisão acontece — a normalização por
+        # linha não mexe nas razões.
+        logs = [np.log(v) for row in rows.values() for v in row.values()]
+        spreads.append(float(np.std(logs)))
+    assert max(spreads) - min(spreads) < 0.05
+
+
+def test_stability_is_the_correlation_between_any_two_periods():
+    """E não só entre semestres consecutivos: a peça permanente não decai, então
+    a correlação entre o 1º e o 8º período é a mesma que entre o 1º e o 2º."""
+    for stability in (0.0, 0.5, 0.9):
+        _, rows = _rows(stability)
+        ids = sorted({sid for sid, _ in rows})
+        first = [rows[(sid, 1)][n] for sid in ids for n in rows[(sid, 1)]]
+        for other in (2, 8):
+            later = [rows[(sid, other)][n] for sid in ids for n in rows[(sid, 1)]]
+            measured = np.corrcoef(np.log(first), np.log(later))[0, 1]
+            assert abs(measured - stability) < 0.06, (stability, other, measured)
+
+
+def test_a_fully_stable_preference_never_changes():
+    _, rows = _rows(1.0, periods=4)
+    for sid in sorted({s for s, _ in rows}):
+        assert rows[(sid, 1)] == rows[(sid, 4)]
+
+
+def test_a_discipline_can_carry_its_own_stability():
+    """Declarar por disciplina é o que sincroniza a persistência entre
+    concorrentes — e é a única estrutura que muda o resultado, porque é a
+    sincronia, e não a persistência em si, que trava a fila.
+
+    A prova é sobre a **correlação entre períodos de cada disciplina**, e não
+    sobre a variância da cota: com poucas disciplinas as cotas são quase
+    complementares, e a variância de uma espelha a da outra quer ela seja fixa
+    ou não.
+    """
+    disciplines = [
+        Discipline(f"FIXA{i}", seats=50, hours=60, entry=True, stability=1.0)
+        for i in range(10)
+    ] + [
+        Discipline(f"SOLTA{i}", seats=50, hours=60, entry=True, stability=0.0)
+        for i in range(10)
+    ]
+    config = SimulationConfig(
+        disciplines=disciplines,
+        periods=4,
+        max_hours=20 * 60,
+        utility_stability=0.0,
+    )
+    students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(400)]
+    rows = draw_utilities(students, config, np.random.default_rng(7))
+    ids = sorted({sid for sid, _ in rows})
+
+    def lag_correlation(prefix: str) -> float:
+        names = [d.name for d in disciplines if d.name.startswith(prefix)]
+        first = [np.log(rows[(sid, 1)][n]) for sid in ids for n in names]
+        later = [np.log(rows[(sid, 4)][n]) for sid in ids for n in names]
+        return float(np.corrcoef(first, later)[0, 1])
+
+    assert lag_correlation("FIXA") > 0.9
+    assert abs(lag_correlation("SOLTA")) < 0.2

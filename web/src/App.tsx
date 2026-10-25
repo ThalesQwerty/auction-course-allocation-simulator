@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { compare, simulate } from "./api";
-import type { SweepIn } from "./types";
+import { compare } from "./api";
 import { Comparison } from "./Comparison";
-import { Config, RunMode } from "./Config";
+import { Config } from "./Config";
 import { choosePreset, editConfig, initialChoice, PresetChoice } from "./presets";
 import {
   formatRunDate,
@@ -10,14 +9,11 @@ import {
   loadHistory,
   MAX_RUNS,
   newComparison,
-  newRun,
   saveHistory,
-  SimulationRun,
 } from "./history";
 import { GradeGraph } from "./GradeGraph";
 import { createPlaygroundDraft, Playground, PlaygroundDraft } from "./Playground";
 import { Project } from "./Project";
-import { Results } from "./Results";
 import { Sidebar, View } from "./Sidebar";
 
 export default function App() {
@@ -28,14 +24,10 @@ export default function App() {
   const [playground, setPlayground] = useState<PlaygroundDraft | null>(null);
   // O modo e o número de execuções não são do cenário: o mesmo cenário se roda
   // uma vez ou se compara N vezes, e trocar de modo não pode mexer nele.
-  const [mode, setMode] = useState<RunMode>("single");
   const [runs, setRuns] = useState(20);
-  const [sweep, setSweep] = useState<SweepIn | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [loadingHistories, setLoadingHistories] = useState(false);
-  const [historiesError, setHistoriesError] = useState<string | null>(null);
 
   // O histórico mora no navegador: execuções antigas sobrevivem a um recarregamento.
   useEffect(() => {
@@ -48,51 +40,23 @@ export default function App() {
     setMenuOpen(false);
   }
 
-  /** Executa o que o modo pede e abre o resultado. Os dois caminhos só diferem
-   * no que mandam para o servidor e no que guardam; a seed do formulário não
-   * acompanha a comparação, que usa as suas próprias (1..N). */
+  /** Roda a comparação e abre o resultado. A seed do formulário não a
+   * acompanha: ali as seeds são as de 1 a N, e o retorno de créditos é o que
+   * separa dois dos braços — carregá-los junto guardaria parâmetros que não
+   * tiveram efeito nenhum. */
   async function handleRun() {
     setRunning(true);
     setError(null);
     try {
-      let entry: HistoryEntry;
-      if (mode === "compare") {
-        // Nem a seed nem o retorno de créditos acompanham a comparação: ali
-        // as seeds são as de 1 a N, e o retorno é o que separa dois dos três
-        // modelos. Carregá-los junto guardaria parâmetros que não tiveram
-        // efeito nenhum no resultado.
-        const { seed: _seed, credit_return: _return, ...scenario } = config;
-        const request = { ...scenario, runs, ...(sweep ? { sweep } : {}) };
-        entry = newComparison(request, await compare(request));
-      } else {
-        entry = newRun(config, await simulate(config));
-      }
+      const { seed: _seed, credit_return: _return, ...scenario } = config;
+      const request = { ...scenario, runs };
+      const entry = newComparison(request, await compare(request));
       setHistory((current) => [entry, ...current].slice(0, MAX_RUNS));
       navigate({ kind: "run", id: entry.id });
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setRunning(false);
-    }
-  }
-
-  /** Reconstrói o detalhe por aluno de uma execução antiga: ele não é
-   * persistido (ver `history.ts`), mas a simulação é determinística pela seed,
-   * então reexecutar devolve exatamente o mesmo resultado. */
-  async function loadHistories(run: SimulationRun) {
-    setLoadingHistories(true);
-    setHistoriesError(null);
-    try {
-      const result = await simulate(run.config, true);
-      setHistory((current) =>
-        current.map((entry) =>
-          entry.id === run.id && entry.kind === "simulation" ? { ...entry, result } : entry
-        )
-      );
-    } catch (e) {
-      setHistoriesError((e as Error).message);
-    } finally {
-      setLoadingHistories(false);
     }
   }
 
@@ -116,20 +80,15 @@ export default function App() {
    * comparação devolve também o N e o modo, senão "reabrir" daria um
    * formulário que não reproduz o que está na tela. */
   function reuseConfig(entry: HistoryEntry) {
-    if (entry.kind === "comparison") {
-      const { runs: count, ...scenario } = entry.config;
-      // Sem seed: ela não fez parte da comparação, então a do formulário fica
-      // como está em vez de ser sobrescrita por um valor inventado.
-      setChoice((c) => editConfig(c, { ...c.config, ...scenario }));
-      setRuns(count);
-      setMode("compare");
-    } else {
-      setChoice((c) => editConfig(c, entry.config));
-      setMode("single");
-    }
+    const { runs: count, ...scenario } = entry.config;
+    // Sem seed: ela não fez parte da comparação, então a do formulário fica
+    // como está em vez de ser sobrescrita por um valor inventado.
+    setChoice((c) => editConfig(c, { ...c.config, ...scenario }));
+    setRuns(count);
     setError(null);
     navigate({ kind: "config" });
   }
+
 
   // Uma execução apagada pelo limite de espaço cai de volta na configuração
   // em vez de deixar a tela em branco.
@@ -149,12 +108,8 @@ export default function App() {
           <Config
             config={config}
             setConfig={(update) => setChoice((c) => editConfig(c, update(c.config)))}
-            mode={mode}
-            setMode={setMode}
             runs={runs}
             setRuns={setRuns}
-            sweep={sweep}
-            setSweep={setSweep}
             running={running}
             error={error}
             onRun={handleRun}
@@ -175,23 +130,11 @@ export default function App() {
             setDraft={setPlayground}
           />
         )}
-        {current?.kind === "comparison" && (
+        {current && (
           <Comparison
             key={current.id}
             run={current}
             onReuseConfig={() => reuseConfig(current)}
-          />
-        )}
-        {current?.kind === "simulation" && (
-          <Results
-            key={current.id}
-            run={current}
-            onReuseConfig={() => reuseConfig(current)}
-            histories={{
-              loading: loadingHistories,
-              error: historiesError,
-              load: () => loadHistories(current),
-            }}
           />
         )}
       </main>

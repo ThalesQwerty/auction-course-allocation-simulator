@@ -102,6 +102,13 @@ class Discipline:
     unlocks: tuple[str, ...] = ()
     entry: bool = False
     elective: bool = False
+    # Quanto do gosto por esta disciplina é permanente, de 0 a 1. `None` cai no
+    # valor do cenário. Declarar por disciplina é o que **sincroniza** a
+    # persistência entre concorrentes — se todos que querem uma disciplina
+    # continuam querendo ao mesmo tempo, a disputa por ela congela inteira em
+    # vez de girar, e é essa sincronia (e não a persistência em si) que trava a
+    # fila. Por aluno ou por célula o efeito se dilui.
+    stability: float | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -112,6 +119,10 @@ class Discipline:
             raise ValueError(f"disciplina {self.name!r}: carga horária (w_x) deve ser > 0")
         if self.difficulty <= 0:
             raise ValueError(f"disciplina {self.name!r}: dificuldade deve ser > 0")
+        if self.stability is not None and not 0.0 <= self.stability <= 1.0:
+            raise ValueError(
+                f"disciplina {self.name!r}: a estabilidade deve estar em [0, 1]"
+            )
         if self.name in self.unlocks:
             raise ValueError(f"disciplina {self.name!r} é sucessora de si mesma")
         if len(set(self.unlocks)) != len(self.unlocks):
@@ -161,17 +172,36 @@ class SimulationConfig:
     # boa demais, ninguém reprova e a recursada some do cenário.
     aptitude_alpha: float = 4.0
     aptitude_beta: float = 2.0
-    # w — o quanto o interesse mexe no desempenho, como expoente sobre u_rel.
+    # O quanto o interesse mexe no desempenho, como expoente sobre u_rel.
     # **Padrão 0: desligado.** É a única peça da fórmula de nota sem forma
-    # justificada, e a única que mexe no resultado principal — em w = 1 ela
-    # fabrica sozinha ~40% de vão em aprovações a favor do leilão. Em w = 0 a
+    # justificada, e a única que mexe no resultado principal — em 1 ela
+    # fabrica sozinha ~40% de vão em aprovações a favor do lance. Em zero a
     # função de nota é neutra entre os mecanismos, e qualquer vão em conclusões
-    # é do mecanismo, inteiro. Varrer w é a análise de sensibilidade que
-    # transforma a suposição em número reportado.
+    # é do modelo, inteiro. Reportá-lo ao lado do resultado é o que
+    # transforma a suposição em número declarado.
     interest_coupling: float = 0.0
     # O desvio do choque log-normal sobre o expoente, por tentativa. Sem ele a
     # nota seria exata e recursar garantiria nota maior.
     grade_noise: float = 0.25
+    # Quanto do gosto do aluno é **permanente**, de 0 a 1 — a fração da
+    # variância que não é resorteada a cada período.
+    #
+    # 0 é o que o modelo fazia antes: a preferência inteira recomeça todo
+    # semestre, e o que o aluno quis no passado não diz nada sobre o que quer
+    # agora. 1 congela a linha dele para o curso inteiro. No meio, cada
+    # semestre é o gosto permanente mais um chacoalhão — o horário, quem dá a
+    # disciplina, quanto ele está sobrecarregado.
+    #
+    # Ela é **ortogonal ao sigma**: a divisão preserva a variância, então cada
+    # período continua tendo exatamente a mesma dispersão qualquer que seja
+    # este valor. O que muda é só a correlação entre semestres, que é
+    # literalmente este número.
+    #
+    # **Padrão 0**, que reproduz o modelo anterior. Como ela é a hipótese mais
+    # exposta que resta — é o valor que mais protege o lado fraco da tese, já
+    # que a preferência que não persiste desfaz a fila sozinha —, qualquer
+    # resultado em conclusões deveria vir com o valor dela declarado.
+    utility_stability: float = 0.0
     # **Utilidades** (u, eqs. 41-43): o desvio da log-normal de onde saem os
     # valores preliminares, antes da normalização de `behavior.draw_utilities`.
     # É o único parâmetro: a média do logaritmo é fixa em 0 porque some na
@@ -237,9 +267,11 @@ class SimulationConfig:
         if self.aptitude_alpha <= 0 or self.aptitude_beta <= 0:
             raise ValueError("os parâmetros da Beta da aptidão devem ser > 0")
         if self.interest_coupling < 0:
-            raise ValueError("o acoplamento interesse-desempenho (w) deve ser >= 0")
+            raise ValueError("o acoplamento interesse-desempenho deve ser >= 0")
         if self.grade_noise < 0:
             raise ValueError("o desvio do choque de nota deve ser >= 0")
+        if not 0.0 <= self.utility_stability <= 1.0:
+            raise ValueError("a estabilidade da preferência deve estar em [0, 1]")
         if self.utility_sigma <= 0:
             raise ValueError("desvio da utilidade (sigma) deve ser > 0")
         if self.max_hours < 1:

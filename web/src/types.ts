@@ -18,6 +18,10 @@ export interface DisciplineInput {
    * aprovar em cada uma — exige somar `elective_hours` entre as aprovadas. É
    * isso que as torna substituíveis entre si. Ortogonal a `entry`. */
   elective?: boolean;
+  /** Quanto do gosto por esta disciplina é permanente, de 0 a 1. Ausente cai
+   * no valor do cenário. Declarar por disciplina sincroniza a persistência
+   * entre concorrentes, e é essa sincronia que trava a fila. */
+  stability?: number;
 }
 
 /** Política de retorno de créditos f_γ — eq. (34). Espelha
@@ -56,16 +60,16 @@ export const creditReturnLabel = (policy: CreditReturnPolicy): string =>
  * pré-requisitos é o que de fato distingue um aluno de outro aqui. */
 export const cohortLabel = (entryPeriod: number): string => `Geração ${entryPeriod}`;
 
-export interface SimulateRequest {
+export interface Scenario {
   disciplines: DisciplineInput[];
   /** A nota sai da **aptidão** do aluno naquela disciplina, elevada à demanda
-   * que ela lhe faz: `round(100 · a^(D/(u_rel^w · t)))/10`. A aptidão vem de
+   * que ela lhe faz: `round(100 · a^(D/(u_rel^acoplamento · t)))/10`. A aptidão vem de
    * uma Beta por par (aluno, disciplina), sorteada uma vez e persistente —
    * traço, não sorte. Beta(4, 2) é a calibragem contra o modelo anterior:
    * nota média 6,7 e 82% de aprovação em dificuldade 1. */
   aptitude_alpha: number; // > 0
   aptitude_beta: number; // > 0
-  /** w — o quanto o interesse mexe no desempenho, como expoente sobre u_rel.
+  /** O quanto o interesse mexe no desempenho, como expoente sobre u_rel.
    * **0 desliga**, e é o padrão: é a única peça da fórmula de nota sem forma
    * justificada e a única que mexe no resultado principal, então ela é
    * parâmetro reportado e não suposição silenciosa. */
@@ -73,6 +77,11 @@ export interface SimulateRequest {
   /** Desvio do choque log-normal por tentativa. Sem ele a nota seria exata e
    * recursar garantiria nota maior. */
   grade_noise: number; // >= 0
+  /** Quanto do gosto do aluno é permanente, de 0 a 1 — a fração da variância
+   * que não é resorteada a cada período. 0 reproduz o modelo anterior; 1
+   * congela a preferência. Ortogonal ao σ: a divisão preserva a dispersão de
+   * cada período, e o que isto controla é só a correlação entre semestres. */
+  utility_stability: number;
   /** Desvio da log-normal de onde saem os valores preliminares das utilidades.
    * Controla o quanto o aluno diferencia as disciplinas: sigma **grande**
    * concentra (quer uma ou duas e despreza o resto), **pequeno** achata. A
@@ -137,29 +146,47 @@ export const COMPARISON_ARMS: {
   hint: string;
 }[] = [
   {
-    key: "ranking",
-    label: "CR (legado)",
-    short: "CR",
-    hint: "as solicitações são atendidas em ordem decrescente do CR do aluno; a carga horária faz o papel do orçamento — eqs. (49)-(50)",
+    key: "ranking_greedy",
+    label: "CR, varredura",
+    short: "CR guloso",
+    hint: "matrícula por CR: os alunos entram em ordem decrescente de histórico e cada um leva o que quer, na própria ordem, enquanto houver vaga e carga — eqs. (49)-(50)",
+  },
+  {
+    key: "ranking_ilp",
+    label: "CR, PLI",
+    short: "CR PLI",
+    hint: "o mesmo CR, resolvido globalmente: maximiza a soma dos históricos atendidos sujeito às vagas e à carga. Como toda disciplina de um aluno tem o mesmo peso, a PLI é indiferente sobre qual dos pedidos dele cortar",
+  },
+  {
+    key: "credits_greedy",
+    label: "Lance, varredura",
+    short: "Lance guloso",
+    hint: "o mecanismo de pontos dos business schools: os lances são processados em ordem decrescente e cada um é atendido se há vaga e se ainda cabe na carga",
+  },
+  {
+    key: "credits_ilp",
+    label: "Lance, PLI",
+    short: "Lance PLI",
+    hint: "o leilão do anteprojeto: a PLI decide a alocação inteira de uma vez — Seção 7.1",
+  },
+  {
+    key: "credits_no_memory",
+    label: "Lance, sem acúmulo",
+    short: "Sem acúmulo",
+    hint: "o orçamento recomeça em Γ_min todo período: nem a sobra nem o retorno atravessam, e o leilão fica sem memória do passado do aluno",
   },
   {
     key: "credits_return",
-    label: "Créditos com retorno",
-    short: "c/ retorno",
-    hint: "o leilão com f_γ proporcional: quem aprova recupera a fatia do preço correspondente à nota, então ir bem compra poder de compra no período seguinte",
-  },
-  {
-    key: "credits",
-    label: "Créditos sem retorno",
-    short: "s/ retorno",
-    hint: "o leilão puro: o crédito gasto sai do sistema, e a única entrada é o Γ_min de cada período — Seção 7.1",
+    label: "Lance, sobra e retorno",
+    short: "C/ retorno",
+    hint: "quem aprova recupera a fatia do preço correspondente à nota, então ir bem compra poder de compra no período seguinte — a única política que premia desempenho acima da nota de corte",
   },
 ];
 
 export const armLabel = (key: string): string =>
   COMPARISON_ARMS.find((arm) => arm.key === key)?.label ?? key;
 
-/** Uma comparação: o mesmo cenário rodado nos três modelos, N vezes em cada um.
+/** Uma comparação: o mesmo cenário rodado em cada modelo, N vezes.
  *
  * Dois campos do cenário não entram. A **seed**, porque as seeds são 1..N e são
  * pareadas, de modo que a i-ésima execução de cada braço parte da mesma
@@ -167,11 +194,10 @@ export const armLabel = (key: string): string =>
  * Seção 7.3). E o **retorno de créditos**, porque ele é o eixo do experimento:
  * cada braço impõe o seu. */
 export interface CompareRequest
-  extends Omit<SimulateRequest, "seed" | "credit_return"> {
+  extends Omit<Scenario, "seed" | "credit_return"> {
   runs: number; // N
   /** Quando presente, a resposta traz também a varredura da forma da
    * preferência. Omitir deixa só o k canônico e o boxplot. */
-  sweep?: SweepIn | null;
 }
 
 /** Teto de execuções por mecanismo. Espelha `leilao.comparison.MAX_RUNS`. */
@@ -192,6 +218,13 @@ export interface RunSummary {
    * menor só porque sobraram os rápidos. */
   graduates: number;
   efficiency: number; // ψ̄ — eq. (53)
+  /** Aproveitamento: carga horária obtida ÷ W_a. A contraparte em carga do ψ,
+   * que é em utilidade — as duas se separam onde está a patologia que
+   * interessa. */
+  utilization: number;
+  /** Fidelidade da mensagem: quanto da preferência sobrevive à tradução para
+   * o que o mecanismo de fato recebe. **Descreve, não pontua.** */
+  fidelity: number;
   fairness: number; // φ — eq. (55)
   correlation: number; // λ — eq. (57)
   /** Períodos do ingresso ao diploma, na média dos concluintes; conta o período
@@ -218,54 +251,10 @@ export interface ArmResult {
   runs: RunSummary[];
 }
 
-/** As amostras dos três braços, pareadas pela seed: o i-ésimo elemento de cada
- * lista é a mesma população sob regras diferentes. */
-/** A varredura da dispersão da preferência, o segundo eixo da comparação: a
- * mesma comparação rodada em vários `utility_sigma`, numa faixa linear. */
-/** O padrão da varredura: a faixa em que sigma diz alguma coisa. Abaixo de 0,25
- * a linha do aluno é praticamente uniforme e os dois mecanismos convergem;
- * acima de 3 ele quer uma disciplina só e quase ninguém se forma. */
-export const DEFAULT_SWEEP: SweepIn = {
-  min_sigma: 0.25,
-  max_sigma: 3,
-  points: 12,
-  runs: 3,
-};
-
-export interface SweepIn {
-  min_sigma: number;
-  max_sigma: number;
-  /** Quantos sigmas, em passos iguais do mínimo ao máximo. Linear basta: o
-   * coeficiente de variação da log-normal cresce depressa em sigma. */
-  points: number;
-  /** Execuções por ponto. Poucas de propósito: aqui se lê a forma da curva ao
-   * longo de sigma, não a significância num sigma. */
-  runs: number;
-}
-
-export interface SweepPoint {
-  sigma: number;
-  arms: ArmResult[];
-  /** Como a utilidade se reparte dentro da linha de um aluno naquele sigma: uma
-   * fração por faixa, somando 1. Cada linha é reescalada ao próprio
-   * [mínimo, máximo] antes de ser dividida em faixas de mesma largura — global
-   * degeneraria, porque um único extremo da matriz definiria o intervalo. */
-  distribution: number[];
-}
-
-export interface Sweep {
-  /** O `utility_sigma` do cenário, que o boxplot mede com mais execuções. Não
-   * precisa cair exatamente num ponto varrido. */
-  canonical: number;
-  runs: number;
-  points: SweepPoint[];
-}
-
 export interface CompareResponse {
   runs: number;
   arms: ArmResult[];
   /** Presente só quando a requisição pediu a varredura. */
-  sweep?: Sweep | null;
   /** As duas distribuições de entrada do cenário. Não variam entre braços nem
    * entre seeds — são do cenário, não da execução. */
   utility_distribution?: number[];
@@ -480,13 +469,14 @@ export interface SimulateResponse {
   grade_distribution?: number[];
 }
 
-export function defaultScenario(): SimulateRequest {
+export function defaultScenario(): Scenario {
   return {
     disciplines: [],
     aptitude_alpha: 4,
     aptitude_beta: 2,
     interest_coupling: 0,
     grade_noise: 0.25,
+    utility_stability: 0,
     resolver: "ilp",
     credit_memory: "carry",
     utility_sigma: 1,

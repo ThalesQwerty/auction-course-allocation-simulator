@@ -2,17 +2,15 @@ import { useMemo } from "react";
 import {
   BoxPlot,
   Histogram,
-  MetricChart,
   boxStats,
   categoricalColors,
   formatCount,
   formatRatio,
   usePrefersDark,
 } from "./charts";
-import type { SeriesPoint } from "./charts";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
 import { COMPARISON_ARMS } from "./types";
-import type { ArmResult, RunSummary, Sweep } from "./types";
+import type { RunSummary } from "./types";
 
 /** Períodos com uma casa: o tempo de formatura anda em frações de período, e
  * duas casas sugeririam uma precisão que a amostra não tem. */
@@ -66,6 +64,26 @@ const METRICS: Metric[] = [
     format: formatRatio,
   },
   {
+    id: "utilization",
+    title: "Aproveitamento da carga",
+    short: "Aproveitamento",
+    of: (run) => run.utilization,
+    bounds: [0, 1],
+    betterWhen: "higher",
+    format: formatRatio,
+  },
+  {
+    id: "fidelity",
+    title: "Fidelidade da mensagem",
+    short: "Fidelidade",
+    of: (run) => run.fidelity,
+    bounds: [0, 1],
+    // Descreve, não pontua: dizer qual lado é melhor exigiria escolher entre
+    // expressar intensidade e ser simples de usar, e isso é juízo de quem lê.
+    betterWhen: null,
+    format: formatRatio,
+  },
+  {
     id: "fairness",
     title: "Equidade (índice de Jain, φ)",
     short: "Equidade (φ)",
@@ -94,22 +112,6 @@ const METRICS: Metric[] = [
   },
 ];
 
-/** Formandos entra **só na varredura**, e não no boxplot. O motivo é o achado
- * que a varredura revelou: ψ̄ sobe monotonicamente conforme a preferência
- * concentra e chega perto de 1 na ponta, onde ninguém se forma — o aluno quer
- * uma disciplina só, consegue, e a satisfação dele é plena. ψ̄ é satisfação
- * *relativa ao que o aluno queria*, então ela é cega para essa patologia, e a
- * contagem de formandos é a única métrica que a pega. Lado a lado no mesmo eixo
- * x, as duas contam a troca que o mecanismo faz. */
-const GRADUATES: Metric = {
-  id: "graduates",
-  title: "Formandos",
-  short: "Formandos",
-  of: (run) => run.graduates,
-  bounds: [0, Infinity],
-  betterWhen: "higher",
-  format: formatCount,
-};
 
 const ORDINALS = ["1ª", "2ª", "3ª", "4ª", "5ª", "6ª", "7ª", "8ª", "9ª", "10ª"];
 
@@ -175,7 +177,7 @@ export function Comparison({
         domain={[0, 10]}
       />
     ) : null,
-    !result.sweep && result.utility_distribution?.length ? (
+    result.utility_distribution?.length ? (
       <Histogram
         key="utilidades"
         title="Utilidades"
@@ -187,56 +189,6 @@ export function Comparison({
   /** A varredura, quando a execução a pediu. Comparações gravadas antes dela
    * existir simplesmente não a trazem, e a seção some em vez de aparecer
    * vazia. */
-  const sweep: Sweep | null = result.sweep ?? null;
-
-  /** Um ponto por sigma, com uma coluna por braço — o formato que o
-   * `MetricChart` consome. O valor de cada braço é a **mediana** das execuções
-   * daquele ponto: com poucas execuções por ponto a média seria arrastada por
-   * uma só, e o que interessa aqui é a tendência. */
-  const sweepSeries = (metric: Metric): SeriesPoint[] =>
-    (sweep?.points ?? []).map((point) => {
-      const row: SeriesPoint = { x: point.sigma };
-      for (const arm of COMPARISON_ARMS) {
-        const found: ArmResult | undefined = point.arms.find((a) => a.key === arm.key);
-        const values = (found?.runs ?? [])
-          .map(metric.of)
-          .filter((value): value is number => value !== null && Number.isFinite(value))
-          .sort((a, b) => a - b);
-        if (values.length) {
-          const middle = Math.floor(values.length / 2);
-          row[arm.label] =
-            values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
-        }
-      }
-      return row;
-    });
-
-  /** Marcas do eixo: uma por ponto. Com mais de 8 pontos elas colidem, e aí
-   * ficam uma sim uma não — o eixo é contínuo, então pular marca não esconde
-   * dado. */
-  const sweepTicks = (sweep?.points ?? [])
-    .map((point) => point.sigma)
-    .filter((_, index, all) => all.length <= 8 || index % 2 === 0);
-  const formatSigma = (value: number) =>
-    value.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
-
-  const sweepChartFor = (metric: Metric) => (
-    <MetricChart
-      key={`sweep-${metric.id}`}
-      title={metric.title}
-      data={sweepSeries(metric)}
-      series={labels}
-      colors={colors}
-      domain={metric.bounds ? [metric.bounds[0], metric.bounds[1] === Infinity ? "auto" : metric.bounds[1]] : undefined}
-      format={metric.format}
-      zeroLine={metric.zeroLine}
-      numericX
-      xTicks={sweepTicks}
-      xFormat={formatSigma}
-      xReference={sweep?.canonical}
-    />
-  );
-
   /** Quantas rodadas o cenário teve, lido do próprio resultado. Comparações
    * gravadas antes da saturação existir não trazem a lista, e aí a seção some
    * em vez de aparecer vazia. */
@@ -414,31 +366,7 @@ export function Comparison({
         </section>
       )}
 
-      {sweep && sweep.points.length > 1 && (
-        <section className="chart-section">
-          <header className="chart-section-head">
-            <h2>Dependência da dispersão da preferência</h2>
-</header>
-                              <div className="chart-grid">{[...METRICS, GRADUATES].map(sweepChartFor)}</div>
-        </section>
-      )}
 
-      {sweep && sweep.points.length > 0 && (
-        <section className="chart-section">
-          <header className="chart-section-head">
-            <h2>Como a utilidade se reparte em cada σ</h2>
-</header>
-                                        <div className="chart-grid">
-            {sweep.points.map((point) => (
-              <Histogram
-                key={`hist-${point.sigma}`}
-                title={`σ = ${formatSigma(point.sigma)}`}
-                fractions={point.distribution}
-              />
-            ))}
-          </div>
-        </section>
-      )}
 
       {scenarioHistograms.length > 0 && (
         <section className="chart-section">

@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..auction import AuctionInput, Bid, run_auction
-from ..comparison import run_comparison, run_sweep
+from ..comparison import run_comparison
 from ..config import Discipline, SimulationConfig
 from ..entities import Agent, Good, MutualExclusion
 from ..playground import PlaygroundDiscipline, PlaygroundStudent, run_playground
@@ -30,16 +30,12 @@ from .schemas import (
     RunRequest,
     RunResponse,
     RunSummaryOut,
-    SweepOut,
-    SweepPointOut,
     PlaygroundRequest,
     PlaygroundResponse,
     PlaygroundRoundOut,
     PlaygroundRoundStudentOut,
     PlaygroundGradeOut,
     ScenarioIn,
-    SimulateRequest,
-    SimulateResponse,
     StudentHistoryOut,
     StudentSummaryOut,
 )
@@ -96,7 +92,14 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
     return SimulationConfig(
         disciplines=[
             Discipline(
-                d.name, d.seats, d.hours, d.difficulty, tuple(d.unlocks), d.entry, d.elective
+                d.name,
+                d.seats,
+                d.hours,
+                d.difficulty,
+                tuple(d.unlocks),
+                d.entry,
+                d.elective,
+                d.stability,
             )
             for d in req.disciplines
         ],
@@ -104,6 +107,7 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
         aptitude_beta=req.aptitude_beta,
         interest_coupling=req.interest_coupling,
         grade_noise=req.grade_noise,
+        utility_stability=req.utility_stability,
         resolver=req.resolver,
         credit_memory=req.credit_memory,
         utility_sigma=req.utility_sigma,
@@ -117,36 +121,6 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
         base_credits=req.base_credits,
         credit_return=req.credit_return,
         seed=seed,
-    )
-
-
-@app.post("/simulate", response_model=SimulateResponse)
-def simulate(req: SimulateRequest) -> SimulateResponse:
-    """Roda uma simulação multi-período completa a partir da configuração."""
-    try:
-        config = build_config(req, seed=req.seed)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
-        result = run_simulation(config)
-    except Exception as exc:  # noqa: BLE001 — reporta falha do solver/instância inviável
-        raise HTTPException(status_code=422, detail=f"falha ao simular o cenário: {exc}") from exc
-
-    # `histories` é montado só quando pedido: converter 1500 históricos custa
-    # tempo e memória à toa quando quem chamou só quer as séries agregadas.
-    return SimulateResponse(
-        periods=[PeriodReportOut.model_validate(p) for p in result.periods],
-        students=[StudentSummaryOut.model_validate(s) for s in result.students],
-        histories=(
-            [StudentHistoryOut.model_validate(h) for h in result.histories]
-            if req.include_histories
-            else []
-        ),
-        disciplines=result.disciplines,
-        curriculum_periods=result.curriculum_periods,
-        utility_distribution=result.utility_distribution,
-        grade_distribution=result.grade_distribution,
     )
 
 
@@ -172,20 +146,7 @@ def compare(req: CompareRequest) -> CompareResponse:
 
     try:
         result = run_comparison(config, runs=req.runs)
-        sweep = (
-            run_sweep(
-                config,
-                min_sigma=req.sweep.min_sigma,
-                max_sigma=req.sweep.max_sigma,
-                points=req.sweep.points,
-                runs=req.sweep.runs,
-            )
-            if req.sweep is not None
-            else None
-        )
     except ValueError as exc:
-        # Faixa inválida ou varredura grande demais: é erro de requisição, não
-        # falha de simulação.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 — reporta falha do solver/instância inviável
         raise HTTPException(
@@ -205,30 +166,6 @@ def compare(req: CompareRequest) -> CompareResponse:
             )
             for arm in result.arms
         ],
-        sweep=(
-            SweepOut(
-                canonical=sweep.canonical,
-                runs=sweep.runs,
-                points=[
-                    SweepPointOut(
-                        sigma=point.sigma,
-                        distribution=point.distribution,
-                        arms=[
-                            ArmResultOut(
-                                key=arm.key,
-                                mechanism=arm.mechanism,
-                                credit_return=arm.credit_return,
-                                runs=[RunSummaryOut.model_validate(r) for r in arm.runs],
-                            )
-                            for arm in point.arms
-                        ],
-                    )
-                    for point in sweep.points
-                ],
-            )
-            if sweep is not None
-            else None
-        ),
     )
 
 

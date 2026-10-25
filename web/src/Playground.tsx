@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { playground } from "./api";
-import type { DisciplineInput, Mechanism, PlaygroundResponse, SimulateRequest } from "./types";
+import type { DisciplineInput, Mechanism, PlaygroundResponse, Scenario } from "./types";
 
 interface PlaygroundStudent {
   id: string;
@@ -22,7 +22,7 @@ export interface PlaygroundDraft {
   students: PlaygroundStudent[];
 }
 
-export function createPlaygroundDraft(config: SimulateRequest): PlaygroundDraft {
+export function createPlaygroundDraft(config: Scenario): PlaygroundDraft {
   return {
     mechanism: "credits",
     rounds: 1,
@@ -35,7 +35,7 @@ export function createPlaygroundDraft(config: SimulateRequest): PlaygroundDraft 
   };
 }
 
-function newStudent(id: string, label: string, config: SimulateRequest): PlaygroundStudent {
+function newStudent(id: string, label: string, config: Scenario): PlaygroundStudent {
   return {
     id,
     label,
@@ -51,7 +51,7 @@ export function Playground({
   draft,
   setDraft,
 }: {
-  config: SimulateRequest;
+  config: Scenario;
   draft: PlaygroundDraft;
   setDraft: (draft: PlaygroundDraft) => void;
 }) {

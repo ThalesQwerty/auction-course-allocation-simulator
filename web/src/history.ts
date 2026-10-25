@@ -3,25 +3,8 @@ import { creditReturnLabel } from "./types";
 import type {
   CompareRequest,
   CompareResponse,
-  SimulateRequest,
-  SimulateResponse,
+  Scenario,
 } from "./types";
-
-/** Uma execução já feita, guardada para consulta posterior. São dois tipos, e
- * `kind` diz qual: uma **simulação** (um cenário, uma seed, todos os gráficos
- * e a tela por aluno) ou uma **comparação** (o mesmo cenário nos dois
- * mecanismos, N seeds de cada lado, só as métricas principais em boxplot).
- *
- * As duas convivem na mesma lista porque é a mesma pergunta em escalas
- * diferentes, e porque o histórico é por data: quem rodou um cenário e depois
- * o comparou quer os dois ali, em ordem. */
-export interface SimulationRun {
-  kind: "simulation";
-  id: string;
-  at: string; // ISO 8601
-  config: SimulateRequest;
-  result: SimulateResponse;
-}
 
 export interface ComparisonRun {
   kind: "comparison";
@@ -31,7 +14,7 @@ export interface ComparisonRun {
   result: CompareResponse;
 }
 
-export type HistoryEntry = SimulationRun | ComparisonRun;
+export type HistoryEntry = ComparisonRun;
 
 /** A versão faz parte da chave porque o formato do resultado mudou com o
  * modelo: a v1 guardava recortes por curso (`by_course`) e um `overall` que era
@@ -58,24 +41,15 @@ export const MAX_RUNS = 20;
  * determinística pela seed. Uma comparação não tem o que podar: ela já guarda
  * só cinco números por execução. */
 function detachHistories(entry: HistoryEntry): HistoryEntry {
-  return entry.kind === "comparison"
-    ? entry
-    : { ...entry, result: { ...entry.result, histories: [] } };
-}
-
-/** Se o detalhe por aluno desta execução está em memória nesta sessão. */
-export function hasHistories(run: SimulationRun): boolean {
-  return run.result.histories.length > 0 || run.result.students.length === 0;
+  // Uma comparação não tem o que podar: ela já guarda só um punhado de
+  // números por execução.
+  return entry;
 }
 
 const stamp = () => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   at: new Date().toISOString(),
 });
-
-export function newRun(config: SimulateRequest, result: SimulateResponse): SimulationRun {
-  return { kind: "simulation", ...stamp(), config, result };
-}
 
 export function newComparison(
   config: CompareRequest,
@@ -99,9 +73,8 @@ export function loadHistory(): HistoryEntry[] {
       }
       return {
         ...entry,
-        kind: "simulation" as const,
         config: { ...entry.config, disciplines },
-        result: { ...entry.result, histories: entry.result?.histories ?? [] },
+        result: entry.result,
       };
     });
   } catch {
@@ -146,7 +119,7 @@ export function formatRunDate(at: string): string {
  * Vale para os dois tipos: a comparação roda exatamente o mesmo cenário, e é o
  * que ela acrescenta — o número de execuções — que a distingue. */
 function describeScenario(
-  config: SimulateRequest | CompareRequest,
+  config: Scenario | CompareRequest,
   { withCreditReturn }: { withCreditReturn: boolean }
 ): string {
   const { periods, rounds, disciplines } = config;
@@ -176,7 +149,7 @@ function describeScenario(
   );
 }
 
-export function describeRun(run: SimulationRun): string {
+export function describeRun(run: ComparisonRun): string {
   // A política de retorno entra no resumo porque é o eixo de experimentação da
   // Seção 7.3.2: duas execuções que só diferem nela precisam se distinguir na
   // barra lateral.

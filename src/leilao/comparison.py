@@ -32,14 +32,6 @@ Por isso a política de retorno **não é parâmetro do cenário aqui**: ela é 
 do experimento, e o `credit_return` que vier na configuração é ignorado, como a
 seed. Cada braço impõe o seu.
 
-**Há um segundo eixo, opcional: a forma da preferência** (`run_sweep`). A
-hipótese do trabalho é que o leilão capta intensidade de preferência que a
-ordenação por CR não enxerga — e se é isso, o quanto a população diferencia as
-disciplinas não é um parâmetro a calibrar, é a *variável independente*. A
-varredura roda a comparação inteira em vários `utility_shape` numa progressão
-geométrica e devolve um ponto por k, de modo que se leia a dependência em vez de
-um valor isolado.
-
 Os dois eixos se dividem o trabalho: a varredura usa **poucas execuções por
 ponto** (é a forma da curva que interessa, e são muitos pontos) e o sigma
 canônico usa **muitas** (ali a pergunta é se a diferença supera o ruído
@@ -100,7 +92,13 @@ import numpy as np
 
 from .behavior import draw_utilities, utility_distribution
 from .grading import draw_aptitudes, grade_distribution, grade_for_attempt
-from .config import CreditReturnPolicy, Mechanism, SimulationConfig
+from .config import (
+    CreditMemory,
+    CreditReturnPolicy,
+    Mechanism,
+    Resolver,
+    SimulationConfig,
+)
 from .population import generate_students
 from .simulation import SimulationResult, run_simulation
 
@@ -109,13 +107,7 @@ from .simulation import SimulationResult, run_simulation
 # simulação inteira em cada um dos três braços.
 MAX_RUNS = 100
 
-# Teto de pontos da varredura — serve só para uma requisição malformada não
-# virar um trabalho de horas.
-MAX_SWEEP_POINTS = 41
 
-# Teto de simulações de uma varredura inteira (pontos x 3 braços x execuções).
-# Uma simulação do preset custa ~0,5 s, então isto é da ordem de três minutos.
-MAX_SWEEP_SIMULATIONS = 400
 
 # A faixa em que sigma diz alguma coisa. Abaixo do piso a linha do aluno é
 # praticamente uniforme e os dois mecanismos convergem; acima do teto ele quer
@@ -126,7 +118,12 @@ USEFUL_SIGMA_RANGE = (0.25, 3.0)
 
 @dataclass(frozen=True)
 class Arm:
-    """Um dos modelos comparados: um mecanismo com uma política de retorno.
+    """Um dos modelos comparados.
+
+    Um modelo é a combinação de quatro escolhas: a **moeda** (ordenação por CR
+    ou lance em créditos), o **resolvedor** (varredura gulosa ou PLI global),
+    a **memória do orçamento** (se a sobra atravessa o período) e a **política
+    de retorno**.
 
     `key` é o identificador estável que a interface usa para rotular a série —
     o rótulo em si é dela, não daqui.
@@ -135,6 +132,8 @@ class Arm:
     key: str
     mechanism: Mechanism
     credit_return: CreditReturnPolicy
+    resolver: Resolver = "ilp"
+    credit_memory: CreditMemory = "carry"
 
 
 # Os três braços, na ordem em que entram no eixo e na legenda: a linha de base
@@ -142,11 +141,28 @@ class Arm:
 # correlação (eq. 57) ser lida de uma vez — do mecanismo em que o CR é o próprio
 # critério ao que o ignora por completo, com o retorno no meio.
 ARMS: tuple[Arm, ...] = (
-    Arm("ranking", "ranking", "none"),
-    # `ratio` é a única política que premia desempenho acima da nota de corte, e
-    # por isso a única com chance de recriar o incentivo que o CR dá de graça.
+    # As quatro células do cruzamento moeda x resolvedor. As duas de fora da
+    # diagonal são mecanismos reais: "lance + varredura" é o *bidding points*
+    # dos business schools, o mais implantado do mundo, e "CR + PLI" é a
+    # matrícula por histórico resolvida globalmente.
+    #
+    # Os dois resolvedores só divergem onde a carga horária aperta — sem ela o
+    # problema se separa por disciplina e a varredura é ótima. É por isso que o
+    # eixo só passou a ter conteúdo depois das optativas, que fazem o conjunto
+    # elegível passar de W_a.
+    Arm("ranking_greedy", "ranking", "none", resolver="greedy"),
+    Arm("ranking_ilp", "ranking", "none", resolver="ilp"),
+    Arm("credits_greedy", "credits", "none", resolver="greedy"),
+    Arm("credits_ilp", "credits", "none", resolver="ilp"),
+    # A escada de acúmulo, sobre o leilão com PLI. O degrau do meio é o
+    # `credits_ilp` acima, então só faltam as duas pontas: sem memória nenhuma
+    # e com memória das duas fontes.
+    #
+    # Ela é um eixo só — **quanta memória o orçamento tem** —, e o degrau do
+    # meio é o que separa as duas fontes, que têm sinais opostos de incentivo:
+    # a sobra premia quem pagou barato, o retorno premia quem aprovou.
+    Arm("credits_no_memory", "credits", "none", credit_memory="none"),
     Arm("credits_return", "credits", "ratio"),
-    Arm("credits", "credits", "none"),
 )
 
 
@@ -164,6 +180,16 @@ class RunSummary:
     periods: int
     graduates: int  # quantos concluíram o curso — eq. (40)
     efficiency: float  # psi-barra — eq. (53)
+    # Aproveitamento: a contraparte em carga do psi, que é em utilidade. As
+    # duas se separam onde está a patologia que interessa — quem concentra o
+    # lance, ganha a disciplina que amava e deixa o resto de W_a ocioso pontua
+    # psi alto e aproveitamento baixo.
+    utilization: float
+    # Fidelidade da mensagem: quanto da preferência sobrevive à tradução para
+    # o que o mecanismo de fato recebe. **Descreve, não pontua** — como a
+    # correlação, ela não ganha "seeds a favor": dizer qual lado é melhor
+    # exigiria escolher entre expressar intensidade e ser simples de usar.
+    fidelity: float
     fairness: float  # phi de Jain — eq. (55)
     correlation: float  # lambda — eq. (57)
     # Períodos do ingresso ao diploma, na média dos concluintes. `None` quando
@@ -205,34 +231,6 @@ class ComparisonResult:
     # cenário, não da execução.
     utility_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class SweepPoint:
-    """Um ponto da varredura: a comparação inteira num desvio de preferência.
-
-    `distribution` é o histograma de como a utilidade se reparte dentro da linha
-    de um aluno naquele sigma (`behavior.utility_distribution`) — o que o
-    parâmetro faz com a preferência, ao lado do que ele faz com o resultado.
-    """
-
-    sigma: float
-    arms: list[ArmResult]
-    distribution: list[float]
-
-
-@dataclass(frozen=True)
-class SweepResult:
-    """A varredura inteira, um ponto por sigma, em ordem crescente.
-
-    `canonical` é o `utility_sigma` do cenário — o que o boxplot mede com mais
-    execuções. Ele **não** precisa cair exatamente num ponto varrido: a
-    interface o marca como referência no eixo.
-    """
-
-    canonical: float
-    runs: int
-    points: list[SweepPoint]
 
 
 def time_to_graduate(result: SimulationResult) -> float | None:
@@ -312,83 +310,12 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         periods=len(result.periods),
         graduates=graduates,
         efficiency=mean(lambda m: m.efficiency),
+        utilization=mean(lambda m: m.utilization),
+        fidelity=mean(lambda m: m.fidelity),
         fairness=mean(lambda m: m.fairness),
         correlation=mean(lambda m: m.correlation),
         time_to_graduate=time_to_graduate(result),
         allocations_per_round=allocations_per_round(result),
-    )
-
-
-def sweep_sigmas(minimum: float, maximum: float, points: int) -> list[float]:
-    """Os sigmas da varredura, em passos iguais do mínimo ao máximo.
-
-    Linear, e não geométrico: o coeficiente de variação da log-normal cresce
-    depressa em sigma, então passos iguais já espalham bem a concentração da
-    preferência — era a Gamma que precisava de progressão geométrica, porque
-    exigia quatro ordens de grandeza do parâmetro para cobrir a mesma faixa.
-    """
-    if minimum <= 0:
-        raise ValueError("o sigma mínimo da varredura deve ser > 0")
-    if minimum > maximum:
-        raise ValueError("o sigma mínimo da varredura não pode passar do máximo")
-    if points < 2:
-        raise ValueError("a varredura precisa de pelo menos 2 pontos")
-    if points > MAX_SWEEP_POINTS:
-        raise ValueError(
-            f"a varredura teria {points} pontos, acima do limite de {MAX_SWEEP_POINTS}"
-        )
-    step = (maximum - minimum) / (points - 1)
-    return [minimum + step * index for index in range(points)]
-
-
-def run_sweep(
-    config: SimulationConfig,
-    *,
-    min_sigma: float,
-    max_sigma: float,
-    points: int,
-    runs: int,
-    workers: int = 4,
-) -> SweepResult:
-    """Roda a comparação inteira em cada sigma da faixa.
-
-    Poucas execuções por ponto, de propósito: o que se lê aqui é a **forma da
-    curva** ao longo de sigma, não a significância num sigma. Esta é a medida
-    que responde "o quanto a vantagem do leilão depende de haver intensidade de
-    preferência a captar?" — e a resposta se lê sobretudo na linha da ordenação
-    por CR, que é plana porque o mecanismo não enxerga intensidade.
-
-    Cada ponto traz também o histograma da própria matriz de utilidades, de modo
-    que o gráfico do resultado tenha ao lado o gráfico da causa.
-    """
-    sigmas = sweep_sigmas(min_sigma, max_sigma, points)
-    if not 1 <= runs <= MAX_RUNS:
-        raise ValueError(f"o número de execuções deve estar entre 1 e {MAX_RUNS}")
-    total = len(sigmas) * len(ARMS) * runs
-    if total > MAX_SWEEP_SIMULATIONS:
-        raise ValueError(
-            f"a varredura pediria {total} simulações ({len(sigmas)} pontos x "
-            f"{len(ARMS)} modelos x {runs} execuções), acima do limite de "
-            f"{MAX_SWEEP_SIMULATIONS}; reduza os pontos ou as execuções"
-        )
-
-    return SweepResult(
-        canonical=float(config.utility_sigma),
-        runs=runs,
-        points=[
-            SweepPoint(
-                sigma=sigma,
-                arms=run_comparison(
-                    dataclasses.replace(config, utility_sigma=sigma),
-                    runs=runs,
-                    workers=workers,
-                ).arms,
-                distribution=sample_distribution(
-                    dataclasses.replace(config, utility_sigma=sigma)
-                ),
-            )
-            for sigma in sigmas
-        ],
     )
 
 
@@ -454,6 +381,8 @@ def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:
                 config,
                 mechanism=arm.mechanism,
                 credit_return=arm.credit_return,
+                resolver=arm.resolver,
+                credit_memory=arm.credit_memory,
                 seed=seed,
             )
         ),

@@ -1,6 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { curriculumPeriods } from "./curriculum";
-import { homogeneousOffer } from "./presets";
 import type { DisciplineInput } from "./types";
 
 interface Arrow {
@@ -140,7 +139,7 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
         {rows.map((row) => (
           <div className="grade-row" key={periods[row[0].name]}>
             {row.map((discipline) => {
-              const offer = homogeneousOffer.get(discipline.name) ?? discipline;
+              const offer = discipline;
               return (
                 <article
                   key={discipline.name}

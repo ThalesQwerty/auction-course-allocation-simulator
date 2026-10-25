@@ -74,6 +74,16 @@ class DisciplineIn(BaseModel):
         default=False,
         description="matrícula garantida de quem ingressa; não pode ter pré-requisito",
     )
+    stability: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description=(
+            "quanto do gosto por esta disciplina é permanente; nulo cai no valor "
+            "do cenário. Declarar por disciplina sincroniza a persistência entre "
+            "concorrentes, que é o que trava a fila"
+        ),
+    )
     difficulty: float = Field(
         default=1.0,
         gt=0,
@@ -115,10 +125,20 @@ class ScenarioIn(BaseModel):
         default=0.0,
         ge=0,
         description=(
-            "w — o quanto o interesse mexe na nota, como expoente sobre u_rel. "
+            "O quanto o interesse mexe na nota, como expoente sobre u_rel. "
             "0 desliga o acoplamento e deixa a função de nota neutra entre os "
             "mecanismos; é o controle a reportar ao lado de qualquer resultado "
             "em conclusões."
+        ),
+    )
+    utility_stability: float = Field(
+        default=0.0,
+        ge=0,
+        le=1,
+        description=(
+            "quanto do gosto do aluno é permanente, de 0 a 1. 0 resorteia a "
+            "preferência inteira a cada período; 1 congela. Ortogonal ao sigma: "
+            "a divisão preserva a dispersão de cada período"
         ),
     )
     grade_noise: float = Field(
@@ -182,54 +202,6 @@ class ScenarioIn(BaseModel):
     credit_return: CreditReturnPolicy = "none"
 
 
-class SimulateRequest(ScenarioIn):
-    """Uma execução única do mecanismo proposto."""
-
-    seed: int = 0
-    include_histories: bool = Field(
-        default=False,
-        description=(
-            "detalhe período a período de cada aluno. Fica de fora por padrão porque "
-            "é ~50x o resto da resposta num cenário grande (40 MB com 1500 alunos) e "
-            "só alimenta a tela individual; a seed garante que reexecutar reconstrói "
-            "exatamente o mesmo detalhe."
-        ),
-    )
-
-
-class SweepIn(BaseModel):
-    """A varredura da forma da preferência, o segundo eixo da comparação.
-
-    Os sigmas saem de uma faixa **linear** — passos iguais do mínimo ao máximo.
-    Linear basta porque o coeficiente de variação da log-normal cresce depressa
-    em sigma: a faixa útil inteira cabe entre ~0,25 e ~3.
-
-    O `utility_sigma` do cenário é o **canônico**, medido pelo boxplot com mais
-    execuções. Ele não precisa cair exatamente num ponto varrido — a interface o
-    marca como referência no eixo.
-    """
-
-    min_sigma: float = Field(
-        default=0.25, gt=0, le=20, description="menor sigma da faixa"
-    )
-    max_sigma: float = Field(
-        default=3.0, gt=0, le=20, description="maior sigma da faixa"
-    )
-    points: int = Field(
-        default=12, ge=2, le=41, description="quantos sigmas, em passos iguais"
-    )
-    runs: int = Field(
-        default=3,
-        ge=1,
-        le=MAX_RUNS,
-        description=(
-            "execuções por ponto. Poucas de propósito: aqui se lê a forma da "
-            "curva ao longo de k, não a significância num k — essa é a pergunta "
-            "do boxplot, que roda no k canônico com `runs`."
-        ),
-    )
-
-
 class CompareRequest(ScenarioIn):
     """Uma comparação entre os três modelos sobre o mesmo cenário.
 
@@ -247,13 +219,6 @@ class CompareRequest(ScenarioIn):
         description=(
             "N — quantas simulações de cada mecanismo, com as seeds de 1 a N. "
             "São 2N simulações no total, e a seed pareia os dois lados."
-        ),
-    )
-    sweep: SweepIn | None = Field(
-        default=None,
-        description=(
-            "quando presente, roda também a varredura da forma da preferência e "
-            "devolve um ponto por k. Omitir deixa só o k canônico."
         ),
     )
 
@@ -274,6 +239,11 @@ class RunSummaryOut(BaseModel):
     # lê: quem forma menos pode exibir um tempo menor só por sobrarem os rápidos.
     graduates: int
     efficiency: float  # eq. (53)
+    # Aproveitamento: a contraparte em carga do psi, que é em utilidade.
+    utilization: float
+    # Fidelidade da mensagem: quanto da preferência sobrevive à tradução.
+    # Descreve, não pontua — como a correlação.
+    fidelity: float
     fairness: float  # eq. (55)
     correlation: float  # eq. (57)
     # Períodos do ingresso ao diploma, na média dos concluintes. Null quando
@@ -300,34 +270,6 @@ class ArmResultOut(BaseModel):
     runs: list[RunSummaryOut]
 
 
-class SweepPointOut(BaseModel):
-    """Um ponto da varredura: a comparação inteira num desvio de preferência.
-
-    `distribution` é o histograma de como a utilidade se reparte dentro da linha
-    de um aluno naquele sigma — o gráfico da causa, ao lado do do resultado.
-    Cada linha é reescalada ao próprio [mínimo, máximo] e dividida em faixas de
-    mesma largura; as frações somam 1.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    sigma: float
-    arms: list[ArmResultOut]
-    distribution: list[float]
-
-
-class SweepOut(BaseModel):
-    """A varredura inteira, em ordem crescente de sigma. `canonical` é o
-    `utility_sigma` do cenário, que o boxplot mede com mais execuções — ele não
-    precisa cair num ponto varrido."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    canonical: float
-    runs: int
-    points: list[SweepPointOut]
-
-
 class CompareResponse(BaseModel):
     """As amostras dos três braços, pareadas pela seed: o i-ésimo elemento de
     cada lista é a mesma população sob regras diferentes."""
@@ -336,12 +278,6 @@ class CompareResponse(BaseModel):
 
     runs: int
     arms: list[ArmResultOut]
-    # Presente só quando a requisição pediu a varredura.
-    sweep: SweepOut | None = None
-    # As duas distribuições de entrada do cenário, como histogramas. Não variam
-    # entre braços nem entre seeds — são do cenário, não da execução.
-    utility_distribution: list[float] = []
-    grade_distribution: list[float] = []
 
 
 class MetricsOut(BaseModel):
@@ -498,22 +434,6 @@ class StudentHistoryOut(BaseModel):
 
     student_id: str
     periods: list[StudentPeriodRecordOut]
-
-
-class SimulateResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    periods: list[PeriodReportOut]
-    students: list[StudentSummaryOut]
-    histories: list[StudentHistoryOut]
-    disciplines: list[str]
-    # Período de cada disciplina na grade, induzido dos pré-requisitos.
-    curriculum_periods: dict[str, int]
-    # As duas distribuições de entrada do cenário, como histogramas: uma fração
-    # por faixa, somando 1. As utilidades são reescaladas por linha e vão de 0 a
-    # 1; as notas vão de 0 a 10.
-    utility_distribution: list[float] = []
-    grade_distribution: list[float] = []
 
 
 class PlaygroundDisciplineIn(BaseModel):

@@ -3,7 +3,7 @@
 A nota não sai de uma normal: ela sai da **aptidão** do aluno naquela
 disciplina, elevada à demanda que a disciplina lhe faz.
 
-    nota = round( 100 · a ^ ( D · ruído / (u_rel^w · t) ) ) / 10
+    nota = round( 100 · a ^ ( D · ruído / (u_rel^acoplamento · t) ) ) / 10
 
 - **a** é a aptidão, sorteada de uma Beta por par (aluno, disciplina) e
   **persistente**: é o traço, não a sorte. Com expoente 1 a nota *é* a
@@ -17,7 +17,7 @@ disciplina, elevada à demanda que a disciplina lhe faz.
   do modelo anterior, que não tinha respaldo nenhum.
 - **u_rel** é a utilidade da disciplina para o aluno, em múltiplos da
   indiferença (`u · |disciplinas|`, que vale 1 quando ele é indiferente), e
-  **w** é o quanto o interesse mexe no desempenho.
+  o **acoplamento** é o quanto o interesse mexe no desempenho.
 - **ruído** é um choque log-normal por tentativa, sem o qual a nota seria
   determinística dado `(a, D, u_rel, t)` — e aí recursar *garantiria* nota
   maior, revertendo uma decisão deliberada do modelo.
@@ -29,12 +29,12 @@ chance de dominar todas. De quebra ela respeita os limites **por construção** 
 `a^E` nunca sai de (0, 1) —, ao contrário da normal truncada, que empilhava
 massa nas pontas sempre que a média chegava perto delas.
 
-**O `w` não é opcional, e é por isso que ele é parâmetro de cenário.** O
+**O acoplamento não é opcional, e é por isso que ele é parâmetro de cenário.** O
 acoplamento entre interesse e desempenho é a única peça da fórmula sem forma
-justificada, e é a única que mexe no resultado principal: medido, `w = 0`
+justificada, e é a única que mexe no resultado principal: medido, acoplamento zero
 deixa a função de nota neutra entre os mecanismos (vão de 0% em aprovações) e
-`w = 1` fabrica sozinha ~40% de vão a favor do leilão, antes de qualquer
-alocação ter sido avaliada. Com `w` varrido e `w = 0` reportado ao lado, a
+um fabrica sozinha ~40% de vão a favor do leilão, antes de qualquer
+alocação ter sido avaliada. Com o acoplamento reportado ao lado, a
 suposição deixa de ser ad-hoc e vira sensibilidade medida.
 
 Nada é sorteado dentro do loop: a aptidão e os choques saem da seed na

@@ -1,12 +1,11 @@
-import type { DisciplineInput, SimulateRequest } from "./types";
+import type { DisciplineInput, Scenario } from "./types";
 
-/** Um cenário pronto. `hint` diz para que ele serve — a lista existe para
- * poupar a montagem manual de cenários que se repetem na pesquisa. */
+/** Um cenário pronto. */
 export interface Preset {
   id: string;
   name: string;
   hint: string;
-  build: () => SimulateRequest;
+  build: () => Scenario;
 }
 
 /** As seis combinações de oferta que se repetem a partir do 2º período: três
@@ -153,73 +152,19 @@ const ELECTIVE_HOURS = 480;
 
 /** Carga horária máxima por período (W_a), igual para todos. É exatamente a
  * soma de um período da grade. */
-/** Vagas do preset Homogêneo, uma por período, iguais para todas as disciplinas
- * daquele período. O 1º ainda comporta a geração inteira e sobra lugar para
- * quem recursa. Dali em diante a oferta cai 15 vagas por período e a
- * concorrência aperta em funil: no 6º cabem menos da metade dos ingressantes. */
-const FUNNEL_SEATS = [120, 105, 90, 75, 60, 45] as const;
-
-/** Carga do Homogêneo, na ordem em que cada período está listado na grade.
- * As três de 60 h permanecem; das três de 90 h, a última de cada período vira
- * 30 h. A soma do período cai de 450 para 390. */
-const FUNNEL_HOURS = [90, 90, 30, 60, 60, 60] as const;
-
-const withFunnelOffer = (groups: Entry[][]): Entry[][] =>
-  groups.map((period, index) =>
-    period.map(
-      ([name, , , dependsOn], slot): Entry => [
-        name,
-        FUNNEL_HOURS[slot],
-        FUNNEL_SEATS[index],
-        dependsOn,
-      ],
-    ),
-  );
-
-const FUNNEL_GRADE = withFunnelOffer(GRADE);
-
 /** Carga horária máxima por período (W_a). É a soma de um período da grade de
  * cada preset: quem está em dia cursa as seis disciplinas do seu período e
  * nada mais. */
 
 const MAX_HOURS = HOURS.reduce((sum, h) => sum + h * SEATS.length, 0); // 450
-const FUNNEL_MAX_HOURS = FUNNEL_HOURS.reduce((sum, h) => sum + h, 0); // 390
 
-/** Alunos que ingressam por período. O teto formal é a menor oferta de 1º
- * período (120), mas quem dimensiona o cenário é o gargalo seguinte: as
- * disciplinas de 40 vagas, que a partir do 2º período servem toda a população
- * em dia. Acima disso a fila nelas cresce sem nunca drenar e ninguém chega ao
- * fim da grade; bem abaixo, nada aperta e não há escassez a alocar.
- *
- * Calibrado rodando o cenário, e revalidado em σ = 1: 29% concluem em 12
- * períodos, a conclusão mais rápida em 7 — um acima do piso da cadeia, porque
- * com a utilidade resorteada por período ninguém quer exatamente as seis do seu
- * período semestre após semestre. O recorte por vagas fica legível: as de 40
- * são o gargalo e as de 120 nunca apertam. Com 30 a universidade fica frouxa
- * (ψ̄ perto de 1); com 70 a conclusão despenca. Como os números andam com σ, é a
- * varredura que os põe em contexto. */
+/** Alunos que ingressam por período. O gargalo que dimensiona o cenário são
+ * as disciplinas de 40 vagas: acima disso a fila nelas cresce sem drenar e
+ * ninguém chega ao fim da grade; bem abaixo, nada aperta. */
 const STUDENTS_PER_PERIOD = 60;
 
-/** Ingressantes por período no Homogêneo. Cabem nas 120 vagas do 1º período e
- * já empatam com a oferta do 2º: quem reprova ou recursa disputa vaga com a
- * geração seguinte, e do 3º em diante a oferta é menor que a turma ingressante. */
-const FUNNEL_STUDENTS_PER_PERIOD = 105;
-
-/** Os alunos do cenário Computação. **Não há perfis**: estas são as duas
- * normais de que toda a população sai, e o que distingue um aluno do outro é só
- * o que a seed sorteou para ele.
- *
- * A normal das notas é a do perfil "Regular" que existia até 08/10/2026 — e,
- * não por acaso, a média da mistura dos três perfis de então (0,25·8 + 0,50·6,5
- * + 0,25·5 = 6,5). O desvio é menor que o da mistura, porque ali parte da
- * dispersão vinha da distância *entre* os perfis, e essa é justamente a
- * diferença sistemática que saiu.
- *
- * O desvio da utilidade é o default do modelo, sigma = 1: o meio da faixa útil
- * (~0,25 a ~3), em que o aluno diferencia as disciplinas de forma clara sem
- * virar fanático — o meio do caminho entre os perfis "Focados" e "Dispersos"
- * que havia antes. É o valor **canônico**, o que os boxplots medem; a varredura
- * passa por ele e o marca no eixo. */
+/** A população. **Não há perfis**: toda ela sai destas distribuições, e o que
+ * distingue um aluno do outro é só o que a seed sorteou. */
 const POPULATION = {
   aptitude_alpha: 4,
   aptitude_beta: 2,
@@ -227,26 +172,27 @@ const POPULATION = {
   max_hours: MAX_HOURS,
 };
 
-/** Os alunos do cenário Homogêneo: as mesmas duas normais, bem mais apertadas.
+/** A dificuldade por patamar de oferta. Correlacionar as duas é escolha de
+ * desenho, e é o que dá conteúdo à dificuldade: sozinha ela se cancela na
+ * comparação, porque os dois mecanismos alocam a mesma mistura de disciplinas.
+ * O canal dela é a **triagem** — a matrícula por CR dá a vaga disputada a quem
+ * tem histórico alto, que é quem tem aptidão alta, e difícil + escassa é onde
+ * isso rende. Vale incluir justamente por ser o melhor argumento do lado que a
+ * hipótese do trabalho contesta.
  *
- * O preset existia para controlar a **heterogeneidade dos perfis**, e os perfis
- * saíram — mas o controle continua fazendo sentido, só que agora é um controle
- * de *dispersão*, que é o que restou do mesmo conceito. Com as notas quase
- * iguais o CR tem pouco a ordenar, e com sigma = 0,25 as utilidades ficam quase
- * uniformes (a preferida vale ~1,9x a menos querida), então o leilão tem pouca
- * preferência a captar: o que a comparação mostrar aqui é da regra de alocação,
- * não de quem a população é. */
-const FLAT_POPULATION = {
-  // Aptidão apertada: o controle de dispersão vale para as duas distribuições,
-  // e com Beta(40, 14) a nota fica em torno de 7,4 com pouca variação, então o
-  // CR tem pouco a ordenar.
-  aptitude_alpha: 40,
-  aptitude_beta: 14,
-  utility_sigma: 0.25,
-  max_hours: FUNNEL_MAX_HOURS,
-};
+ * Lê-se em tentativas: 1,2 quer dizer que a disciplina custa uma tentativa e
+ * um quinto para render o que uma de dificuldade 1 rende de primeira.
+ *
+ * **O tamanho do gradiente é calibragem, e custa caro.** As 40 vagas são
+ * justamente a cadeia de pré-requisitos, de modo que a penalidade se compõe
+ * ao longo dos seis níveis e atrasa todo mundo — não só quem a cursa. Medido
+ * em seis braços, trocar {1, 1, 1} por {1,5, 1, 0,75} derruba os formados do
+ * CR guloso de 158 para 107 e o psi de 0,095 para 0,083; {1,2, 1, 0,9} fica em
+ * 140 e 0,091. Ficamos no gradiente médio: ele instala o canal da triagem sem
+ * que o cenário inteiro vire um gargalo, e o vão entre os mecanismos quase não
+ * muda com a escolha. É uma linha para mexer. */
+const DIFFICULTY_BY_SEATS: Record<number, number> = { 40: 1.2, 80: 1, 120: 0.9 };
 
-/** Inverte a autoria por predecessores na lista de sucessores do motor. */
 const toDisciplines = (groups: Entry[][]): DisciplineInput[] => {
   const flat = groups.flat();
   const unlocks = new Map<string, string[]>(flat.map(([name]) => [name, []]));
@@ -260,6 +206,7 @@ const toDisciplines = (groups: Entry[][]): DisciplineInput[] => {
     name,
     hours,
     seats,
+    difficulty: DIFFICULTY_BY_SEATS[seats] ?? 1,
     unlocks: unlocks.get(name) ?? [],
     entry: entry.has(name),
   }));
@@ -270,35 +217,24 @@ const toElectives = (entries: Entry[]): DisciplineInput[] =>
     name,
     hours,
     seats,
+    // Optativa fica em dificuldade 1: ela é o encaixe de carga, e dar-lhe
+    // gradação misturaria dois efeitos no mesmo lugar.
+    difficulty: 1,
     unlocks: [],
     entry: false,
     elective: true,
   }));
 
-export const homogeneousOffer = new Map(
-  toDisciplines(FUNNEL_GRADE).map((discipline) => [
-    discipline.name,
-    { seats: discipline.seats, hours: discipline.hours },
-  ]),
-);
-
-/** Horizonte, rodadas e seed que os dois presets compartilham. A oferta e o
- * tamanho da geração entram por argumento: o Computação varia vagas dentro do
- * período, o Homogêneo iguala as vagas e afunila a oferta.
- *
- * `electiveHours` e `periods` também entram por argumento porque andam juntos:
- * a exigência optativa sobe o piso de períodos (cada hora de optativa desloca
- * uma hora de obrigatória, já que W_a é exatamente um período da grade), e um
- * horizonte curto demais faz as gerações tardias não formarem ninguém. O
- * Homogêneo fica sem optativa de propósito — ele é o controle, e acrescentá-la
- * lá é decisão de modelagem, não de merge. */
+/** O que não varia entre execuções. `electiveHours` e `periods` andam juntos:
+ * a exigência optativa sobe o piso de períodos, porque W_a é exatamente um
+ * período da grade e cada hora de optativa desloca uma de obrigatória. */
 const commonScenario = (
   disciplines: DisciplineInput[],
   studentsPerPeriod: number,
-  electiveHours = 0,
-  periods = 12,
+  electiveHours: number,
+  periods: number,
 ): Omit<
-  SimulateRequest,
+  Scenario,
   "aptitude_alpha" | "aptitude_beta" | "utility_sigma" | "max_hours" | "base_credits"
 > => ({
   disciplines,
@@ -319,6 +255,11 @@ const commonScenario = (
   resolver: "ilp",
   credit_memory: "carry",
   interest_coupling: 0,
+  // Preferência resorteada a cada período, que é o que o modelo fazia antes
+  // de a estabilidade existir. É a hipótese mais exposta que resta: a
+  // preferência que não persiste desfaz a fila sozinha, e é por isso que
+  // qualquer resultado em conclusões deve vir com este valor declarado.
+  utility_stability: 0,
   grade_noise: 0.25,
   credit_return: "none",
   seed: 42,
@@ -328,8 +269,8 @@ export const PRESETS: Preset[] = [
   {
     id: "computacao",
     name: "Computação",
-    hint: "Grade de 6 períodos com 6 disciplinas cada, encadeadas por pré-requisitos; do 2º período em diante repetem-se as combinações de 40/80/120 vagas × 60/90 h. 60 ingressantes por período em 6 períodos, 360 alunos, e mais 6 períodos de drenagem.",
-    build: (): SimulateRequest => ({
+    hint: "Grade de 6 períodos × 6 disciplinas encadeadas, mais 24 optativas. 360 alunos em 6 gerações, 14 períodos.",
+    build: (): Scenario => ({
       ...commonScenario(
         [...toDisciplines(GRADE), ...toElectives(OPTATIVAS)],
         STUDENTS_PER_PERIOD,
@@ -348,28 +289,8 @@ export const PRESETS: Preset[] = [
       base_credits: 40,
     }),
   },
-  {
-    id: "homogeneo",
-    name: "Homogêneo",
-    hint: "Mesma grade e mesmas normais apertadas, com oferta em funil: todas as disciplinas de um período têm as mesmas vagas (120, 105, 90, 75, 60 e 45 do 1º ao 6º) e entram 105 alunos por período. Cada período tem 2 disciplinas de 90 h, 3 de 60 h e 1 de 30 h (W_a = 390). Γ_min = 12. A concorrência aperta a cada período; com alunos quase idênticos, o que a comparação mostrar é da regra de alocação.",
-    // Existe para a comparação entre mecanismos. No Computação, parte do vão
-    // entre CR e créditos pode vir de como cada um trata uma população
-    // dispersa: a ordenação por CR premia quem tira nota alta por construção, e
-    // o leilão rende mais a quem concentra a preferência. Aqui quase não há a
-    // quem premiar.
-    //
-    // Até 08/10/2026 este preset era o controle da **heterogeneidade dos
-    // perfis**; com os perfis fora do modelo, ele passou a ser o controle da
-    // **dispersão**, que é o que restou do mesmo conceito. A oferta deixou de
-    // ser a do Computação: as vagas são iguais dentro do período e caem em
-    // funil, e a geração (105) já empata com o 2º período.
-    build: (): SimulateRequest => ({
-      ...commonScenario(toDisciplines(FUNNEL_GRADE), FUNNEL_STUDENTS_PER_PERIOD),
-      ...FLAT_POPULATION,
-      base_credits: 12,
-    }),
-  },
 ];
+
 
 export const defaultPreset = PRESETS[0];
 
@@ -377,9 +298,9 @@ export const defaultPreset = PRESETS[0];
  * significa "Personalizado"; `custom` guarda o cenário montado à mão para que
  * experimentar um preset não o perca. */
 export interface PresetChoice {
-  config: SimulateRequest;
+  config: Scenario;
   presetId: string | null;
-  custom: SimulateRequest | null;
+  custom: Scenario | null;
 }
 
 export const initialChoice = (): PresetChoice => ({
@@ -401,6 +322,6 @@ export function choosePreset(choice: PresetChoice, id: string | null): PresetCho
 }
 
 /** Qualquer alteração no formulário passa a valer como cenário personalizado. */
-export function editConfig(_choice: PresetChoice, config: SimulateRequest): PresetChoice {
+export function editConfig(_choice: PresetChoice, config: Scenario): PresetChoice {
   return { config, presetId: null, custom: config };
 }

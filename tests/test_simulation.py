@@ -1005,8 +1005,12 @@ def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
 # precisa de duas das quatro, e escolhe quais. É essa folga entre catálogo e
 # exigência que torna as optativas substituíveis entre si — a propriedade que a
 # ordenação por CR não consegue expressar e o lance consegue.
+# Seis optativas para duas de exigência: com W_a = 180 o aluno ganha no máximo
+# três num período, então ele não consegue esgotar o catálogo antes de o teto
+# tirá-las do elegível. Com quatro ele esgotava, e o teste media o tamanho do
+# catálogo em vez da regra.
 ELECTIVES = [
-    Discipline(f"OPT{i}", seats=36, hours=60, elective=True) for i in range(1, 5)
+    Discipline(f"OPT{i}", seats=36, hours=60, elective=True) for i in range(1, 7)
 ]
 ELECTIVE_QUOTA = 120
 
@@ -1079,7 +1083,7 @@ def test_hours_to_graduate_counts_required_plus_the_quota():
     exigência de propósito."""
     config = make_elective_config()
     assert config.hours_to_graduate() == 6 * 60 + ELECTIVE_QUOTA
-    assert sum(d.hours for d in config.disciplines) == 10 * 60
+    assert sum(d.hours for d in config.disciplines) == 12 * 60
 
 
 def test_an_elective_cannot_have_prerequisites():
