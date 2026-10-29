@@ -1,4 +1,4 @@
-"""Comparação entre os dois mecanismos (Seção 7.3).
+"""Comparação entre os modelos de alocação (Seção 7.3).
 
 O anteprojeto impõe duas condições metodológicas à comparação, e este módulo
 existe para fazer as duas valerem de uma vez:
@@ -20,17 +20,30 @@ Juntas, as duas isolam o nexo causal no mecanismo. Uma execução só não diria
 nada — a diferença poderia ser daquela população; e N execuções sem parear as
 seeds mediriam a variação entre populações junto da variação entre mecanismos.
 
-**São três braços, não dois** (`ARMS`). O leilão entra duas vezes, com e sem
-retorno de créditos, porque o retorno é o que pode devolver ao mecanismo algum
-senso meritocrático: na política proporcional o aluno recupera a fatia do preço
+**Os braços são dois eixos cruzados mais uma escada** (`ARMS`).
+
+O primeiro eixo é a **moeda**: ordenação por CR ou lance em créditos. O
+segundo é o **resolvedor**: varredura gulosa ou PLI global. Cruzados, dão
+quatro células, e as duas de fora da diagonal são mecanismos reais — "lance +
+varredura" é o *bidding points* dos business schools, o mais implantado do
+mundo, e "CR + PLI" é a matrícula por histórico resolvida globalmente.
+
+Sobre a célula "lance + PLI" — o leilão do anteprojeto — corre a **escada de
+acúmulo**, que é um eixo só: quanta memória o orçamento tem de um período
+para o outro. Sem memória nenhuma, só com a sobra (que é a própria célula), e
+com sobra mais retorno. O degrau do meio é o que separa as duas fontes de
+memória, que têm sinais opostos de incentivo: a sobra premia quem pagou
+barato, o retorno premia quem aprovou.
+
+O retorno importa porque é o que pode devolver ao leilão algum senso
+meritocrático: na política proporcional o aluno recupera a fatia do preço
 correspondente à nota, de modo que ir bem compra poder de compra no período
 seguinte. A ordenação por CR faz isso por construção — o histórico *é* o
-critério —, e o leilão sem retorno não faz de jeito nenhum. Os três juntos
-mostram onde a política cai entre os dois extremos.
+critério — e o leilão sem retorno não faz de jeito nenhum.
 
-Por isso a política de retorno **não é parâmetro do cenário aqui**: ela é o eixo
-do experimento, e o `credit_return` que vier na configuração é ignorado, como a
-seed. Cada braço impõe o seu.
+Por isso a política de retorno e o resolvedor **não são parâmetros do cenário
+aqui**: são eixos do experimento, e o que vier na configuração é ignorado,
+como a seed. Cada braço impõe o seu.
 
 **Uma execução vira um número por métrica**, que é o ponto do boxplot. Para as
 três métricas de período a redução é a média **ponderada pelos alunos medidos**:
@@ -81,8 +94,15 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .behavior import draw_utilities, utility_distribution
-from .grading import draw_aptitudes, grade_distribution, grade_for_attempt
+from .behavior import draw_utilities
+from .equations import (
+    grade_for_attempt,
+    grade_histogram,
+    utility_histogram,
+    weighted_mean,
+)
+from .equations import time_to_graduate as mean_span
+from .grading import draw_aptitudes
 from .config import (
     CreditMemory,
     CreditReturnPolicy,
@@ -95,17 +115,8 @@ from .simulation import SimulationResult, run_simulation
 
 # Teto de execuções por braço. Não é limitação técnica: é que o boxplot para de
 # ganhar informação muito antes disso, e cada execução a mais custa uma
-# simulação inteira em cada um dos três braços.
+# simulação inteira em cada braço.
 MAX_RUNS = 100
-
-
-
-# A faixa em que sigma diz alguma coisa. Abaixo do piso a linha do aluno é
-# praticamente uniforme e os dois mecanismos convergem; acima do teto ele quer
-# uma disciplina só e ninguém se forma. Nada é recusado fora disso — a
-# simulação continua correta —, mas é a faixa que a interface sugere.
-USEFUL_SIGMA_RANGE = (0.25, 3.0)
-
 
 @dataclass(frozen=True)
 class Arm:
@@ -127,10 +138,10 @@ class Arm:
     credit_memory: CreditMemory = "carry"
 
 
-# Os três braços, na ordem em que entram no eixo e na legenda: a linha de base
-# primeiro, e depois o leilão com e sem retorno. Pô-los nessa ordem faz a
-# correlação (eq. 57) ser lida de uma vez — do mecanismo em que o CR é o próprio
-# critério ao que o ignora por completo, com o retorno no meio.
+# Os braços, na ordem em que entram no eixo e na legenda: o CR primeiro, o
+# lance depois, e a escada de acúmulo por último. Nessa ordem a correlação
+# (eq. 57) se lê de uma vez — do mecanismo em que o CR é o próprio critério ao
+# que o ignora por completo, com o retorno no meio.
 ARMS: tuple[Arm, ...] = (
     # As quatro células do cruzamento moeda x resolvedor. As duas de fora da
     # diagonal são mecanismos reais: "lance + varredura" é o *bidding points*
@@ -163,7 +174,7 @@ class RunSummary:
 
     `periods` é quantos períodos a simulação de fato publicou — pode ser menor
     que |T| se a população se esvaziou antes do horizonte —, e serve para
-    conferir que os dois mecanismos viveram o mesmo intervalo. `graduates` é o
+    conferir que todos os braços viveram o mesmo intervalo. `graduates` é o
     contexto sem o qual `time_to_graduate` não se lê.
     """
 
@@ -225,28 +236,12 @@ class ComparisonResult:
 
 
 def time_to_graduate(result: SimulationResult) -> float | None:
-    """Períodos do ingresso ao diploma, na média dos concluintes.
-
-    Conta inclusive o período da formatura: quem entra em t e conclui ao fim de
-    t levou 1 período, não 0. Quem não concluiu não tem tempo — e não entra
-    como "muito lento", porque não há valor que o represente; é `graduates` que
-    diz quantos ficaram de fora.
-    """
-    spans = [
+    """Períodos do ingresso ao diploma — ver `equations.time_to_graduate`."""
+    return mean_span(
         s.graduated_at - s.entry_period + 1
         for s in result.students
         if s.graduated_at is not None
-    ]
-    return sum(spans) / len(spans) if spans else None
-
-
-def _weighted(pairs: list[tuple[float, int]]) -> float | None:
-    """Média ponderada de (valor, peso). `None` quando não há o que promediar —
-    um zero ali seria um valor medido, e não a ausência de medida."""
-    total = sum(weight for _, weight in pairs)
-    if not total:
-        return None
-    return sum(value * weight for value, weight in pairs) / total
+    )
 
 
 def allocations_per_round(result: SimulationResult) -> list[float | None]:
@@ -261,7 +256,7 @@ def allocations_per_round(result: SimulationResult) -> list[float | None]:
     series: list[float | None] = []
     for index in range(rounds):
         series.append(
-            _weighted(
+            weighted_mean(
                 [
                     (metrics.allocations_per_student, metrics.students)
                     for period in result.periods
@@ -294,7 +289,7 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     ]
 
     def mean(of) -> float:
-        return _weighted([(of(m), w) for m, w in by_period]) or 0.0
+        return weighted_mean([(of(m), w) for m, w in by_period]) or 0.0
 
     return RunSummary(
         seed=seed,
@@ -330,7 +325,7 @@ def sample_distribution(config: SimulationConfig) -> list[float]:
     """
     students = generate_students(config, np.random.default_rng(SAMPLE_SEED))
     rows = draw_utilities(students, config, np.random.default_rng(SAMPLE_SEED))
-    return utility_distribution(rows)
+    return utility_histogram(rows.values())
 
 
 def sample_grade_distribution(config: SimulationConfig) -> list[float]:
@@ -356,7 +351,7 @@ def sample_grade_distribution(config: SimulationConfig) -> list[float]:
         )
         for aptitude in aptitudes.values()
     ]
-    return grade_distribution(grades)
+    return grade_histogram(grades)
 
 
 def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:
@@ -378,13 +373,14 @@ def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:
 def run_comparison(
     config: SimulationConfig, *, runs: int, workers: int = 4
 ) -> ComparisonResult:
-    """Roda `runs` simulações de cada braço, com as seeds de 1 a `runs`.
+    """Roda `runs` simulações em cada braço, com as seeds de 1 a `runs`.
 
-    Dois campos do cenário recebido são ignorados de propósito. A **seed**,
+    Três campos do cenário recebido são ignorados de propósito. A **seed**,
     porque numa comparação ela deixa de ser parâmetro e passa a ser o eixo da
-    amostra. E a **política de retorno**, porque ela é o eixo do experimento: os
-    braços a impõem. O resto — disciplinas, perfis, horizonte, rodadas — vale
-    igual nos três, que é o que torna a diferença atribuível ao modelo.
+    amostra. E o **resolvedor** e a **política de retorno**, porque são eixos
+    do experimento: os braços os impõem. O resto — disciplinas, população,
+    horizonte, rodadas — vale igual em todos, que é o que torna a diferença
+    atribuível ao modelo.
 
     As execuções saem em paralelo por `ThreadPoolExecutor`, e não por processos:
     o tempo do leilão está quase todo dentro do CBC, que roda como processo

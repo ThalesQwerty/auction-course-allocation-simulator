@@ -25,6 +25,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .equations import (
+    curriculum_heights,
+    curriculum_periods,
+    curriculum_reach,
+    eligible_set,
+)
+
 # Mecanismo de alocação. `credits` é o leilão por créditos proposto (Seção 7.1),
 # em que o aluno reparte um orçamento entre lances e um PLI decide a alocação.
 # `ranking` é a linha de base tradicional (Seção 7.3.1, eqs. 49-50): não há
@@ -251,6 +258,19 @@ class SimulationConfig:
         return self.mechanism == "credits"
 
     def __post_init__(self) -> None:
+        """Recusa o cenário que não produziria simulação legível.
+
+        São quatro grupos de verificação, nesta ordem porque cada um depende
+        do anterior: os números soltos, a grade, a conclusão e a matrícula
+        garantida.
+        """
+        self._check_horizon()
+        self._check_population()
+        self._check_curriculum()
+        self._check_graduation()
+        self._check_guaranteed_enrolment()
+
+    def _check_horizon(self) -> None:
         if self.periods < 1:
             raise ValueError("é preciso simular ao menos 1 período")
         if self.entry_periods is not None and not 1 <= self.entry_periods <= self.periods:
@@ -264,12 +284,18 @@ class SimulationConfig:
             raise ValueError("nota mínima deve estar em (0, 10]")
         if self.base_credits < 1:
             raise ValueError("créditos base (Gamma_min) deve ser >= 1")
+        if self.max_hours < 1:
+            raise ValueError("carga horária máxima (W_a) deve ser >= 1")
+
+    def _check_population(self) -> None:
         # Sem disciplina ou sem aluno não há o que alocar: a simulação não
         # produziria período nenhum, e toda métrica sairia indefinida.
         if not self.disciplines:
             raise ValueError("o cenário precisa de pelo menos uma disciplina")
         if self.students_per_period < 1:
-            raise ValueError("o cenário precisa de pelo menos um aluno por período de ingresso")
+            raise ValueError(
+                "o cenário precisa de pelo menos um aluno por período de ingresso"
+            )
         if self.aptitude_alpha <= 0 or self.aptitude_beta <= 0:
             raise ValueError("os parâmetros da Beta da aptidão devem ser > 0")
         if self.utility_gain < 0:
@@ -280,9 +306,8 @@ class SimulationConfig:
             raise ValueError("a estabilidade da preferência deve estar em [0, 1]")
         if self.utility_sigma <= 0:
             raise ValueError("desvio da utilidade (sigma) deve ser > 0")
-        if self.max_hours < 1:
-            raise ValueError("carga horária máxima (W_a) deve ser >= 1")
 
+    def _check_curriculum(self) -> None:
         names = [d.name for d in self.disciplines]
         if len(set(names)) != len(names):
             raise ValueError("há disciplinas com nomes repetidos")
@@ -295,11 +320,15 @@ class SimulationConfig:
                     f"{sorted(unknown)}"
                 )
 
-        # Ciclo: a cadeia que se fecha não tem altura nem período.
+        # Ciclo: a cadeia que se fecha não tem altura nem período, e a
+        # indução levanta por conta própria.
         self.heights()
+
         requires = self.prerequisites_by_discipline()
         for discipline in self.disciplines:
-            if discipline.entry and requires[discipline.name]:
+            if not requires[discipline.name]:
+                continue
+            if discipline.entry:
                 raise ValueError(
                     f"disciplina {discipline.name!r} é de entrada e tem pré-requisitos"
                 )
@@ -307,15 +336,13 @@ class SimulationConfig:
             # a tiraria do elegível justamente de quem está atrasado. O outro
             # sentido — optativa não desbloqueia nada — é checado na própria
             # `Discipline`, que já enxerga os `unlocks` dela.
-            if discipline.elective and requires[discipline.name]:
+            if discipline.elective:
                 raise ValueError(
                     f"optativa {discipline.name!r} não pode ter pré-requisito: "
                     f"{sorted(requires[discipline.name])} a desbloqueia"
                 )
-        entry = self.entry_disciplines()
-        if not entry:
-            raise ValueError("o cenário precisa de pelo menos uma disciplina de entrada")
 
+    def _check_graduation(self) -> None:
         if self.elective_hours < 0:
             raise ValueError("elective_hours (X) deve ser >= 0")
         offered = sum(d.hours for d in self.disciplines if d.elective)
@@ -325,8 +352,14 @@ class SimulationConfig:
                 f"{offered} h ofertadas em optativas: ninguém concluiria"
             )
 
+    def _check_guaranteed_enrolment(self) -> None:
+        """A matrícula garantida não escolhe quem a recebe, então a oferta de
+        entrada tem de comportar a geração inteira de uma vez."""
+        entry = self.entry_disciplines()
+        if not entry:
+            raise ValueError("o cenário precisa de pelo menos uma disciplina de entrada")
+
         seats = {d.name: d.seats for d in self.disciplines}
-        hours = {d.name: d.hours for d in self.disciplines}
         smallest = min(seats[name] for name in entry)
         if self.students_per_period > smallest:
             tightest = min(entry, key=lambda name: (seats[name], name))
@@ -335,6 +368,8 @@ class SimulationConfig:
                 f"entre as disciplinas de entrada ({smallest} vagas em {tightest!r}): "
                 "o ingressante tem vaga garantida em todas elas"
             )
+
+        hours = self.hours_by_discipline()
         entry_hours = sum(hours[name] for name in entry)
         if entry_hours > self.max_hours:
             raise ValueError(
@@ -363,91 +398,21 @@ class SimulationConfig:
         return {name: tuple(parents) for name, parents in preds.items()}
 
     def heights(self) -> dict[str, int]:
-        """Altura s_x na DAG de sucessores: 0 se não desbloqueia nada; senão
-        1 + max das alturas dos sucessores. Ciclo é rejeitado — a disciplina
-        nunca ficaria elegível."""
-        unlocks = {d.name: d.unlocks for d in self.disciplines}
-        height: dict[str, int] = {}
-        on_path: set[str] = set()
-        for start in unlocks:
-            if start in height:
-                continue
-            stack = [(start, False)]
-            while stack:
-                name, expanded = stack.pop()
-                if expanded:
-                    on_path.discard(name)
-                    height[name] = 1 + max((height[s] for s in unlocks[name]), default=-1)
-                    continue
-                if name in height:
-                    continue
-                if name in on_path:
-                    raise ValueError(
-                        f"há um ciclo de sucessores envolvendo {name!r}: a disciplina "
-                        "nunca ficaria elegível"
-                    )
-                on_path.add(name)
-                stack.append((name, True))
-                stack.extend((s, False) for s in unlocks[name])
-        return height
+        """s_x — ver `equations.curriculum_height`."""
+        return curriculum_heights({d.name: d.unlocks for d in self.disciplines})
 
     def curriculum_periods(self) -> dict[str, int]:
-        """O período de cada disciplina na grade, por indução sobre a aresta
-        inversa dos sucessores: quem ninguém desbloqueia é 1º período; quem é
-        desbloqueada por outras é o período seguinte ao mais tardio delas.
+        """O período de cada disciplina — ver `equations.curriculum_period`.
 
-        Contagem a partir das raízes, usada nos gráficos. A matrícula garantida
-        é `entry`, não este período. A altura (s_x) conta do outro extremo.
+        Contagem a partir das raízes, usada nos gráficos. A matrícula
+        garantida é a flag `entry`, não este número; a altura conta do outro
+        extremo da mesma DAG.
         """
-        requires = self.prerequisites_by_discipline()
-        period: dict[str, int] = {}
-        on_path: set[str] = set()
-        for start in requires:
-            if start in period:
-                continue
-            stack = [(start, False)]
-            while stack:
-                name, expanded = stack.pop()
-                if expanded:
-                    on_path.discard(name)
-                    period[name] = 1 + max((period[p] for p in requires[name]), default=0)
-                    continue
-                if name in period:
-                    continue
-                if name in on_path:
-                    raise ValueError(
-                        f"há um ciclo de sucessores envolvendo {name!r}: a disciplina "
-                        "nunca ficaria elegível"
-                    )
-                on_path.add(name)
-                stack.append((name, True))
-                stack.extend((p, False) for p in requires[name])
-        return period
+        return curriculum_periods(self.prerequisites_by_discipline())
 
     def reach(self) -> dict[str, int]:
-        """Quantas disciplinas cada uma desbloqueia, **transitivamente** — o
-        "quanto avanço se passar" do termo de progresso.
-
-        Não é a altura: altura é o comprimento da cadeia mais longa à frente,
-        alcance é o tamanho do que fica para trás destravado. Uma disciplina
-        pode ter altura 1 e alcance 10 se destrava dez terminais de uma vez, e
-        o que interessa ao aluno que quer avançar é o alcance.
-        """
-        unlocks = {d.name: d.unlocks for d in self.disciplines}
-        memo: dict[str, set[str]] = {}
-
-        def descend(name: str) -> set[str]:
-            if name in memo:
-                return memo[name]
-            memo[name] = set()  # corta ciclo; a validação já o rejeita
-            out: set[str] = set()
-            for successor in unlocks.get(name, ()):
-                out.add(successor)
-                out |= descend(successor)
-            memo[name] = out
-            return out
-
-        return {name: len(descend(name)) for name in unlocks}
+        """d_x — ver `equations.curriculum_reach`."""
+        return curriculum_reach({d.name: d.unlocks for d in self.disciplines})
 
     def entry_disciplines(self) -> list[str]:
         """Disciplinas de matrícula garantida, na ordem do cenário.
@@ -460,34 +425,14 @@ class SimulationConfig:
         return [d.name for d in self.disciplines if d.entry]
 
     def eligible_disciplines(self, approved: set[str]) -> list[str]:
-        """Disciplinas que o aluno ainda precisa cursar e já pode disputar:
-        não aprovadas, com todos os predecessores (aresta inversa) cumpridos,
-        e — no caso da optativa — **enquanto a exigência X não estiver
-        cumprida**.
-
-        O teto nas optativas não é detalhe de calibragem, é o que faz `X`
-        significar alguma coisa. Sem ele a optativa fica elegível para sempre
-        (nunca aprovada, sem pré-requisito), o aluno continua apostando nela
-        por utilidade, e medindo-se o cenário quem conclui tinha aprovado o
-        catálogo **inteiro**: 1 560 h de optativa onde 480 h eram exigidas.
-        A exigência não restringia nada e a substituibilidade — escolher
-        *quais* optativas — nunca chegava a ser exercida.
-
-        Com `elective_hours = 0` nenhuma optativa é elegível, o que é a leitura
-        consistente: sem exigência, elas não contam para coisa alguma.
-        """
-        requires = self.prerequisites_by_discipline()
-        met = (
-            sum(d.hours for d in self.disciplines if d.elective and d.name in approved)
-            >= self.elective_hours
+        """O conjunto elegível — ver `equations.eligible_set`."""
+        return eligible_set(
+            names=[d.name for d in self.disciplines],
+            approved=approved,
+            prerequisites=self.prerequisites_by_discipline(),
+            elective_hours_by_discipline=self.elective_hours_by_discipline(),
+            elective_hours_needed=self.elective_hours,
         )
-        return [
-            d.name
-            for d in self.disciplines
-            if d.name not in approved
-            and all(p in approved for p in requires[d.name])
-            and not (d.elective and met)
-        ]
 
     def hours_by_discipline(self) -> dict[str, int]:
         return {d.name: d.hours for d in self.disciplines}

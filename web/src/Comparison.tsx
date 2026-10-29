@@ -1,13 +1,6 @@
 import { useMemo } from "react";
-import {
-  BoxPlot,
-  Histogram,
-  boxStats,
-  categoricalColors,
-  formatCount,
-  formatRatio,
-  usePrefersDark,
-} from "./charts";
+import { BoxPlot, Histogram, categoricalColors, formatCount, formatRatio, usePrefersDark } from "./charts";
+import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
 import { COMPARISON_ARMS } from "./types";
 import type { RunSummary } from "./types";
@@ -132,16 +125,24 @@ const roundMetrics = (rounds: number): Metric[] =>
     };
   });
 
-/** Os dois braços do leilão, na ordem em que a diferença entre eles se lê: o
- * retorno é o que muda de um para o outro. */
+/** Os dois braços do leilão que isolam o retorno: eles diferem em **uma**
+ * coisa só — `credits_ilp` é o leilão com PLI e sem retorno, `credits_return`
+ * é o mesmo com a política proporcional. Comparar qualquer outro par mediria
+ * o retorno somado a outra diferença. */
 const WITH_RETURN = "credits_return";
-const WITHOUT_RETURN = "credits";
-/** A linha de base, contra a qual as diferenças da tabela principal são
- * medidas. */
-const BASELINE = "ranking";
+const WITHOUT_RETURN = "credits_ilp";
+
+/** A linha de base, contra a qual as diferenças da tabela de resumo são
+ * medidas: a matrícula por CR com varredura, que é o mecanismo real das
+ * universidades brasileiras. */
+const BASELINE = "ranking_greedy";
 
 /** Sinal explícito: numa coluna de diferenças, "+0,04" e "−0,04" se distinguem
  * de relance e "0,04" não. */
+/** Os rótulos dos braços, na ordem do eixo. Derivado de uma constante do
+ * módulo, então não precisa ser recalculado a cada render. */
+const ARM_LABELS = COMPARISON_ARMS.map((arm) => arm.label);
+
 const formatDelta = (value: number, format: (v: number) => string) =>
   `${value > 0 ? "+" : value < 0 ? "−" : ""}${format(Math.abs(value))}`;
 
@@ -154,9 +155,7 @@ export function Comparison({
 }) {
   const dark = usePrefersDark();
   const result = run.result;
-
-  const labels = COMPARISON_ARMS.map((arm) => arm.label);
-  const colors = useMemo(() => categoricalColors(labels, dark), [dark, labels.join()]);
+  const colors = useMemo(() => categoricalColors(ARM_LABELS, dark), [dark]);
 
   /** As execuções de um braço, na ordem das seeds. Execuções gravadas antes de
    * um braço existir simplesmente não o trazem, e o braço sai vazio em vez de
@@ -343,12 +342,12 @@ export function Comparison({
           {result.runs} execuções de cada modelo — {result.runs * result.arms.length}{" "}
           simulações
         </h2>
-                                              </div>
+      </div>
 
       <section className="chart-section">
         <header className="chart-section-head">
           <h2>Métricas de alocação</h2>
-</header>
+          </header>
         <div className="chart-grid">{METRICS.map(chartFor)}</div>
       </section>
 
@@ -356,25 +355,23 @@ export function Comparison({
         <section className="chart-section">
           <header className="chart-section-head">
             <h2>Saturação da demanda</h2>
-</header>
-                              <div className="chart-grid">{saturation.map(chartFor)}</div>
+          </header>
+          <div className="chart-grid">{saturation.map(chartFor)}</div>
         </section>
       )}
-
-
 
       {scenarioHistograms.length > 0 && (
         <section className="chart-section">
           <header className="chart-section-head">
             <h2>As distribuições do cenário</h2>
-</header>
-                              <div className="chart-grid">{scenarioHistograms}</div>
+          </header>
+          <div className="chart-grid">{scenarioHistograms}</div>
         </section>
       )}
 
       <div className="panel">
         <h2>O que o retorno de créditos muda</h2>
-                <table>
+        <table>
           <thead>
             <tr>
               <th>Métrica</th>
@@ -391,7 +388,7 @@ export function Comparison({
 
       <div className="panel">
         <h2>Resumo das distribuições</h2>
-                <table>
+        <table>
           <thead>
             <tr>
               <th>Métrica</th>
@@ -411,7 +408,7 @@ export function Comparison({
 
       <div className="panel">
         <h2>Execução a execução</h2>
-                <table>
+        <table>
           <thead>
             <tr>
               <th>Seed</th>
@@ -450,7 +447,7 @@ export function Comparison({
             })}
           </tbody>
         </table>
-              </div>
+      </div>
     </div>
   );
 }

@@ -14,12 +14,17 @@ equidade e correlação da Seção 7.3.
 
 São **dois mecanismos de alocação** sobre o mesmo modelo de universidade: o
 **leilão por créditos** proposto (Seção 7.1) e a **ordenação por CR** que serve
-de linha de base (Seção 7.3.1, eqs. 49-50). E, por isso, dois modos de
-execução — uma simulação, que detalha um mecanismo por dentro, e uma
-**comparação**, que roda o mesmo cenário em **três modelos**, N vezes em cada
-um, e mostra só as métricas de alocação em boxplot. Os três são a ordenação por
-CR e o leilão **com** e **sem** retorno de créditos: o retorno entra como eixo
-do experimento porque é ele que pode devolver ao leilão algum senso
+de linha de base (Seção 7.3.1, eqs. 49-50). A **comparação** roda o mesmo
+cenário em cada **braço**, N vezes, e mostra só as métricas de alocação em
+boxplot.
+
+Os braços são dois eixos cruzados mais uma escada. A **moeda** (CR ou lance)
+× o **resolvedor** (varredura gulosa ou PLI) dá quatro células, e as duas de
+fora da diagonal são mecanismos reais — "lance + varredura" é o *bidding
+points* dos business schools. Sobre a célula "lance + PLI", que é o leilão do
+anteprojeto, corre a **escada de acúmulo**: quanta memória o orçamento tem de
+um período para o outro, de nenhuma a sobra-mais-retorno. O retorno entra como
+eixo do experimento porque é ele que pode devolver ao leilão algum senso
 meritocrático.
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade, e **toda
@@ -31,44 +36,58 @@ tardio deles.
 ```
 Simulador/
 ├── src/leilao/
+│   ├── equations/        # UMA fórmula por arquivo, uma função pura por fórmula
 │   ├── entities.py       # Problema central P = (A, B, D, p, q, w, W, X) — Seção 3
-│   ├── wdp_solver.py     # Resolvedor exato via PLI (Winner Determination Problem)
-│   ├── tie_breaking.py   # Desempate, viés administrativo e perturbação — 7.1.2
-│   ├── auction.py        # Leilão por créditos de uma rodada — 7.1
-│   ├── config.py         # Cenário: geral, grade, pré-requisitos e as duas normais
+│   ├── wdp_solver.py     # Os dois resolvedores: PLI exata e varredura gulosa
+│   ├── auction.py        # Uma rodada do leilão por créditos — Seção 7.1
+│   ├── ranking.py        # Linha de base por CR — Seção 7.3.1
+│   ├── config.py         # Cenário: geral, grade, pré-requisitos e as duas distribuições
 │   ├── names.py          # 256 nomes x 256 sobrenomes para batizar os alunos
 │   ├── population.py     # Alunos e seu histórico acadêmico
-│   ├── behavior.py       # Utilidades e lances — eqs. (41)-(48)
-│   ├── ranking.py        # Linha de base por CR — eqs. (49)-(50), Seção 7.3.1
-│   ├── grading.py        # Notas e retorno de créditos — eqs. (33)-(37)
-│   ├── metrics.py        # Eficiência, Jain, correlação, semestralização
-│   ├── simulation.py     # Loop multi-período — Seção 7.2
-│   ├── comparison.py     # N execuções pareadas dos dois mecanismos — Seção 7.3
+│   ├── behavior.py       # Sorteio da matriz de utilidades e o recorte dela
+│   ├── grading.py        # Sorteio da aptidão
+│   ├── metrics.py        # O registro de métricas de um recorte
+│   ├── simulation/       # O laço multi-período — Seção 7.2
+│   ├── comparison.py     # N execuções pareadas de cada braço — Seção 7.3
+│   ├── playground.py     # Uma alocação isolada, sem períodos
 │   └── api/              # Ponte FastAPI (sem persistência — stateless)
 ├── tests/                # pytest (motor + simulação + API)
 ├── examples/             # Script de exemplo executável
-└── web/src/              # Interface React + TypeScript
+└── web/src/
+    ├── equations/        # O espelho das fórmulas no navegador
+    ├── charts/           # Tema, formatos e as três marcas (boxplot, densidade, histograma)
     ├── App.tsx           # Shell: barra lateral, navegação e histórico
-    ├── Sidebar.tsx       # Menu, lista de simulações e limpeza do histórico
-    ├── Config.tsx        # Formulário do cenário
+    ├── Sidebar.tsx       # Menu, lista de execuções e limpeza do histórico
+    ├── Config.tsx        # Formulário do cenário, com as duas prévias
     ├── PresetList.tsx    # Barra lateral direita: cenários prontos
     ├── presets.ts        # Catálogo de presets e regra de seleção
-    ├── curriculum.ts     # Período de cada disciplina, induzido dos pré-requisitos
+    ├── curriculum.ts     # Migração da grade e os recortes que as telas usam
+    ├── distributions.ts  # Encadeia as equações nas duas curvas de prévia
+    ├── GradeGraph.tsx    # A grade desenhada, com a cadeia de pré-requisitos
+    ├── Playground.tsx    # A decisão de um aluno, passo a passo
     ├── Project.tsx       # Visão teórica do projeto
-    ├── Results.tsx       # Gráficos e tabelas de uma execução
     ├── Comparison.tsx    # Boxplots e tabelas de uma comparação
-    ├── StudentList.tsx   # Barra lateral direita: busca, filtro e ordenação
-    ├── StudentDetail.tsx # Tela individual do aluno (depuração)
-    ├── charts.tsx        # Paleta, eixos, tooltip e o boxplot da comparação
     └── history.ts        # Histórico de execuções (localStorage)
 ```
 
+**Onde ficam as contas.** Nenhuma fórmula do modelo mora dentro de um laço:
+cada uma tem arquivo e função própria em `src/leilao/equations/`, com a
+fórmula na docstring e nada de estado. O `__init__.py` do pacote traz o
+índice inteiro, com o número da equação do anteprojeto onde a correspondência
+ainda vale — e com o que o código mudou em relação a ele. O front tem o seu
+espelho em `web/src/equations/`, pelas contas que a prévia precisa fazer
+antes de existir execução a quem perguntar.
+
 **Front-end (TypeScript) → API (FastAPI/Python) → Motor (Python)**: a
-interface monta a configuração inteira no navegador e manda para `/simulate`,
-que devolve as séries por período, por rodada e por recorte (geração), ou para
-`/compare`, que devolve N resumos de
-cada mecanismo. Não há banco de dados — cada execução é independente e
-reprodutível pela seed.
+interface monta a configuração inteira no navegador e manda para `/compare`,
+que roda o cenário em cada braço, N vezes, e devolve os resumos pareados. Não
+há banco de dados — cada execução é independente e reprodutível pela seed.
+
+O motor ainda sabe rodar **uma** simulação por dentro (`run_simulation`), com
+as séries por período, por rodada e por geração, o detalhe por aluno e os
+relatórios por disciplina — é o que a comparação chama em cada braço, e o que
+os testes exercitam. O que não existe hoje é **tela** para ela: a interface só
+abre comparações.
 
 ## Como a simulação funciona
 
@@ -92,9 +111,9 @@ primeiro período — nada é sorteado dentro do loop, como exige a Seção 7.3:
 
 | Matriz | O que é | Onde |
 | --- | --- | --- |
-| `n` | sorteio de nota de cada par (aluno, disciplina) em cada período | `grading.draw_grades` |
+| `a` | aptidão de cada par (aluno, disciplina), persistente | `grading.draw_aptitudes` |
 | `u^(t)` | utilidade de cada par (aluno, disciplina) em cada período | `behavior.draw_utilities` |
-| `alpha`, `epsilon` | ordem de desempate e perturbação | `tie_breaking` |
+| `alpha`, `epsilon` | ordem de desempate e perturbação | `simulation.setup` |
 
 Uma coisa **não** vem da seed, de propósito: o período de ingresso `t_a`. As
 gerações têm todas o mesmo tamanho, em períodos consecutivos
@@ -277,22 +296,26 @@ Duas consequências visíveis:
 
 ### A comparação
 
-`run_comparison` roda o mesmo cenário em **três braços** (`ARMS`), `N` vezes em
+`run_comparison` roda o mesmo cenário em cada braço (`ARMS`), `N` vezes em
 cada um, com as **seeds de 1 a N**:
 
-| Braço | Mecanismo | `f_γ` | O que ele é |
-|---|---|---|---|
-| `ranking` | ordenação por CR | — | a linha de base: o histórico *é* o critério |
-| `credits_return` | leilão | `ratio` | quem aprova recupera a fatia do preço correspondente à nota |
-| `credits` | leilão | `none` | o leilão puro: o crédito gasto sai do sistema |
+| Braço | Moeda | Resolvedor | Memória | `f_γ` |
+|---|---|---|---|---|
+| `ranking_greedy` | CR | varredura | — | — |
+| `ranking_ilp` | CR | PLI | — | — |
+| `credits_greedy` | lance | varredura | sobra | `none` |
+| `credits_ilp` | lance | PLI | sobra | `none` |
+| `credits_no_memory` | lance | PLI | nenhuma | `none` |
+| `credits_return` | lance | PLI | sobra | `ratio` |
 
-O leilão entra duas vezes porque o **retorno de créditos é o eixo do
-experimento**, não um parâmetro do cenário: a política proporcional é a única
-que premia desempenho acima da nota de corte, e portanto a única com chance de
-recriar o incentivo que o CR dá de graça. Os dois braços do leilão rodam a mesma
-população com a mesma seed e diferem em uma única coisa, de modo que a diferença
-entre eles **é** o efeito do retorno, isolado. Por isso o `credit_return` que
-vier na configuração é ignorado, como a seed.
+`credits_ilp` e `credits_return` diferem em **uma única coisa** — a política
+de retorno —, de modo que a diferença entre eles *é* o efeito do retorno,
+isolado; `credits_no_memory` é o degrau de baixo da mesma escada. A política
+proporcional é a única que premia desempenho acima da nota de corte, e
+portanto a única com chance de recriar o incentivo que o CR dá de graça. Por
+isso o `credit_return` e o `resolver` que vierem na configuração são
+ignorados, como a seed: aqui eles são eixos do experimento, e cada braço impõe
+o seu.
 
 As duas condições da Seção 7.3 saem daí:
 
@@ -606,20 +629,13 @@ que ela exige e o que ela destrava, no mesmo tom, porque quem separa os dois
 lados é a coluna de cada um — e o resto da grade recua. Os conectores não levam
 ponta pelo mesmo motivo: a grade corre num sentido só.
 
-No topo de "Configurar", **Modo de execução** escolhe o que o botão faz:
+O botão de "Configurar" faz uma coisa só:
 
-- **uma simulação do leilão por créditos** — o cenário roda uma vez, com a seed
-  do formulário, e a tela traz todos os gráficos por período, o recorte por
-  geração e a tela de depuração por aluno.
-- **comparar os três modelos** — o mesmo cenário roda nos três, `N` vezes em
-  cada um, com as seeds de 1 a `N`. Somem dois campos: o da **seed** (ali ela
-  vira o eixo da amostra) e o do **retorno de créditos** (ali ele vira o eixo do
-  experimento, e cada braço impõe o seu). No lugar entra **execuções por modelo
-  (N)**. São `3N` simulações completas: com o preset Computação e `N = 20`,
-  cerca de meio minuto.
-
-O cenário é o mesmo nos dois modos — trocar de modo não mexe em nada do que
-está configurado.
+- **comparar os modelos** — o mesmo cenário roda em cada braço, `N` vezes, com
+  as seeds de 1 a `N`. Somem três campos: a **seed** (ali ela vira o eixo da
+  amostra), o **retorno de créditos** e o **resolvedor** (ali eles viram eixos
+  do experimento, e cada braço impõe o seu). No lugar entra **execuções por
+  modelo (N)**. São `N` simulações completas por braço.
 
 Em "Configurar", a barra lateral **direita** lista os presets — cenários
 prontos. Clicar num deles carrega o cenário no formulário; clicar no que já
@@ -810,10 +826,20 @@ interface reexecuta a simulação, que a seed garante idêntica.
 
 ## Convenções de código
 
-Os módulos do motor citam explicitamente os números das equações do
-anteprojeto (`../TCC1_Anteprojeto_Thales_Brito_Rodrigues.pdf`) em
-docstrings, para rastreabilidade entre a formalização matemática (Seções 3 e
-7) e a implementação.
+**Uma fórmula, um arquivo, uma função pura.** Toda conta do modelo vive em
+`src/leilao/equations/`, num módulo com o nome da grandeza que ela calcula. A
+docstring abre com a fórmula e, quando a correspondência ainda vale, com o
+número da equação do anteprojeto
+(`../TCC1_Anteprojeto_Thales_Brito_Rodrigues.pdf`, Seções 3 e 7) — mas o
+recorte é o **código**: há conta aqui que o anteprojeto não prevê, e previsão
+dele que o código substituiu, e as duas coisas estão declaradas no índice do
+pacote.
+
+A função não toca em estado e não importa nada do resto do motor: ela recebe
+números e dicionários e devolve um valor. Quem monta o laço, guarda o
+resultado e decide quando chamar é o módulo de cima — `auction`, `simulation`,
+`metrics`. Isso é o que torna a revisão possível equação a equação, e o que
+deixa cada uma testável sozinha.
 
 No formulário, todo `input[type=number]` precisa de `(valor − min) % step === 0`.
 O `min` é a **base** da escada do stepper, e não só um piso de validação: fora

@@ -1,5 +1,5 @@
 import { withUnlocks } from "./curriculum";
-import { creditReturnLabel } from "./types";
+import { COMPARISON_ARMS, creditReturnLabel } from "./types";
 import type {
   CompareRequest,
   CompareResponse,
@@ -33,18 +33,6 @@ const STORAGE_KEY = "leilao.historico.v3";
 /** Teto de execuções guardadas: cada resultado carrega todas as séries e todos
  * os alunos, então o histórico é podado pelas mais antigas. */
 export const MAX_RUNS = 20;
-
-/** O detalhe por aluno (`result.histories`) é ~20x maior que o resto do
- * resultado — 1 MB num cenário de 8 períodos, contra 51 kB. Guardá-lo estouraria
- * a cota do navegador em poucas execuções, então ele fica de fora do
- * localStorage e é reconstruído sob demanda re-executando a simulação, que é
- * determinística pela seed. Uma comparação não tem o que podar: ela já guarda
- * só cinco números por execução. */
-function detachHistories(entry: HistoryEntry): HistoryEntry {
-  // Uma comparação não tem o que podar: ela já guarda só um punhado de
-  // números por execução.
-  return entry;
-}
 
 const stamp = () => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -103,21 +91,15 @@ export function loadHistory(): HistoryEntry[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
-    return (parsed as HistoryEntry[]).map((entry) => {
-      // Entradas gravadas antes das comparações existirem não têm `kind`, e
-      // não havia outra coisa que elas pudessem ser. Grade legada ainda pode
-      // trazer `prerequisites` no lugar de `unlocks`; o resto do cenário
-      // legado passa por `migrateScenario`.
-      const disciplines = withUnlocks(entry.config.disciplines ?? []);
-      if (entry.kind === "comparison") {
-        return { ...entry, config: migrateScenario({ ...entry.config, disciplines }) };
-      }
-      return {
-        ...entry,
-        config: migrateScenario({ ...entry.config, disciplines }),
-        result: entry.result,
-      };
-    });
+    // Grade legada ainda pode trazer `prerequisites` no lugar de `unlocks`;
+    // o resto do cenário legado passa por `migrateScenario`.
+    return (parsed as HistoryEntry[]).map((entry) => ({
+      ...entry,
+      config: migrateScenario({
+        ...entry.config,
+        disciplines: withUnlocks(entry.config.disciplines ?? []),
+      }),
+    }));
   } catch {
     // localStorage indisponível (modo privado) ou conteúdo corrompido
     return [];
@@ -130,7 +112,7 @@ export function saveHistory(entries: HistoryEntry[]): HistoryEntry[] {
   let kept = entries.slice(0, MAX_RUNS);
   while (kept.length > 0) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(kept.map(detachHistories)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(kept));
       return kept;
     } catch {
       kept = kept.slice(0, kept.length - 1);
@@ -190,26 +172,13 @@ function describeScenario(
   );
 }
 
-export function describeRun(run: ComparisonRun): string {
-  // A política de retorno entra no resumo porque é o eixo de experimentação da
-  // Seção 7.3.2: duas execuções que só diferem nela precisam se distinguir na
-  // barra lateral.
-  return describeScenario(run.config, { withCreditReturn: true });
-}
-
-/** Quantos modelos uma comparação põe lado a lado. Espelha
- * `leilao.comparison.ARMS`; fica aqui para o resumo da barra lateral não
- * depender da tela que desenha os gráficos. */
-const COMPARED_MODELS = 3;
-
 export function describeComparison(run: ComparisonRun): string {
   // O número de execuções vem primeiro: é o que muda a leitura do resultado —
   // com poucas seeds a dispersão da caixa mal se lê.
-  return `${run.config.runs} seeds × ${COMPARED_MODELS} modelos · ${describeScenario(
+  return `${run.config.runs} seeds × ${COMPARISON_ARMS.length} modelos · ${describeScenario(
     run.config,
     { withCreditReturn: false }
   )}`;
 }
 
-export const describeEntry = (entry: HistoryEntry): string =>
-  entry.kind === "comparison" ? describeComparison(entry) : describeRun(entry);
+export const describeEntry = (entry: HistoryEntry): string => describeComparison(entry);

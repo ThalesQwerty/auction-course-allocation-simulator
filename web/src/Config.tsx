@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { DensityChart, STATUS } from "./charts";
 import { entryDisciplines } from "./curriculum";
-import { gradeDensity, utilityDensity } from "./distributions";
+import { gradeCurve, utilityCurve } from "./distributions";
 import { PresetList } from "./PresetList";
 import { COMPARISON_ARMS, MAX_COMPARISON_RUNS } from "./types";
 import type { Scenario } from "./types";
@@ -55,10 +55,10 @@ export function Config({
   // não barras: aqui não há dado contado, e sim a forma que os parâmetros
   // implicam.
   const grades = useMemo(
-    () => gradeDensity(config, { difficulty, attempt, relativeUtility }),
+    () => gradeCurve(config, { difficulty, attempt, relativeUtility }),
     [config, difficulty, attempt, relativeUtility]
   );
-  const utilities = useMemo(() => utilityDensity(config), [config]);
+  const utilities = useMemo(() => utilityCurve(config), [config]);
   // O eixo da utilidade é o suporte da própria amostra, que a curva já carrega
   // no último ponto.
   const utilityTop = utilities.points.length

@@ -8,8 +8,8 @@ import type {
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 
-/** Roda o mesmo cenário nos dois mecanismos, N vezes de cada lado, com as
- * seeds de 1 a N. São 2N simulações completas no servidor: num cenário grande
+/** Roda o mesmo cenário em cada braço da comparação, N vezes, com as seeds de
+ * 1 a N. São N simulações completas por braço no servidor: num cenário grande
  * a requisição leva dezenas de segundos, e por isso a tela trava o botão em
  * vez de fingir que foi rápido. */
 export async function compare(request: CompareRequest): Promise<CompareResponse> {

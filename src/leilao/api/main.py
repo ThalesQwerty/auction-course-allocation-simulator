@@ -1,8 +1,9 @@
-"""Ponte FastAPI entre o motor Python (leilao.auction) e a interface web.
+"""Ponte FastAPI entre o motor Python e a interface web.
 
-Sem persistência: cada requisição a /run carrega o cenário inteiro (agentes,
-bens, lances, exclusões) e recebe de volta o resultado do leilão. O estado
-do cenário vive só no navegador (React), não no servidor.
+Três rotas, sem persistência nenhuma: `/run` resolve um leilão de uma rodada
+montado à mão, `/compare` roda o cenário nos braços da Seção 7.3 e
+`/playground` roda uma alocação isolada. O estado vive só no navegador — cada
+requisição carrega o cenário inteiro, e a seed torna o resultado reprodutível.
 
 Executar localmente:
     uvicorn leilao.api.main:app --reload --port 8000
@@ -22,23 +23,19 @@ from ..config import Discipline, SimulationConfig
 from ..entities import Agent, Good, MutualExclusion
 from ..grading import beta_shape
 from ..playground import PlaygroundDiscipline, PlaygroundStudent, run_playground
-from ..simulation import run_simulation
 from .schemas import (
     ArmResultOut,
     CompareRequest,
     CompareResponse,
-    PeriodReportOut,
-    RunRequest,
-    RunResponse,
-    RunSummaryOut,
+    PlaygroundGradeOut,
     PlaygroundRequest,
     PlaygroundResponse,
     PlaygroundRoundOut,
     PlaygroundRoundStudentOut,
-    PlaygroundGradeOut,
+    RunRequest,
+    RunResponse,
+    RunSummaryOut,
     ScenarioIn,
-    StudentHistoryOut,
-    StudentSummaryOut,
 )
 
 app = FastAPI(

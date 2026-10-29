@@ -1,23 +1,28 @@
-"""Leilão por créditos — versão simples de uma única rodada (Seção 7.1).
+"""Uma rodada do leilão por créditos (Seção 7.1).
 
-Cada agente distribui livremente seu orçamento de créditos entre lances nas
-disciplinas que deseja (respeitando a restrição de orçamento, eq. 19). O
-resolvedor de PLI (wdp_solver.solve_wdp) decide a alocação vencedora com base
-em preferências derivadas dos lances somados ao desempate, viés e
-perturbação estocástica (eq. 22). Em seguida calculam-se os preços de
-mercado — 2º preço, eq. 24 — e o consumo de créditos de cada vencedor
-(eq. 25).
+Cada agente reparte o orçamento em lances (eq. 19), o resolvedor decide a
+alocação sobre as preferências da eq. (22), e a liquidação aplica o preço de
+segundo preço (eq. 24), o consumo (eq. 25) e os dois descontos (eqs. 14, 27).
 
-Escopo desta versão: um único período, uma única rodada de alocação (sem o
-loop multi-rodada da Seção 3.2, sem a camada multi-período da Seção 7.2).
+Escopo: um período, uma rodada. O laço multi-rodada e a camada multi-período
+são de `simulation`.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .entities import Agent, Allocation, Demand, Good, MutualExclusion, Problem
-from .tie_breaking import rectify_bias, stochastic_perturbations, tie_break_factor
 from .config import Resolver
+from .entities import Agent, Allocation, Demand, Good, MutualExclusion, Problem
+from .equations import (
+    consumption,
+    final_preference,
+    market_prices,
+    rectify_bias,
+    remaining_budget,
+    remaining_capacity,
+    stochastic_perturbations,
+    tie_break_factor,
+)
 from .wdp_solver import solve_wdp, solve_wdp_greedy
 
 
@@ -36,23 +41,23 @@ class Bid:
 
 @dataclass
 class AuctionInput:
-    """Insumos do leilão de uma rodada.
+    """Insumos de uma rodada.
 
-    `tie_break_order` mapeia good_id -> lista de agent_id em ordem de
-    prioridade de desempate (matriz alpha, eq. 20). Se omitido para um bem,
-    usa-se a ordem lexicográfica dos ids como padrão determinístico.
+    `tie_break_order` mapeia good_id -> agentes em ordem de prioridade de
+    desempate (matriz α, eq. 20); omitido para um bem, usa-se a ordem
+    lexicográfica dos ids como padrão determinístico.
 
-    `bias` mapeia (agent_id, good_id) -> viés bruto beta_{a,x} (eq. 21).
-    Pares ausentes são tratados como 0 (sem viés).
+    `bias` mapeia (agent_id, good_id) -> viés bruto β (eq. 21); pares ausentes
+    não têm viés.
 
-    `epsilon` permite injetar a matriz de perturbações estocástica já sorteada.
-    Numa simulação multi-rodada ela precisa ser a mesma em todas as rodadas
+    `epsilon` permite injetar a matriz de perturbações já sorteada. Numa
+    simulação multi-rodada ela **precisa** ser a mesma em todas as rodadas
     (Seção 7.1.2); omitida, é sorteada a partir de `seed` para esta rodada.
     """
 
     agents: list[Agent]
     goods: list[Good]
-    budgets: dict[str, int]  # C_a — orçamento de créditos de cada agente, eq. (19)
+    budgets: dict[str, int]  # C_a — eq. (19)
     bids: list[Bid]
     exclusions: list[MutualExclusion] = field(default_factory=list)
     tie_break_order: dict[str, list[str]] = field(default_factory=dict)
@@ -61,133 +66,120 @@ class AuctionInput:
     seed: int = 0
 
     def __post_init__(self) -> None:
-        agent_ids = {a.id for a in self.agents}
-        missing_budget = agent_ids - self.budgets.keys()
-        if missing_budget:
-            raise ValueError(f"agentes sem orçamento definido: {missing_budget}")
+        missing = {a.id for a in self.agents} - self.budgets.keys()
+        if missing:
+            raise ValueError(f"agentes sem orçamento definido: {missing}")
 
-        total_bid: dict[str, int] = {}
+        committed: dict[str, int] = {}
         for bid in self.bids:
-            total_bid[bid.agent_id] = total_bid.get(bid.agent_id, 0) + bid.credits
+            committed[bid.agent_id] = committed.get(bid.agent_id, 0) + bid.credits
         over_budget = {
             agent_id: (spent, self.budgets[agent_id])
-            for agent_id, spent in total_bid.items()
+            for agent_id, spent in committed.items()
             if agent_id in self.budgets and spent > self.budgets[agent_id]
         }
         if over_budget:
-            raise ValueError(
-                f"lances excedem o orçamento do agente (eq. 19): {over_budget}"
-            )
+            raise ValueError(f"lances excedem o orçamento do agente (eq. 19): {over_budget}")
 
 
 @dataclass
 class AuctionResult:
     bids: dict[tuple[str, str], int]
     allocation: Allocation  # z — eq. (1)
-    prices: dict[str, int]  # pi_x — eq. (24). Sempre inteiro: lances (eq. 18) e o
-    # valor-padrão de 1 crédito já são inteiros, então o maior lance mal-sucedido
-    # também é.
-    consumption: dict[tuple[str, str], int]  # delta_{a,x} — eq. (25)
-    remaining_budget: dict[str, int]  # C_a - Delta_a — eq. (27)
-    remaining_capacity: dict[str, float]  # W_a - soma dos w_x recebidos — eq. (14)
+    prices: dict[str, int]  # π_x — eq. (24)
+    consumption: dict[tuple[str, str], int]  # δ_{a,x} — eq. (25)
+    remaining_budget: dict[str, int]  # C_a − Δ_a — eq. (27)
+    remaining_capacity: dict[str, float]  # W_a − Σ w_x — eq. (14)
 
 
-def _compute_prices(
-    *, goods: list[Good], bids: dict[tuple[str, str], int], allocation: Allocation
-) -> dict[str, int]:
-    """Preço de mercado por bem — eq. (24): maior lance mal-sucedido, ou 1."""
-    highest_unsuccessful: dict[str, int] = {}
-    for (agent_id, good_id), credits in bids.items():
-        if allocation.get((agent_id, good_id), 0) == 0:
-            if credits > highest_unsuccessful.get(good_id, 0):
-                highest_unsuccessful[good_id] = credits
-    return {good.id: highest_unsuccessful.get(good.id, 1) for good in goods}
+def _tie_break_ranks(auction_input: AuctionInput) -> dict[str, dict[str, int]]:
+    """Posição de cada agente na ordem de desempate de cada bem.
 
-
-def _compute_consumption(
-    *, bids: dict[tuple[str, str], int], allocation: Allocation, prices: dict[str, int]
-) -> dict[tuple[str, str], int]:
-    """Consumo de créditos por demanda vencedora — eq. (25)."""
-    consumption: dict[tuple[str, str], int] = {}
-    for (agent_id, good_id), credits in bids.items():
-        if allocation.get((agent_id, good_id), 0):
-            price = prices[good_id]
-            consumption[(agent_id, good_id)] = price if credits >= price else credits
-    return consumption
-
-
-def run_auction(
-    auction_input: AuctionInput, *, resolver: Resolver = "ilp"
-) -> AuctionResult:
-    """Executa uma rodada de leilão: resolve o WDP e liquida preços/consumo.
-
-    `resolver` escolhe quem decide a alocação — a PLI global do anteprojeto ou
-    a varredura gulosa por lance decrescente, que é o mecanismo de *bidding
-    points*. É o único ponto em que as duas células do leilão diferem.
+    A ordem pode cobrir mais agentes do que os presentes nesta rodada — numa
+    simulação multi-período α é fixo para a população inteira —, então α̂ é
+    normalizado pelo tamanho da própria ordem, e não pelo da rodada.
     """
-    bids = {(b.agent_id, b.good_id): b.credits for b in auction_input.bids}
-    initial_capacity = {a.id: a.capacity for a in auction_input.agents}
-    if not bids:
-        return AuctionResult({}, {}, {}, {}, dict(auction_input.budgets), initial_capacity)
+    default = sorted(a.id for a in auction_input.agents)
+    return {
+        good.id: {
+            agent_id: position + 1
+            for position, agent_id in enumerate(
+                auction_input.tie_break_order.get(good.id) or default
+            )
+        }
+        for good in auction_input.goods
+    }
 
-    # Preferências finais: lance + viés + desempate + perturbação — eq. (22)
-    rectified_bias = rectify_bias(auction_input.bias)
+
+def _demands(auction_input: AuctionInput, bids: dict[tuple[str, str], int]) -> list[Demand]:
+    """Os pares de demanda com a preferência final da eq. (22)."""
+    bias = rectify_bias(auction_input.bias)
     epsilon = auction_input.epsilon
     if epsilon is None:
         epsilon = stochastic_perturbations(
-            list(bids.keys()),
+            list(bids),
             num_agents=len(auction_input.agents),
             num_goods=len(auction_input.goods),
             seed=auction_input.seed,
         )
-
-    # A ordem de desempate pode cobrir mais agentes do que os presentes nesta
-    # rodada (numa simulação multi-período, alpha é fixo para a população
-    # inteira), então alpha_hat é normalizado pelo tamanho da própria ordem.
-    default_order = sorted(a.id for a in auction_input.agents)
-    ranks: dict[str, dict[str, int]] = {}
-    for good in auction_input.goods:
-        order = auction_input.tie_break_order.get(good.id) or default_order
-        ranks[good.id] = {agent_id: i + 1 for i, agent_id in enumerate(order)}
+    ranks = _tie_break_ranks(auction_input)
 
     demands: list[Demand] = []
     for (agent_id, good_id), credits in bids.items():
-        order_ranks = ranks.get(good_id) or {}
-        order_size = len(order_ranks) or len(auction_input.agents)
-        rank = order_ranks.get(agent_id, order_size)
-        alpha_hat = tie_break_factor(rank, order_size)
-        beta_hat = rectified_bias.get((agent_id, good_id), 0)
-        pref = credits + beta_hat + alpha_hat + epsilon.get((agent_id, good_id), 0.0)
-        demands.append(Demand(agent_id, good_id, pref))
+        order = ranks.get(good_id) or {}
+        size = len(order) or len(auction_input.agents)
+        demands.append(
+            Demand(
+                agent_id,
+                good_id,
+                final_preference(
+                    bid=credits,
+                    rectified_bias=bias.get((agent_id, good_id), 0),
+                    tie_break=tie_break_factor(order.get(agent_id, size), size),
+                    perturbation=epsilon.get((agent_id, good_id), 0.0),
+                ),
+            )
+        )
+    return demands
+
+
+def run_auction(auction_input: AuctionInput, *, resolver: Resolver = "ilp") -> AuctionResult:
+    """Resolve o WDP da rodada e liquida preços, consumo e saldos.
+
+    `resolver` escolhe quem decide a alocação — a PLI global do anteprojeto ou
+    a varredura gulosa, que é o mecanismo de *bidding points*. É o **único**
+    ponto em que as duas células do leilão diferem: preferência, preço e
+    consumo são calculados igual dos dois lados.
+    """
+    bids = {(b.agent_id, b.good_id): b.credits for b in auction_input.bids}
+    capacity = {a.id: a.capacity for a in auction_input.agents}
+    if not bids:
+        return AuctionResult({}, {}, {}, {}, dict(auction_input.budgets), capacity)
 
     problem = Problem(
         agents=auction_input.agents,
         goods=auction_input.goods,
-        demands=demands,
+        demands=_demands(auction_input, bids),
         exclusions=auction_input.exclusions,
     )
-    # O resolvedor é o segundo eixo da comparação. Tudo o mais — a preferência
-    # da eq. (22), o preço de 2º preço da eq. (24) e o consumo da eq. (27) — é
-    # calculado igual nos dois, de modo que a diferença entre as duas células
-    # seja só quem decidiu a alocação.
     allocation = (solve_wdp if resolver == "ilp" else solve_wdp_greedy)(problem)
 
-    # Preços de mercado e consumo de créditos — eq. (24)-(26)
-    prices = _compute_prices(goods=auction_input.goods, bids=bids, allocation=allocation)
-    consumption = _compute_consumption(bids=bids, allocation=allocation, prices=prices)
-
-    weight_by_good = {g.id: g.weight for g in auction_input.goods}
-    remaining_budget = dict(auction_input.budgets)
-    remaining_capacity = dict(initial_capacity)
-    for (agent_id, good_id), consumed in consumption.items():
-        remaining_budget[agent_id] -= consumed
-        remaining_capacity[agent_id] -= weight_by_good[good_id]
+    prices = market_prices(
+        good_ids=[g.id for g in auction_input.goods], bids=bids, allocation=allocation
+    )
+    consumed = consumption(bids=bids, allocation=allocation, prices=prices)
 
     return AuctionResult(
         bids=bids,
         allocation=allocation,
         prices=prices,
-        consumption=consumption,
-        remaining_budget=remaining_budget,
-        remaining_capacity=remaining_capacity,
+        consumption=consumed,
+        remaining_budget=remaining_budget(
+            budgets=auction_input.budgets, consumption=consumed
+        ),
+        remaining_capacity=remaining_capacity(
+            capacity=capacity,
+            allocation={key: 1 for key in consumed},
+            weights={g.id: g.weight for g in auction_input.goods},
+        ),
     )
