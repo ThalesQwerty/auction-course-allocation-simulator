@@ -196,8 +196,6 @@ export const armLabel = (key: string): string =>
 export interface CompareRequest
   extends Omit<Scenario, "seed" | "credit_return"> {
   runs: number; // N
-  /** Quando presente, a resposta traz também a varredura da forma da
-   * preferência. Omitir deixa só o k canônico e o boxplot. */
 }
 
 /** Teto de execuções por mecanismo. Espelha `leilao.comparison.MAX_RUNS`. */
@@ -254,7 +252,6 @@ export interface ArmResult {
 export interface CompareResponse {
   runs: number;
   arms: ArmResult[];
-  /** Presente só quando a requisição pediu a varredura. */
   /** As duas distribuições de entrada do cenário. Não variam entre braços nem
    * entre seeds — são do cenário, não da execução. */
   utility_distribution?: number[];

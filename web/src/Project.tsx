@@ -415,17 +415,6 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         formaram em cada execução.
       </p>
       <p>
-        A comparação tem um <strong>segundo eixo, opcional</strong>: a varredura da forma da
-        preferência. A hipótese do trabalho é que o leilão capta intensidade que a ordenação por
-        CR não enxerga — e se é isso, o quanto a população diferencia as disciplinas não é um
-        parâmetro a calibrar, é a variável independente. A varredura roda a comparação inteira em
-        vários <em>σ</em>, numa faixa linear, com poucas execuções por ponto: ali se lê a{" "}
-        <strong>forma da curva</strong>, enquanto os boxplots respondem, no <em>σ</em> canônico e
-        com muitas execuções, se a diferença supera o ruído amostral. O resultado sai em duas
-        seções próprias — as linhas por métrica e, ao lado, o histograma de como a utilidade se
-        reparte em cada <em>σ</em>, que é o gráfico da causa.
-      </p>
-      <p>
         Uma <strong>simulação</strong> abre os gráficos do cenário, em dois blocos. Os{" "}
         <strong>gráficos por aluno</strong> trazem uma linha por geração, com o eixo
         horizontal por período ou por rodada, divididos em métricas principais, progressão e

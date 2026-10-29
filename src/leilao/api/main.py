@@ -134,10 +134,8 @@ def compare(req: CompareRequest) -> CompareResponse:
     execução — nada de crédito e nenhum recorte, porque o que se compara aqui é
     o modelo, não o que acontece dentro de cada um.
 
-    São 3N simulações completas; com um cenário grande a requisição leva
-    dezenas de segundos. Pedir a **varredura** acrescenta a comparação inteira
-    em cada forma de preferência da progressão, e aí são minutos — por isso ela
-    roda com bem menos execuções por ponto.
+    É uma simulação completa por braço e por seed; com um cenário grande a
+    requisição leva dezenas de segundos.
     """
     try:
         config = build_config(req)

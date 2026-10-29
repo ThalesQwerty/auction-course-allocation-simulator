@@ -310,7 +310,7 @@ def utility_distribution(
     intervalo e, de sigma = 1 em diante, 94% dos valores caem na primeira faixa:
     todos os gráficos saem iguais e nenhum descreve um aluno. Por linha, a
     leitura é "como *um* aluno reparte a preferência dele", que é a grandeza que
-    sigma controla — e aí a forma muda visivelmente ao longo da varredura.
+    sigma controla — e aí a forma de fato muda quando sigma muda.
 
     A última faixa guarda sempre o máximo da linha, então ela nunca é vazia: num
     conjunto de n disciplinas ela vale pelo menos 1/n.

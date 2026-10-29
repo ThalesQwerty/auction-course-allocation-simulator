@@ -1,29 +1,50 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { curriculumPeriods } from "./curriculum";
+import type { CSSProperties } from "react";
+import { CYCLIC, curriculumPeriods } from "./curriculum";
 import type { DisciplineInput } from "./types";
 
+/** Uma seta entre duas disciplinas, já em coordenadas do contêiner. O traço é
+ * uma cúbica de tangentes horizontais: a cadeia corre da esquerda para a
+ * direita, e a curva dá o sentido sem depender só da ponta. */
 interface Arrow {
   key: string;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
+  from: string;
+  to: string;
+  d: string;
 }
+
+const formatHours = (hours: number) => hours.toLocaleString("pt-BR");
+
+const totalHours = (list: DisciplineInput[]) =>
+  list.reduce((sum, discipline) => sum + discipline.hours, 0);
 
 export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) {
   const periods = useMemo(() => curriculumPeriods(disciplines), [disciplines]);
-  const rows = useMemo(() => {
-    const placed = disciplines.filter((d) => periods[d.name] >= 1);
-    const maxPeriod = placed.reduce((max, d) => Math.max(max, periods[d.name]), 0);
-    const levels = [];
-    for (let period = 1; period <= maxPeriod; period++) {
-      const row = placed.filter((d) => periods[d.name] === period);
-      if (row.length) levels.push(row);
+  const required = useMemo(() => disciplines.filter((d) => !d.elective), [disciplines]);
+  const electives = useMemo(() => disciplines.filter((d) => d.elective), [disciplines]);
+
+  /** As colunas das obrigatórias — uma por período da grade, na ordem. O
+   * período não se configura: sai da indução sobre os pré-requisitos
+   * (`curriculum.ts`). A última coluna recolhe o que está preso num ciclo, que
+   * é período nenhum mas é o estado normal do formulário no meio de uma edição. */
+  const columns = useMemo(() => {
+    const placed = required.filter((d) => periods[d.name] >= 1);
+    const last = placed.reduce((max, d) => Math.max(max, periods[d.name]), 0);
+    const result: { period: number; cards: DisciplineInput[] }[] = [];
+    for (let period = 1; period <= last; period++) {
+      const cards = placed.filter((d) => periods[d.name] === period);
+      if (cards.length) result.push({ period, cards });
     }
-    const broken = disciplines.filter((d) => periods[d.name] < 1);
-    if (broken.length) levels.push(broken);
-    return levels;
-  }, [disciplines, periods]);
+    const broken = required.filter((d) => periods[d.name] < 1);
+    if (broken.length) result.push({ period: CYCLIC, cards: broken });
+    return result;
+  }, [required, periods]);
+
+  /** A optativa não tem período a mostrar: não destrava nada e não é
+   * pré-requisito de ninguém, então não há cadeia que ordene o catálogo. Sem
+   * eixo, o bloco tende ao **quadrado** — tantas colunas quanto a raiz do
+   * número de disciplinas, e as linhas que daí saírem. */
+  const electiveColumns = Math.max(1, Math.ceil(Math.sqrt(electives.length)));
 
   const links = useMemo(() => {
     const incoming = new Map<string, string[]>();
@@ -58,11 +79,25 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
   }, [disciplines]);
 
   const [hover, setHover] = useState<string | null>(null);
+
+  /** Com o mouse sobre uma disciplina, a cadeia dela se acende e o resto recua:
+   * numa grade de dezenas de cartões é o apagar do que não é da cadeia que faz
+   * o caminho aparecer. */
+  const related = useCallback(
+    (name: string) =>
+      hover !== null &&
+      (name === hover ||
+        (links.prereq.get(hover)?.has(name) ?? false) ||
+        (links.postreq.get(hover)?.has(name) ?? false)),
+    [hover, links]
+  );
+
   const cardClass = (name: string) => {
+    if (!hover) return "grade-card";
     if (hover === name) return "grade-card is-focus";
-    if (hover && links.prereq.get(hover)?.has(name)) return "grade-card is-prereq";
-    if (hover && links.postreq.get(hover)?.has(name)) return "grade-card is-postreq";
-    return "grade-card";
+    if (links.prereq.get(hover)?.has(name)) return "grade-card is-prereq";
+    if (links.postreq.get(hover)?.has(name)) return "grade-card is-postreq";
+    return "grade-card is-mute";
   };
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -82,25 +117,25 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
         const to = cards.current.get(successor);
         if (!to) continue;
         const end = to.getBoundingClientRect();
+        // Sai pela direita de quem destrava e chega pela esquerda de quem é
+        // destravada: a grade corre na horizontal, então é esse o par de bordas
+        // que não atravessa o próprio cartão.
+        const x1 = start.right - origin.left;
+        const y1 = start.top + start.height / 2 - origin.top;
+        const x2 = end.left - origin.left;
+        const y2 = end.top + end.height / 2 - origin.top;
+        const pull = Math.max(24, Math.abs(x2 - x1) / 2);
         next.push({
           key: `${discipline.name}->${successor}`,
-          x1: start.left + start.width / 2 - origin.left,
-          y1: start.bottom - origin.top,
-          x2: end.left + end.width / 2 - origin.left,
-          y2: end.top - origin.top,
+          from: discipline.name,
+          to: successor,
+          d: `M ${x1} ${y1} C ${x1 + pull} ${y1}, ${x2 - pull} ${y2}, ${x2} ${y2}`,
         });
       }
     }
     setArrows((current) =>
       current.length === next.length &&
-      current.every(
-        (arrow, index) =>
-          arrow.key === next[index].key &&
-          arrow.x1 === next[index].x1 &&
-          arrow.y1 === next[index].y1 &&
-          arrow.x2 === next[index].x2 &&
-          arrow.y2 === next[index].y2
-      )
+      current.every((arrow, index) => arrow.key === next[index].key && arrow.d === next[index].d)
         ? current
         : next
     );
@@ -115,52 +150,109 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
     return () => observer.disconnect();
   }, [measure]);
 
+  const card = (discipline: DisciplineInput) => (
+    <article
+      key={discipline.name}
+      className={cardClass(discipline.name)}
+      onMouseEnter={() => setHover(discipline.name)}
+      onMouseLeave={() => setHover(null)}
+      ref={(node) => {
+        if (node) cards.current.set(discipline.name, node);
+        else cards.current.delete(discipline.name);
+      }}
+    >
+      <h3>{discipline.name}</h3>
+      <p>
+        {discipline.seats} vagas · {discipline.hours} h
+        {discipline.entry && <em>entrada</em>}
+      </p>
+    </article>
+  );
+
   return (
     <div>
       <h1>Grade</h1>
-      <div className="grade-graph" ref={containerRef}>
-        <svg className="grade-arrows" aria-hidden="true">
-          <defs>
-            <marker id="grade-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-              <path d="M0,0 L6,3 L0,6" fill="none" stroke="currentColor" />
-            </marker>
-          </defs>
-          {arrows.map((arrow) => (
-            <line
-              key={arrow.key}
-              x1={arrow.x1}
-              y1={arrow.y1}
-              x2={arrow.x2}
-              y2={arrow.y2}
-              markerEnd="url(#grade-arrow)"
-            />
-          ))}
-        </svg>
-        {rows.map((row) => (
-          <div className="grade-row" key={periods[row[0].name]}>
-            {row.map((discipline) => {
-              const offer = discipline;
+      <p className="note">
+        São duas grades porque são duas regras de conclusão. Nas{" "}
+        <strong>obrigatórias</strong> cada coluna é um período da grade, lido da esquerda para a
+        direita; o período não se configura, sai da indução sobre os pré-requisitos. As{" "}
+        <strong>optativas</strong> não têm período — o aluno escolhe quais cursar até somar a carga
+        exigida, e é essa substituibilidade que as põe num bloco sem ordem. Com o mouse sobre uma
+        disciplina, o que ela exige fica <span className="grade-key up">azul</span> e o que ela
+        destrava fica <span className="grade-key down">barro</span>.
+      </p>
+
+      <div className="grade-scroll">
+        <div className="grade-sheet" ref={containerRef}>
+          <svg className="grade-arrows" aria-hidden="true">
+            <defs>
+              <marker id="grade-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path className="arrow-head" d="M0,0 L6,3 L0,6" />
+              </marker>
+              <marker
+                id="grade-arrow-lit"
+                markerWidth="8"
+                markerHeight="8"
+                refX="6"
+                refY="3"
+                orient="auto"
+              >
+                <path className="arrow-head is-lit" d="M0,0 L6,3 L0,6" />
+              </marker>
+            </defs>
+            {arrows.map((arrow) => {
+              const lit = related(arrow.from) && related(arrow.to);
               return (
-                <article
-                  key={discipline.name}
-                  className={cardClass(discipline.name)}
-                  onMouseEnter={() => setHover(discipline.name)}
-                  onMouseLeave={() => setHover(null)}
-                  ref={(node) => {
-                    if (node) cards.current.set(discipline.name, node);
-                    else cards.current.delete(discipline.name);
-                  }}
-                >
-                  <h2>{discipline.name}</h2>
-                  <p>
-                    {offer.seats} vagas · {offer.hours} h
-                    {discipline.entry && <em>entrada</em>}
-                  </p>
-                </article>
+                <path
+                  key={arrow.key}
+                  className={hover ? (lit ? "is-lit" : "is-dim") : ""}
+                  d={arrow.d}
+                  markerEnd={lit ? "url(#grade-arrow-lit)" : "url(#grade-arrow)"}
+                />
               );
             })}
-          </div>
-        ))}
+          </svg>
+
+          {columns.length > 0 && (
+            <section className="grade-block">
+              <header className="grade-block-head">
+                <h2>Obrigatórias</h2>
+                <p>
+                  {required.length} disciplinas · {formatHours(totalHours(required))} h · conclui
+                  quem aprova em todas
+                </p>
+              </header>
+              <div className="grade-columns">
+                {columns.map((column) => (
+                  <div className="grade-column" key={column.period}>
+                    <div className="grade-column-head">
+                      {column.period === CYCLIC ? "ciclo" : `${column.period}º`}
+                    </div>
+                    {column.cards.map(card)}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {electives.length > 0 && (
+            <section className="grade-block">
+              <header className="grade-block-head">
+                <h2>Optativas</h2>
+                <p>
+                  {electives.length} disciplinas · {formatHours(totalHours(electives))} h ofertadas
+                  · sem pré-requisito e sem período
+                </p>
+              </header>
+              <div
+                className="grade-square"
+                style={{ "--grade-cols": electiveColumns } as CSSProperties}
+              >
+                {electives.map(card)}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

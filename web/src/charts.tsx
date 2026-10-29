@@ -201,10 +201,6 @@ export function MetricChart({
   format = formatRatio,
   zeroLine = false,
   band = false,
-  numericX = false,
-  xTicks,
-  xFormat,
-  xReference,
 }: {
   title: string;
   data: SeriesPoint[];
@@ -214,15 +210,6 @@ export function MetricChart({
   domain?: [number | "auto", number | "auto"];
   format?: (value: number) => string;
   zeroLine?: boolean;
-  /** Eixo x **numérico**, para uma grandeza contínua — o sigma da varredura. A
-   * diferença para o eixo categórico não é só cosmética: ela é o que permite
-   * posicionar `xReference` proporcionalmente. Exige `x` numérico. */
-  numericX?: boolean;
-  /** Marcas do eixo x, para o passo automático não cair em valores quebrados. */
-  xTicks?: number[];
-  xFormat?: (value: number) => string;
-  /** Linha vertical de referência — o sigma canônico, onde os boxplots medem. */
-  xReference?: number;
   /** Séries que são leituras ordenadas da mesma grandeza (`bandColors`), e não
    * entidades diferentes. */
   band?: boolean;
@@ -259,16 +246,10 @@ export function MetricChart({
           <CartesianGrid stroke={ink.grid} vertical={false} />
           <XAxis
             dataKey="x"
-            type={numericX ? "number" : "category"}
-            domain={numericX ? ["dataMin", "dataMax"] : undefined}
-            ticks={numericX ? xTicks : undefined}
-            tickFormatter={
-              numericX ? (value: number) => (xFormat ?? formatRatio)(value) : undefined
-            }
             tick={{ fill: ink.muted, fontSize: 11 }}
             tickLine={false}
             stroke={ink.axis}
-            interval={numericX ? 0 : "preserveStartEnd"}
+            interval="preserveStartEnd"
           />
           <YAxis
             domain={domain}
@@ -279,14 +260,6 @@ export function MetricChart({
             tickFormatter={format}
           />
           {zeroLine && <ReferenceLine y={0} stroke={ink.axis} />}
-          {xReference !== undefined && (
-            <ReferenceLine
-              x={xReference}
-              stroke={ink.axis}
-              strokeDasharray="4 3"
-              label={{ value: "canônico", fill: ink.muted, fontSize: 10, position: "top" }}
-            />
-          )}
           <Tooltip
             cursor={{ stroke: ink.axis }}
             content={<Tip colors={colors} format={format} dark={dark} />}

@@ -164,10 +164,8 @@ export function Comparison({
   const runsOf = (key: string): RunSummary[] =>
     result.arms.find((arm) => arm.key === key)?.runs ?? [];
 
-  /** As duas distribuições de entrada do cenário. A de utilidades só entra
-   * aqui quando **não** há varredura — com varredura ela tem seção própria, uma
-   * por sigma. A de notas entra sempre, porque não depende de sigma: varrida,
-   * ela sairia idêntica em todos os pontos. */
+  /** As duas distribuições de entrada do cenário. Não variam entre braços nem
+   * entre seeds: são do cenário, não da execução. */
   const scenarioHistograms = [
     result.grade_distribution?.length ? (
       <Histogram
@@ -186,9 +184,6 @@ export function Comparison({
     ) : null,
   ].filter(Boolean);
 
-  /** A varredura, quando a execução a pediu. Comparações gravadas antes dela
-   * existir simplesmente não a trazem, e a seção some em vez de aparecer
-   * vazia. */
   /** Quantas rodadas o cenário teve, lido do próprio resultado. Comparações
    * gravadas antes da saturação existir não trazem a lista, e aí a seção some
    * em vez de aparecer vazia. */

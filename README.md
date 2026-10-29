@@ -330,43 +330,14 @@ rodadas. Nenhuma rodada isolada tem lado "melhor": na primeira, mais alto é
 atender mais; nas seguintes, mais alto é ter deixado mais para trás. E a
 matrícula garantida não infla a primeira, porque o calouro está fora do recorte.
 
-#### O segundo eixo: a varredura da forma da preferência
-
-A hipótese do trabalho é que o leilão capta **intensidade** de preferência que a
-ordenação por CR não enxerga. Se é isso, o quanto a população diferencia as
-disciplinas não é um parâmetro a calibrar — é a **variável independente**. Por
-isso `run_sweep` roda a comparação inteira em vários `utility_sigma`, numa faixa
-**linear**, e devolve um ponto por `σ`.
-
-Linear basta porque o coeficiente de variação da log-normal cresce depressa em
-`σ`: a faixa útil inteira cabe entre ~0,25 e ~3 em passos iguais. (Era a Gamma
-que precisava de progressão geométrica e eixo logarítmico, porque exigia quatro
-ordens de grandeza do parâmetro.) O `utility_sigma` do cenário é o **canônico** —
-o que os boxplots medem — e é marcado no eixo com uma linha de referência, sem
-precisar cair exatamente num ponto varrido.
-
-| | σ canônico (boxplot) | varredura (linhas) |
-| --- | --- | --- |
-| pergunta | a diferença supera o ruído amostral? | como o vão depende de σ? |
-| execuções | muitas (`runs`, 20 por padrão) | poucas (3 por padrão), por ponto |
-| forma | caixa por modelo | linha por modelo, eixo x linear |
-
-Cada ponto traz também o **histograma da própria matriz de utilidades** — o
-gráfico da causa ao lado do da consequência. Ele mostra como a preferência de um
-aluno se reparte entre as disciplinas: cada linha (aluno, período) é reescalada
-ao **próprio** mínimo e máximo e dividida em 9 faixas de mesma largura, e a
-altura é a fração de utilidades em cada faixa. A escala é por linha, e não do
-menor ao maior valor da matriz inteira, porque global degenera — um único extremo
-define o intervalo e, de `σ = 1` em diante, 94% dos valores caem na primeira
-faixa, de modo que todos os gráficos sairiam iguais.
-
-A varredura acrescenta uma métrica que **não** está no boxplot: a contagem de
-**formandos**. Ela é obrigatória aqui porque `ψ̄` é cega para a patologia que a
-varredura revela — `ψ̄` cresce monotonicamente conforme a preferência concentra e
-chega perto de 1 na ponta, justamente onde ninguém se forma: o aluno quer uma
-disciplina só, consegue, e a satisfação dele é plena. `ψ̄` é satisfação *relativa
-ao que o aluno queria*. Lado a lado no mesmo eixo, as duas contam a troca que o
-mecanismo faz.
+A comparação traz também o **histograma da matriz de utilidades** do cenário —
+o gráfico da causa ao lado do da consequência. Ele mostra como a preferência de
+um aluno se reparte entre as disciplinas: cada linha (aluno, período) é
+reescalada ao **próprio** mínimo e máximo e dividida em 9 faixas de mesma
+largura, e a altura é a fração de utilidades em cada faixa. A escala é por
+linha, e não do menor ao maior valor da matriz inteira, porque global degenera —
+um único extremo define o intervalo e, de `σ = 1` em diante, 94% dos valores
+caem na primeira faixa, de modo que todos os gráficos sairiam iguais.
 
 Ficaram de fora, por motivos diferentes. A **ocupação** (θ) porque, com o
 calouro fora do recorte, ela deixou de se ler como "o quanto a universidade
@@ -672,7 +643,7 @@ em dia. Rodando o cenário em σ = 1, **29% concluem** em 12 períodos. No recor
 vagas, as de 40 são o gargalo e as de 120 nunca apertam — é essa gradação que os
 gráficos por disciplina existem para mostrar. Com 30 ingressantes por período a
 universidade fica frouxa; com 70 a conclusão despenca. Os números exatos variam
-com σ, e é a varredura que os põe em contexto.
+com σ.
 
 A população do preset, nas duas normais do cenário:
 

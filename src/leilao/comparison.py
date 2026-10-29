@@ -32,15 +32,6 @@ Por isso a política de retorno **não é parâmetro do cenário aqui**: ela é 
 do experimento, e o `credit_return` que vier na configuração é ignorado, como a
 seed. Cada braço impõe o seu.
 
-Os dois eixos se dividem o trabalho: a varredura usa **poucas execuções por
-ponto** (é a forma da curva que interessa, e são muitos pontos) e o sigma
-canônico usa **muitas** (ali a pergunta é se a diferença supera o ruído
-amostral, que é o que o boxplot responde). O canônico é o `utility_sigma` do
-cenário, e a varredura é uma faixa **linear** em volta dele — o que a log-normal
-permite e a Gamma não permitia: o coeficiente de variação cresce depressa em
-sigma, então a faixa útil inteira cabe entre ~0,25 e ~3 em passos iguais, sem
-precisar de progressão geométrica nem de eixo logarítmico.
-
 **Uma execução vira um número por métrica**, que é o ponto do boxplot. Para as
 três métricas de período a redução é a média **ponderada pelos alunos medidos**:
 a simulação termina numa fase de drenagem, em que a população só diminui, e uma
@@ -345,11 +336,6 @@ def sample_distribution(config: SimulationConfig) -> list[float]:
 def sample_grade_distribution(config: SimulationConfig) -> list[float]:
     """O histograma de notas de primeira tentativa, pelo mesmo motivo e do mesmo
     jeito que `sample_distribution`.
-
-    Diferente das utilidades, ele **não** entra em cada ponto da varredura: com
-    o acoplamento `w` desligado a nota não depende de sigma, e o gráfico seria
-    o mesmo doze vezes. (Com `w > 0` ele passaria a depender — é mais uma razão
-    para o acoplamento ser parâmetro reportado, e não suposição silenciosa.)
 
     A nota mostrada é a de **primeira tentativa, dificuldade 1 e sem ruído**:
     `a^1`, ou seja, a própria aptidão. É o retrato da população que o cenário
