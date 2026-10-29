@@ -1,29 +1,47 @@
 :root {
   color-scheme: light dark;
-  --bg: #f7f7f8;
+  /* Paleta quente: fundo creme, tinta quase preta e um barro como cor de ação.
+     A superfície dos cards de gráfico (--panel) é o que a paleta de séries de
+     `charts.tsx` foi validada contra — branco na clara, #262624 na escura —,
+     então mexer nela pede revalidar lá. */
+  --bg: #faf9f5;
   --panel: #ffffff;
-  --border: #d9dadd;
-  --text: #1c1e21;
-  --muted: #6b6f76;
-  --accent: #2f6fed;
+  --border: #e6e3d9;
+  --text: #141413;
+  --muted: #73706a;
+  /* `--accent` é tinta de texto e de preenchimento sólido, escurecida o
+     bastante para passar 4,5:1 sobre o creme; `--accent-soft` é o barro cheio,
+     usado só onde a cor é fundo diluído. Na escura as duas coincidem: ali o
+     tom claro já contrasta. */
+  --accent: #a84b2a;
+  --accent-soft: #c96442;
   --accent-contrast: #ffffff;
-  --danger: #c8402c;
-  --win: #23934c;
-  --sidebar: #ffffff;
+  --danger: #a8281e;
+  --win: #2b6e4b;
+  --sidebar: #f2f0e7;
   --sidebar-w: 248px;
   --rail-w: 264px;
-  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Serifada, como a tipografia de leitura do Claude. A Source Serif 4 vem do
+     Google Fonts (ver index.html) e tem algarismos tabulares, de que as
+     tabelas dependem; sem rede, a cadeia cai na Georgia. */
+  font-family: "Source Serif 4", "Tiempos Text", Charter, "Iowan Old Style", Georgia,
+    "Times New Roman", serif;
+  font-optical-sizing: auto;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #17181b;
-    --panel: #212227;
-    --border: #35373d;
-    --text: #eceef1;
-    --muted: #9a9ea6;
-    --sidebar: #1c1d21;
-    --win: #4fb972;
+    --bg: #1f1e1d;
+    --panel: #262624;
+    --border: #3b3a36;
+    --text: #f5f4ef;
+    --muted: #a3a097;
+    --accent: #d97757;
+    --accent-soft: #d97757;
+    --accent-contrast: #1f1e1d;
+    --danger: #e8837a;
+    --win: #5fb98a;
+    --sidebar: #1a1a18;
   }
 }
 
@@ -35,6 +53,8 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Barra lateral fixa + área de conteúdo rolável. */
@@ -53,7 +73,8 @@ body {
 }
 
 h1 {
-  font-size: 20px;
+  font-size: 22px;
+  letter-spacing: -0.01em;
 }
 
 .page-head {
@@ -182,10 +203,12 @@ input, select {
   margin-top: 16px;
 }
 
+/* Tinta e fundo saem do mesmo token: com cores fixas o aviso ficava rosa-claro
+   no tema escuro. */
 .error-banner {
-  background: #fbe4e1;
-  border: 1px solid var(--danger);
-  color: #7a271a;
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger);
   padding: 10px 14px;
   border-radius: 8px;
   margin-bottom: 16px;
@@ -229,9 +252,67 @@ input.invalid {
 
 .subpanel {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 12px;
   margin-bottom: 12px;
+}
+
+.subpanel h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+/* Formulário à esquerda, prévia da distribuição à direita. O gráfico é
+   recalculado a cada tecla: é vendo a forma mudar que o parâmetro ganha
+   sentido, antes de qualquer execução. */
+.config-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+  gap: 16px;
+  align-items: start;
+}
+
+.config-preview .chart-card {
+  padding: 12px;
+}
+
+/* Os controles do gráfico ficam **dentro** do card, logo abaixo do título: é
+   a moldura que diz que eles configuram o desenho e não a simulação. Os campos
+   dividem a largura da coluna em vez de quebrarem na largura natural deles. */
+.chart-controls {
+  margin: 8px 0 2px;
+}
+
+.chart-controls .field-row {
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.chart-controls .field {
+  flex: 1 1 88px;
+  min-width: 0;
+}
+
+.chart-controls label,
+.chart-controls .field-hint {
+  font-size: 11px;
+}
+
+.config-preview .field-hint {
+  display: block;
+  margin: 6px 2px 0;
+}
+
+/* Num card estreito as onze divisas se encostam: fica uma sim, uma não — e
+   como são ímpares, as duas pontas continuam rotuladas. */
+.config-preview .histogram-edges span:nth-child(even) {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .config-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .sticky-actions {
@@ -358,6 +439,15 @@ input.invalid {
   color: var(--muted);
 }
 
+/* O que a curva não diz sozinha: a altura de uma densidade não se lê, então o
+   valor mais provável e a aprovação saem em número, ao pé do desenho. */
+.chart-footer {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Régua de divisas do histograma: os rótulos ficam **entre** as barras, então
    cada um é posicionado na fração exata do eixo e centrado nela. A caixa recebe
    do componente as mesmas margens da área de plotagem, de modo que 0% caia na
@@ -419,9 +509,15 @@ input.invalid {
   box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
 }
 
+/* O título do tooltip é uma linha de duas pontas: o valor à esquerda e, nas
+   notas, o veredito à direita — mesma linha e mesmo corpo, porque os dois são
+   leitura do mesmo ponto. */
 .tooltip-title {
   color: var(--muted);
+  display: flex;
   font-size: 11px;
+  gap: 16px;
+  justify-content: space-between;
   margin-bottom: 4px;
 }
 
@@ -690,7 +786,8 @@ td, th {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 4px;
-  font-size: 12.5px;
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
   padding: 1px 5px;
 }
 
@@ -1002,14 +1099,87 @@ td.failed {
   color: var(--danger);
 }
 
-.grade-graph {
+/* ------------------------------------------------------------ grade curricular
+
+   Duas grades, porque são duas regras de conclusão. A das **obrigatórias** é a
+   cadeia de pré-requisitos lida da esquerda para a direita: cada coluna é um
+   período, que não se configura — sai da indução sobre os pré-requisitos. A das
+   **optativas** não tem período a mostrar, e sem eixo o bloco tende ao
+   quadrado: o número de colunas vem do componente, na raiz do catálogo. */
+
+.grade-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.grade-sheet {
+  --grade-card-w: 176px;
   position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 56px;
   width: max-content;
   min-width: 100%;
-  padding: 8px 0 24px;
+  padding: 4px 0 16px;
+}
+
+.grade-block + .grade-block {
+  margin-top: 32px;
+}
+
+.grade-block-head {
+  margin-bottom: 12px;
+}
+
+.grade-block-head h2 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.grade-block-head p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Os cartões ficam **sobre** as setas: a linha sai da borda de um e morre na
+   borda do outro, sem atravessar texto. */
+.grade-columns,
+.grade-square {
+  position: relative;
+  z-index: 1;
+}
+
+/* O vão entre colunas é por onde os conectores passam: apertado, eles se
+   cruzam antes de chegar ao cartão. */
+.grade-columns {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+}
+
+.grade-column {
+  display: flex;
+  flex: 0 0 var(--grade-card-w);
+  flex-direction: column;
+  gap: 10px;
+}
+
+.grade-column-head {
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding-bottom: 6px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.grade-square {
+  display: grid;
+  grid-template-columns: repeat(var(--grade-cols, 5), var(--grade-card-w));
+  gap: 10px 28px;
 }
 
 .grade-arrows {
@@ -1018,59 +1188,46 @@ td.failed {
   width: 100%;
   height: 100%;
   overflow: visible;
-  color: var(--muted);
   pointer-events: none;
 }
 
-.grade-arrows line {
-  stroke: currentColor;
+.grade-arrows path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--muted) 50%, transparent);
   stroke-width: 1.25;
+  transition: opacity 120ms ease;
 }
 
-.grade-row {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: center;
-  gap: 12px;
+.grade-arrows path.is-dim {
+  opacity: 0.15;
+}
+
+.grade-arrows path.is-lit {
+  stroke: var(--accent-soft);
+  stroke-width: 1.75;
 }
 
 .grade-card {
-  flex: 0 0 168px;
   margin: 0;
-  padding: 10px 12px;
+  padding: 9px 11px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  transition: background 120ms ease, border-color 120ms ease;
+  border-radius: 10px;
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
 }
 
-.grade-card.is-prereq {
-  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-}
-
-.grade-card.is-postreq {
-  background: color-mix(in srgb, var(--danger) 16%, var(--panel));
-  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
-}
-
-.grade-card.is-focus {
-  background: color-mix(in srgb, white 18%, var(--panel));
-  border-color: color-mix(in srgb, white 48%, var(--border));
-}
-
-.grade-card h2 {
-  margin: 0 0 6px;
-  font-size: 14px;
+.grade-card h3 {
+  margin: 0 0 4px;
+  font-size: 13.5px;
   font-weight: 600;
+  line-height: 1.25;
 }
 
 .grade-card p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .grade-card em {
@@ -1078,4 +1235,22 @@ td.failed {
   margin-left: 6px;
   color: var(--accent);
   font-style: normal;
+}
+
+/* A cadeia inteira em barro — o que a disciplina exige e o que ela destrava no
+   mesmo tom, porque quem separa os dois lados é a coluna de cada um. O que não
+   é da cadeia recua: numa grade de dezenas de cartões, é o apagar do resto que
+   faz o caminho aparecer. */
+.grade-card.is-chain {
+  background: color-mix(in srgb, var(--accent-soft) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent-soft) 45%, var(--border));
+}
+
+.grade-card.is-focus {
+  border-color: var(--text);
+  box-shadow: 0 0 0 1px var(--text);
+}
+
+.grade-card.is-mute {
+  opacity: 0.4;
 }

@@ -350,9 +350,8 @@ def test_the_retake_lowers_the_demand_of_the_discipline():
             difficulty=difficulty,
             relative_utility=1.0,
             attempt=attempt,
-            coupling=0.0,
-            noise=0.0,
-            noise_sigma=0.0,
+            utility_gain=0.0,
+            retake_gain=1.0,
         )
 
     assert grade(1) < grade(2) < grade(3)

@@ -58,6 +58,46 @@ export function newComparison(
   return { kind: "comparison", ...stamp(), config, result };
 }
 
+/** O cenário de uma execução gravada antes de 29/10/2026, traduzido para os
+ * campos de hoje. Sem isto uma entrada antiga derruba a lista inteira — o
+ * rótulo lê campos que não existem lá — ou reexecuta calada com outro cenário.
+ *
+ * **Aptidão**: era descrita pelos dois parâmetros de forma da Beta e passou a
+ * ser média e concentração. É a mesma Beta vista do outro lado, com
+ * `média = forma_1/(forma_1 + forma_2)` e `concentração = forma_1 + forma_2`.
+ *
+ * **Ganhos**: o `interest_coupling` virou `utility_gain` sem mudar de
+ * significado, e o `grade_noise` deu lugar ao `retake_gain`. Este último não é
+ * tradução — o choque não vira coeficiente —, então a execução antiga recebe o
+ * padrão 1 e passa a valer o `D/t`, que é o que o choque já fazia em média. */
+function migrateScenario<
+  T extends {
+    aptitude_mean: number;
+    aptitude_concentration: number;
+    utility_gain: number;
+    retake_gain: number;
+  }
+>(config: T): T {
+  const legacy = config as T & {
+    aptitude_alpha?: number;
+    aptitude_beta?: number;
+    interest_coupling?: number;
+  };
+  const migrated = { ...config };
+  if (typeof config.aptitude_mean !== "number") {
+    const concentration = (legacy.aptitude_alpha ?? 4) + (legacy.aptitude_beta ?? 2);
+    migrated.aptitude_mean = (legacy.aptitude_alpha ?? 4) / concentration;
+    migrated.aptitude_concentration = concentration;
+  }
+  if (typeof config.utility_gain !== "number") {
+    migrated.utility_gain = legacy.interest_coupling ?? 0;
+  }
+  if (typeof config.retake_gain !== "number") {
+    migrated.retake_gain = 1;
+  }
+  return migrated;
+}
+
 export function loadHistory(): HistoryEntry[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -66,14 +106,15 @@ export function loadHistory(): HistoryEntry[] {
     return (parsed as HistoryEntry[]).map((entry) => {
       // Entradas gravadas antes das comparações existirem não têm `kind`, e
       // não havia outra coisa que elas pudessem ser. Grade legada ainda pode
-      // trazer `prerequisites` no lugar de `unlocks`.
+      // trazer `prerequisites` no lugar de `unlocks`; o resto do cenário
+      // legado passa por `migrateScenario`.
       const disciplines = withUnlocks(entry.config.disciplines ?? []);
       if (entry.kind === "comparison") {
-        return { ...entry, config: { ...entry.config, disciplines } };
+        return { ...entry, config: migrateScenario({ ...entry.config, disciplines }) };
       }
       return {
         ...entry,
-        config: { ...entry.config, disciplines },
+        config: migrateScenario({ ...entry.config, disciplines }),
         result: entry.result,
       };
     });
@@ -135,7 +176,7 @@ function describeScenario(
   // As duas normais entram só quando saem do default: num cenário montado a
   // partir de um preset elas distinguem execuções que, de resto, são iguais.
   const populacao = [
-    `a ~ Beta(${config.aptitude_alpha.toLocaleString("pt-BR")}, ${config.aptitude_beta.toLocaleString("pt-BR")})`,
+    `aptidão: média ${config.aptitude_mean.toLocaleString("pt-BR")} · concentração ${config.aptitude_concentration.toLocaleString("pt-BR")}`,
     `u σ ${config.utility_sigma.toLocaleString("pt-BR")}`,
   ];
   return (

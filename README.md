@@ -591,9 +591,20 @@ do `PATH`.
 ### Usando a interface
 
 Em `http://localhost:5173`, a barra lateral tem **Configurar** (o formulário do
-cenário), **Projeto** (visão teórica do modelo e das métricas) e a lista de
-**Execuções** já feitas, cada uma identificada por data e hora — as comparações
-levam uma etiqueta, porque abrem numa tela diferente.
+cenário), **Projeto** (visão teórica do modelo e das métricas), **Grade** (a
+oferta desenhada), **Submochila** (a decisão de um aluno, passo a passo) e a
+lista de **Execuções** já feitas, cada uma identificada por data e hora — as
+comparações levam uma etiqueta, porque abrem numa tela diferente.
+
+A tela **Grade** traz duas grades, porque são duas regras de conclusão. A das
+**obrigatórias** é a cadeia de pré-requisitos lida da esquerda para a direita:
+cada coluna é um período, que não se configura — sai da indução sobre os
+pré-requisitos. A das **optativas** não tem período a mostrar (nenhuma destrava
+nada), e sem eixo o bloco tende ao quadrado: o número de colunas é a raiz do
+catálogo. Com o mouse sobre uma disciplina, a cadeia inteira dela se acende — o
+que ela exige e o que ela destrava, no mesmo tom, porque quem separa os dois
+lados é a coluna de cada um — e o resto da grade recua. Os conectores não levam
+ponta pelo mesmo motivo: a grade corre num sentido só.
 
 No topo de "Configurar", **Modo de execução** escolhe o que o botão faz:
 
@@ -657,10 +668,60 @@ A média das notas é a da mistura dos três perfis de aptidão que existiam ant
 dispersão vinha da distância *entre* os perfis, que é a diferença sistemática
 que saiu do modelo.
 
-Ou monte o seu: configure os parâmetros gerais, a população e a grade. Na tabela
-de disciplinas, a coluna **Período** é derivada (não se edita) e a célula de
-pré-requisitos abre a lista de chips para marcar de quais disciplinas aquela
-depende. Ao executar, a simulação entra no histórico e a tela abre nela.
+Ou monte o seu: a tela de configuração tem **Configurações gerais** (o N da
+comparação, o horizonte e o ritmo de ingresso, as rodadas e o Γ_min),
+**Utilidades** e **Notas**, cada uma destas ao lado da prévia da distribuição
+que seus parâmetros produzem. A **oferta não se edita ali**: a grade é a do
+preset carregado, e quem a mostra é a tela Grade. Ao executar, a simulação entra
+no histórico e a tela abre nela.
+
+Ao lado dos campos de **notas** e de **utilidades**, a tela desenha a
+distribuição que aqueles parâmetros produzem, recalculada a cada tecla
+(`web/src/distributions.ts`). São as mesmas dez faixas que a execução reporta,
+de modo que a prévia e o histograma do resultado se leem lado a lado. A das
+notas é quadratura sobre a Beta — exata, e por isso não treme enquanto se
+digita —, e traz a média e a aprovação ao pé.
+
+Ela desenha **um caso de cada vez**, escolhido ali: uma disciplina de
+dificuldade `D` (decimal) na `t`-ésima tentativa (inteiro), com uma dada
+**utilidade relativa** (decimal: a fração de utilidade vezes o número de
+disciplinas, de modo que 1 é a indiferença). O padrão é `D = 1`, `t = 1`,
+utilidade relativa 1, que é onde a nota *é* a aptidão. O título carrega
+o caso ("Notas · dificuldade 1,2 · 2ª tentativa"), senão duas leituras
+diferentes do mesmo histograma ficariam indistinguíveis — e a utilidade só
+entra nele quando o **ganho por utilidade** é maior que zero, porque é só aí
+que ela move o gráfico: ela age como expoente dele, e em ganho 0 o fator vale
+1. Como os três entram na fórmula pela razão
+`D/(u_rel^ganho_utilidade · tentativas)`, dificuldade 2 na segunda tentativa
+desenha exatamente o mesmo gráfico que dificuldade 1 na primeira — com ganho
+por recursada 1 —, e dificuldade 2 com `u_rel` 2 em ganho por utilidade 1
+também: o que serve de conferência da própria prévia. Em `t > 1` o gráfico é
+a nota que a **população inteira** tiraria naquela tentativa, e não a dos
+recursantes: quem recursa é quem foi mal, então a amostra real de uma segunda
+tentativa é a cauda de baixo da aptidão. A prévia responde "quanto a tentativa
+vale", não "como ficou a turma de repetentes". Ela
+sai **pintada pela nota mínima**, que por isso mora na seção de notas e não nas
+configurações gerais: faixa inteira acima dela em verde, inteira abaixo em
+vermelho, e em amarelo a faixa que `n_min` corta ao meio (com `n_min` = 5 não há
+nenhuma; com 5,5 é a `[5, 6)`). As faixas são fechadas à esquerda e abertas à
+direita — **menos a última**, fechada dos dois lados porque é nela que o máximo
+do domínio cai —, e o tooltip de qualquer um dos dois histogramas nomeia a faixa
+nessa notação: `[7, 8)`, `[9, 10]`, `[0,1; 0,2)`. Onde a vírgula já é a decimal,
+o par vai separado por ponto e vírgula. A legenda em palavras não é enfeite — cor de
+estado nunca diz sozinha o que quer dizer, e a amarela fica abaixo de 3:1 contra
+o fundo claro.
+
+A prévia **das utilidades** sorteia linhas de semente fixa e **deixa o degrau
+por altura de fora**: ele é curricular, não populacional, e domina tanto a linha
+que, com ele, o desenho não se mexeria com σ (as faixas andam menos de 2 pontos
+entre σ = 0,25 e σ = 3; sem ele, vão de um sino a 92% na primeira faixa). O
+seletor dentro do card troca a régua: em **fração de utilidade** o eixo vai de 0
+a 1 em dez faixas de 0,1 — o intervalo em que a grandeza vive por definição, e o
+mesmo em todo cenário —; em **utilidade relativa** (a fração vezes o número de
+disciplinas, em que 1 é a indiferença) ele vai de 0 ao maior valor sorteado. Os
+eixos não são proporcionais um ao outro, então as faixas são recontadas a cada
+troca. Numa grade grande a fração média é 1/|disciplinas|, e é a vista em
+utilidade relativa que abre o desenho.
 
 Os gráficos são a representação principal e saem em **dois lados do mercado**.
 
@@ -753,3 +814,9 @@ Os módulos do motor citam explicitamente os números das equações do
 anteprojeto (`../TCC1_Anteprojeto_Thales_Brito_Rodrigues.pdf`) em
 docstrings, para rastreabilidade entre a formalização matemática (Seções 3 e
 7) e a implementação.
+
+No formulário, todo `input[type=number]` precisa de `(valor − min) % step === 0`.
+O `min` é a **base** da escada do stepper, e não só um piso de validação: fora
+da grade, o primeiro clique na seta anda só até a próxima casa — era por isso
+que o σ, com `min=0,01` e `step=0,25`, saía de 1 para 1,01, e o W<sub>a</sub>,
+com `min=1` e `step=30`, saía de 450 para 451.

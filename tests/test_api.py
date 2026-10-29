@@ -107,10 +107,10 @@ COMPARE_SCENARIO = {
 # até 08/10/2026. Notas baixas e ganho alto para o cenário produzir recursadas
 # dentro do horizonte; W_a de 120 h para o teto morder.
 POPULATION = {
-    # Aptidão dura: Beta(2, 3) tem média 0,4, então reprova-se bastante e há
-    # recursada o bastante para o teste da razão D/t ter amostra.
-    "aptitude_alpha": 2,
-    "aptitude_beta": 3,
+    # Aptidão dura: média 0,4 (a Beta(2, 3) de antes), então reprova-se
+    # bastante e há recursada o bastante para o teste da razão D/t ter amostra.
+    "aptitude_mean": 0.4,
+    "aptitude_concentration": 5,
     "utility_sigma": 1,
     "max_hours": 120,
 }

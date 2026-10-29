@@ -65,7 +65,6 @@ from .entities import Agent, Good
 from .grading import (
     credit_return,
     draw_aptitudes,
-    draw_grade_noise,
     grade_distribution,
     grade_for_attempt,
 )
@@ -577,10 +576,9 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     elective_hours_by = config.elective_hours_by_discipline()
     hours_to_graduate = config.hours_to_graduate()
 
-    # Aptidão: um sorteio por par, persistente — é o traço do aluno. O choque
-    # é por par e período, e é ele que devolve sorte à tentativa.
+    # Aptidão: um sorteio por par, persistente — é o traço do aluno. É o único
+    # sorteio que a nota usa; o resto da fórmula é determinístico.
     aptitudes = draw_aptitudes(students, config.disciplines, config, rng)
-    grade_noise = draw_grade_noise(students, config.disciplines, config, rng)
     difficulty = {d.name: d.difficulty for d in config.disciplines}
     # u_rel: a utilidade em múltiplos da indiferença. `|disciplinas|` é o que
     # põe a indiferença em 1 e faz o parâmetro sobreviver ao catálogo crescer.
@@ -991,9 +989,8 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                     difficulty=difficulty[name],
                     relative_utility=utility_rows[(student.id, period)][name] * catalogue,
                     attempt=attempt,
-                    coupling=config.interest_coupling,
-                    noise=grade_noise[(student.id, name, period)],
-                    noise_sigma=config.grade_noise,
+                    utility_gain=config.utility_gain,
+                    retake_gain=config.retake_gain,
                 )
                 if attempt == 1:
                     first_grades.append(grade)

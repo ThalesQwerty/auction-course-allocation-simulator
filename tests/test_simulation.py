@@ -37,7 +37,6 @@ NEVER_APPROVES = dict(
     # nunca chega a 10,0 — então ninguém aprova e o conjunto elegível no 2º
     # período continua sendo o de entrada.
     min_grade=10.0,
-    grade_noise=0.0,
 )
 
 
@@ -727,10 +726,10 @@ def test_an_emptied_cohort_stays_in_the_series_with_its_graduates():
     # isso o cenário depende de sorte — com a matriz de notas sorteada por
     # período, quem reprova pode destoar e as duas gerações acabam juntas.
     result = run_simulation(
-        # Aptidão alta e sem ruído: todo mundo passa de primeira e a geração
-        # esvazia dentro do horizonte, que é o caso que o teste quer.
+        # Aptidão alta: todo mundo passa de primeira e a geração esvazia
+        # dentro do horizonte, que é o caso que o teste quer.
         make_config(
-            periods=12, entry_periods=2, aptitude_alpha=40.0, grade_noise=0.0
+            periods=12, entry_periods=2, aptitude_alpha=40.0
         )
     )
     emptied = [

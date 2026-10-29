@@ -18,7 +18,7 @@ from leilao.behavior import (
 )
 from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig
-from leilao.grading import draw_aptitudes, draw_grade_noise, grade_for_attempt
+from leilao.grading import draw_aptitudes, grade_for_attempt
 from leilao.population import Student, generate_students
 from leilao.simulation import run_simulation
 
@@ -58,7 +58,8 @@ def _grade_config(disciplines, **overrides):
 
 def test_aptitude_is_drawn_once_per_pair_and_persists():
     """A aptidão é **traço**: um sorteio por (aluno, disciplina), sem dimensão
-    de período. O que varia por período é o choque, não ela."""
+    de período — e, desde que o choque por tentativa saiu, o único sorteio que
+    a nota usa."""
     disciplines = [Discipline(f"D{i}", seats=50, hours=60, entry=True) for i in range(1, 41)]
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(120)]
     config = _grade_config(disciplines, periods=3)
@@ -69,37 +70,35 @@ def test_aptitude_is_drawn_once_per_pair_and_persists():
     # Beta(4, 2) tem média 4/6.
     assert abs(sum(aptitudes.values()) / len(aptitudes) - 4 / 6) < 0.01
 
-    noise = draw_grade_noise(students, disciplines, config, np.random.default_rng(0))
-    assert len(noise) == 120 * 40 * 3  # este sim é por período
-
 
 def test_the_grade_is_the_aptitude_when_the_demand_is_standard():
-    """Com dificuldade 1, primeira tentativa, sem acoplamento e sem ruído, o
-    expoente é 1 e a nota **é** a aptidão. É o que lhe dá leitura direta."""
+    """Com dificuldade 1, primeira tentativa e sem ganho por utilidade, o
+    expoente é 1 e a nota **é** a aptidão. É o que lhe dá leitura direta — e
+    vale para *toda* primeira tentativa, porque não há mais choque caindo
+    sobre ela."""
     for aptitude in (0.2, 0.55, 0.86, 0.99):
         assert grade_for_attempt(
             aptitude=aptitude,
             difficulty=1.0,
             relative_utility=1.0,
             attempt=1,
-            coupling=0.0,
-            noise=0.0,
-            noise_sigma=0.0,
+            utility_gain=0.0,
+            retake_gain=1.0,
         ) == round(100 * aptitude) / 10
 
 
 def test_difficulty_and_attempt_enter_as_a_ratio():
-    """D e t entram como D/t: dificuldade 2 na **segunda** tentativa equivale a
-    dificuldade 1 na primeira. É o que faz a dificuldade se ler em tentativas."""
+    """Com ganho por recursada 1, D e t entram como D/t: dificuldade 2 na
+    **segunda** tentativa equivale a dificuldade 1 na primeira. É o que faz a
+    dificuldade se ler em tentativas."""
     def grade(difficulty, attempt):
         return grade_for_attempt(
             aptitude=0.7,
             difficulty=difficulty,
             relative_utility=1.0,
             attempt=attempt,
-            coupling=0.0,
-            noise=0.0,
-            noise_sigma=0.0,
+            utility_gain=0.0,
+            retake_gain=1.0,
         )
 
     assert grade(1.0, 1) == grade(2.0, 2) == grade(3.0, 3)
@@ -109,18 +108,17 @@ def test_difficulty_and_attempt_enter_as_a_ratio():
     assert grade(2.0, 1) < grade(1.0, 1) < grade(1.0, 2)
 
 
-def test_the_interest_coupling_is_off_by_default():
-    """Com w = 0 a utilidade some da fórmula — é o controle que deixa a função
-    de nota neutra entre os mecanismos."""
-    def grade(u_rel, coupling):
+def test_the_utility_gain_is_off_by_default():
+    """Com ganho por utilidade 0 a utilidade some da fórmula — é o controle que
+    deixa a função de nota neutra entre os mecanismos."""
+    def grade(u_rel, gain):
         return grade_for_attempt(
             aptitude=0.7,
             difficulty=1.0,
             relative_utility=u_rel,
             attempt=1,
-            coupling=coupling,
-            noise=0.0,
-            noise_sigma=0.0,
+            utility_gain=gain,
+            retake_gain=1.0,
         )
 
     assert grade(0.1, 0.0) == grade(1.0, 0.0) == grade(5.0, 0.0)
@@ -128,24 +126,26 @@ def test_the_interest_coupling_is_off_by_default():
     assert grade(0.3, 1.0) < grade(1.0, 1.0) < grade(3.0, 1.0)
 
 
-def test_a_retake_no_longer_guarantees_a_higher_grade():
-    """O choque por tentativa é o que devolve sorte à recursada. Sem ele a nota
-    seria exata e recursar sempre melhoraria — revertendo uma decisão do
-    modelo — e a variância das notas passaria a vir do resorteio da utilidade,
-    amarrando a nota ao parâmetro de estabilidade da preferência."""
-    rng = np.random.default_rng(4)
-    first, second = [], []
-    for _ in range(20000):
-        kwargs = dict(
-            aptitude=0.6, difficulty=1.0, relative_utility=1.0,
-            coupling=0.0, noise_sigma=0.3,
+def test_the_retake_gain_says_what_a_repetition_is_worth():
+    """O ganho por recursada é quanta tentativa efetiva cada repetição
+    acrescenta. Em 1 o denominador é o próprio t; em 0 a repetição não rende
+    nada e a nota não se move — que é o extremo em que o aluno fica preso."""
+    def grade(attempt, gain):
+        return grade_for_attempt(
+            aptitude=0.6,
+            difficulty=1.0,
+            relative_utility=1.0,
+            attempt=attempt,
+            utility_gain=0.0,
+            retake_gain=gain,
         )
-        first.append(grade_for_attempt(attempt=1, noise=rng.normal(), **kwargs))
-        second.append(grade_for_attempt(attempt=2, noise=rng.normal(), **kwargs))
-    # Em média a recursada melhora...
-    assert np.mean(second) > np.mean(first)
-    # ...mas não em cada sorteio.
-    assert any(b < a for a, b in zip(first, second))
+
+    # Ganho 1: a segunda tentativa divide o expoente por 2, como o D/t.
+    assert grade(2, 1.0) == round(100 * 0.6**0.5) / 10
+    # Meio ganho fica entre não recursar e recursar inteiro.
+    assert grade(1, 0.5) < grade(2, 0.5) < grade(2, 1.0)
+    # Ganho 0: recursar não move a nota, e o aluno reprovado reprova sempre.
+    assert grade(1, 0.0) == grade(2, 0.0) == grade(9, 0.0)
 
 
 def test_the_grade_stays_on_the_scale_and_reaches_the_top():
@@ -154,7 +154,7 @@ def test_the_grade_stays_on_the_scale_and_reaches_the_top():
     grades = [
         grade_for_attempt(
             aptitude=a, difficulty=d, relative_utility=1.0, attempt=1,
-            coupling=0.0, noise=0.0, noise_sigma=0.0,
+            utility_gain=0.0, retake_gain=1.0,
         )
         for a in (0.01, 0.3, 0.7, 0.999)
         for d in (0.5, 1.0, 4.0)

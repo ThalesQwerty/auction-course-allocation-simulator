@@ -351,9 +351,8 @@ def sample_grade_distribution(config: SimulationConfig) -> list[float]:
             difficulty=1.0,
             relative_utility=1.0,
             attempt=1,
-            coupling=0.0,
-            noise=0.0,
-            noise_sigma=0.0,
+            utility_gain=0.0,
+            retake_gain=1.0,
         )
         for aptitude in aptitudes.values()
     ]

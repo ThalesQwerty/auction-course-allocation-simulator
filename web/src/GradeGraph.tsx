@@ -3,9 +3,10 @@ import type { CSSProperties } from "react";
 import { CYCLIC, curriculumPeriods } from "./curriculum";
 import type { DisciplineInput } from "./types";
 
-/** Uma seta entre duas disciplinas, já em coordenadas do contêiner. O traço é
- * uma cúbica de tangentes horizontais: a cadeia corre da esquerda para a
- * direita, e a curva dá o sentido sem depender só da ponta. */
+/** Um conector entre duas disciplinas, já em coordenadas do contêiner. O traço
+ * é uma cúbica de tangentes horizontais, e não leva ponta: a cadeia corre da
+ * esquerda para a direita, então o sentido está na própria posição das
+ * colunas. */
 interface Arrow {
   key: string;
   from: string;
@@ -92,12 +93,13 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
     [hover, links]
   );
 
+  /** Os dois lados da cadeia saem no **mesmo** tom: o que separa "exige" de
+   * "destrava" é a coluna em que o cartão está, e a grade corre num sentido
+   * só. */
   const cardClass = (name: string) => {
     if (!hover) return "grade-card";
     if (hover === name) return "grade-card is-focus";
-    if (links.prereq.get(hover)?.has(name)) return "grade-card is-prereq";
-    if (links.postreq.get(hover)?.has(name)) return "grade-card is-postreq";
-    return "grade-card is-mute";
+    return related(name) ? "grade-card is-chain" : "grade-card is-mute";
   };
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -124,7 +126,10 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
         const y1 = start.top + start.height / 2 - origin.top;
         const x2 = end.left - origin.left;
         const y2 = end.top + end.height / 2 - origin.top;
-        const pull = Math.max(24, Math.abs(x2 - x1) / 2);
+        // Metade do vão em cada ponta, e nada além dele: com a tangente mais
+        // longa que a distância, as duas pontas se ultrapassam e a curva estufa
+        // num S. O teto segura as que saltam colunas.
+        const pull = Math.max(8, Math.min(Math.abs(x2 - x1) / 2, 48));
         next.push({
           key: `${discipline.name}->${successor}`,
           from: discipline.name,
@@ -172,45 +177,19 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
   return (
     <div>
       <h1>Grade</h1>
-      <p className="note">
-        São duas grades porque são duas regras de conclusão. Nas{" "}
-        <strong>obrigatórias</strong> cada coluna é um período da grade, lido da esquerda para a
-        direita; o período não se configura, sai da indução sobre os pré-requisitos. As{" "}
-        <strong>optativas</strong> não têm período — o aluno escolhe quais cursar até somar a carga
-        exigida, e é essa substituibilidade que as põe num bloco sem ordem. Com o mouse sobre uma
-        disciplina, o que ela exige fica <span className="grade-key up">azul</span> e o que ela
-        destrava fica <span className="grade-key down">barro</span>.
-      </p>
 
       <div className="grade-scroll">
         <div className="grade-sheet" ref={containerRef}>
           <svg className="grade-arrows" aria-hidden="true">
-            <defs>
-              <marker id="grade-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-                <path className="arrow-head" d="M0,0 L6,3 L0,6" />
-              </marker>
-              <marker
-                id="grade-arrow-lit"
-                markerWidth="8"
-                markerHeight="8"
-                refX="6"
-                refY="3"
-                orient="auto"
-              >
-                <path className="arrow-head is-lit" d="M0,0 L6,3 L0,6" />
-              </marker>
-            </defs>
-            {arrows.map((arrow) => {
-              const lit = related(arrow.from) && related(arrow.to);
-              return (
-                <path
-                  key={arrow.key}
-                  className={hover ? (lit ? "is-lit" : "is-dim") : ""}
-                  d={arrow.d}
-                  markerEnd={lit ? "url(#grade-arrow-lit)" : "url(#grade-arrow)"}
-                />
-              );
-            })}
+            {arrows.map((arrow) => (
+              <path
+                key={arrow.key}
+                className={
+                  hover ? (related(arrow.from) && related(arrow.to) ? "is-lit" : "is-dim") : ""
+                }
+                d={arrow.d}
+              />
+            ))}
           </svg>
 
           {columns.length > 0 && (

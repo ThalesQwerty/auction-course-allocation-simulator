@@ -124,9 +124,10 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
       <p>
         <strong>Não há perfis de aluno.</strong> Toda a população sai de duas distribuições do
         cenário, e o que distingue um aluno do outro é só o que a <em>seed</em> sorteou para ele. A{" "}
-        <em>normal das notas</em> é de onde cada par (aluno, disciplina) sorteia a nota em cada
-        período, por média e desvio, e a recursada desloca essa média (eq. 33) — sem dispersão de
-        desempenho o CR vira ruído e a eq. (57) não mede nada. A <em>log-normal das utilidades</em> tem
+        <em>Beta da aptidão</em> dá, para cada par (aluno, disciplina), o quanto aquele aluno
+        rende naquela disciplina — traço persistente, sorteado uma vez —, e a nota é essa aptidão
+        elevada à demanda que a disciplina faz (eq. 33). Sem dispersão de desempenho o CR vira
+        ruído e a eq. (57) não mede nada. A <em>log-normal das utilidades</em> tem
         um parâmetro só, o desvio <em>σ</em>, e é ele que diz o quanto o aluno diferencia uma
         disciplina da outra: <em>σ</em> grande concentra a preferência e <em>σ</em> pequeno a
         achata. Diferenciar preferência é justamente a informação
@@ -316,16 +317,22 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
       <h2>Escolhas de modelagem não fixadas pelo anteprojeto</h2>
       <ul>
         <li>
-          <strong>A normal das notas:</strong> as notas saem de uma normal do cenário,
-          parametrizada por média e desvio padrão. Sem dispersão de desempenho o CR vira ruído e a
-          eq. (57) não mede nada.
+          <strong>A nota como potência da aptidão:</strong> a aptidão de cada par (aluno,
+          disciplina) sai de uma Beta do cenário, descrita por <strong>média</strong> e{" "}
+          <strong>concentração</strong>, e a nota é <em>a</em> elevada à demanda que a disciplina
+          faz. A forma de potência tem história generativa — se a disciplina são E unidades
+          independentes e o aluno domina cada uma com probabilidade <em>a</em>, então{" "}
+          <em>a^E</em> é a chance de dominar todas — e respeita (0, 1) por construção, sem a
+          truncagem que empilhava massa nas pontas.
         </li>
         <li>
-          <strong>Notas como parâmetro de entrada:</strong> a matriz com o sorteio de cada par
-          (aluno, disciplina) em cada <em>período</em> é gerada junto com a população. A recursada
-          desloca a <strong>média</strong> do sorteio pelo incremento de aprendizado, então ela
-          não garante nota maior — o aluno aprende, mas pode ter um dia pior. O que não regride é
-          a maior nota já obtida, que é a que conta para o CR.
+          <strong>Os dois ganhos:</strong> a demanda é a dificuldade dividida por{" "}
+          a <em>utilidade relativa</em> elevada ao <strong>ganho por utilidade</strong> e pelas tentativas
+          efetivas, que o <strong>ganho por recursada</strong> define. A nota é determinística
+          dada a aptidão: até 29/10/2026 havia um choque log-normal por tentativa, que saiu porque
+          ele atrasava o cenário em ~5% dos formados sem mover métrica nenhuma e borrava a leitura
+          de que a nota <em>é</em> a aptidão na primeira tentativa. O que não regride é a maior
+          nota já obtida, que é a que conta para o CR.
         </li>
 
         <li>
@@ -384,7 +391,7 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
       <p>
         Uma <strong>comparação</strong> abre quatro boxplots — satisfação (ψ̄), equidade (φ),
         correlação (λ) e tempo de formatura —, com uma caixa por modelo: a linha grossa é a
-        mediana, a caixa é a metade central das N execuções, os bigodes vão até 1,5 IQR. Nas três
+        mediana, a caixa é a metade central das execuções, os bigodes vão até 1,5 IQR. Nas três
         primeiras, cada valor é uma execução reduzida à média dos períodos ponderada pelos alunos
         medidos; o tempo de formatura é da execução inteira. O que se lê é a sobreposição — caixas
         que não se tocam separam os mecanismos; caixas sobrepostas dizem que a diferença entre as

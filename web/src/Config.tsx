@@ -1,14 +1,10 @@
-import { useMemo } from "react";
-import { CYCLIC, curriculumPeriods, entryDisciplines } from "./curriculum";
+import { useMemo, useState } from "react";
+import { DensityChart, STATUS } from "./charts";
+import { entryDisciplines } from "./curriculum";
+import { gradeDensity, utilityDensity } from "./distributions";
 import { PresetList } from "./PresetList";
-import {
-  COMPARISON_ARMS,
-  MAX_COMPARISON_RUNS,
-} from "./types";
-import type {
-  DisciplineInput,
-  Scenario,
-} from "./types";
+import { COMPARISON_ARMS, MAX_COMPARISON_RUNS } from "./types";
+import type { Scenario } from "./types";
 
 export function Config({
   config,
@@ -33,21 +29,10 @@ export function Config({
   hasCustom: boolean;
   onSelectPreset: (presetId: string | null) => void;
 }) {
-
   function patch(values: Partial<Scenario>) {
     setConfig((current) => ({ ...current, ...values }));
   }
 
-  function updateDiscipline(index: number, values: Partial<DisciplineInput>) {
-    setConfig((current) => ({
-      ...current,
-      disciplines: current.disciplines.map((d, i) => (i === index ? { ...d, ...values } : d)),
-    }));
-  }
-
-
-  const periods = useMemo(() => curriculumPeriods(config.disciplines), [config.disciplines]);
-  const hasCycle = Object.values(periods).some((p) => p === CYCLIC);
   // **Entrada**, não "1º período": a optativa também não tem pré-requisito e
   // também cai no 1º período na indução, mas fica fora da matrícula garantida.
   // Validar contra o conjunto errado acusaria erro em cenário que o motor
@@ -60,267 +45,334 @@ export function Config({
   const entryTooLarge = config.students_per_period > smallestEntrySeats;
   const entryTooHeavy = entryHours > config.max_hours;
 
-  const totalSeats = config.disciplines.reduce((sum, d) => sum + d.seats, 0);
-  const totalHours = config.disciplines.reduce((sum, d) => sum + d.hours, 0);
+  // O recorte que cada prévia desenha. Nada disto é parâmetro de cenário: não
+  // vai para a API, e por isso mora aqui e não em `Scenario`.
+  const [difficulty, setDifficulty] = useState(1);
+  const [attempt, setAttempt] = useState(1);
+  const [relativeUtility, setRelativeUtility] = useState(1);
+
+  // As duas distribuições de entrada, recalculadas a cada tecla. São curvas, e
+  // não barras: aqui não há dado contado, e sim a forma que os parâmetros
+  // implicam.
+  const grades = useMemo(
+    () => gradeDensity(config, { difficulty, attempt, relativeUtility }),
+    [config, difficulty, attempt, relativeUtility]
+  );
+  const utilities = useMemo(() => utilityDensity(config), [config]);
+  // O eixo da utilidade é o suporte da própria amostra, que a curva já carrega
+  // no último ponto.
+  const utilityTop = utilities.points.length
+    ? utilities.points[utilities.points.length - 1].x
+    : 1;
+  // Uma casa a mais do que a régua do eixo: o rodapé dá um número, e um número
+  // arredondado à casa do eixo perderia justamente o que ele acrescenta.
+  const utilityDigits =
+    Math.max(0, Math.ceil(-Math.log10(Math.max(utilityTop, 1e-9) / 10))) + 1;
+  const utilityValue = (value: number) =>
+    value.toLocaleString("pt-BR", { maximumFractionDigits: utilityDigits });
+
+  // A nota sai do motor arredondada a um décimo; o rodapé a mostra assim.
+  const grade = (value: number) =>
+    value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
 
   return (
     <div className="rail-layout">
       <div className="rail-layout-main">
-      <h1>Configurar comparação</h1>
+        <h1>Configurar comparação</h1>
 
-      {error && <div className="error-banner">{error}</div>}
+        {error && <div className="error-banner">{error}</div>}
 
-      <div className="panel">
-        <h2>Execução</h2>
-        <p className="note">
-          Toda execução é uma <strong>comparação entre modelos</strong>: o mesmo cenário roda nos{" "}
-          {COMPARISON_ARMS.length} braços, com as seeds de 1 a N. As listas são pareadas — a
-          i-ésima execução de cada braço parte da mesma população, da mesma matriz de utilidades e
-          da mesma de aptidão —, e por isso a diferença entre eles é atribuível ao modelo, e não ao
-          sorteio.
-        </p>
-        <div className="field-row">
-          <div className="field">
-            <label>Execuções por modelo (N)</label>
-            <input
-              type="number"
-              min={1}
-              max={MAX_COMPARISON_RUNS}
-              value={runs}
-              onChange={(e) => setRuns(Number(e.target.value))}
-            />
-            <span className="field-hint">
-              {runs * COMPARISON_ARMS.length} simulações
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="panel">
-        <h2>Configurações gerais</h2>
-        <div className="field-row">
-          <div className="field">
-            <label>Períodos (|T|)</label>
-            <input type="number" min={1} max={40} value={config.periods} onChange={(e) => patch({ periods: Number(e.target.value) })} />
-          </div>
-          <div className="field">
-            <label>Períodos com ingresso (L)</label>
-            <input
-              type="number"
-              min={1}
-              max={config.periods}
-              placeholder={String(config.periods)}
-              value={config.entry_periods ?? ""}
-              onChange={(e) =>
-                patch({ entry_periods: e.target.value === "" ? null : Number(e.target.value) })
-              }
-            />
-            <span className="field-hint">vazio = todos os períodos</span>
-          </div>
-          <div className="field">
-            <label>Alunos novos por período</label>
-            <input
-              type="number"
-              min={1}
-              className={entryTooLarge ? "invalid" : undefined}
-              value={config.students_per_period}
-              onChange={(e) => patch({ students_per_period: Number(e.target.value) })}
-            />
-            {entryTooLarge && (
-              <span className="field-hint invalid-text">
-                Passa das {smallestEntrySeats} vagas da disciplina de entrada mais apertada.
-              </span>
-            )}
-          </div>
-          <div className="field">
-            <label>Rodadas por período (|R|)</label>
-            <input type="number" min={1} max={10} value={config.rounds} onChange={(e) => patch({ rounds: Number(e.target.value) })} />
-          </div>
-          <div className="field">
-            <label>Nota mínima (n<sub>min</sub>)</label>
-            <input type="number" min={0.1} max={10} step={0.1} value={config.min_grade} onChange={(e) => patch({ min_grade: Number(e.target.value) })} />
-          </div>
-          <div className="field">
-            <label>Créditos base por período (Γ<sub>min</sub>)</label>
-            <input type="number" min={1} value={config.base_credits} onChange={(e) => patch({ base_credits: Number(e.target.value) })} />
-          </div>
-        </div>
-      </div>
-
-      <div className="panel">
-        <h2>Como são os alunos</h2>
-
-        <div className="subpanel">
-          <h3>Notas</h3>
-          <p className="note">
-            A nota sai da <strong>aptidão</strong> do aluno naquela disciplina, elevada à demanda
-            que ela lhe faz: com dificuldade 1, primeira tentativa e sem acoplamento, o expoente é
-            1 e a <em>nota é a aptidão</em>. A aptidão vem de uma Beta por par (aluno, disciplina),
-            sorteada uma vez e permanente — é traço, não sorte. Dificuldade e tentativa entram como
-            a razão <em>D/t</em>: dificuldade 2 na segunda tentativa equivale a dificuldade 1 na
-            primeira.
-          </p>
+        <div className="panel">
+          <h2>Configurações gerais</h2>
           <div className="field-row">
             <div className="field">
-              <label>Aptidão: α</label>
-              <input
-                type="number"
-                min={0.1}
-                step={0.5}
-                value={config.aptitude_alpha}
-                onChange={(e) => patch({ aptitude_alpha: Number(e.target.value) })}
-              />
-            </div>
-            <div className="field">
-              <label>Aptidão: β</label>
-              <input
-                type="number"
-                min={0.1}
-                step={0.5}
-                value={config.aptitude_beta}
-                onChange={(e) => patch({ aptitude_beta: Number(e.target.value) })}
-              />
-            </div>
-            <div className="field">
-              <label>Ruído por tentativa</label>
-              <input
-                type="number"
-                min={0}
-                step={0.05}
-                value={config.grade_noise}
-                onChange={(e) => patch({ grade_noise: Number(e.target.value) })}
-              />
-            </div>
-            <div className="field">
-              <label>Interesse × desempenho</label>
-              <input
-                type="number"
-                min={0}
-                step={0.25}
-                value={config.interest_coupling}
-                onChange={(e) => patch({ interest_coupling: Number(e.target.value) })}
-              />
-            </div>
-          </div>
-          <p className="note">
-            <strong>Zero desliga o acoplamento</strong>, e é o padrão. Ele é a única peça da
-            fórmula de nota sem forma justificada e a única que mexe no resultado principal: em 1
-            ela fabrica sozinha ~40% de vão em aprovações a favor do lance, antes de qualquer
-            alocação ter sido avaliada. Em 0 a função de nota é neutra entre os modelos, e
-            qualquer vão em conclusões é do modelo, inteiro.
-          </p>
-        </div>
-
-        <div className="subpanel">
-          <h3>Utilidades</h3>
-          <div className="field-row">
-            <div className="field">
-              <label>
-                Desvio da log-normal (<em>σ</em>)
-              </label>
-              <input
-                type="number"
-                min={0.01}
-                step={0.25}
-                value={config.utility_sigma}
-                onChange={(e) => patch({ utility_sigma: Number(e.target.value) })}
-              />
-              <div className="field">
-              <label>Parte permanente do gosto</label>
-              <input
-                type="number"
-                min={0}
-                max={1}
-                step={0.1}
-                value={config.utility_stability}
-                onChange={(e) => patch({ utility_stability: Number(e.target.value) })}
-              />
-              <span className="field-hint">
-                0 resorteia a preferência inteira todo período; 1 congela. É literalmente a
-                correlação entre dois semestres quaisquer, e não mexe na dispersão de nenhum
-                deles.
-              </span>
-            </div>
-          </div>
-            <div className="field grow">
-              <label>Carga horária máxima (W<sub>a</sub>)</label>
+              <label>Execuções por modelo</label>
               <input
                 type="number"
                 min={1}
-                step={30}
-                className={entryTooHeavy ? "invalid" : undefined}
-                value={config.max_hours}
-                onChange={(e) => patch({ max_hours: Number(e.target.value) })}
+                max={MAX_COMPARISON_RUNS}
+                value={runs}
+                onChange={(e) => setRuns(Number(e.target.value))}
               />
             </div>
           </div>
-          {entryTooHeavy && (
-            <p className="invalid-text">
-              As {entryCourses.length} disciplinas de entrada somam {entryHours} h e não cabem em W
-              <sub>a</sub>.
-            </p>
-          )}
-        </div>
-      </div>
 
-      <div className="panel">
-        <h2>
-          Oferta — {config.disciplines.length} disciplinas, {totalSeats} vagas, {totalHours} h
-        </h2>
-        {hasCycle && (
-          <div className="error-banner">
-            Há um ciclo de sucessores. A simulação recusa o cenário enquanto ele existir.
+          <div className="field-row">
+            <div className="field">
+              <label>Períodos (|T|)</label>
+              <input
+                type="number"
+                min={1}
+                max={40}
+                value={config.periods}
+                onChange={(e) => patch({ periods: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Períodos com ingresso</label>
+              <input
+                type="number"
+                min={1}
+                max={config.periods}
+                placeholder={String(config.periods)}
+                value={config.entry_periods ?? ""}
+                onChange={(e) =>
+                  patch({ entry_periods: e.target.value === "" ? null : Number(e.target.value) })
+                }
+              />
+            </div>
+            <div className="field">
+              <label>Alunos novos por período</label>
+              <input
+                type="number"
+                min={1}
+                className={entryTooLarge ? "invalid" : undefined}
+                value={config.students_per_period}
+                onChange={(e) => patch({ students_per_period: Number(e.target.value) })}
+              />
+              {entryTooLarge && (
+                <span className="field-hint invalid-text">
+                  Passa das {smallestEntrySeats} vagas da disciplina de entrada mais apertada.
+                </span>
+              )}
+            </div>
           </div>
-        )}
 
-        <table>
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th style={{ width: 90 }}>Vagas</th>
-              <th style={{ width: 110 }}>Carga</th>
-            </tr>
-          </thead>
-          <tbody>
-            {config.disciplines.map((discipline, i) => (
-              <tr key={discipline.name}>
-                <td className={periods[discipline.name] === CYCLIC ? "invalid-text" : undefined}>
-                  {discipline.name}
-                </td>
-                <td>
+          <div className="field-row">
+            <div className="field">
+              <label>Rodadas por período (|R|)</label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={config.rounds}
+                onChange={(e) => patch({ rounds: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>
+                Créditos base por período (Γ<sub>min</sub>)
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={config.base_credits}
+                onChange={(e) => patch({ base_credits: Number(e.target.value) })}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="panel">
+          <h2>Utilidades</h2>
+          <div className="config-split">
+            <div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Desvio da log-normal</label>
+                  <input
+                    type="number"
+                    min={0.05}
+                    step={0.05}
+                    value={config.utility_sigma}
+                    onChange={(e) => patch({ utility_sigma: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Estabilidade</label>
                   <input
                     type="number"
                     min={0}
-                    className={
-                      discipline.entry && discipline.seats < config.students_per_period
-                        ? "invalid"
-                        : undefined
-                    }
-                    value={discipline.seats}
-                    onChange={(e) => updateDiscipline(i, { seats: Number(e.target.value) })}
+                    max={1}
+                    step={0.1}
+                    value={config.utility_stability}
+                    onChange={(e) => patch({ utility_stability: Number(e.target.value) })}
                   />
-                </td>
-                <td>
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>
+                    Carga horária máxima (W<sub>a</sub>)
+                  </label>
                   <input
                     type="number"
-                    min={1}
-                    value={discipline.hours}
-                    onChange={(e) => updateDiscipline(i, { hours: Number(e.target.value) })}
+                    min={30}
+                    step={30}
+                    className={entryTooHeavy ? "invalid" : undefined}
+                    value={config.max_hours}
+                    onChange={(e) => patch({ max_hours: Number(e.target.value) })}
                   />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                </div>
+              </div>
 
-      <div className="actions sticky-actions">
-        <button className="primary" disabled={running} onClick={onRun}>
-          {running
-            ? `Comparando — ${runs * COMPARISON_ARMS.length} simulações...`
-            : "Comparar modelos"}
-        </button>
-      </div>
+              {entryTooHeavy && (
+                <p className="invalid-text">
+                  As {entryCourses.length} disciplinas de entrada somam {entryHours} h e não cabem
+                  em W<sub>a</sub>.
+                </p>
+              )}
+            </div>
+
+            <div className="config-preview">
+              <DensityChart
+                id="curva-utilidade"
+                title="Distribuição de utilidade relativa"
+                points={utilities.points}
+                domain={[0, utilityTop]}
+                footer={<>mais provável: {utilityValue(utilities.mode)}</>}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="panel">
+          <h2>Notas</h2>
+          <div className="config-split">
+            <div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Nota média</label>
+                  {/* O cenário guarda a média da aptidão em (0, 1); a tela a
+                      edita como nota, que é o mesmo número vezes 10 — em
+                      dificuldade 1 e primeira tentativa a nota *é* a aptidão.
+                      O arredondamento no caminho de ida evita que 0,67 apareça
+                      como 6,700000000000001. */}
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={9.9}
+                    step={0.1}
+                    value={Math.round(config.aptitude_mean * 1000) / 100}
+                    onChange={(e) => patch({ aptitude_mean: Number(e.target.value) / 10 })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Concentração</label>
+                  <input
+                    type="number"
+                    min={0.5}
+                    step={0.5}
+                    value={config.aptitude_concentration}
+                    onChange={(e) => patch({ aptitude_concentration: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>Ganho por utilidade</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.25}
+                    value={config.utility_gain}
+                    onChange={(e) => patch({ utility_gain: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Ganho por tentativa</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.25}
+                    value={config.retake_gain}
+                    onChange={(e) => patch({ retake_gain: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>
+                    Nota mínima de aprovação (n<sub>min</sub>)
+                  </label>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={10}
+                    step={0.1}
+                    value={config.min_grade}
+                    onChange={(e) => patch({ min_grade: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="config-preview">
+              <DensityChart
+                id="curva-notas"
+                title="Distribuição das notas"
+                points={grades.points}
+                domain={[0, 10]}
+                footer={
+                  <>
+                    mais provável: {grade(grades.mode)} · aprova: {" "}
+                    {(grades.approval * 100).toLocaleString("pt-BR", {
+                      maximumFractionDigits: 1,
+                    })}
+                    %
+                  </>
+                }
+                split={{
+                  at: config.min_grade,
+                  below: STATUS.critical,
+                  above: STATUS.good,
+                  labels: ["reprova", "aprova"],
+                }}
+                controls={
+                  <div className="field-row">
+                    <div className="field">
+                      <label>Dificuldade (D)</label>
+                      {/* O min é a base da escada do stepper: com min 0 e passo
+                          0,1 a grade é 0 · 0,1 · 0,2, e o padrão (1) cai nela.
+                          O 0 é aparado na prévia. */}
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={difficulty}
+                        onChange={(e) => setDifficulty(Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Tentativa (t)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={attempt}
+                        onChange={(e) =>
+                          setAttempt(Math.max(1, Math.round(Number(e.target.value))))
+                        }
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Utilidade relativa</label>
+                      <input
+                        type="number"
+                        min={0.0001}
+                        step={0.1}
+                        value={relativeUtility}
+                        onChange={(e) => setRelativeUtility(Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                }
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="actions sticky-actions">
+          <button className="primary" disabled={running} onClick={onRun}>
+            {running
+              ? `Comparando — ${runs * COMPARISON_ARMS.length} simulações...`
+              : "Comparar modelos"}
+          </button>
+        </div>
       </div>
 
       <PresetList selected={presetId} hasCustom={hasCustom} onSelect={onSelectPreset} />

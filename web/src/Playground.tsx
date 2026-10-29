@@ -16,8 +16,8 @@ export interface PlaygroundDraft {
   rounds: number;
   seats: number;
   seed: number;
-  aptitudeAlpha: number;
-  aptitudeBeta: number;
+  aptitudeMean: number;
+  aptitudeConcentration: number;
   selected: number;
   students: PlaygroundStudent[];
 }
@@ -28,8 +28,8 @@ export function createPlaygroundDraft(config: Scenario): PlaygroundDraft {
     rounds: 1,
     seats: 1,
     seed: 1,
-    aptitudeAlpha: config.aptitude_alpha,
-    aptitudeBeta: config.aptitude_beta,
+    aptitudeMean: config.aptitude_mean,
+    aptitudeConcentration: config.aptitude_concentration,
     selected: 0,
     students: [newStudent("voce", "Você", config)],
   };
@@ -106,8 +106,8 @@ export function Playground({
           mechanism: draft.mechanism,
           rounds: draft.rounds,
           seed: draft.seed,
-          aptitude_alpha: draft.aptitudeAlpha,
-          aptitude_beta: draft.aptitudeBeta,
+          aptitude_mean: draft.aptitudeMean,
+          aptitude_concentration: draft.aptitudeConcentration,
           disciplines: config.disciplines.map(({ name, hours }) => ({
             name,
             seats: draft.seats ?? 1,
@@ -172,24 +172,26 @@ export function Playground({
             />
           </div>
           <div className="field">
-            <label>Média das notas</label>
+            <label>Aptidão: média</label>
             <input
               type="number"
-              min={0}
-              max={10}
-              step={0.1}
-              value={draft.aptitudeAlpha}
-              onChange={(e) => setDraft({ ...draft, aptitudeAlpha: Number(e.target.value) })}
+              min={0.01}
+              max={0.99}
+              step={0.01}
+              value={draft.aptitudeMean}
+              onChange={(e) => setDraft({ ...draft, aptitudeMean: Number(e.target.value) })}
             />
           </div>
           <div className="field">
-            <label>Desvio das notas</label>
+            <label>Aptidão: concentração</label>
             <input
               type="number"
               min={0.1}
-              step={0.1}
-              value={draft.aptitudeBeta}
-              onChange={(e) => setDraft({ ...draft, aptitudeBeta: Number(e.target.value) })}
+              step={0.5}
+              value={draft.aptitudeConcentration}
+              onChange={(e) =>
+                setDraft({ ...draft, aptitudeConcentration: Number(e.target.value) })
+              }
             />
           </div>
           <div className="field">

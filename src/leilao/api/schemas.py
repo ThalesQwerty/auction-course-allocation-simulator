@@ -115,20 +115,23 @@ class ScenarioIn(BaseModel):
     disciplines: list[DisciplineIn] = Field(default_factory=list)
     # As distribuições que descrevem a população. Não há perfis: todo aluno sai
     # daqui, e a diferença entre dois alunos é só o que a seed sorteou.
-    aptitude_alpha: float = Field(
-        default=4.0, gt=0, description="alpha da Beta da aptidão"
+    # A aptidão entra por média e concentração, que é como se lê uma
+    # população; `grading.beta_shape` as converte nos dois parâmetros de forma
+    # que a Beta pede. Média 0,67 com concentração 6 é a Beta(4, 2) calibrada.
+    aptitude_mean: float = Field(
+        default=0.67, gt=0, lt=1, description="média da aptidão"
     )
-    aptitude_beta: float = Field(
-        default=2.0, gt=0, description="beta da Beta da aptidão"
+    aptitude_concentration: float = Field(
+        default=6.0, gt=0, description="concentração da aptidão em torno da média"
     )
-    interest_coupling: float = Field(
+    utility_gain: float = Field(
         default=0.0,
         ge=0,
         description=(
-            "O quanto o interesse mexe na nota, como expoente sobre u_rel. "
-            "0 desliga o acoplamento e deixa a função de nota neutra entre os "
-            "mecanismos; é o controle a reportar ao lado de qualquer resultado "
-            "em conclusões."
+            "ganho por utilidade: o quanto a utilidade mexe na nota, como "
+            "expoente sobre u_rel. 0 desliga e deixa a função de nota neutra "
+            "entre os mecanismos; é o controle a reportar ao lado de qualquer "
+            "resultado em conclusões."
         ),
     )
     utility_stability: float = Field(
@@ -141,8 +144,13 @@ class ScenarioIn(BaseModel):
             "a divisão preserva a dispersão de cada período"
         ),
     )
-    grade_noise: float = Field(
-        default=0.25, ge=0, description="desvio do choque log-normal por tentativa"
+    retake_gain: float = Field(
+        default=1.0,
+        ge=0,
+        description=(
+            "ganho por recursada: quanta tentativa efetiva cada repetição "
+            "acrescenta no denominador do expoente. 1 recupera o D/t"
+        ),
     )
     utility_sigma: float = Field(
         default=1.0,
@@ -455,8 +463,8 @@ class PlaygroundRequest(BaseModel):
     mechanism: Mechanism
     rounds: int = Field(ge=1, le=10)
     seed: int = 0
-    aptitude_alpha: float = Field(default=12.0, gt=0)
-    aptitude_beta: float = Field(default=2.0, gt=0)
+    aptitude_mean: float = Field(default=0.67, gt=0, lt=1)
+    aptitude_concentration: float = Field(default=6.0, gt=0)
     disciplines: list[PlaygroundDisciplineIn]
     students: list[PlaygroundStudentIn]
 

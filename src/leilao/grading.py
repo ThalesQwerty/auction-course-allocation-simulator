@@ -3,24 +3,42 @@
 A nota não sai de uma normal: ela sai da **aptidão** do aluno naquela
 disciplina, elevada à demanda que a disciplina lhe faz.
 
-    nota = round( 100 · a ^ ( D · ruído / (u_rel^acoplamento · t) ) ) / 10
+    nota = round( 100 · a ^ expoente ) / 10
+
+        expoente   = D / ( u_rel ^ ganho_utilidade · tentativas )
+        tentativas = 1 + ganho_recursada · (t - 1)
 
 - **a** é a aptidão, sorteada de uma Beta por par (aluno, disciplina) e
   **persistente**: é o traço, não a sorte. Com expoente 1 a nota *é* a
   aptidão, o que lhe dá leitura direta — "a nota que este aluno tiraria nesta
   disciplina, de dificuldade padrão, de primeira".
-- **D** é a dificuldade da disciplina, e **t** a tentativa. Eles entram como a
-  razão `D/t`, então **dificuldade 2 na segunda tentativa equivale a
-  dificuldade 1 na primeira**: a dificuldade se lê em *quantas tentativas a
-  disciplina custa* para render o que uma de dificuldade 1 rende de saída. É
-  a lei de potência da prática, e substitui o incremento aditivo por recursada
-  do modelo anterior, que não tinha respaldo nenhum.
+- **D** é a dificuldade da disciplina: o quanto ela exige, em múltiplos da
+  disciplina padrão.
 - **u_rel** é a utilidade da disciplina para o aluno, em múltiplos da
-  indiferença (`u · |disciplinas|`, que vale 1 quando ele é indiferente), e
-  o **acoplamento** é o quanto o interesse mexe no desempenho.
-- **ruído** é um choque log-normal por tentativa, sem o qual a nota seria
-  determinística dado `(a, D, u_rel, t)` — e aí recursar *garantiria* nota
-  maior, revertendo uma decisão deliberada do modelo.
+  indiferença (`u · |disciplinas|`, que vale 1 quando ele é indiferente).
+- **t** é a tentativa, e `tentativas` é a tentativa *efetiva*: quanto cada
+  repetição acrescenta é o ganho por recursada.
+
+**Os dois ganhos dividem o mesmo lugar** — o denominador do expoente — e por
+isso se leem juntos: cada um diz o quanto um fator desconta da demanda que a
+disciplina faz. Com os dois em 1, o expoente é `D/t`, então **dificuldade 2 na
+segunda tentativa equivale a dificuldade 1 na primeira**, e a dificuldade se lê
+em *quantas tentativas a disciplina custa* para render o que uma de dificuldade
+1 rende de saída. É a lei de potência da prática.
+
+**O ganho por recursada substituiu um choque log-normal por tentativa** em
+29/10/2026. O choque existia para que recursar não *garantisse* nota maior, mas
+medido ele não entregava isso: com desvio 0,25 e `D = 1,2`, a segunda tentativa
+piorava a nota em 0,8% dos casos. O que ele de fato fazia era atrasar o cenário
+— ~5% menos formados em **todos** os braços, sem mexer em psi, aproveitamento,
+fidelidade nem phi — e borrar a leitura de que a nota *é* a aptidão em
+dificuldade 1 e primeira tentativa, porque o choque também caía sobre ela. No
+lugar dele ficou um coeficiente, que diz a mesma coisa sem sorteio.
+
+**Ganho por recursada 0 prende o aluno para sempre**: a nota é determinística,
+de modo que quem reprova uma vez reprova sempre, e sem jubilamento ele ocupa
+vaga até o horizonte acabar. É permitido de propósito — é um extremo que se
+pode querer medir.
 
 **Por que a forma de potência.** Ela tem história generativa, da mesma classe
 da que sustenta a log-normal das utilidades: se a disciplina são E unidades
@@ -29,20 +47,18 @@ chance de dominar todas. De quebra ela respeita os limites **por construção** 
 `a^E` nunca sai de (0, 1) —, ao contrário da normal truncada, que empilhava
 massa nas pontas sempre que a média chegava perto delas.
 
-**O acoplamento não é opcional, e é por isso que ele é parâmetro de cenário.** O
-acoplamento entre interesse e desempenho é a única peça da fórmula sem forma
-justificada, e é a única que mexe no resultado principal: medido, acoplamento zero
-deixa a função de nota neutra entre os mecanismos (vão de 0% em aprovações) e
-um fabrica sozinha ~40% de vão a favor do leilão, antes de qualquer
-alocação ter sido avaliada. Com o acoplamento reportado ao lado, a
-suposição deixa de ser ad-hoc e vira sensibilidade medida.
+**O ganho por utilidade não é opcional, e é por isso que ele é parâmetro de
+cenário.** Que a utilidade mexa no desempenho é a única peça da fórmula sem
+forma justificada, e é a única que mexe no resultado principal: medido, ganho
+zero deixa a função de nota neutra entre os mecanismos (vão de 0% em
+aprovações) e ganho 1 fabrica sozinho ~40% de vão a favor do leilão, antes de
+qualquer alocação ter sido avaliada. Com o ganho reportado ao lado, a suposição
+deixa de ser ad-hoc e vira sensibilidade medida.
 
-Nada é sorteado dentro do loop: a aptidão e os choques saem da seed na
-inicialização, como exige a Seção 7.3.
+Nada é sorteado dentro do loop: a aptidão sai da seed na inicialização, como
+exige a Seção 7.3.
 """
 from __future__ import annotations
-
-import math
 
 import numpy as np
 
@@ -52,6 +68,34 @@ from .population import Student
 # Abaixo disto a aptidão produziria 0,0 ou 1,0 exatos, e a nota degeneraria. O
 # gerador de Beta devolve as duas pontas para parâmetros pequenos.
 APTITUDE_GUARD = 1e-9
+
+
+def beta_shape(*, mean: float, concentration: float) -> tuple[float, float]:
+    """Os dois **parâmetros de forma** da Beta, a partir da média e da
+    concentração com que a interface descreve a população.
+
+        forma_1 = média · concentração
+        forma_2 = (1 - média) · concentração
+
+    A Beta não tem locação nem escala — o suporte é fixo em (0, 1) —, de modo
+    que os dois números que ela pede são forma pura, e forma pura não se lê:
+    ninguém olha `(4, 2)` e enxerga "média 0,67, moderadamente espalhada". A
+    interface edita as duas grandezas que *se* leem e a conversão acontece
+    aqui, na entrada do modelo; `SimulationConfig` guarda a forma, que é o que
+    o sorteio pede.
+
+    As duas grandezas respondem a perguntas independentes, e as duas importam.
+    A **média** calibra o cenário contra a taxa de aprovação — é ela que decide
+    se a universidade forma 30% ou 80%. A **concentração** diz quão apertada a
+    população fica em torno dela: mesma média com concentração maior é uma
+    população mais homogênea, e homogeneidade demais apaga a ordenação por CR,
+    que precisa de dispersão para ter o que ordenar.
+    """
+    if not 0.0 < mean < 1.0:
+        raise ValueError("a média da aptidão deve estar em (0, 1)")
+    if concentration <= 0.0:
+        raise ValueError("a concentração da aptidão deve ser > 0")
+    return mean * concentration, (1.0 - mean) * concentration
 
 
 def draw_aptitudes(
@@ -82,52 +126,23 @@ def draw_aptitudes(
     }
 
 
-def draw_grade_noise(
-    students: list[Student],
-    disciplines: list[Discipline],
-    config: SimulationConfig,
-    rng: np.random.Generator,
-) -> dict[tuple[str, str, int], float]:
-    """O choque normal padrão de cada (aluno, disciplina, período) — o dia bom
-    ou ruim.
-
-    Sem ele a nota seria exata dado `(a, D, u_rel, t)`, e duas coisas
-    quebrariam: a recursada voltaria a **garantir** nota maior, e a variância
-    das notas passaria a vir só do resorteio da utilidade, de modo que o
-    parâmetro de estabilidade da preferência controlaria também o acaso das
-    notas — dois botões que devem ser independentes.
-
-    Sai padrão (média 0, desvio 1); a escala é `config.grade_noise`, aplicada
-    em `grade_for_attempt`. É a mesma separação do `ε` das utilidades: a régua
-    fica num lugar só.
-    """
-    draws = rng.normal(
-        0.0, 1.0, size=(len(students), len(disciplines), config.periods)
-    )
-    return {
-        (student.id, discipline.name, period + 1): float(draws[i, j, period])
-        for i, student in enumerate(students)
-        for j, discipline in enumerate(disciplines)
-        for period in range(config.periods)
-    }
-
-
 def grade_for_attempt(
     *,
     aptitude: float,
     difficulty: float,
     relative_utility: float,
     attempt: int,
-    coupling: float,
-    noise: float,
-    noise_sigma: float,
+    utility_gain: float,
+    retake_gain: float,
 ) -> float:
     """A nota da `attempt`-ésima tentativa (1 = primeira) — eq. (33).
 
-    `relative_utility` é `u_rel`, a utilidade em múltiplos da indiferença. Com
-    `coupling = 0` ela some da conta (qualquer coisa elevada a 0 é 1) e a nota
-    passa a depender só de aptidão, dificuldade e tentativa — que é o controle
-    a reportar ao lado de qualquer resultado em conclusões.
+    Os dois ganhos ocupam o mesmo lugar, o denominador do expoente. O **ganho
+    por utilidade** é expoente sobre `u_rel`: em 0 a utilidade some da conta
+    (qualquer coisa elevada a 0 é 1) e a nota passa a depender só de aptidão,
+    dificuldade e tentativa, que é o controle a reportar ao lado de qualquer
+    resultado em conclusões. O **ganho por recursada** diz quanta tentativa
+    efetiva cada repetição acrescenta: em 1 o denominador é o próprio `t`.
 
     O arredondamento é `round`, e não `floor`: com `a < 1` e expoente positivo
     o produto nunca chega a 100, e truncando o teto da escala seria 9,9.
@@ -135,10 +150,13 @@ def grade_for_attempt(
     if attempt < 1:
         raise ValueError("attempt deve ser >= 1")
     a = min(1.0 - APTITUDE_GUARD, max(APTITUDE_GUARD, aptitude))
-    weight = relative_utility**coupling if relative_utility > 0.0 else 1.0
-    if weight <= 0.0:
-        weight = 1.0
-    exponent = difficulty * math.exp(noise_sigma * noise) / (weight * attempt)
+    utility = relative_utility**utility_gain if relative_utility > 0.0 else 1.0
+    if utility <= 0.0:
+        utility = 1.0
+    attempts = 1.0 + retake_gain * (attempt - 1)
+    if attempts <= 0.0:
+        raise ValueError("o ganho por recursada zerou as tentativas efetivas")
+    exponent = difficulty / (utility * attempts)
     return round(100.0 * a**exponent) / 10.0
 
 

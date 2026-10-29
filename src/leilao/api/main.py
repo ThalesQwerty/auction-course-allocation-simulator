@@ -20,6 +20,7 @@ from ..auction import AuctionInput, Bid, run_auction
 from ..comparison import run_comparison
 from ..config import Discipline, SimulationConfig
 from ..entities import Agent, Good, MutualExclusion
+from ..grading import beta_shape
 from ..playground import PlaygroundDiscipline, PlaygroundStudent, run_playground
 from ..simulation import run_simulation
 from .schemas import (
@@ -85,10 +86,14 @@ def run(req: RunRequest) -> RunResponse:
 def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
     """Converte o cenário recebido no `SimulationConfig` do motor.
 
-    Compartilhada pelos dois modos: a execução única passa a seed do formulário
-    e a comparação passa cada seed da amostra. É o mesmo cenário dos dois lados,
-    que é o que a Seção 7.3 exige da comparação.
+    A comparação passa cada seed da amostra, de modo que todos os braços veem
+    o mesmo cenário — que é o que a Seção 7.3 exige dela.
     """
+    # A interface descreve a aptidão por média e concentração; a Beta pede a
+    # forma.
+    aptitude_alpha, aptitude_beta = beta_shape(
+        mean=req.aptitude_mean, concentration=req.aptitude_concentration
+    )
     return SimulationConfig(
         disciplines=[
             Discipline(
@@ -103,10 +108,10 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
             )
             for d in req.disciplines
         ],
-        aptitude_alpha=req.aptitude_alpha,
-        aptitude_beta=req.aptitude_beta,
-        interest_coupling=req.interest_coupling,
-        grade_noise=req.grade_noise,
+        aptitude_alpha=aptitude_alpha,
+        aptitude_beta=aptitude_beta,
+        utility_gain=req.utility_gain,
+        retake_gain=req.retake_gain,
         utility_stability=req.utility_stability,
         resolver=req.resolver,
         credit_memory=req.credit_memory,
@@ -169,13 +174,16 @@ def compare(req: CompareRequest) -> CompareResponse:
 
 @app.post("/playground", response_model=PlaygroundResponse)
 def playground(req: PlaygroundRequest) -> PlaygroundResponse:
+    aptitude_alpha, aptitude_beta = beta_shape(
+        mean=req.aptitude_mean, concentration=req.aptitude_concentration
+    )
     try:
         result = run_playground(
             mechanism=req.mechanism,
             rounds=req.rounds,
             seed=req.seed,
-            aptitude_alpha=req.aptitude_alpha,
-            aptitude_beta=req.aptitude_beta,
+            aptitude_alpha=aptitude_alpha,
+            aptitude_beta=aptitude_beta,
             disciplines=[
                 PlaygroundDiscipline(d.name, d.seats, d.hours) for d in req.disciplines
             ],

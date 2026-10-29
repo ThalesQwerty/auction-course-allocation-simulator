@@ -172,17 +172,23 @@ class SimulationConfig:
     # boa demais, ninguém reprova e a recursada some do cenário.
     aptitude_alpha: float = 4.0
     aptitude_beta: float = 2.0
-    # O quanto o interesse mexe no desempenho, como expoente sobre u_rel.
-    # **Padrão 0: desligado.** É a única peça da fórmula de nota sem forma
+    # **Ganho por utilidade**: o quanto a utilidade mexe no desempenho, como
+    # expoente sobre u_rel. **Padrão 0: desligado.** É a única peça da fórmula de nota sem forma
     # justificada, e a única que mexe no resultado principal — em 1 ela
     # fabrica sozinha ~40% de vão em aprovações a favor do lance. Em zero a
     # função de nota é neutra entre os mecanismos, e qualquer vão em conclusões
     # é do modelo, inteiro. Reportá-lo ao lado do resultado é o que
     # transforma a suposição em número declarado.
-    interest_coupling: float = 0.0
-    # O desvio do choque log-normal sobre o expoente, por tentativa. Sem ele a
-    # nota seria exata e recursar garantiria nota maior.
-    grade_noise: float = 0.25
+    utility_gain: float = 0.0
+    # **Ganho por recursada**: quanta tentativa efetiva cada repetição
+    # acrescenta no denominador do expoente. Em 1 o denominador é o próprio t,
+    # e o expoente é o D/t da lei de potência da prática; em 0,5 a recursada
+    # rende metade; em 0 ela não rende nada — e aí, com a nota determinística e
+    # sem jubilamento, quem reprova uma vez ocupa vaga até o fim do horizonte.
+    #
+    # Substituiu o choque log-normal por tentativa em 29/10/2026; o porquê está
+    # em `grading`.
+    retake_gain: float = 1.0
     # Quanto do gosto do aluno é **permanente**, de 0 a 1 — a fração da
     # variância que não é resorteada a cada período.
     #
@@ -266,10 +272,10 @@ class SimulationConfig:
             raise ValueError("o cenário precisa de pelo menos um aluno por período de ingresso")
         if self.aptitude_alpha <= 0 or self.aptitude_beta <= 0:
             raise ValueError("os parâmetros da Beta da aptidão devem ser > 0")
-        if self.interest_coupling < 0:
-            raise ValueError("o acoplamento interesse-desempenho deve ser >= 0")
-        if self.grade_noise < 0:
-            raise ValueError("o desvio do choque de nota deve ser >= 0")
+        if self.utility_gain < 0:
+            raise ValueError("o ganho por utilidade deve ser >= 0")
+        if self.retake_gain < 0:
+            raise ValueError("o ganho por recursada deve ser >= 0")
         if not 0.0 <= self.utility_stability <= 1.0:
             raise ValueError("a estabilidade da preferência deve estar em [0, 1]")
         if self.utility_sigma <= 0:

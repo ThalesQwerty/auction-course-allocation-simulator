@@ -63,20 +63,32 @@ export const cohortLabel = (entryPeriod: number): string => `Geração ${entryPe
 export interface Scenario {
   disciplines: DisciplineInput[];
   /** A nota sai da **aptidão** do aluno naquela disciplina, elevada à demanda
-   * que ela lhe faz: `round(100 · a^(D/(u_rel^acoplamento · t)))/10`. A aptidão vem de
+   * que ela lhe faz: `round(100 · a^(D/(u_rel^ganho · tentativas)))/10`. A aptidão vem de
    * uma Beta por par (aluno, disciplina), sorteada uma vez e persistente —
-   * traço, não sorte. Beta(4, 2) é a calibragem contra o modelo anterior:
-   * nota média 6,7 e 82% de aprovação em dificuldade 1. */
-  aptitude_alpha: number; // > 0
-  aptitude_beta: number; // > 0
-  /** O quanto o interesse mexe no desempenho, como expoente sobre u_rel.
-   * **0 desliga**, e é o padrão: é a única peça da fórmula de nota sem forma
-   * justificada e a única que mexe no resultado principal, então ela é
-   * parâmetro reportado e não suposição silenciosa. */
-  interest_coupling: number; // >= 0
-  /** Desvio do choque log-normal por tentativa. Sem ele a nota seria exata e
-   * recursar garantiria nota maior. */
-  grade_noise: number; // >= 0
+   * traço, não sorte.
+   *
+   * A Beta é descrita aqui por **média** e **concentração**, que é como se lê
+   * uma população; o motor as converte nos dois parâmetros de forma que o
+   * sorteio pede. Média 0,67 com concentração 6 é a calibragem contra o modelo
+   * anterior: nota média 6,7 e 82% de aprovação em dificuldade 1. */
+  aptitude_mean: number; // em (0, 1)
+  /** Quão apertada a aptidão fica em torno da média. Mesma média com
+   * concentração maior é uma população mais homogênea — e é a dispersão que dá
+   * à ordenação por CR alguma coisa para ordenar. */
+  aptitude_concentration: number; // > 0
+  /** **Ganho por utilidade**: o quanto a utilidade mexe no desempenho, como
+   * expoente sobre a **utilidade relativa** — a fração de utilidade vezes o
+   * número de disciplinas, de modo que 1 é a indiferença. **0 desliga**, e é o
+   * padrão: é a única peça da
+   * fórmula de nota sem forma justificada e a única que mexe no resultado
+   * principal, então ela é parâmetro reportado e não suposição silenciosa. */
+  utility_gain: number; // >= 0
+  /** **Ganho por recursada**: quanta tentativa efetiva cada repetição
+   * acrescenta no denominador do expoente. Em 1 o denominador é o próprio `t`
+   * e o expoente é `D/t`; em 0 a recursada não rende nada, e aí quem reprova
+   * uma vez reprova sempre. Os dois ganhos dividem o mesmo lugar na fórmula,
+   * e é por isso que se leem juntos. */
+  retake_gain: number; // >= 0
   /** Quanto do gosto do aluno é permanente, de 0 a 1 — a fração da variância
    * que não é resorteada a cada período. 0 reproduz o modelo anterior; 1
    * congela a preferência. Ortogonal ao σ: a divisão preserva a dispersão de
@@ -469,10 +481,10 @@ export interface SimulateResponse {
 export function defaultScenario(): Scenario {
   return {
     disciplines: [],
-    aptitude_alpha: 4,
-    aptitude_beta: 2,
-    interest_coupling: 0,
-    grade_noise: 0.25,
+    aptitude_mean: 0.67,
+    aptitude_concentration: 6,
+    utility_gain: 0,
+    retake_gain: 1,
     utility_stability: 0,
     resolver: "ilp",
     credit_memory: "carry",
@@ -494,8 +506,8 @@ export interface PlaygroundRequest {
   mechanism: Mechanism;
   rounds: number;
   seed: number;
-  aptitude_alpha: number;
-  aptitude_beta: number;
+  aptitude_mean: number;
+  aptitude_concentration: number;
   disciplines: { name: string; seats: number; hours: number }[];
   students: {
     id: string;

@@ -166,8 +166,8 @@ const STUDENTS_PER_PERIOD = 60;
 /** A população. **Não há perfis**: toda ela sai destas distribuições, e o que
  * distingue um aluno do outro é só o que a seed sorteou. */
 const POPULATION = {
-  aptitude_alpha: 4,
-  aptitude_beta: 2,
+  aptitude_mean: 0.67,
+  aptitude_concentration: 6,
   utility_sigma: 1,
   max_hours: MAX_HOURS,
 };
@@ -235,7 +235,11 @@ const commonScenario = (
   periods: number,
 ): Omit<
   Scenario,
-  "aptitude_alpha" | "aptitude_beta" | "utility_sigma" | "max_hours" | "base_credits"
+  | "aptitude_mean"
+  | "aptitude_concentration"
+  | "utility_sigma"
+  | "max_hours"
+  | "base_credits"
 > => ({
   disciplines,
   elective_hours: electiveHours,
@@ -254,13 +258,13 @@ const commonScenario = (
   // orçamento que carrega entre períodos (eq. 36). A comparação os varia.
   resolver: "ilp",
   credit_memory: "carry",
-  interest_coupling: 0,
+  utility_gain: 0,
   // Preferência resorteada a cada período, que é o que o modelo fazia antes
   // de a estabilidade existir. É a hipótese mais exposta que resta: a
   // preferência que não persiste desfaz a fila sozinha, e é por isso que
   // qualquer resultado em conclusões deve vir com este valor declarado.
   utility_stability: 0,
-  grade_noise: 0.25,
+  retake_gain: 1,
   credit_return: "none",
   seed: 42,
 });
