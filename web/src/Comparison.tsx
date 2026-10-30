@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { BoxPlot, Histogram, categoricalColors, formatCount, formatRatio, usePrefersDark } from "./charts";
 import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
-import { COMPARISON_ARMS } from "./types";
+import { CHARTED_ARMS, COMPARISON_ARMS } from "./types";
 import type { RunSummary } from "./types";
 
 /** Períodos com uma casa: o tempo de formatura anda em frações de período, e
@@ -139,7 +139,10 @@ const BASELINE = "ranking_greedy";
 
 /** Sinal explícito: numa coluna de diferenças, "+0,04" e "−0,04" se distinguem
  * de relance e "0,04" não. */
-/** Os rótulos dos braços, na ordem do eixo. Derivado de uma constante do
+/** Os rótulos de **todos** os braços, na ordem do caminho — e não só os
+ * plotados, porque as tabelas mostram os de robustez também e a bolinha de
+ * cor tem de bater entre tabela e gráfico. Os plotados vêm primeiro, então
+ * ficam com as primeiras cores da paleta. Derivado de uma constante do
  * módulo, então não precisa ser recalculado a cada render. */
 const ARM_LABELS = COMPARISON_ARMS.map((arm) => arm.label);
 
@@ -263,6 +266,7 @@ export function Comparison({
           <td>{index === 0 ? metric.short : ""}</td>
           <td>
             <span className="swatch" style={{ background: colors[arm.label] }} /> {arm.label}
+            {arm.charted ? "" : <span className="arm-aside"> · fora dos gráficos</span>}
           </td>
           <td>{box ? metric.format(box.min) : "—"}</td>
           <td>{box ? metric.format(box.q1) : "—"}</td>
@@ -313,7 +317,7 @@ export function Comparison({
     <BoxPlot
       key={metric.id}
       title={metric.title}
-      groups={COMPARISON_ARMS.map((arm) => ({
+      groups={CHARTED_ARMS.map((arm) => ({
         label: arm.label,
         short: arm.short,
         values: valuesOf(arm.key, metric),
@@ -421,7 +425,7 @@ export function Comparison({
           </thead>
           <tbody>
             {Array.from({ length: result.runs }, (_, i) => {
-              const row = COMPARISON_ARMS.map((arm) => runsOf(arm.key)[i]).filter(Boolean);
+              const row = CHARTED_ARMS.map((arm) => runsOf(arm.key)[i]).filter(Boolean);
               if (!row.length) return null;
               const join = (
                 of: (run: RunSummary) => number | null,

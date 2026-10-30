@@ -8,11 +8,17 @@ torna o eixo **ordenação × PLI** um eixo de verdade: a preferência da eq.
 (22), o preço da eq. (24) e o consumo da eq. (25) são calculados do mesmo
 jeito dos dois lados, e a única coisa que muda é quem decide a alocação.
 
-Com lance como preferência, isto **é** o mecanismo de *bidding points* dos
-business schools: o aluno reparte pontos, os lances são processados em ordem
-decrescente, e cada um é atendido se a disciplina tem vaga e a grade do aluno
-ainda comporta. A restrição de carga não volta a ser resolvida pelo aluno em
-casa — ela é resolvida aqui, *ex-post*, como na PLI.
+Com lance como preferência, isto **é** o mecanismo de *bidding points*
+clássico das business schools (Sönmez & Ünver 2010, sobre Michigan e Yale
+SOM): o aluno reparte pontos, os lances são processados em ordem decrescente,
+e cada um é atendido se a disciplina tem vaga e a grade do aluno ainda
+comporta. A restrição de carga não volta a ser resolvida pelo aluno em casa —
+ela é resolvida aqui, *ex-post*, como na PLI.
+
+Não é o único mecanismo de lance em uso: Wharton trocou o bidding points pelo
+**Course Match**, que resolve A-CEEI por MIP e é cardinal. Aquele não é esta
+varredura nem a PLI daqui — preferências são sobre *cestas*, os orçamentos são
+aproximadamente iguais e o aluno paga o preço de equilíbrio, não o lance.
 
 **O guloso é ótimo da relaxação sem a restrição de carga**: sem ela o
 problema se separa por bem, e tomar os q_x maiores lances de cada um é

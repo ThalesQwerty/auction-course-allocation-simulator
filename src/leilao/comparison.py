@@ -20,26 +20,37 @@ Juntas, as duas isolam o nexo causal no mecanismo. Uma execução só não diria
 nada — a diferença poderia ser daquela população; e N execuções sem parear as
 seeds mediriam a variação entre populações junto da variação entre mecanismos.
 
-**Os braços são dois eixos cruzados mais uma escada** (`ARMS`).
+**Os braços são um caminho de quatro passos** (`ARMS`), e cada seta muda
+**uma** coisa só — é o que torna o vão atribuível. Comparar a linha de base
+direto com o leilão mediria mensagem e resolução somadas, sem dizer qual
+pesou.
 
-O primeiro eixo é a **moeda**: ordenação por CR ou lance em créditos. O
-segundo é o **resolvedor**: varredura gulosa ou PLI global. Cruzados, dão
-quatro células, e as duas de fora da diagonal são mecanismos reais — "lance +
-varredura" é o *bidding points* dos business schools, o mais implantado do
-mundo, e "CR + PLI" é a matrícula por histórico resolvida globalmente.
+    CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão sem retorno
+                                                   ──retorno──▶  Leilão com retorno
 
-Sobre a célula "lance + PLI" — o leilão do anteprojeto — corre a **escada de
-acúmulo**, que é um eixo só: quanta memória o orçamento tem de um período
-para o outro. Sem memória nenhuma, só com a sobra (que é a própria célula), e
-com sobra mais retorno. O degrau do meio é o que separa as duas fontes de
-memória, que têm sinais opostos de incentivo: a sobra premia quem pagou
-barato, o retorno premia quem aprovou.
+1. **A mensagem.** O CR dá um número por *aluno*; o lance dá um número por
+   *par* (aluno, disciplina). É a intensidade entrando no que o mecanismo
+   recebe. Os dois lados resolvem ordinalmente, então o passo isola a moeda.
+   Não é o mesmo algoritmo dos dois lados (`serial_dictatorship` contra
+   `greedy_allocation`), e não poderia ser: um número por aluno não dá para
+   ordenar pares. "Ordinal" descreve a **propriedade** — nenhum dos dois
+   troca magnitudes —, não a implementação.
+2. **A resolução.** Ordinal usa só a *ordem* dos lances: qualquer
+   transformação monótona do vetor dá a mesma alocação. Cardinal (PLI) usa as
+   *magnitudes*, e derruba um lance alto para acomodar dois médios, o que a
+   varredura nunca faz. Os dois só divergem onde a carga horária aperta — sem
+   ela o problema se separa por disciplina e a varredura é ótima —, então o
+   passo só tem conteúdo em cenário com conjunto elegível maior que W_a.
+3. **O retorno.** `f_γ` proporcional (eq. 34): quem aprova recupera a fatia
+   do preço correspondente à nota, de modo que ir bem compra poder de compra
+   no período seguinte. É a única fonte de mérito do leilão — a ordenação por
+   CR faz isso por construção, o histórico *é* o critério, e o leilão sem
+   retorno não faz de jeito nenhum.
 
-O retorno importa porque é o que pode devolver ao leilão algum senso
-meritocrático: na política proporcional o aluno recupera a fatia do preço
-correspondente à nota, de modo que ir bem compra poder de compra no período
-seguinte. A ordenação por CR faz isso por construção — o histórico *é* o
-critério — e o leilão sem retorno não faz de jeito nenhum.
+**Por que o retorno leva ablação e a sobra não.** A sobra é a eq. (36), dada
+pelo anteprojeto; a política de retorno a Seção 7.3.2 deixa explicitamente em
+aberto, como eixo de experimentação. Escolher `ratio` como canônico é decisão
+de quem escreve, e o passo 3 é onde ela se paga.
 
 Por isso a política de retorno e o resolvedor **não são parâmetros do cenário
 aqui**: são eixos do experimento, e o que vier na configuração é ignorado,
@@ -138,33 +149,39 @@ class Arm:
     credit_memory: CreditMemory = "carry"
 
 
-# Os braços, na ordem em que entram no eixo e na legenda: o CR primeiro, o
-# lance depois, e a escada de acúmulo por último. Nessa ordem a correlação
-# (eq. 57) se lê de uma vez — do mecanismo em que o CR é o próprio critério ao
-# que o ignora por completo, com o retorno no meio.
+# Os braços na ordem do caminho — é também a ordem do eixo, da legenda e das
+# cores, e nela a correlação (eq. 57) se lê de uma vez: do mecanismo em que o
+# CR é o próprio critério ao que o ignora por completo.
+#
+# Os dois últimos não entram nos boxplots (`charted: false` do lado da
+# interface): seguem rodando e aparecem nas tabelas como verificação de
+# robustez. No gráfico eles não são passos do caminho, são perguntas laterais,
+# e empilhá-los nas mesmas caixas foi o que tornou a legenda ilegível.
 ARMS: tuple[Arm, ...] = (
-    # As quatro células do cruzamento moeda x resolvedor. As duas de fora da
-    # diagonal são mecanismos reais: "lance + varredura" é o *bidding points*
-    # dos business schools, o mais implantado do mundo, e "CR + PLI" é a
-    # matrícula por histórico resolvida globalmente.
-    #
-    # Os dois resolvedores só divergem onde a carga horária aperta — sem ela o
-    # problema se separa por disciplina e a varredura é ótima. É por isso que o
-    # eixo só passou a ter conteúdo depois das optativas, que fazem o conjunto
-    # elegível passar de W_a.
+    # O caminho. `credits_greedy` é o *bidding points* clássico — orçamento de
+    # pontos, lances por disciplina, disciplina fechando no menor lance
+    # atendido (Sönmez & Ünver 2010, sobre Michigan e Yale SOM). Não confundir
+    # com o **Course Match** de Wharton, que substituiu o bidding points de lá
+    # em 2013: aquele é cardinal e resolve por MIP, mas é outro mecanismo —
+    # preferências sobre *cestas*, orçamentos aproximadamente iguais e preços
+    # de equilíbrio, não lance pago a segundo preço. Ele é trabalho
+    # relacionado, não célula deste desenho.
     Arm("ranking_greedy", "ranking", "none", resolver="greedy"),
-    Arm("ranking_ilp", "ranking", "none", resolver="ilp"),
     Arm("credits_greedy", "credits", "none", resolver="greedy"),
     Arm("credits_ilp", "credits", "none", resolver="ilp"),
-    # A escada de acúmulo, sobre o leilão com PLI. O degrau do meio é o
-    # `credits_ilp` acima, então só faltam as duas pontas: sem memória nenhuma
-    # e com memória das duas fontes.
-    #
-    # Ela é um eixo só — **quanta memória o orçamento tem** —, e o degrau do
-    # meio é o que separa as duas fontes, que têm sinais opostos de incentivo:
-    # a sobra premia quem pagou barato, o retorno premia quem aprovou.
-    Arm("credits_no_memory", "credits", "none", credit_memory="none"),
     Arm("credits_return", "credits", "ratio"),
+    # Robustez, fora dos gráficos.
+    #
+    # `ranking_ilp`: o CR como peso num ótimo global. Tem defeito declarado —
+    # como todo pedido do aluno tem o mesmo peso N_a, a PLI é indiferente
+    # sobre qual cortar e o aluno não tem voz sobre o que perde.
+    #
+    # `credits_no_memory`: o orçamento recomeça em Γ_min todo período. Note
+    # que sem acúmulo **o retorno é inerte** — `next_budget` devolve
+    # `base_credits` e descarta `period_return` —, então esta célula é a mesma
+    # simulação com e sem f_γ, e não há uma quarta combinação a rodar.
+    Arm("ranking_ilp", "ranking", "none", resolver="ilp"),
+    Arm("credits_no_memory", "credits", "none", credit_memory="none"),
 )
 
 

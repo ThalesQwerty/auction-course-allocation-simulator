@@ -39,20 +39,23 @@ from .equations import (
 # aluno, e a carga horária faz o papel do orçamento.
 Mechanism = Literal["credits", "ranking"]
 
-# Quem decide a alocação, dada a mensagem dos alunos — o segundo eixo da
-# comparação. Cruzado com `mechanism`, dá as quatro células:
+# Quem decide a alocação, dada a mensagem dos alunos — o passo do meio do
+# caminho da comparação (ver `comparison.ARMS`).
 #
-#                  ordenação (guloso)            PLI (global)
-#   CR        matrícula por CR (a linha      CR como peso num ótimo
-#             de base brasileira)            global
-#   lance     *bidding points* dos           o leilão do anteprojeto
-#             business schools
+# A diferença é **ordinal x cardinal**, e não "guloso x exato": a varredura
+# usa só a *ordem* das preferências, de modo que qualquer transformação
+# monótona do vetor dá a mesma alocação; a PLI usa as *magnitudes*, e derruba
+# um lance alto para acomodar dois médios, o que a varredura nunca faz.
 #
-# As duas células de fora da diagonal são mecanismos reais, não construções:
-# o *bidding points* é o mais implantado do mundo. Os dois resolvedores só
-# divergem onde a restrição de carga aperta — sem ela o problema se separa por
-# disciplina e o guloso é ótimo —, então o eixo só tem conteúdo em cenário com
-# conjunto elegível maior que W_a.
+# Com lance e varredura sai o *bidding points* clássico das business schools
+# (Sönmez & Ünver 2010, sobre Michigan e Yale SOM). Cuidado com a afirmação de
+# que é "o mais implantado do mundo": Wharton o substituiu pelo **Course
+# Match** (A-CEEI resolvido por MIP), que é cardinal — então a direção
+# histórica é do ordinal para o cardinal, e não o contrário.
+#
+# Os dois resolvedores só divergem onde a restrição de carga aperta — sem ela
+# o problema se separa por disciplina e o guloso é ótimo —, então o passo só
+# tem conteúdo em cenário com conjunto elegível maior que W_a.
 Resolver = Literal["ilp", "greedy"]
 
 # Política de retorno de créditos f_gamma — eq. (34). O anteprojeto deixa a

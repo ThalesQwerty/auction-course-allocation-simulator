@@ -1079,6 +1079,12 @@ button.link:hover {
   color: var(--muted);
 }
 
+/* Marca, na tabela de resumo, o braço que roda mas fica fora dos boxplots. */
+.arm-aside {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .outcome.won {
   color: var(--win);
 }

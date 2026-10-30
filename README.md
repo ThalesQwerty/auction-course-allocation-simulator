@@ -18,14 +18,28 @@ de linha de base (Seção 7.3.1, eqs. 49-50). A **comparação** roda o mesmo
 cenário em cada **braço**, N vezes, e mostra só as métricas de alocação em
 boxplot.
 
-Os braços são dois eixos cruzados mais uma escada. A **moeda** (CR ou lance)
-× o **resolvedor** (varredura gulosa ou PLI) dá quatro células, e as duas de
-fora da diagonal são mecanismos reais — "lance + varredura" é o *bidding
-points* dos business schools. Sobre a célula "lance + PLI", que é o leilão do
-anteprojeto, corre a **escada de acúmulo**: quanta memória o orçamento tem de
-um período para o outro, de nenhuma a sobra-mais-retorno. O retorno entra como
-eixo do experimento porque é ele que pode devolver ao leilão algum senso
-meritocrático.
+Os braços são um **caminho de quatro passos**, e cada seta muda **uma** coisa
+só — é o que torna o vão atribuível:
+
+    CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão sem retorno
+                                                   ──retorno──▶  Leilão com retorno
+
+A **mensagem** é um número por *aluno* (o CR) contra um por *par* aluno-disciplina
+(o lance). A **resolução** é ordinal (só a ordem dos lances importa; qualquer
+transformação monótona dá a mesma alocação) contra cardinal (a PLI usa as
+magnitudes e derruba um lance alto para acomodar dois médios). O **retorno** é
+a política proporcional de f_γ, a única fonte de mérito do leilão.
+
+O passo do meio é o *bidding points* clássico das business schools — orçamento
+de pontos, lances por disciplina, disciplina fechando no menor lance atendido
+(Sönmez & Ünver 2010, sobre Michigan e Yale SOM). Não confundir com o **Course
+Match** de Wharton, que substituiu o bidding points de lá: aquele também é
+cardinal e resolve por MIP, mas é outro mecanismo — preferências sobre *cestas*,
+orçamentos aproximadamente iguais e preços de equilíbrio. É trabalho
+relacionado, não célula deste desenho.
+
+Rodam ainda dois braços de **robustez** que ficam fora dos boxplots e aparecem
+só nas tabelas: o CR resolvido por PLI e o leilão sem sobra.
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade, e **toda
 disciplina é obrigatória** — conclui quem aprova em todas. O que ordena a grade

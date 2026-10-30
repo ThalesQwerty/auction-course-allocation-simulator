@@ -119,15 +119,15 @@ def test_compare_returns_one_summary_per_seed_in_every_arm(client):
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 3}).json()
 
     assert payload["runs"] == 3
-    # Seis modelos: as quatro células do cruzamento moeda x resolvedor, mais
-    # as duas pontas da escada de acúmulo (o degrau do meio é `credits_ilp`).
+    # Os quatro passos do caminho primeiro, na ordem do eixo, e os dois de
+    # robustez depois — que rodam, mas ficam fora dos boxplots.
     assert [a["key"] for a in payload["arms"]] == [
         "ranking_greedy",
-        "ranking_ilp",
         "credits_greedy",
         "credits_ilp",
-        "credits_no_memory",
         "credits_return",
+        "ranking_ilp",
+        "credits_no_memory",
     ]
     # As seeds vão de 1 a N e são pareadas: a i-ésima execução de cada braço
     # parte da mesma população.

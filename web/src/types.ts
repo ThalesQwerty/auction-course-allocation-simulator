@@ -137,63 +137,85 @@ export interface Scenario {
  * (Seção 7.3.1, eqs. 49-50). Espelha `leilao.config.Mechanism`. */
 export type Mechanism = "credits" | "ranking";
 
-/** Os três modelos comparados, na ordem em que entram no eixo e na legenda.
+/** Os modelos comparados, na ordem do caminho — que é também a ordem do eixo,
+ * da legenda e das cores.
  *
- * O leilão entra **duas vezes**, com e sem retorno de créditos, porque o
- * retorno é o que pode devolver ao mecanismo algum senso meritocrático: na
- * política proporcional o aluno recupera a fatia do preço correspondente à
- * nota, então ir bem compra poder de compra no período seguinte. A ordenação
- * por CR faz isso por construção — o histórico *é* o critério — e o leilão sem
- * retorno não faz de jeito nenhum. Nessa ordem, a correlação (λ) se lê de uma
- * vez: do mecanismo em que o CR decide tudo ao que o ignora, com o retorno no
- * meio.
+ * O eixo é um **caminho**, e cada seta muda **uma** coisa só. É o que torna o
+ * vão atribuível: comparar o CR direto com o leilão mediria mensagem e
+ * resolução somadas, sem dizer qual pesou.
+ *
+ *     CR ──mensagem──▶ Bidding points ──resolução──▶ sem retorno ──retorno──▶ com retorno
+ *
+ * 1. **Mensagem**: o CR dá um número por *aluno*, o lance dá um número por
+ *    *par* (aluno, disciplina). Os dois resolvem ordinalmente.
+ * 2. **Resolução**: ordinal usa só a *ordem* dos lances — qualquer
+ *    transformação monótona dá a mesma alocação —, cardinal usa as
+ *    *magnitudes* e derruba um lance alto para acomodar dois médios.
+ * 3. **Retorno**: quem aprova recupera a fatia do preço correspondente à
+ *    nota. É a única fonte de mérito do leilão.
+ *
+ * `charted: false` fica de fora dos boxplots e segue nas tabelas: são
+ * verificações de robustez, não passos do caminho, e empilhá-las nas mesmas
+ * caixas foi o que tornou a legenda ilegível.
  *
  * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas. */
 export const COMPARISON_ARMS: {
   key: string;
   label: string;
-  /** Rótulo do eixo do boxplot: embaixo da caixa cabe pouco — com três caixas,
-   * menos ainda —, e o nome inteiro fica na legenda. */
+  /** Rótulo do eixo do boxplot: embaixo da caixa cabe pouco, e o nome inteiro
+   * fica na legenda. Nomeia **o que mudou em relação à caixa anterior**, que
+   * num gráfico que é um caminho é a informação mais útil ali. */
   short: string;
+  /** Se entra nos boxplots. */
+  charted: boolean;
   hint: string;
 }[] = [
   {
     key: "ranking_greedy",
-    label: "CR, varredura",
-    short: "CR guloso",
-    hint: "matrícula por CR: os alunos entram em ordem decrescente de histórico e cada um leva o que quer, na própria ordem, enquanto houver vaga e carga — eqs. (49)-(50)",
-  },
-  {
-    key: "ranking_ilp",
-    label: "CR, PLI",
-    short: "CR PLI",
-    hint: "o mesmo CR, resolvido globalmente: maximiza a soma dos históricos atendidos sujeito às vagas e à carga. Como toda disciplina de um aluno tem o mesmo peso, a PLI é indiferente sobre qual dos pedidos dele cortar",
+    label: "CR",
+    short: "CR",
+    charted: true,
+    hint: "a linha de base: matrícula por histórico. Os alunos entram em ordem decrescente de CR e cada um leva o que quer, na própria ordem de preferência, enquanto houver vaga e carga — eqs. (49)-(50). Ordinal: a alocação usa só a ordem, nunca a magnitude",
   },
   {
     key: "credits_greedy",
-    label: "Lance, varredura",
-    short: "Lance guloso",
-    hint: "o mecanismo de pontos dos business schools: os lances são processados em ordem decrescente e cada um é atendido se há vaga e se ainda cabe na carga",
+    label: "Bidding points",
+    short: "Bidding points",
+    charted: true,
+    hint: "o mecanismo de pontos das business schools (Sönmez & Ünver 2010, sobre Michigan e Yale SOM): o aluno reparte um orçamento em lances e os lances são atendidos em ordem decrescente, enquanto houver vaga e carga. Ordinal como o CR — o que muda em relação a ele é só a mensagem, que passa a ser um número por disciplina em vez de um por aluno",
   },
   {
     key: "credits_ilp",
-    label: "Lance, PLI",
-    short: "Lance PLI",
-    hint: "o leilão do anteprojeto: a PLI decide a alocação inteira de uma vez — Seção 7.1",
-  },
-  {
-    key: "credits_no_memory",
-    label: "Lance, sem acúmulo",
-    short: "Sem acúmulo",
-    hint: "o orçamento recomeça em Γ_min todo período: nem a sobra nem o retorno atravessam, e o leilão fica sem memória do passado do aluno",
+    label: "Leilão sem retorno",
+    short: "Sem retorno",
+    charted: true,
+    hint: "o leilão do anteprojeto (Seção 7.1): mesma mensagem do bidding points, resolvida por PLI. Cardinal — a alocação usa as magnitudes e derruba um lance alto para acomodar dois médios, o que a varredura nunca faz. O que muda em relação ao bidding points é só a resolução",
   },
   {
     key: "credits_return",
-    label: "Lance, sobra e retorno",
-    short: "C/ retorno",
-    hint: "quem aprova recupera a fatia do preço correspondente à nota, então ir bem compra poder de compra no período seguinte — a única política que premia desempenho acima da nota de corte",
+    label: "Leilão com retorno",
+    short: "Com retorno",
+    charted: true,
+    hint: "o modelo proposto: o mesmo leilão com a política proporcional de f_γ (eq. 34). Quem aprova recupera a fatia do preço correspondente à nota, então ir bem compra poder de compra no período seguinte — a única política que premia desempenho acima da nota de corte. O que muda em relação à caixa anterior é só o retorno",
+  },
+  {
+    key: "ranking_ilp",
+    label: "CR cardinal",
+    short: "CR cardinal",
+    charted: false,
+    hint: "verificação de robustez, fora dos gráficos: o CR resolvido por PLI, como peso num ótimo global. Tem defeito declarado — como todo pedido do aluno tem o mesmo peso, a PLI é indiferente sobre qual cortar, e o aluno não tem voz sobre o que perde",
+  },
+  {
+    key: "credits_no_memory",
+    label: "Leilão sem sobra",
+    short: "Sem sobra",
+    charted: false,
+    hint: "verificação de robustez, fora dos gráficos: o orçamento recomeça em Γ_min todo período. Sem acúmulo o retorno é inerte — o crédito devolvido é descartado —, então esta célula é a mesma simulação com e sem f_γ",
   },
 ];
+
+/** Só os braços que entram nos boxplots, na ordem do caminho. */
+export const CHARTED_ARMS = COMPARISON_ARMS.filter((arm) => arm.charted);
 
 export const armLabel = (key: string): string =>
   COMPARISON_ARMS.find((arm) => arm.key === key)?.label ?? key;
