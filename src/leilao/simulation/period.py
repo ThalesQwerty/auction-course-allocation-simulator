@@ -146,6 +146,7 @@ def _request_records(
     desempata as duas mochilas.
     """
     records: list[RequestRecord] = []
+    excluded = set(closing.excluded.get(student.id, ()))
     for name, utility in sorted(utilities.items(), key=lambda item: -item[1]):
         attempt = closing.attempts.get((student.id, name))
         records.append(
@@ -155,6 +156,7 @@ def _request_records(
                 bids=state.bid_log[student.id].get(name, [0] * config.rounds),
                 won_round=state.won_round.get((student.id, name)),
                 paid=state.paid.get((student.id, name), 0),
+                excluded=name in excluded,
                 attempt=attempt[0] if attempt else None,
                 grade=attempt[1] if attempt else None,
                 approved=bool(attempt and attempt[1] >= config.min_grade),
@@ -195,7 +197,12 @@ class _Reporter:
         prices: PriceStats | None,
         ages: dict[str, int],
         credit_returns: dict[str, int] | None,
+        retained: dict[str, set[str]] | None = None,
+        excluded: dict[str, list[str]] | None = None,
     ) -> RoundReport:
+        # O pedido é do período inteiro, não da rodada: lance em qualquer
+        # rodada conta, e a matrícula garantida conta como pedido.
+        requested = {s.id: self.state.requested(s.id) for s in self.active}
         values = measure(
             config=self.config,
             active=self.active,
@@ -212,6 +219,9 @@ class _Reporter:
             ages=ages,
             hours=self.draws.hours,
             credit_returns=credit_returns,
+            retained=retained,
+            excluded=excluded,
+            requested=requested,
         )
         overall, by_cohort = snapshot_groups(
             config=self.config,
@@ -276,6 +286,7 @@ def _discipline_snapshots(
             requests=demand.get(d.name, 0),
             mean_price=prices.get(d.name),
             approvals=closing.approvals[d.name],
+            exclusions=closing.exclusions[d.name],
         )
         for d in config.disciplines
     ]
@@ -304,6 +315,10 @@ def _student_records(
             grade_average=grade_averages[student.id],
             approved_hours=student.approved_hours(draws.hours, config.min_grade),
             enrolled_hours=sum(draws.hours[name] for name in state.won[student.id]),
+            retained_hours=sum(
+                draws.hours[name] for name in closing.retained[student.id]
+            ),
+            effective_load=closing.load[student.id],
             requests=_request_records(
                 student=student,
                 utilities=utilities[student.id],
@@ -409,11 +424,17 @@ def run_period(
         active=active,
         state=state,
         period=period,
+        utilities=utilities,
         enrollments=enrollments,
     )
 
+    # ψ do período sai do que o aluno **reteve**, não do que lhe foi alocado:
+    # ele não consumiu a utilidade do que largou. As rodadas, ao contrário,
+    # medem o alocado — ali a exclusão ainda não aconteceu.
     period_satisfaction = {
-        s.id: satisfaction(utilities=utilities[s.id], allocated=sorted(state.won[s.id]))
+        s.id: satisfaction(
+            utilities=utilities[s.id], allocated=sorted(closing.retained[s.id])
+        )
         for s in active
     }
     prices = _period_prices(config=config, state=state)
@@ -430,6 +451,8 @@ def run_period(
         prices=PriceStats.of(list(prices.values())),
         ages=reporter.ages(closed=True),
         credit_returns=closing.credits_returned,
+        retained=closing.retained,
+        excluded=closing.excluded,
     )
 
     return PeriodOutcome(

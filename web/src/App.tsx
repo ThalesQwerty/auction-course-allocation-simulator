@@ -4,6 +4,11 @@ import { Comparison } from "./Comparison";
 import { Config } from "./Config";
 import { choosePreset, editConfig, initialChoice, PresetChoice } from "./presets";
 import {
+  loadSavedPresets,
+  saveSavedPresets,
+  upsertSavedPreset,
+} from "./savedPresets";
+import {
   formatRunDate,
   HistoryEntry,
   loadHistory,
@@ -18,6 +23,9 @@ import { Sidebar, View } from "./Sidebar";
 
 export default function App() {
   const [choice, setChoice] = useState<PresetChoice>(initialChoice);
+  // Os cenários salvos no navegador. Leitura preguiçosa, como o
+  // histórico: `localStorage` só é tocado na primeira renderização.
+  const [saved, setSaved] = useState(loadSavedPresets);
   const config = choice.config;
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
   const [view, setView] = useState<View>({ kind: "config" });
@@ -116,8 +124,23 @@ export default function App() {
             presetId={choice.presetId}
             hasCustom={choice.custom !== null}
             onSelectPreset={(id) => {
-              setChoice((c) => choosePreset(c, id));
+              setChoice((c) => choosePreset(c, id, saved));
               setError(null);
+            }}
+            saved={saved}
+            onSave={(name) => {
+              // Grava e já seleciona o salvo: quem acabou de salvar está
+              // editando aquele cenário, não um personalizado solto.
+              const next = saveSavedPresets(upsertSavedPreset(saved, name, config));
+              setSaved(next);
+              const stored = next.find((entry) => entry.name === name.trim());
+              if (stored) setChoice((c) => ({ ...c, presetId: stored.id }));
+            }}
+            onDeleteSaved={(id) => {
+              setSaved(saveSavedPresets(saved.filter((entry) => entry.id !== id)));
+              // O apagado some da lista; o formulário continua como está, e
+              // passa a valer como personalizado.
+              setChoice((c) => (c.presetId === id ? { ...c, presetId: null, custom: c.config } : c));
             }}
           />
         )}

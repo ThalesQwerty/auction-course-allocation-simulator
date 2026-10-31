@@ -68,22 +68,46 @@ export const creditReturnLabel = (policy: CreditReturnPolicy): string =>
  * pré-requisitos é o que de fato distingue um aluno de outro aqui. */
 export const cohortLabel = (entryPeriod: number): string => `Geração ${entryPeriod}`;
 
+/** Um grupo da população num dos dois eixos de perfil.
+ *
+ * O perfil descreve o comportamento do aluno **fora do mecanismo**: se ele vai
+ * bem na disciplina (desempenho) ou se a larga (disponibilidade). É traço
+ * imutável, não evolui e o aluno não o conhece — o que age *dentro* do
+ * mecanismo é a estratégia, e são coisas separadas de propósito.
+ *
+ * A Beta entra por **média e concentração**, que é como se lê uma população:
+ * média maior é um grupo que reprova ou exclui menos; concentração maior é um
+ * grupo mais homogêneo em torno dela.
+ *
+ * Espelha `api.schemas.ProfileIn`. */
+export interface Profile {
+  /** Rótulo de relatório; precisa ser único dentro do seu eixo. */
+  name: string;
+  mean: number; // em (0, 1)
+  concentration: number; // > 0
+}
+
 export interface Scenario {
   disciplines: DisciplineInput[];
-  /** A nota sai da **aptidão** do aluno naquela disciplina, elevada à demanda
-   * que ela lhe faz: `round(100 · a^(D/(u_rel^ganho · tentativas)))/10`. A aptidão vem de
-   * uma Beta por par (aluno, disciplina), sorteada uma vez e persistente —
+  /** Perfis de **desempenho**: governam a Beta da aptidão, e por aí a
+   * frequência com que o aluno reprova. A nota sai da aptidão elevada à
+   * demanda da disciplina: `round(100 · a^(D/(u_rel^ganho · tentativas)))/10`.
+   * A aptidão é sorteada uma vez por par (aluno, disciplina) e persiste —
    * traço, não sorte.
    *
-   * A Beta é descrita aqui por **média** e **concentração**, que é como se lê
-   * uma população; o motor as converte nos dois parâmetros de forma que o
-   * sorteio pede. Média 0,65 com concentração 10 é a Beta(6,5, 3,5) calibrada:
-   * nota média 6,5, desvio 0,14 e 84% de aprovação em dificuldade 1. */
-  aptitude_mean: number; // em (0, 1)
-  /** Quão apertada a aptidão fica em torno da média. Mesma média com
-   * concentração maior é uma população mais homogênea — e é a dispersão que dá
-   * à ordenação por CR alguma coisa para ordenar. */
-  aptitude_concentration: number; // > 0
+   * Com dificuldade 1 e sem ganhos a nota **é** a aptidão × 10, então a média
+   * do perfil se lê direto como a nota típica do grupo. */
+  performance_profiles: Profile[];
+  /** Perfis de **disponibilidade**: governam a Beta da fração de W_a que o
+   * aluno de fato cursa, sorteada **a cada período** — ao contrário da
+   * aptidão, que é uma só para o curso inteiro. O tempo disponível é
+   * circunstância; o que é traço é a média de onde ela sai.
+   *
+   * Depois da última rodada o aluno descarta o que não couber nessa fração, e
+   * o descartado vira solicitação **excluída**: não conta carga, não conta
+   * tentativa, não mexe no CR, e no leilão devolve metade do preço pago. A
+   * vaga não volta para a oferta. */
+  availability_profiles: Profile[];
   /** **Ganho por utilidade**: o quanto a utilidade mexe no desempenho, como
    * expoente sobre a **utilidade relativa** — a fração de utilidade vezes o
    * número de disciplinas, de modo que 1 é a indiferença. **0 desliga**, e é o
@@ -172,43 +196,60 @@ export type Mechanism = "credits" | "ranking";
  * boxplot e uma linha das tabelas, e nada roda para não ser mostrado.
  *
  * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas. */
-export const COMPARISON_ARMS: {
+interface ArmDescription {
   key: string;
   label: string;
   /** Rótulo do eixo do boxplot: embaixo da caixa cabe pouco, e o nome inteiro
-   * fica na legenda. Nomeia **o que mudou em relação à caixa anterior**, que
-   * num gráfico que é um caminho é a informação mais útil ali. */
+   * fica na legenda. */
   short: string;
   hint: string;
-}[] = [
+}
+
+/** Os dois modelos comparados, na ordem do eixo.
+ *
+ * A complexidade do trabalho foi para os parâmetros — os perfis de aluno e a
+ * disponibilidade —, e por equilíbrio saiu dos modelos. O preço é que o vão
+ * medido soma três mudanças ao mesmo tempo (mensagem, resolução e retorno) e
+ * não diz qual pesou; a escada que as separava está em `ABLATION_ARMS`.
+ *
+ * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas. */
+export const COMPARISON_ARMS: ArmDescription[] = [
   {
     key: "ranking_greedy",
     label: "CR",
     short: "CR",
-    hint: "a linha de base: matrícula por histórico. Os alunos entram em ordem decrescente de CR e cada um leva o que quer, na própria ordem de preferência, enquanto houver vaga e carga — eqs. (49)-(50). Ordinal: a alocação usa só a ordem, nunca a magnitude",
+    hint: "a linha de base: matrícula por histórico. Os alunos entram em ordem decrescente de CR e cada um leva o que quer, na própria ordem de preferência, enquanto houver vaga e carga — eqs. (49)-(50). Ordinal: a alocação usa só a ordem, nunca a magnitude. Excluir não custa nada aqui — não há moeda a perder",
   },
+  {
+    key: "credits_return",
+    label: "Leilão",
+    short: "Leilão",
+    hint: "o modelo proposto (Seção 7.1): o aluno reparte um orçamento de créditos em lances por disciplina, um PLI resolve a alocação e o segundo preço cobra. Com a política proporcional de f_γ (eq. 34), quem aprova recupera a fatia do preço correspondente à nota — e quem exclui recupera metade, de modo que largar vaga custa",
+  },
+];
+
+/** Os dois degraus do meio do caminho, que **não** rodam por padrão.
+ *
+ * Separam o vão em três parcelas, e o motor os alcança por
+ * `run_comparison(..., arms=ARMS + ABLATION_ARMS)`. Ficam aqui só para que o
+ * traço de uma execução antiga continue com rótulo legível. */
+export const ABLATION_ARMS: ArmDescription[] = [
   {
     key: "credits_greedy",
     label: "Bidding points",
     short: "Bidding points",
-    hint: "o mecanismo de pontos das business schools (Sönmez & Ünver 2010, sobre Michigan e Yale SOM): o aluno reparte um orçamento em lances e os lances são atendidos em ordem decrescente, enquanto houver vaga e carga. Ordinal como o CR — o que muda em relação a ele é só a mensagem, que passa a ser um número por disciplina em vez de um por aluno",
+    hint: "o mecanismo de pontos das business schools (Sönmez & Ünver 2010): lances repartidos de um orçamento, atendidos em ordem decrescente. Ordinal como o CR — o que muda é só a mensagem, que passa a ser um número por disciplina em vez de um por aluno",
   },
   {
     key: "credits_ilp",
     label: "Leilão sem retorno",
     short: "Sem retorno",
-    hint: "o leilão do anteprojeto (Seção 7.1): mesma mensagem do bidding points, resolvida por PLI. Cardinal — a alocação usa as magnitudes e derruba um lance alto para acomodar dois médios, o que a varredura nunca faz. O que muda em relação ao bidding points é só a resolução",
-  },
-  {
-    key: "credits_return",
-    label: "Leilão com retorno",
-    short: "Com retorno",
-    hint: "o modelo proposto: o mesmo leilão com a política proporcional de f_γ (eq. 34). Quem aprova recupera a fatia do preço correspondente à nota, então ir bem compra poder de compra no período seguinte — a única política que premia desempenho acima da nota de corte. O que muda em relação à caixa anterior é só o retorno",
+    hint: "o mesmo leilão resolvido por PLI, mas sem devolver crédito nenhum. Cardinal — a alocação usa as magnitudes e derruba um lance alto para acomodar dois médios. O que muda em relação ao bidding points é só a resolução",
   },
 ];
 
 export const armLabel = (key: string): string =>
-  COMPARISON_ARMS.find((arm) => arm.key === key)?.label ?? key;
+  [...COMPARISON_ARMS, ...ABLATION_ARMS].find((arm) => arm.key === key)?.label ?? key;
 
 /** Uma comparação: o mesmo cenário rodado em cada modelo, N vezes.
  *
@@ -247,6 +288,16 @@ export interface PeriodSeries {
   fidelity: number[];
   fairness: number[];
   correlation: number[];
+  exclusion_rate: number[];
+  /** A série da seção "Solicitações de disciplinas": seis linhas **não
+   * empilhadas**, em média por aluno, uma posição por período medido.
+   *
+   * Não empilhadas porque empilhar torna a espessura de uma faixa legível mas
+   * a posição dela dependente de tudo o que está embaixo — e comparar a linha
+   * de exclusão entre dois braços com a base balançando é das leituras mais
+   * difíceis que existem. Cada estado ganha escala própria pelo mesmo motivo:
+   * "não elegível" gira numa ordem de grandeza e "excluída" em outra. */
+  request_states: RequestStates[];
   /** A saturação do período, rodada a rodada: `allocations_per_round[i][r]` é o
    * que foi ganho por aluno na rodada r+1 do período `period[i]`. Uma linha por
    * período medido, sempre com |R| posições — lê-se por **coluna**: a 1ª rodada
@@ -281,6 +332,8 @@ export interface CohortSeries {
   fidelity: number[];
   fairness: number[];
   correlation: number[];
+  exclusion_rate: number[];
+  request_states: RequestStates[];
   /** `null` na geração em que ninguém concluiu. */
   time_to_graduate: (number | null)[];
   /** A saturação da geração, rodada a rodada — lê-se por coluna, como a de
@@ -316,6 +369,13 @@ export interface RunSummary {
   fidelity: number;
   fairness: number; // φ — eq. (55)
   correlation: number; // λ — eq. (57)
+  /** Desperdício: a fração das vagas obtidas que foi largada antes de virar
+   * aula. É a quinta métrica da comparação, e a que a disponibilidade existe
+   * para produzir. */
+  exclusion_rate: number;
+  /** Os seis estados em média por aluno, reduzidos a um ponto cada. A série
+   * sem reduzir está em `by_period` e `by_cohort`. */
+  request_states: RequestStates;
   /** Períodos do ingresso ao diploma, na média dos concluintes; conta o período
    * da formatura. `null` quando ninguém concluiu — zero ali se leria como
    * "formou na hora". */
@@ -357,6 +417,32 @@ export interface CompareResponse {
   grade_distribution?: number[];
 }
 
+/** Os seis estados de uma solicitação, em **média por aluno**.
+ *
+ * Particionam o que ainda falta ao aluno — o catálogo menos o que ele já
+ * aprovou —, de modo que a soma é o tamanho desse denominador. A ordem dos
+ * campos é a do funil, do mais distante ao mais bem-sucedido:
+ *
+ *     não elegível → não solicitada → recusada → excluída → reprovada → aprovada
+ *
+ * **O já aprovado sai do denominador**, e isso não é detalhe: juntá-lo com o
+ * bloqueado num estado só faria a mesma faixa crescer com o progresso do aluno
+ * e encolher com o desbloqueio dele, e as duas se cancelariam em parte.
+ *
+ * É média, nunca soma: a soma seria governada pela população, que sobe no
+ * escalonamento de ingresso e despenca na drenagem, e o gráfico mostraria o
+ * tamanho da universidade em vez do mecanismo.
+ *
+ * Espelha `equations.request_states.RequestStates`. */
+export interface RequestStates {
+  not_eligible: number;
+  not_requested: number;
+  refused: number;
+  excluded: number;
+  failed: number;
+  approved: number;
+}
+
 export interface Metrics {
   students: number;
   allocated: number;
@@ -380,6 +466,25 @@ export interface Metrics {
   fidelity: number;
   fairness: number; // φ — Jain, eq. (55)
   occupancy: number; // θ — eq. (54)
+  /** Vagas que o recorte obteve e largou. `null` em plena rodada: a exclusão
+   * acontece depois da última, então só o fim do período tem o que contar. */
+  excluded: number | null;
+  /** Desperdício: as vagas excluídas sobre as obtidas. É a diferença entre as
+   * duas leituras de ocupação — a vaga saiu da oferta de qualquer jeito, mas
+   * só a parte retida virou carga cursada. */
+  exclusion_rate: number | null;
+  /** Aproveitamento **efetivo**: carga retida ÷ W_a. Lido contra
+   * `utilization`, que fica no alocado, o vão entre os dois é o desperdício.
+   *
+   * A divisão de trabalho é essa: as grandezas de **contagem** (allocated,
+   * occupancy, utilization) ficam no alocado, porque a vaga saiu do sistema
+   * tenha sido cursada ou não; as de **valor** (efficiency, fairness,
+   * correlation) ficam no retido, porque o aluno não consumiu a utilidade do
+   * que largou. */
+  effective_utilization: number | null;
+  /** Os seis estados de solicitação, em média por aluno — a seção
+   * "Solicitações de disciplinas". */
+  request_states: RequestStates | null;
   /** Escassez: elegíveis por vaga. Para cada disciplina que o aluno ainda pode
    * cursar — não aprovada e com os pré-requisitos cumpridos —, (quantos são
    * elegíveis a ela) ÷ (vagas); a do aluno é a média dessas razões, e a do
@@ -484,6 +589,9 @@ export interface DisciplineSnapshot {
    * leria como barata justamente a que todo mundo quis. */
   mean_price: number | null;
   approvals: number;
+  /** Vagas desta disciplina obtidas e depois largadas. Com `filled`, separa a
+   * vaga que virou aula da que só saiu da oferta. */
+  exclusions: number;
 }
 
 export interface PeriodReport {
@@ -499,6 +607,12 @@ export interface StudentSummary {
   id: string;
   name: string;
   entry_period: number; // t_a — eq. (31)
+  /** Os dois grupos a que ele pertence, pelo nome. São **traço imutável** e
+   * não entram em decisão nenhuma dele: estão aqui porque a tela individual é
+   * onde se pergunta "por que *este* aluno foi assim" — e o perfil é metade da
+   * resposta, com a seed sendo a outra. */
+  performance: string;
+  availability: string;
   grade_average: number; // N_a — eq. (49)
   approved_hours: number;
   /** S — a carga da grade inteira. Toda disciplina é obrigatória, então é a
@@ -529,6 +643,10 @@ export interface RequestRecord {
    * matrícula garantida do ingressante. */
   won_round: number | null;
   paid: number; // eq. (27)
+  /** Obteve a vaga e não cursou: a disponibilidade do período não comportou.
+   * Com ela, `attempt` e `grade` vêm `null` — não houve tentativa — e
+   * `returned` traz metade do preço pago em vez do retorno por nota. */
+  excluded: boolean;
   attempt: number | null;
   grade: number | null; // eq. (33)
   approved: boolean;
@@ -544,7 +662,13 @@ export interface StudentPeriodRecord {
   satisfaction: number; // psi_a^(t) — eq. (51)
   grade_average: number; // CR no início do período — eq. (49)
   approved_hours: number;
+  /** Carga obtida no período, **antes** de excluir. */
   enrolled_hours: number;
+  /** Carga que ele de fato cursou e o teto que a disponibilidade lhe deu:
+   * `retained_hours <= effective_load`, e o vão para `enrolled_hours` é o que
+   * ele largou. */
+  retained_hours: number;
+  effective_load: number;
   requests: RequestRecord[];
   graduated: boolean;
 }
@@ -595,8 +719,16 @@ export interface TraceResponse {
 export function defaultScenario(): Scenario {
   return {
     disciplines: [],
-    aptitude_mean: 0.65,
-    aptitude_concentration: 10,
+    performance_profiles: [
+      { name: "Alto desempenho", mean: 0.8, concentration: 25 },
+      { name: "Médio desempenho", mean: 0.65, concentration: 15 },
+      { name: "Baixo desempenho", mean: 0.5, concentration: 10 },
+    ],
+    availability_profiles: [
+      { name: "Alta disponibilidade", mean: 0.95, concentration: 50 },
+      { name: "Média disponibilidade", mean: 0.85, concentration: 20 },
+      { name: "Baixa disponibilidade", mean: 0.6, concentration: 10 },
+    ],
     utility_gain: 0,
     retake_gain: 1,
     utility_stability: 0.5,

@@ -19,5 +19,13 @@ export { SeriesChart } from "./SeriesChart";
 export type { SeriesGroup, SeriesPoint } from "./SeriesChart";
 export { formatCount, formatRatio } from "./format";
 export { SeriesTip } from "./SeriesTip";
-export { STATUS, categoricalColors, inkFor, soloColor, usePrefersDark } from "./theme";
+export {
+  REQUEST_STATES,
+  STATUS,
+  categoricalColors,
+  inkFor,
+  requestStateColors,
+  soloColor,
+  usePrefersDark,
+} from "./theme";
 export type { Ink } from "./theme";

@@ -67,3 +67,34 @@ export function categoricalColors(
  * use precisa vir com rótulo em palavras ao lado — é a mitigação prevista, e
  * por isso o gráfico colorido por estado exige legenda. */
 export const STATUS = { good: "#0ca30c", warning: "#fab219", critical: "#d03b3b" };
+
+/** A paleta dos **seis estados de uma solicitação**, na ordem do funil.
+ *
+ * Os três que já existiam mantêm a matiz de `STATUS`, para que um significado
+ * não tenha duas cores no mesmo aplicativo. Os três novos — as duas ausências
+ * e a exclusão — são cinzas e um azul, validados contra os dois fundos: o par
+ * de cinzas precisa separar-se por **luminosidade**, que é o que o mantém
+ * legível em daltonismo, e por isso ele não é fixo nos dois temas como o
+ * `STATUS` é.
+ *
+ * Vale aqui a mesma mitigação do `STATUS`: a cor diz de relance, e cada uso
+ * vem com o nome do estado ao lado. Na seção de solicitações isso é de graça —
+ * cada painel traz o nome do estado no título, com o quadrado ao lado. */
+export const requestStateColors = (dark: boolean) => ({
+  not_eligible: dark ? "#7d7a71" : "#4f4c45",
+  not_requested: dark ? "#aba89f" : "#8d8a82",
+  refused: STATUS.warning,
+  excluded: dark ? "#5b9ae8" : "#2f5aa8",
+  failed: STATUS.critical,
+  approved: STATUS.good,
+});
+
+/** Os seis estados na ordem do funil, com o rótulo que a tela mostra. */
+export const REQUEST_STATES = [
+  { key: "not_eligible", label: "não elegível" },
+  { key: "not_requested", label: "não solicitada" },
+  { key: "refused", label: "recusada" },
+  { key: "excluded", label: "excluída" },
+  { key: "failed", label: "reprovada" },
+  { key: "approved", label: "aprovada" },
+] as const;

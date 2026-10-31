@@ -326,7 +326,9 @@ def test_history_matches_the_aggregate_summary():
             for request in record.requests
             if request.won_round is not None
         ]
-        assert summary.enrollments == len(won)
+        # `enrollments` conta o que ele **cursou**: a excluída ocupou vaga, mas
+        # não virou matrícula.
+        assert summary.enrollments == len([r for r in won if not r.excluded])
         assert summary.approvals == len({r.discipline for r in won if r.approved})
         if history.periods:
             assert summary.credits == history.periods[-1].credits_end
@@ -340,6 +342,14 @@ def test_history_matches_the_aggregate_summary():
             assert record.enrolled_hours == sum(
                 hours[r.discipline] for r in record.requests if r.won_round is not None
             )
+            # A retida é o que sobreviveu à exclusão, e cabe no teto que a
+            # disponibilidade do período deu — ver `equations.retained_set`.
+            assert record.retained_hours == sum(
+                hours[r.discipline]
+                for r in record.requests
+                if r.won_round is not None and not r.excluded
+            )
+            assert record.retained_hours <= record.effective_load
 
 
 def test_history_separates_refused_requests_from_unbid_ones():
@@ -367,14 +377,22 @@ def test_history_separates_refused_requests_from_unbid_ones():
     requests = [r for h in result.histories for p in h.periods for r in p.requests]
 
     won = [r for r in requests if r.won_round is not None]
+    coursed = [r for r in won if not r.excluded]
+    excluded = [r for r in won if r.excluded]
     refused = [r for r in requests if r.won_round is None and any(r.bids)]
     unbid = [r for r in requests if not any(r.bids)]
-    assert won and refused and unbid, "o cenário deveria produzir as três saídas"
+    assert coursed and refused and unbid, "o cenário deveria produzir as saídas"
 
-    for request in won:
+    for request in coursed:
         assert request.paid > 0 and request.attempt is not None and request.grade is not None
+    # A excluída ocupou vaga e pagou, mas não virou tentativa nem nota: não
+    # conta carga cursada, não mexe no CR e, se refizer, volta como primeira
+    # tentativa.
+    for request in excluded:
+        assert request.paid > 0 and request.attempt is None and request.grade is None
     for request in refused + unbid:
         assert request.paid == 0 and request.attempt is None and request.grade is None
+        assert not request.excluded
     # Lance só sai de disciplina com utilidade positiva — eq. (18).
     assert all(r.utility > 0 for r in requests)
 
@@ -549,7 +567,12 @@ def test_entrants_get_every_entry_discipline_without_bidding():
         # denominador fixo em 1 (a linha é normalizada sobre a grade). Para o
         # calouro isso é a utilidade do pacote de entrada, que **não** é 1:
         # o resto da grade continua sendo desejo dele, só que fora de alcance.
-        served = sum(r.utility for r in record.requests if r.won_round is not None)
+        # O calouro exclui como qualquer outro, e psi sai do que ele reteve.
+        served = sum(
+            r.utility
+            for r in record.requests
+            if r.won_round is not None and not r.excluded
+        )
         assert record.satisfaction == pytest.approx(served)
         assert 0 < record.satisfaction < 1
 
@@ -730,7 +753,7 @@ def test_an_emptied_cohort_stays_in_the_series_with_its_graduates():
         # Aptidão alta: todo mundo passa de primeira e a geração esvazia
         # dentro do horizonte, que é o caso que o teste quer.
         make_config(
-            periods=12, entry_periods=2, aptitude_alpha=40.0
+            periods=12, entry_periods=2
         )
     )
     emptied = [
@@ -811,9 +834,13 @@ def test_credit_return_is_added_to_the_budget_of_the_next_period():
                     + record.credits_returned
                 )
                 # O total do período é a soma do gamma de cada disciplina, e só
-                # disciplina cursada devolve crédito.
+                # devolve crédito quem obteve a vaga — cursando ou excluindo.
                 assert record.credits_returned == sum(q.returned for q in record.requests)
-                assert all(q.returned == 0 for q in record.requests if q.attempt is None)
+                assert all(
+                    q.returned == 0
+                    for q in record.requests
+                    if q.attempt is None and not q.excluded
+                )
 
 
 def test_each_policy_returns_what_it_promises_inside_a_full_simulation():

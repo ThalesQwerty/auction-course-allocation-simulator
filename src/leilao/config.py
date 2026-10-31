@@ -4,12 +4,21 @@ O usuário descreve o cenário em dois blocos — parâmetros gerais e disciplin
 e a simulação deriva o resto (alunos, nomes, matriz de utilidades, notas)
 aleatoriamente a partir da `seed`.
 
-**Não há perfis de aluno.** Toda a população sai das mesmas duas normais — a das
-notas (a Beta da aptidão) e a das utilidades
-(`utility_sigma`) —, e o que distingue um aluno do outro é só o que a seed
-sorteou para ele. Os eixos de aptidão e afinidade existiram até
-08/10/2026 e foram removidos a pedido: a heterogeneidade continua, mas deixa de
-ser *sistemática*, e com ela sai o recorte dos relatórios por perfil.
+**Os perfis de aluno descrevem o comportamento fora do mecanismo.** São dois
+eixos independentes — `performance_profiles`, que governa a Beta da aptidão e
+portanto a frequência com que o aluno reprova, e `availability_profiles`, que
+governa a Beta da disponibilidade e portanto a frequência com que ele exclui.
+Cada eixo é uma lista de grupos, e o aluno carrega **dois escalares** sorteados
+das Betas dos grupos que lhe couberam.
+
+O perfil é **traço imutável**: não evolui, não responde a sinal, não entra no
+genoma e o aluno não o conhece. Ele age *depois* da vaga — se o aluno vai bem
+na disciplina ou se a larga. A estratégia (`equations.decision_score`) age
+*dentro* do mecanismo, ao pedir. Não há eixo de perfil para utilidade: o β do
+score já é o parâmetro de o quanto o aluno diferencia as disciplinas, e dois
+botões para a mesma coisa tornariam qualquer resultado ambíguo de ler.
+
+A repartição é **igualitária entre as combinações** — ver `profile_index`.
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade. A
 obrigatória tem de ser aprovada uma a uma; a **optativa** (`elective`) conta só
@@ -28,6 +37,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from .equations import (
+    beta_shape,
     curriculum_heights,
     curriculum_periods,
     curriculum_reach,
@@ -80,6 +90,63 @@ CreditReturnPolicy = Literal["none", "unit", "full", "ratio"]
 # opostos de incentivo: a sobra premia quem pagou barato, o retorno premia quem
 # aprovou.
 CreditMemory = Literal["none", "carry"]
+
+
+@dataclass(frozen=True)
+class Profile:
+    """Um grupo da população num dos dois eixos de perfil.
+
+    A Beta entra por **média e concentração**, que é como se lê uma população,
+    e não pelos dois parâmetros de forma — a conversão está em
+    `equations.beta_shape`. Média maior é um grupo que vai melhor (reprova
+    menos) ou que tem mais tempo (exclui menos); concentração maior é um grupo
+    mais homogêneo em torno dela.
+
+    O nome é rótulo de relatório, e precisa ser único dentro do seu eixo — é
+    por ele que o recorte por perfil separa os grupos.
+    """
+
+    name: str
+    mean: float
+    concentration: float
+
+    @property
+    def shape(self) -> tuple[float, float]:
+        """(forma₁, forma₂) da Beta — ver `equations.beta_shape`."""
+        return beta_shape(mean=self.mean, concentration=self.concentration)
+
+
+# A calibragem dos dois eixos. Com dificuldade 1 e sem ganhos a nota **é** a
+# aptidão × 10, então a média do perfil de desempenho se lê direto como a nota
+# típica do grupo. O "baixo" fica exatamente em `n_min = 5`: a mediana daquele
+# grupo encosta na linha de corte, de modo que ele reprova em torno de metade
+# das vezes numa disciplina de dificuldade padrão.
+#
+# O nome carrega o eixo de propósito. "Alto" e "Alta" nos dois lados fariam
+# "alto-baixo" virar charada em legenda de gráfico; com o eixo no rótulo, a
+# combinação se lê sozinha.
+DEFAULT_PERFORMANCE: tuple[Profile, ...] = (
+    Profile(name="Alto desempenho", mean=0.80, concentration=25.0),
+    Profile(name="Médio desempenho", mean=0.65, concentration=15.0),
+    Profile(name="Baixo desempenho", mean=0.50, concentration=10.0),
+)
+
+# "Alta" concentra junto do teto e às vezes alcança W_a inteiro; "Baixa" é
+# larga e raramente passa de 0,8 de W_a.
+DEFAULT_AVAILABILITY: tuple[Profile, ...] = (
+    Profile(name="Alta disponibilidade", mean=0.95, concentration=50.0),
+    Profile(name="Média disponibilidade", mean=0.85, concentration=20.0),
+    Profile(name="Baixa disponibilidade", mean=0.60, concentration=10.0),
+)
+
+# O perfil de quem é construído **fora** de `generate_students` — um aluno de
+# teste, um cenário escrito à mão. Não descreve grupo nenhum: reproduz a
+# população sem perfis que havia antes, com a Beta(6,5, 3,5) única no
+# desempenho e disponibilidade praticamente cheia, de modo que construir um
+# aluno sem dizer o perfil dele não liga a exclusão sem querer.
+NEUTRAL_PERFORMANCE = Profile(name="—", mean=0.65, concentration=10.0)
+NEUTRAL_AVAILABILITY = Profile(name="—", mean=0.99, concentration=400.0)
+
 
 @dataclass(frozen=True)
 class Discipline:
@@ -203,24 +270,26 @@ class SimulationConfig:
     # período de residência conta como concluinte, não como jubilado — o
     # jubilamento só alcança quem chegou ao fim dele sem fechar a grade.
     max_residence: int | None = None
-    # --- as duas distribuições que descrevem um aluno -----------------------
+    # --- os dois eixos de perfil --------------------------------------------
     #
-    # Todo aluno é igual a todos os outros *em distribuição*: não há mais perfis,
-    # e o que o distingue dos colegas é só o que saiu da seed para ele. São duas
-    # distribuições, e nenhuma delas consta no anteprojeto.
+    # **Desempenho**: a nota sai da aptidão elevada à demanda da disciplina —
+    # ver `grading`. A aptidão de cada par (aluno, disciplina) vem da Beta do
+    # perfil, sorteada uma vez e persistente: é traço, não sorte. A calibragem
+    # importa — sem dispersão de desempenho ninguém reprova, a recursada some
+    # do cenário e o CR vira ruído, de modo que a eq. (57) não mede nada.
+    performance_profiles: tuple[Profile, ...] = DEFAULT_PERFORMANCE
+    # **Disponibilidade**: a fração de W_a que o aluno vai de fato cursar,
+    # sorteada da Beta do perfil **a cada período** — ao contrário da aptidão,
+    # que é uma só para o curso inteiro. Depois da última rodada ele descarta
+    # o que não couber nessa fração (`equations.retained_set`), e o descartado
+    # vira solicitação **excluída**: não conta carga, não conta tentativa, não
+    # mexe no CR, e no leilão devolve metade do preço pago
+    # (`equations.exclusion_refund`).
     #
-    # **Notas**: a nota sai da aptidão elevada à demanda da disciplina — ver
-    # `grading`. A aptidão de cada par (aluno, disciplina) vem de uma Beta,
-    # sorteada uma vez e persistente: é traço, não sorte.
-    #
-    # **Beta(6,5, 3,5)** — média 0,65 (nota 6,5) e concentração 10 — é a
-    # calibragem da população: desvio 0,14 e 84% de aprovação numa disciplina
-    # de dificuldade 1. Era Beta(4, 2) (média 0,67, concentração 6, desvio
-    # 0,18, 81% de aprovação); a concentração maior aperta as duas caudas sem
-    # mexer no centro. Sem calibrar, a população fica boa demais, ninguém
-    # reprova e a recursada some do cenário.
-    aptitude_alpha: float = 6.5
-    aptitude_beta: float = 3.5
+    # A vaga excluída **não volta para a oferta** — exclui-se depois de
+    # encerradas as alocações do período. É o que torna a exclusão socialmente
+    # cara e dá sentido à penalidade do leilão.
+    availability_profiles: tuple[Profile, ...] = DEFAULT_AVAILABILITY
     # **Ganho por utilidade**: o quanto a utilidade mexe no desempenho, como
     # expoente sobre u_rel. **Padrão 0: desligado.** É a única peça da fórmula de nota sem forma
     # justificada, e a única que mexe no resultado principal — em 1 ela
@@ -328,8 +397,11 @@ class SimulationConfig:
             )
         if self.rounds < 1:
             raise ValueError("é preciso simular ao menos 1 rodada por período")
-        if not 0 < self.min_grade <= 10:
-            raise ValueError("nota mínima deve estar em (0, 10]")
+        # O piso em 5 é do retorno por exclusão: ele devolve metade do preço
+        # pago, e abaixo de 5 a metade passaria a render mais que a aprovação
+        # raspada — excluir bateria passar. Ver `equations.exclusion_refund`.
+        if not 5 <= self.min_grade <= 10:
+            raise ValueError("nota mínima deve estar em [5, 10]")
         if self.base_credits < 1:
             raise ValueError("créditos base (Gamma_min) deve ser >= 1")
         if self.max_hours < 1:
@@ -346,8 +418,27 @@ class SimulationConfig:
             raise ValueError(
                 "o cenário precisa de pelo menos um aluno por período de ingresso"
             )
-        if self.aptitude_alpha <= 0 or self.aptitude_beta <= 0:
-            raise ValueError("os parâmetros da Beta da aptidão devem ser > 0")
+        for eixo, perfis in (
+            ("desempenho", self.performance_profiles),
+            ("disponibilidade", self.availability_profiles),
+        ):
+            if not perfis:
+                raise ValueError(f"o eixo de {eixo} precisa de pelo menos um perfil")
+            nomes = [p.name.strip() for p in perfis]
+            if any(not nome for nome in nomes):
+                raise ValueError(f"todo perfil de {eixo} precisa de um nome")
+            if len(set(nomes)) != len(nomes):
+                raise ValueError(f"os nomes dos perfis de {eixo} devem ser únicos")
+            for perfil in perfis:
+                if not 0 < perfil.mean < 1:
+                    raise ValueError(
+                        f"a média do perfil '{perfil.name}' ({eixo}) deve estar "
+                        "em (0, 1)"
+                    )
+                if perfil.concentration <= 0:
+                    raise ValueError(
+                        f"a concentração do perfil '{perfil.name}' ({eixo}) deve ser > 0"
+                    )
         if self.utility_gain < 0:
             raise ValueError("o ganho por utilidade deve ser >= 0")
         if self.retake_gain < 0:
@@ -447,6 +538,36 @@ class SimulationConfig:
     def total_students(self) -> int:
         """|A| — uma geração do mesmo tamanho em cada período com ingresso."""
         return self.students_per_period * self.entry_span
+
+    def profile_combinations(self) -> int:
+        """Quantos pares (desempenho, disponibilidade) existem."""
+        return len(self.performance_profiles) * len(self.availability_profiles)
+
+    def profile_index(self, student_index: int) -> tuple[int, int]:
+        """O par (desempenho, disponibilidade) do aluno de índice global.
+
+        A repartição é **igualitária entre as combinações**: com 3 perfis em
+        cada eixo são 9 pares, e cada um fica com ~11% da geração. Não há
+        porcentagem a configurar — o que o usuário escolhe é quantos perfis
+        existem em cada eixo, e as fatias saem disso.
+
+        O rodízio é sobre o índice **global**, não o índice dentro da geração.
+        Com os dois iguais a conta seria a mesma quando a geração é múltipla
+        do número de pares; quando não é, o índice global faz a sobra girar
+        entre as gerações, enquanto o índice local daria o excedente sempre
+        aos mesmos primeiros pares. É largest-remainder com o resto rodando.
+
+        O perfil **não sai da seed**, pelo mesmo motivo que o período de
+        ingresso não sai: duas execuções com seeds diferentes têm a mesma
+        estrutura de perfis, então a diferença entre elas não é quem calhou de
+        ser frágil. Da seed vêm os dois escalares, não o grupo.
+        """
+        pairs = self.profile_combinations()
+        combination = student_index % pairs
+        return (
+            combination // len(self.availability_profiles),
+            combination % len(self.availability_profiles),
+        )
 
     def prerequisites_by_discipline(self) -> dict[str, tuple[str, ...]]:
         """Aresta inversa dos sucessores: quem precisa estar aprovado para

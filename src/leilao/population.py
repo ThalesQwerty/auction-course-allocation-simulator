@@ -1,9 +1,13 @@
 """Os alunos — o conjunto A (Seção 7.2) e o estado que anda com os períodos.
 
-Eles não são configurados um a um: o usuário diz quantos ingressam por
-período e a população inteira sai da seed. **Não há perfis** — todos saem das
-mesmas distribuições do cenário, de modo que a diferença entre dois alunos é
-só o que a seed sorteou para cada um.
+Eles não são configurados um a um: o usuário diz quantos ingressam por período
+e a população inteira sai da seed.
+
+Cada aluno carrega **dois perfis**, um por eixo — desempenho e
+disponibilidade. Eles não saem da seed: a repartição é igualitária entre as
+combinações e determinística (`SimulationConfig.profile_index`), do mesmo modo
+que o período de ingresso. Da seed vêm os escalares que as Betas dos perfis
+produzem, não o grupo.
 """
 from __future__ import annotations
 
@@ -11,7 +15,12 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .config import SimulationConfig
+from .config import (
+    NEUTRAL_AVAILABILITY,
+    NEUTRAL_PERFORMANCE,
+    Profile,
+    SimulationConfig,
+)
 from .equations import NEUTRAL, Behavior, grade_average
 from .names import sample_names
 
@@ -30,6 +39,16 @@ class Student:
     name: str
     credits: int  # C_a^(t,1) — eqs. (36)/(37)
     entry_period: int = 1  # t_a — eq. (31)
+    # Os dois grupos a que ele pertence. São **traço imutável** e o aluno não
+    # os conhece: não entram no genoma nem na decisão de lance, só no sorteio
+    # da aptidão e da disponibilidade — e no recorte dos relatórios.
+    #
+    # O default é o perfil **neutro**, não o primeiro da lista: quem constrói
+    # um aluno à mão não está escolhendo um grupo, e herdar "forte" por
+    # omissão enviesaria o teste sem avisar. `generate_students` sempre define
+    # os dois.
+    performance: Profile = NEUTRAL_PERFORMANCE
+    availability: Profile = NEUTRAL_AVAILABILITY
     # n_{a,x}: a **maior** nota já obtida, que é a que conta para o CR e para
     # a aprovação. A nota de cada tentativa vive no histórico do período.
     grades: dict[str, float] = field(default_factory=dict)
@@ -84,19 +103,26 @@ def generate_students(
     menos que |T|, os períodos seguintes não recebem ninguém: é a fase de
     drenagem.
 
-    O período de ingresso **não** vem da seed. As gerações têm todas o mesmo
-    tamanho, em períodos consecutivos, e isso importa para comparar cenários:
-    duas execuções com seeds diferentes têm a mesma estrutura de entrada,
-    então a diferença entre elas não é quem entrou quando. Da seed vem o nome
-    — e, fora daqui, a aptidão e as utilidades.
+    O período de ingresso **não** vem da seed, e o par de perfis também não.
+    As gerações têm todas o mesmo tamanho, em períodos consecutivos, e os
+    perfis se repartem igualmente entre as combinações — e isso importa para
+    comparar cenários: duas execuções com seeds diferentes têm a mesma
+    estrutura de entrada e os mesmos grupos, então a diferença entre elas não
+    é quem entrou quando nem quem calhou de ser frágil. Da seed vem o nome —
+    e, fora daqui, a aptidão, a disponibilidade e as utilidades.
     """
     names = sample_names(config.total_students(), rng)
-    return [
-        Student(
-            id=f"a{index:05d}",
-            name=names[index],
-            credits=config.base_credits,
-            entry_period=1 + index // config.students_per_period,
+    students = []
+    for index in range(config.total_students()):
+        performance, availability = config.profile_index(index)
+        students.append(
+            Student(
+                id=f"a{index:05d}",
+                name=names[index],
+                credits=config.base_credits,
+                entry_period=1 + index // config.students_per_period,
+                performance=config.performance_profiles[performance],
+                availability=config.availability_profiles[availability],
+            )
         )
-        for index in range(config.total_students())
-    ]
+    return students

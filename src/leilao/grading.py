@@ -43,13 +43,21 @@ def draw_aptitudes(
     limitada — que parcela do máximo esta pessoa alcança —, e ela já nasce em
     (0, 1) sem truncagem.
 
+    Cada aluno sorteia da Beta do **perfil de desempenho** dele, de modo que a
+    heterogeneidade é sistemática: há grupos a separar no relatório, e não só
+    dispersão. O perfil em si não vem da seed — ver `population`.
+
     O corte nas pontas evita o 0,0 e o 1,0 exatos que o gerador devolve para
     parâmetros pequenos, e que degenerariam a nota.
     """
+    # Uma forma por linha, difundida sobre as colunas: o gerador consome
+    # exatamente um sorteio por par (aluno, disciplina), como quando a
+    # população inteira saía de uma Beta só.
+    shapes = np.array([student.performance.shape for student in students])
     draws = np.clip(
         rng.beta(
-            config.aptitude_alpha,
-            config.aptitude_beta,
+            shapes[:, 0:1],
+            shapes[:, 1:2],
             size=(len(students), len(disciplines)),
         ),
         APTITUDE_GUARD,

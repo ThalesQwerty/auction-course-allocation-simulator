@@ -1,8 +1,12 @@
 import { useMemo, useState } from "react";
 import { DensityChart, STATUS } from "./charts";
 import { entryDisciplines } from "./curriculum";
-import { gradeCurve, utilityCurve } from "./distributions";
+import { availabilityCurve, gradeCurve, utilityCurve } from "./distributions";
 import { PresetList } from "./PresetList";
+import { nameExists } from "./savedPresets";
+import type { SavedPreset } from "./savedPresets";
+import { ProfileList, axisShare } from "./ProfileList";
+import { SaveScenario } from "./SaveScenario";
 import { COMPARISON_ARMS, MAX_COMPARISON_RUNS, horizonFor } from "./types";
 import type { Scenario } from "./types";
 
@@ -17,6 +21,9 @@ export function Config({
   presetId,
   hasCustom,
   onSelectPreset,
+  saved,
+  onSave,
+  onDeleteSaved,
 }: {
   config: Scenario;
   setConfig: (update: (current: Scenario) => Scenario) => void;
@@ -28,6 +35,11 @@ export function Config({
   presetId: string | null;
   hasCustom: boolean;
   onSelectPreset: (presetId: string | null) => void;
+  saved: SavedPreset[];
+  /** Grava o cenário atual sob este nome. Nome que já existe **substitui** o
+   * cenário daquele nome — é assim que se edita um salvo. */
+  onSave: (name: string) => void;
+  onDeleteSaved: (presetId: string) => void;
 }) {
   function patch(values: Partial<Scenario>) {
     setConfig((current) => ({ ...current, ...values }));
@@ -54,13 +66,26 @@ export function Config({
   const [attempt, setAttempt] = useState(1);
   const [relativeUtility, setRelativeUtility] = useState(1);
   const [attractiveness, setAttractiveness] = useState(0);
+  // Qual linha do editor a prévia ao lado desenha. Uma curva por vez, em vez
+  // de todas sobrepostas: com cinco ou seis grupos aquilo vira emaranhado.
+  const [performanceIndex, setPerformanceIndex] = useState(0);
+  const [availabilityIndex, setAvailabilityIndex] = useState(0);
+
+  const performance =
+    config.performance_profiles[performanceIndex] ?? config.performance_profiles[0];
+  const availability =
+    config.availability_profiles[availabilityIndex] ?? config.availability_profiles[0];
 
   // As duas distribuições de entrada, recalculadas a cada tecla. São curvas, e
   // não barras: aqui não há dado contado, e sim a forma que os parâmetros
   // implicam.
   const grades = useMemo(
-    () => gradeCurve(config, { difficulty, attempt, relativeUtility }),
-    [config, difficulty, attempt, relativeUtility]
+    () => gradeCurve(config, { difficulty, attempt, relativeUtility }, performance),
+    [config, difficulty, attempt, relativeUtility, performance]
+  );
+  const availabilities = useMemo(
+    () => availabilityCurve(availability),
+    [availability]
   );
   const utilities = useMemo(
     () => utilityCurve(config, attractiveness),
@@ -77,6 +102,26 @@ export function Config({
     Math.max(0, Math.ceil(-Math.log10(Math.max(utilityTop, 1e-9) / 10))) + 1;
   const utilityValue = (value: number) =>
     value.toLocaleString("pt-BR", { maximumFractionDigits: utilityDigits });
+
+  // O nome proposto ao salvar. Vindo de um preset carregado, é o nome dele —
+  // salvar por cima de um salvo é o caminho de edição, e repetir o nome é
+  // justamente o que o usuário quer ali. Do contrário, a data basta para
+  // distinguir.
+  const suggestedName =
+    saved.find((entry) => entry.id === presetId)?.name ??
+    `Cenário de ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
+
+  // O rodapé de cada seção fala do **próprio** eixo: a lista ali edita os
+  // grupos de um só, e a fatia que interessa é a dele. A contagem de
+  // combinações vem junto, nomeando o outro eixo.
+  const performanceShare = axisShare(
+    config.performance_profiles.length,
+    config.availability_profiles.length
+  );
+  const availabilityShare = axisShare(
+    config.availability_profiles.length,
+    config.performance_profiles.length
+  );
 
   // A nota sai do motor arredondada a um décimo; o rodapé a mostra assim.
   const grade = (value: number) =>
@@ -261,34 +306,14 @@ export function Config({
           <h2>Notas</h2>
           <div className="config-split">
             <div>
-              <div className="field-row">
-                <div className="field">
-                  <label>Nota média</label>
-                  {/* O cenário guarda a média da aptidão em (0, 1); a tela a
-                      edita como nota, que é o mesmo número vezes 10 — em
-                      dificuldade 1 e primeira tentativa a nota *é* a aptidão.
-                      O arredondamento no caminho de ida evita que 0,67 apareça
-                      como 6,700000000000001. */}
-                  <input
-                    type="number"
-                    min={0.1}
-                    max={9.9}
-                    step={0.1}
-                    value={Math.round(config.aptitude_mean * 1000) / 100}
-                    onChange={(e) => patch({ aptitude_mean: Number(e.target.value) / 10 })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Concentração</label>
-                  <input
-                    type="number"
-                    min={0.5}
-                    step={0.5}
-                    value={config.aptitude_concentration}
-                    onChange={(e) => patch({ aptitude_concentration: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
+              <ProfileList
+                profiles={config.performance_profiles}
+                onChange={(performance_profiles) => patch({ performance_profiles })}
+                selected={performanceIndex}
+                onSelect={setPerformanceIndex}
+                scale="grade"
+                newName="desempenho"
+              />
 
               <div className="field-row">
                 <div className="field">
@@ -333,7 +358,7 @@ export function Config({
             <div className="config-preview">
               <DensityChart
                 id="curva-notas"
-                title="Distribuição das notas"
+                title={`Notas — ${performance.name}`}
                 points={grades.points}
                 domain={[0, 10]}
                 footer={
@@ -393,6 +418,45 @@ export function Config({
               />
             </div>
           </div>
+          <p className="note">{performanceShare}</p>
+        </div>
+
+        <div className="panel">
+          <h2>Disponibilidade</h2>
+          <div className="config-split">
+            <div>
+              <ProfileList
+                profiles={config.availability_profiles}
+                onChange={(availability_profiles) => patch({ availability_profiles })}
+                selected={availabilityIndex}
+                onSelect={setAvailabilityIndex}
+                scale="fraction"
+                newName="disponibilidade"
+              />
+            </div>
+
+            <div className="config-preview">
+              <DensityChart
+                id="curva-disponibilidade"
+                title={`Disponibilidade — ${availability.name}`}
+                points={availabilities.points}
+                domain={[0, 1]}
+                footer={
+                  <>
+                    mais provável:{" "}
+                    {availabilities.mode.toLocaleString("pt-BR", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    · teto típico:{" "}
+                    {Math.round(availabilities.mode * config.max_hours)} h de{" "}
+                    {config.max_hours}
+                  </>
+                }
+              />
+            </div>
+          </div>
+          <p className="note">{availabilityShare}</p>
         </div>
 
         <div className="actions sticky-actions">
@@ -401,10 +465,23 @@ export function Config({
               ? `Comparando — ${runs * COMPARISON_ARMS.length} simulações...`
               : "Comparar modelos"}
           </button>
+          <div className="actions-right">
+            <SaveScenario
+              onSave={onSave}
+              suggestion={suggestedName}
+              exists={(name) => nameExists(saved, name)}
+            />
+          </div>
         </div>
       </div>
 
-      <PresetList selected={presetId} hasCustom={hasCustom} onSelect={onSelectPreset} />
+      <PresetList
+        selected={presetId}
+        hasCustom={hasCustom}
+        saved={saved}
+        onSelect={onSelectPreset}
+        onDelete={onDeleteSaved}
+      />
     </div>
   );
 }

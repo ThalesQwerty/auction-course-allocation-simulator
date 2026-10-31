@@ -13,9 +13,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..auction import AuctionResult
 from ..comparison import MAX_RUNS
 from ..config import (
+    DEFAULT_AVAILABILITY,
+    DEFAULT_PERFORMANCE,
     CreditMemory,
     CreditReturnPolicy,
     Mechanism,
+    Profile,
     Resolver,
     horizon_for_lifecycle,
 )
@@ -121,6 +124,31 @@ class DisciplineIn(BaseModel):
     )
 
 
+class ProfileIn(BaseModel):
+    """Um grupo da população num dos dois eixos de perfil.
+
+    A Beta entra por **média e concentração**, que é como se lê uma população:
+    média maior é um grupo que reprova menos (desempenho) ou que exclui menos
+    (disponibilidade); concentração maior é um grupo mais homogêneo em torno
+    dela. `equations.beta_shape` converte no par de formas.
+
+    O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
+    """
+
+    name: str = Field(min_length=1, max_length=40)
+    mean: float = Field(gt=0, lt=1, description="média da Beta, em (0, 1)")
+    concentration: float = Field(gt=0, description="concentração em torno da média")
+
+    @classmethod
+    def of(cls, profile: Profile) -> "ProfileIn":
+        return cls(
+            name=profile.name, mean=profile.mean, concentration=profile.concentration
+        )
+
+    def to_profile(self) -> Profile:
+        return Profile(name=self.name, mean=self.mean, concentration=self.concentration)
+
+
 class ScenarioIn(BaseModel):
     """O cenário em si (Seção 7.2) — tudo que descreve a universidade e a
     população, sem dizer *como* ele será executado.
@@ -132,17 +160,22 @@ class ScenarioIn(BaseModel):
     """
 
     disciplines: list[DisciplineIn] = Field(default_factory=list)
-    # As distribuições que descrevem a população. Não há perfis: todo aluno sai
-    # daqui, e a diferença entre dois alunos é só o que a seed sorteou.
-    # A aptidão entra por média e concentração, que é como se lê uma
-    # população; `grading.beta_shape` as converte nos dois parâmetros de forma
-    # que a Beta pede. Média 0,65 com concentração 10 é a Beta(6,5, 3,5)
-    # calibrada: nota média 6,5 e 84% de aprovação em dificuldade 1.
-    aptitude_mean: float = Field(
-        default=0.65, gt=0, lt=1, description="média da aptidão"
+    # Os dois eixos de perfil. Cada um é uma lista de grupos, e a repartição
+    # entre as combinações é **igualitária**: com 3 em cada eixo são 9 pares e
+    # ~11% da geração em cada um. Não há porcentagem a enviar — o que define as
+    # fatias é quantos perfis existem.
+    performance_profiles: list[ProfileIn] = Field(
+        default_factory=lambda: [ProfileIn.of(x) for x in DEFAULT_PERFORMANCE],
+        min_length=1,
+        description="perfis de desempenho: governam a Beta da aptidão",
     )
-    aptitude_concentration: float = Field(
-        default=10.0, gt=0, description="concentração da aptidão em torno da média"
+    availability_profiles: list[ProfileIn] = Field(
+        default_factory=lambda: [ProfileIn.of(x) for x in DEFAULT_AVAILABILITY],
+        min_length=1,
+        description=(
+            "perfis de disponibilidade: governam a Beta da fração de W_a que o "
+            "aluno de fato cursa, sorteada a cada período"
+        ),
     )
     utility_gain: float = Field(
         default=0.0,
@@ -296,6 +329,10 @@ class PeriodSeriesOut(BaseModel):
     fidelity: list[float]
     fairness: list[float]
     correlation: list[float]
+    exclusion_rate: list[float]
+    # A série da seção "Solicitações de disciplinas": seis linhas não
+    # empilhadas, em média por aluno, uma posição por período medido.
+    request_states: list[RequestStatesOut]
     # A saturação do período, rodada a rodada: a posição [i][r] é o que foi
     # ganho por aluno na rodada r+1 do período `period[i]`. Uma linha por
     # período medido, sempre com |R| posições.
@@ -329,6 +366,8 @@ class CohortSeriesOut(BaseModel):
     fidelity: list[float]
     fairness: list[float]
     correlation: list[float]
+    exclusion_rate: list[float]
+    request_states: list[RequestStatesOut]
     time_to_graduate: list[float | None]
     allocations_per_round: list[list[float | None]]
 
@@ -360,6 +399,13 @@ class RunSummaryOut(BaseModel):
     fidelity: float
     fairness: float  # eq. (55)
     correlation: float  # eq. (57)
+    # Desperdício: a fração das vagas obtidas que foi largada antes de virar
+    # aula. É a quinta métrica da comparação, e a que a disponibilidade existe
+    # para produzir.
+    exclusion_rate: float
+    # Os seis estados em média por aluno, reduzidos a um ponto cada. A série
+    # sem reduzir está em `by_period` e `by_cohort`.
+    request_states: RequestStatesOut
     # Períodos do ingresso ao diploma, na média dos concluintes. Null quando
     # ninguém concluiu.
     time_to_graduate: float | None
@@ -399,6 +445,28 @@ class CompareResponse(BaseModel):
     arms: list[ArmResultOut]
 
 
+class RequestStatesOut(BaseModel):
+    """Os seis estados de solicitação, em **média por aluno**.
+
+    Particionam o que ainda falta ao aluno — o catálogo menos o que ele já
+    aprovou —, de modo que a soma é o tamanho desse denominador. A ordem dos
+    campos é a do funil, do mais distante ao mais bem-sucedido.
+
+    É média, nunca soma: a soma seria governada pela população, que sobe no
+    escalonamento de ingresso e despenca na drenagem, e o gráfico mostraria o
+    tamanho da universidade em vez do mecanismo.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    not_eligible: float  # pré-requisito pendente, ou optativa que a cota dispensou
+    not_requested: float
+    refused: float
+    excluded: float  # obteve a vaga e largou
+    failed: float
+    approved: float
+
+
 class MetricsOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -414,6 +482,18 @@ class MetricsOut(BaseModel):
     fidelity: float
     fairness: float  # eq. (55)
     occupancy: float  # eq. (54)
+    # As grandezas da exclusão. `null` em plena rodada: a exclusão acontece
+    # depois da última, então só o recorte de fim de período tem o que contar.
+    #
+    # As de **contagem** acima (allocated, occupancy, utilization) ficam no
+    # alocado, porque a vaga saiu do sistema tenha sido cursada ou não; as de
+    # **valor** (efficiency, fairness, correlation) ficam no retido, porque o
+    # aluno não consumiu a utilidade do que largou. O vão entre as duas
+    # leituras é o desperdício.
+    excluded: int | None
+    exclusion_rate: float | None
+    effective_utilization: float | None  # carga **retida** / W_a, média
+    request_states: RequestStatesOut | None
     scarcity: float  # escassez — elegíveis por vaga, média dos alunos
     contention: float  # concorrência — candidatos por vaga, média dos alunos
     mean_grade_average: float  # eq. (56)
@@ -490,6 +570,9 @@ class DisciplineSnapshotOut(BaseModel):
     # Média de pi_x nas rodadas em que ainda havia vaga; null se nunca houve.
     mean_price: float | None
     approvals: int
+    # Vagas desta disciplina obtidas e depois largadas. Com `filled`, separa a
+    # vaga que virou aula da que só saiu da oferta.
+    exclusions: int
 
 
 class PeriodReportOut(BaseModel):
@@ -509,6 +592,10 @@ class StudentSummaryOut(BaseModel):
     id: str
     name: str
     entry_period: int
+    # Os dois perfis do aluno, pelo nome — o recorte que a tela individual
+    # mostra no cabeçalho dele.
+    performance: str
+    availability: str
     grade_average: float
     approved_hours: int
     hours_to_graduate: int
@@ -529,6 +616,9 @@ class RequestRecordOut(BaseModel):
     # 0 = vaga garantida de ingressante, concedida fora do leilão.
     won_round: int | None
     paid: int
+    # Obteve a vaga e não cursou. Com ela, `attempt` e `grade` vêm null — não
+    # houve tentativa — e `returned` traz metade do preço pago.
+    excluded: bool
     attempt: int | None
     grade: float | None
     approved: bool
@@ -546,7 +636,12 @@ class StudentPeriodRecordOut(BaseModel):
     satisfaction: float
     grade_average: float
     approved_hours: int
-    enrolled_hours: int
+    enrolled_hours: int  # carga obtida no período, antes de excluir
+    # Carga que ele de fato cursou e o teto que a disponibilidade lhe deu.
+    # `retained_hours <= effective_load`, e o vao para `enrolled_hours` e o que
+    # ele largou.
+    retained_hours: int
+    effective_load: int
     requests: list[RequestRecordOut]
     graduated: bool
 

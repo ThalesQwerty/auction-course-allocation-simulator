@@ -20,10 +20,12 @@ Juntas, as duas isolam o nexo causal no mecanismo. Uma execução só não diria
 nada — a diferença poderia ser daquela população; e N execuções sem parear as
 seeds mediriam a variação entre populações junto da variação entre mecanismos.
 
-**Os braços são um caminho de quatro passos** (`ARMS`), e cada seta muda
-**uma** coisa só — é o que torna o vão atribuível. Comparar a linha de base
-direto com o leilão mediria mensagem e resolução somadas, sem dizer qual
-pesou.
+**São dois braços** (`ARMS`): a ordenação por CR e o leilão com retorno. A
+complexidade do trabalho foi para os parâmetros — os perfis de aluno e a
+disponibilidade —, e por equilíbrio saiu dos modelos comparados.
+
+O preço disso é que o vão medido soma três mudanças ao mesmo tempo, e não diz
+qual pesou. A escada que as separava continua aqui, em `ABLATION_ARMS`:
 
     CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão sem retorno
                                                    ──retorno──▶  Leilão com retorno
@@ -108,6 +110,7 @@ import numpy as np
 
 from .behavior import draw_utilities
 from .equations import (
+    RequestStates,
     grade_for_attempt,
     grade_histogram,
     utility_histogram,
@@ -164,23 +167,36 @@ class Arm:
 # `SimulationConfig` — `resolver="ilp"` com `mechanism="ranking"`, e
 # `credit_memory="none"` — se um dia forem precisas para um apêndice.
 ARMS: tuple[Arm, ...] = (
-    # `credits_greedy` é o *bidding points* clássico — orçamento de pontos,
-    # lances por disciplina, disciplina fechando no menor lance atendido
-    # (Sönmez & Ünver 2010, sobre Michigan e Yale SOM). Não confundir com o
-    # **Course Match** de Wharton, que substituiu o bidding points de lá:
-    # aquele é cardinal e resolve por MIP, mas é outro mecanismo —
-    # preferências sobre *cestas*, orçamentos aproximadamente iguais e preços
-    # de equilíbrio, não lance pago a segundo preço. É trabalho relacionado,
-    # não célula deste desenho.
     Arm("ranking_greedy", "ranking", "none", resolver="greedy"),
-    Arm("credits_greedy", "credits", "none", resolver="greedy"),
-    Arm("credits_ilp", "credits", "none", resolver="ilp"),
     Arm("credits_return", "credits", "ratio"),
 )
 
+# Os dois degraus do meio do caminho, que **não** rodam por padrão.
+#
+# Eles separam o vão em três parcelas — mensagem (CR → lance), resolução
+# (varredura → PLI) e retorno —, e sem eles o que a comparação mede é a soma
+# das três, sem dizer qual pesou. Saíram do padrão porque o trabalho passou a
+# comparar dois modelos, e a escada inteira não cabe no texto; ficam aqui
+# porque custam tempo de execução e não complexidade conceitual — são a mesma
+# simulação com dois campos trocados. Para a ablação, `run_comparison(...,
+# arms=ARMS + ABLATION_ARMS)`.
+#
+# `credits_greedy` é o *bidding points* clássico — orçamento de pontos, lances
+# por disciplina, disciplina fechando no menor lance atendido (Sönmez & Ünver
+# 2010, sobre Michigan e Yale SOM). Não confundir com o **Course Match** de
+# Wharton, que substituiu o bidding points de lá: aquele é cardinal e resolve
+# por MIP, mas é outro mecanismo — preferências sobre *cestas*, orçamentos
+# aproximadamente iguais e preços de equilíbrio, não lance pago a segundo
+# preço. É trabalho relacionado, não célula deste desenho.
+ABLATION_ARMS: tuple[Arm, ...] = (
+    Arm("credits_greedy", "credits", "none", resolver="greedy"),
+    Arm("credits_ilp", "credits", "none", resolver="ilp"),
+)
+
 # Os braços por chave — como a interface se refere a um deles ao pedir o traço
-# de uma execução.
-ARM_BY_KEY: dict[str, Arm] = {arm.key: arm for arm in ARMS}
+# de uma execução. Inclui a ablação: o traço de um braço que não rodou por
+# padrão continua reproduzível.
+ARM_BY_KEY: dict[str, Arm] = {arm.key: arm for arm in ARMS + ABLATION_ARMS}
 
 
 @dataclass(frozen=True)
@@ -224,6 +240,12 @@ class PeriodSeries:
     fidelity: list[float]
     fairness: list[float]
     correlation: list[float]
+    # A fração das vagas obtidas que foi largada — ver `equations.exclusion_rate`.
+    exclusion_rate: list[float]
+    # Os seis estados de solicitação, em média por aluno. É a série da seção
+    # "Solicitações de disciplinas": uma linha por estado, não empilhada, cada
+    # braço no seu painel.
+    request_states: list[RequestStates]
     # A saturação do período, rodada a rodada: `allocations_per_round[i][r]` é o
     # que foi ganho por aluno na rodada r+1 do período `period[i]`. Uma linha
     # por período medido, sempre com |R| posições — `None` onde aquele período
@@ -279,6 +301,8 @@ class CohortSeries:
     fidelity: list[float]
     fairness: list[float]
     correlation: list[float]
+    exclusion_rate: list[float]
+    request_states: list[RequestStates]
     # `None` na geração em que ninguém concluiu — zero ali se leria como
     # "formou na hora".
     time_to_graduate: list[float | None]
@@ -321,6 +345,13 @@ class RunSummary:
     fidelity: float
     fairness: float  # phi de Jain — eq. (55)
     correlation: float  # lambda — eq. (57)
+    # Desperdício: a fração das vagas obtidas que foi largada antes de virar
+    # aula. É a quinta métrica da comparação — e a que a disponibilidade
+    # existe para produzir. Ver `equations.exclusion_rate`.
+    exclusion_rate: float
+    # Os seis estados em média por aluno, reduzidos a um ponto cada. A série
+    # sem reduzir está em `by_period` e `by_cohort`.
+    request_states: RequestStates
     # Períodos do ingresso ao diploma, na média dos concluintes. `None` quando
     # ninguém concluiu: a média não existe, e 0 ali se leria como "formou na
     # hora", que é o contrário do que aconteceu.
@@ -403,6 +434,31 @@ def allocations_per_round(result: SimulationResult) -> list[float | None]:
     return series
 
 
+def weighted_states(pairs: list[tuple[Metrics, int]]) -> RequestStates:
+    """A média ponderada dos seis estados, campo a campo.
+
+    O peso é o mesmo das demais métricas — os alunos medidos —, de modo que um
+    período final de vinte alunos não pesa como um período cheio. Instante sem
+    os estados (uma rodada, onde a exclusão ainda não aconteceu) simplesmente
+    não entra.
+    """
+    rows = [(m.request_states, w) for m, w in pairs if m.request_states is not None]
+    if not rows:
+        return RequestStates(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    def of(field_name: str) -> float:
+        return weighted_mean([(getattr(r, field_name), w) for r, w in rows]) or 0.0
+
+    return RequestStates(
+        not_eligible=of("not_eligible"),
+        not_requested=of("not_requested"),
+        refused=of("refused"),
+        excluded=of("excluded"),
+        failed=of("failed"),
+        approved=of("approved"),
+    )
+
+
 def cohort_series(result: SimulationResult) -> CohortSeries:
     """Reduz a execução geração a geração.
 
@@ -477,6 +533,8 @@ def cohort_series(result: SimulationResult) -> CohortSeries:
         fidelity=[mean(c, lambda m: m.fidelity) for c in cohorts],
         fairness=[mean(c, lambda m: m.fairness) for c in cohorts],
         correlation=[mean(c, lambda m: m.correlation) for c in cohorts],
+        exclusion_rate=[mean(c, lambda m: m.exclusion_rate or 0.0) for c in cohorts],
+        request_states=[weighted_states(instants[c]) for c in cohorts],
         time_to_graduate=[mean_span(spans[cohort]) for cohort in cohorts],
         allocations_per_round=[
             [weighted_mean(pairs) for pairs in saturation[cohort]] for cohort in cohorts
@@ -543,6 +601,8 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         fidelity=mean(lambda m: m.fidelity),
         fairness=mean(lambda m: m.fairness),
         correlation=mean(lambda m: m.correlation),
+        exclusion_rate=mean(lambda m: m.exclusion_rate or 0.0),
+        request_states=weighted_states(by_period),
         time_to_graduate=time_to_graduate(result),
         allocations_per_round=allocations_per_round(result),
         by_period=PeriodSeries(
@@ -553,6 +613,10 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
             fidelity=series(lambda m: m.fidelity),
             fairness=series(lambda m: m.fairness),
             correlation=series(lambda m: m.correlation),
+            exclusion_rate=series(lambda m: m.exclusion_rate or 0.0),
+            request_states=series(
+                lambda m: m.request_states or RequestStates(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            ),
             allocations_per_round=[saturation(period) for period, _ in measured],
         ),
         by_cohort=cohort_series(result),
@@ -631,9 +695,18 @@ def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:
 
 
 def run_comparison(
-    config: SimulationConfig, *, runs: int, workers: int = 4
+    config: SimulationConfig,
+    *,
+    runs: int,
+    workers: int = 4,
+    arms: tuple[Arm, ...] = ARMS,
 ) -> ComparisonResult:
     """Roda `runs` simulações em cada braço, com as seeds de 1 a `runs`.
+
+    `arms` é o conjunto comparado, e o padrão são os dois do trabalho. Para a
+    ablação que separa mensagem, resolução e retorno, passe
+    `arms=ARMS + ABLATION_ARMS` — custa uma simulação a mais por braço e por
+    seed, e nada mais.
 
     Três campos do cenário recebido são ignorados de propósito. A **seed**,
     porque numa comparação ela deixa de ser parâmetro e passa a ser o eixo da
@@ -655,7 +728,7 @@ def run_comparison(
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         jobs = [
-            [pool.submit(_run_one, config, arm, seed) for seed in seeds] for arm in ARMS
+            [pool.submit(_run_one, config, arm, seed) for seed in seeds] for arm in arms
         ]
     return ComparisonResult(
         runs=runs,
@@ -668,6 +741,6 @@ def run_comparison(
                 credit_return=arm.credit_return,
                 runs=[job.result() for job in arm_jobs],
             )
-            for arm, arm_jobs in zip(ARMS, jobs)
+            for arm, arm_jobs in zip(arms, jobs)
         ],
     )

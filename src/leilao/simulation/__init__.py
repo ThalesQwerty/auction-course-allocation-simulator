@@ -115,6 +115,8 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 id=s.id,
                 name=s.name,
                 entry_period=s.entry_period,
+                performance=s.performance.name,
+                availability=s.availability.name,
                 grade_average=s.grade_average(draws.hours),
                 approved_hours=s.approved_hours(draws.hours, config.min_grade),
                 hours_to_graduate=draws.hours_to_graduate,

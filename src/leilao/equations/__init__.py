@@ -57,6 +57,14 @@ Notas, créditos e saída (Seção 7.2.2)
     graduation                obrigatórias ⊆ aprovadas ∧ X        eq. (40)
     grade_average             N_a ponderado por carga             eq. (49)
 
+Disponibilidade e exclusão
+
+    effective_load            Ŵ_a = round(δ · W_a)                —
+    retained_set              mochila 0-1 do que ele leva         —
+    exclusion_refund          γ = paid // 2, só sob `ratio`       —
+    exclusion_rate            ε = excluídas / obtidas             —
+    request_states            os seis estados de uma solicitação  —
+
 Sinais publicados
 
     win_estimate              P̂(obter) = min(1, q/n)              —
@@ -103,7 +111,10 @@ from .curriculum_period import curriculum_periods
 from .curriculum_reach import curriculum_reach
 from .decision_score import NEUTRAL, Behavior, Signals, decision_scores
 from .demand_per_seat import demand_per_seat
+from .effective_load import effective_load
 from .eligible_set import eligible_set
+from .exclusion_refund import exclusion_refund
+from .exclusion_rate import exclusion_rate
 from .final_preference import final_preference
 from .grade_average import grade_average
 from .grade_for_attempt import APTITUDE_GUARD, grade_for_attempt
@@ -129,6 +140,8 @@ from .remaining_budget import remaining_budget
 from .remaining_capacity import remaining_capacity
 from .remaining_seats import remaining_seats
 from .request_set import request_set
+from .request_states import RequestStates, request_states
+from .retained_set import retained_set
 from .satisfaction import satisfaction
 from .semestralization import semestralization
 from .serial_dictatorship import serial_dictatorship
@@ -145,6 +158,7 @@ __all__ = [
     "APTITUDE_GUARD",
     "Behavior",
     "NEUTRAL",
+    "RequestStates",
     "Signals",
     "available_goods",
     "beta_shape",
@@ -157,7 +171,10 @@ __all__ = [
     "curriculum_reach",
     "decision_scores",
     "demand_per_seat",
+    "effective_load",
     "eligible_set",
+    "exclusion_rate",
+    "exclusion_refund",
     "final_preference",
     "grade_average",
     "grade_for_attempt",
@@ -184,6 +201,8 @@ __all__ = [
     "remaining_capacity",
     "remaining_seats",
     "request_set",
+    "request_states",
+    "retained_set",
     "satisfaction",
     "semestralization",
     "serial_dictatorship",

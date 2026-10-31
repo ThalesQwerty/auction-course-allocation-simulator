@@ -22,6 +22,9 @@
      (#fab219) é cor de preenchimento e fica abaixo de 3:1 sobre o creme. Este
      é o mesmo estado escurecido até 5:1, para poder virar palavra. */
   --warn: #8a6410;
+  /* O azul da exclusão, como **tinta**: o estado de quem obteve a vaga e a
+     largou. Mesma régua do amarelo — escurecido até passar sobre o creme. */
+  --drop: #2f5aa8;
   --sidebar: #f2f0e7;
   --sidebar-w: 248px;
   --rail-w: 264px;
@@ -42,6 +45,7 @@
     --muted: #a3a097;
     --accent: #d97757;
     --accent-soft: #d97757;
+    --drop: #7aa5e8;
     --accent-contrast: #1f1e1d;
     --danger: #e8837a;
     --win: #5fb98a;
@@ -1425,4 +1429,131 @@ td.failed {
 
 .grade-card.is-mute {
   opacity: 0.4;
+}
+
+/* --- editor de perfis ---------------------------------------------------
+   Uma linha por grupo, com a selecionada marcando qual curva a prévia ao lado
+   desenha. Não há campo de porcentagem: a repartição entre as combinações dos
+   dois eixos é igualitária. */
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  align-items: flex-start;
+}
+.profile-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) 20px;
+  gap: 8px;
+  align-items: end;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.profile-row.on {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+.profile-row .field {
+  min-width: 0;
+}
+.profile-remove {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  height: 28px;
+}
+.profile-remove:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.profile-remove:hover:not(:disabled),
+.profile-remove:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.outcome.dropped {
+  background: color-mix(in srgb, var(--drop) 16%, transparent);
+  color: var(--drop);
+}
+
+/* --- salvar cenário -----------------------------------------------------
+   Fica na barra de ações, empurrado para a direita: a ação primária é
+   comparar, e salvar é o que se faz antes ou depois dela, não no lugar. */
+.actions-right {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.save-scenario {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+.save-scenario input {
+  font-size: 13px;
+  min-width: 200px;
+}
+.save-cancel {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+.save-cancel:hover,
+.save-cancel:focus-visible {
+  color: var(--text);
+}
+
+/* O preset salvo carrega um botão de apagar, como a execução no histórico. */
+.rail-row {
+  position: relative;
+}
+.rail-row .rail-item {
+  padding-right: 28px;
+}
+.rail-row .nav-delete {
+  top: 8px;
+  right: 8px;
+}
+.rail-row:hover .nav-delete {
+  opacity: 1;
+}
+.rail-section {
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  margin: 6px 0 0;
+  padding: 10px 12px 4px;
+  text-transform: uppercase;
+}
+
+/* Os dois perfis do aluno, no cabeçalho da tela individual. Usam o chip
+   neutro: são rótulo de grupo, não estado de uma solicitação — a paleta de
+   estado está reservada para as saídas de um pedido. */
+.trace-profiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.trace-profiles .chip {
+  cursor: default;
 }

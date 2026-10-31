@@ -29,7 +29,7 @@ const formatUtility = (value: number) =>
  * caso que costuma explicar um resultado inesperado. **Já obtida** é a que ele
  * ganhou numa rodada anterior: ela não está mais em disputa, e chamá-la de não
  * solicitada esconderia justamente o que deu certo. */
-type Tone = "approved" | "failed" | "refused" | "idle";
+type Tone = "approved" | "failed" | "refused" | "dropped" | "idle";
 
 interface Outcome {
   label: string;
@@ -39,21 +39,31 @@ interface Outcome {
   guaranteed: boolean;
 }
 
-function outcomeOf(record: RequestRecord, round: number): Outcome {
+/** O resultado de uma disciplina **nesta** rodada, ou `null` quando ela não
+ * é linha de tabela aqui.
+ *
+ * O `null` é a disciplina que o aluno **já obteve numa rodada anterior**: ela
+ * saiu de B_a^(t,r) e não está em disputa, de modo que listá-la repetiria a
+ * mesma vaga em todas as rodadas seguintes e afogaria o que ainda se decide.
+ * O que ela produziu aparece na rodada em que foi ganha, e no fim do período.
+ */
+function outcomeOf(record: RequestRecord, round: number): Outcome | null {
   const won = record.won_round;
   const guaranteed = won === GUARANTEED_ROUND;
   // A garantida é creditada na 1ª rodada: é ali que ela passa a valer, e é
   // assim que a simulação a conta (ver `simulation.rounds`).
   const settled = won !== null && (won === round || (guaranteed && round === 1));
   if (settled) {
+    // Excluída vem antes das duas: ela obteve a vaga e não cursou, então não
+    // há nota — `approved` é falso ali por ausência, não por reprovação.
+    if (record.excluded) return { label: "excluída", tone: "dropped", guaranteed };
     return record.approved
       ? { label: "aprovada", tone: "approved", guaranteed }
       : { label: "reprovada", tone: "failed", guaranteed };
   }
   if (record.bids[round - 1] > 0) return { label: "recusada", tone: "refused", guaranteed: false };
-  if (won !== null && (guaranteed || won < round)) {
-    return { label: "já obtida", tone: "idle", guaranteed };
-  }
+  // Já obtida antes desta rodada: fora da tabela — ver acima.
+  if (won !== null && (guaranteed || won < round)) return null;
   return { label: "não solicitada", tone: "idle", guaranteed: false };
 }
 
@@ -283,11 +293,13 @@ export function Trace({ run }: { run: ComparisonRun }) {
             passou ·{" "}
             <Chip outcome={{ label: "reprovada", tone: "failed", guaranteed: false }} /> cursou e
             não passou ·{" "}
+            <Chip outcome={{ label: "excluída", tone: "dropped", guaranteed: false }} /> obteve e
+            largou ·{" "}
             <Chip outcome={{ label: "recusada", tone: "refused", guaranteed: false }} /> pediu e
             não obteve ·{" "}
             <Chip outcome={{ label: "não solicitada", tone: "idle", guaranteed: false }} /> elegível
-            e sem pedido, ou já obtida antes. A nota é do fim do período, e só existe onde
-            houve vaga.
+            e sem pedido. A disciplina já obtida numa rodada anterior sai da tabela: ela não
+            está mais em disputa. A nota é do fim do período, e só existe onde houve vaga.
           </p>
         )}
       </div>
@@ -388,6 +400,13 @@ function StudentTrace({
           <h3>{student.name}</h3>
           <p className="note">
             {cohortLabel(student.entry_period)} · {student.id}
+          </p>
+          {/* Os perfis ficam junto do nome, e não na régua de números: eles
+              não são resultado, são o que o aluno trouxe de fábrica. É metade
+              da resposta a "por que este aluno foi assim" — a seed é a outra. */}
+          <p className="trace-profiles">
+            <span className="chip">{student.performance}</span>
+            <span className="chip">{student.availability}</span>
           </p>
         </div>
         <dl className="stat-row">
@@ -497,7 +516,10 @@ function StudentPeriod({
 
       {Array.from({ length: rounds }, (_, index) => index + 1).map((round) => {
         const rows = record.requests
-          .map((request) => ({ request, outcome: outcomeOf(request, round) }))
+          .flatMap((request) => {
+            const outcome = outcomeOf(request, round);
+            return outcome ? [{ request, outcome }] : [];
+          })
           .filter((row) => showIdle || isLive(row.outcome));
         return (
           <div className="round-block" key={round}>
@@ -650,7 +672,10 @@ function DisciplineTrace({
               // Só quem pediu **nesta** rodada: a vista por disciplina não tem
               // não solicitadas, senão toda linha seria a população inteira.
               const rows = bidders
-                .map((bidder) => ({ ...bidder, outcome: outcomeOf(bidder.request, round) }))
+                .flatMap((bidder) => {
+                  const outcome = outcomeOf(bidder.request, round);
+                  return outcome ? [{ ...bidder, outcome }] : [];
+                })
                 .filter(
                   ({ request, outcome }) =>
                     request.bids[round - 1] > 0 ||

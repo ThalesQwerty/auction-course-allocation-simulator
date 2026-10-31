@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..availability import draw_availability
 from ..behavior import draw_utilities
 from ..config import SimulationConfig
 from ..grading import draw_aptitudes
@@ -33,6 +34,9 @@ class Draws:
     students: list[Student]
     # a_{a,x} — traço, não sorte: uma aptidão por par, persistente.
     aptitudes: dict[tuple[str, str], float]
+    # δ_a^(t) — circunstância, não traço: uma por (aluno, período). O que é
+    # traço é a média de onde ela sai, que é o perfil.
+    availability: dict[tuple[str, int], float]
     # u^(t) inteira: uma linha por (aluno, período), sobre a grade.
     utility_rows: dict[tuple[str, int], dict[str, float]]
     # α: uma ordem de desempate por disciplina, fixa para a simulação inteira,
@@ -61,6 +65,7 @@ def prepare(config: SimulationConfig) -> Draws:
     rng = np.random.default_rng(config.seed)
     students = generate_students(config, rng)
     aptitudes = draw_aptitudes(students, config.disciplines, config, rng)
+    availability = draw_availability(students, config, rng)
     utility_rows = draw_utilities(students, config, rng)
 
     student_ids = [s.id for s in students]
@@ -78,6 +83,7 @@ def prepare(config: SimulationConfig) -> Draws:
     return Draws(
         students=students,
         aptitudes=aptitudes,
+        availability=availability,
         utility_rows=utility_rows,
         tie_break_order=tie_break_order,
         epsilon=epsilon,

@@ -15,8 +15,10 @@ from dataclasses import dataclass
 
 from ..config import SimulationConfig
 from ..equations import (
+    RequestStates,
     credits_per_seat,
     message_fidelity,
+    request_states,
     semestralization,
     utilization,
 )
@@ -64,6 +66,12 @@ class Measurements:
     contentions: dict[str, float]
     approved_hours: dict[str, int]
     won: dict[str, set[str]]
+    # O que o aluno largou e o aproveitamento do que ficou. `None` em plena
+    # rodada: a exclusão acontece depois da última, então só o recorte de fim
+    # de período tem o que contar.
+    excluded: dict[str, list[str]] | None
+    effective_utilizations: dict[str, float] | None
+    request_states: dict[str, RequestStates] | None
     credits: dict[str, int]  # saldo no instante
     supply: dict[str, int]  # C_a^(t,1), a oferta do início do período
     bids: dict[str, int]
@@ -87,12 +95,18 @@ def measure(
     ages: dict[str, int],
     hours: dict[str, int],
     credit_returns: dict[str, int] | None,
+    retained: dict[str, set[str]] | None = None,
+    excluded: dict[str, list[str]] | None = None,
+    requested: dict[str, set[str]] | None = None,
 ) -> Measurements:
     """Calcula as grandezas que dependem do instante.
 
     `ages` vem do chamador porque acompanha o instante do recorte: nas
     rodadas de t o aluno completou t − t_a períodos; ao fim de t, um a mais —
     e é esse intervalo que a carga aprovada do mesmo recorte cobre.
+
+    `retained` e `excluded` só existem no recorte de fim de período, pelo
+    mesmo motivo que `credit_returns`: a exclusão é posterior à última rodada.
     """
     approved_hours = {s.id: s.approved_hours(hours, config.min_grade) for s in active}
     return Measurements(
@@ -123,6 +137,37 @@ def measure(
         contentions=contentions,
         approved_hours=approved_hours,
         won=won,
+        excluded=excluded,
+        # O aproveitamento *efetivo*: só a carga que ele de fato levou. Lido
+        # contra `utilizations`, o vão entre os dois é o desperdício.
+        effective_utilizations=(
+            {
+                s.id: utilization(
+                    won=retained[s.id], hours=hours, max_hours=config.max_hours
+                )
+                for s in active
+            }
+            if retained is not None
+            else None
+        ),
+        # Os seis estados só fecham depois da exclusão e das notas — ver
+        # `equations.request_states`. `approved` é o acumulado ao fim do
+        # período; `utilities` traz o elegível do início dele.
+        request_states=(
+            {
+                s.id: request_states(
+                    catalogue=[d.name for d in config.disciplines],
+                    approved=s.approved(config.min_grade),
+                    eligible=utilities[s.id],
+                    requested=requested[s.id],
+                    won=won[s.id],
+                    retained=retained[s.id],
+                )
+                for s in active
+            }
+            if retained is not None and requested is not None
+            else None
+        ),
         credits=credits,
         supply=supply,
         bids=bids,
@@ -189,6 +234,21 @@ def snapshot(
             contentions=pick(values.contentions),
             allocated=sum(len(values.won[i]) for i in ids),
             total_seats=total_seats,
+            excluded=(
+                sum(len(values.excluded[i]) for i in ids)
+                if values.excluded is not None
+                else None
+            ),
+            effective_utilizations=(
+                pick(values.effective_utilizations)
+                if values.effective_utilizations is not None
+                else None
+            ),
+            states=(
+                [values.request_states[i] for i in ids]
+                if values.request_states is not None
+                else None
+            ),
         ),
         active=len(members),
         population=population,

@@ -97,11 +97,6 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
     A comparação passa cada seed da amostra, de modo que todos os braços veem
     o mesmo cenário — que é o que a Seção 7.3 exige dela.
     """
-    # A interface descreve a aptidão por média e concentração; a Beta pede a
-    # forma.
-    aptitude_alpha, aptitude_beta = beta_shape(
-        mean=req.aptitude_mean, concentration=req.aptitude_concentration
-    )
     return SimulationConfig(
         disciplines=[
             Discipline(
@@ -117,8 +112,10 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
             )
             for d in req.disciplines
         ],
-        aptitude_alpha=aptitude_alpha,
-        aptitude_beta=aptitude_beta,
+        performance_profiles=tuple(p.to_profile() for p in req.performance_profiles),
+        availability_profiles=tuple(
+            p.to_profile() for p in req.availability_profiles
+        ),
         utility_gain=req.utility_gain,
         retake_gain=req.retake_gain,
         utility_stability=req.utility_stability,

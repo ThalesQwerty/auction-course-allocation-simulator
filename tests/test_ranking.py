@@ -8,6 +8,7 @@ import pytest
 from leilao.behavior import DISTRIBUTION_BINS
 from leilao.grading import DISTRIBUTION_BINS as GRADE_BINS
 from leilao.comparison import (
+    ABLATION_ARMS,
     ARMS,
     MAX_RUNS,
     allocations_per_round,
@@ -251,7 +252,9 @@ def test_the_two_credit_arms_differ_only_by_the_return():
     saem idênticos — o que não diz que o retorno é inócuo, diz que ali não havia
     o que devolver. Cinco alunos por período bastam para a disputa existir.
     """
-    result = run_comparison(make_config(students_per_period=5), runs=4)
+    result = run_comparison(
+        make_config(students_per_period=5), runs=4, arms=ARMS + ABLATION_ARMS
+    )
     with_return = next(a for a in result.arms if a.key == "credits_return")
     without = next(a for a in result.arms if a.key == "credits_ilp")
 

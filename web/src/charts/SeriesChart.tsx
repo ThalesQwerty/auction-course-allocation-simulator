@@ -70,6 +70,7 @@ const summarize = (values: number[]): Summary | null => {
 
 export function SeriesChart({
   title,
+  accent,
   groups,
   colors,
   format = formatRatio,
@@ -79,6 +80,11 @@ export function SeriesChart({
   xLabel = (x) => String(x),
 }: {
   title: string;
+  /** Cor do quadrado ao lado do título, quando o que o gráfico mostra é um
+   * **estado** e não uma grandeza — os seis de uma solicitação. Amarra o
+   * painel aos mesmos tons da tela individual, sem que a cor precise carregar
+   * a identidade sozinha: o nome está no título. */
+  accent?: string;
   groups: SeriesGroup[];
   colors: Record<string, string>;
   format?: (value: number) => string;
@@ -165,7 +171,10 @@ export function SeriesChart({
   return (
     <figure className="chart-card">
       <figcaption>
-        <h3>{title}</h3>
+        <h3>
+          {accent && <span className="swatch" style={{ background: accent }} />}
+          {title}
+        </h3>
       </figcaption>
 
       <div className="legend">

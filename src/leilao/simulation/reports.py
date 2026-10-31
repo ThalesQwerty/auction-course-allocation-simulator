@@ -128,6 +128,9 @@ class DisciplineSnapshot:
     requests: int
     mean_price: float | None
     approvals: int
+    # Vagas desta disciplina que foram obtidas e depois largadas. Com
+    # `filled`, separa a vaga que virou aula da que só saiu da oferta.
+    exclusions: int
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,10 @@ class RequestRecord:
     bids: list[int]  # c_{a,x}^(t,r) por rodada; 0 = não pediu
     won_round: int | None  # `None` = recusada; `GUARANTEED_ROUND` = garantida
     paid: int  # eq. (27)
+    # Obteve a vaga e não cursou: a disponibilidade do período não comportou.
+    # Com ela, `attempt` e `grade` saem `None` — não houve tentativa —, e
+    # `returned` traz metade do preço pago em vez do retorno por nota.
+    excluded: bool
     attempt: int | None
     # Nota **desta** tentativa (eq. 33). Pode ser menor que a de uma anterior.
     # O que não regride é `Student.grades`, a maior já obtida, que alimenta o
@@ -180,7 +187,12 @@ class StudentPeriodRecord:
     satisfaction: float  # ψ_a^(t)
     grade_average: float  # N_a no início do período
     approved_hours: int  # acumulado ao fim do período
-    enrolled_hours: int  # carga obtida neste período
+    enrolled_hours: int  # carga obtida neste período, antes de excluir
+    # Carga que ele de fato cursou e o teto que a disponibilidade do período
+    # lhe deu. `retained_hours <= effective_load`, e o vão para
+    # `enrolled_hours` é o que ele largou.
+    retained_hours: int
+    effective_load: int
     requests: list[RequestRecord]
     graduated: bool
 
@@ -199,6 +211,11 @@ class StudentSummary:
     id: str
     name: str
     entry_period: int  # t_a
+    # Os dois grupos a que ele pertence, pelo nome. São traço imutável e não
+    # entram em decisão nenhuma do aluno: estão aqui porque a tela individual
+    # é onde se pergunta "por que *este* aluno foi assim".
+    performance: str
+    availability: str
     grade_average: float  # N_a
     approved_hours: int
     hours_to_graduate: int  # S — igual para todos

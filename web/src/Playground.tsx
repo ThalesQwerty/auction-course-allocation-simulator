@@ -28,8 +28,11 @@ export function createPlaygroundDraft(config: Scenario): PlaygroundDraft {
     rounds: 1,
     seats: 1,
     seed: 1,
-    aptitudeMean: config.aptitude_mean,
-    aptitudeConcentration: config.aptitude_concentration,
+    // O playground é um leilão isolado, com uma Beta só: parte do primeiro
+    // perfil de desempenho do cenário, e dali o usuário mexe à vontade. Aqui
+    // não há população com grupos a separar.
+    aptitudeMean: config.performance_profiles[0]?.mean ?? 0.65,
+    aptitudeConcentration: config.performance_profiles[0]?.concentration ?? 10,
     selected: 0,
     students: [newStudent("voce", "Você", config)],
   };

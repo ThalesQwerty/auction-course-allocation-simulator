@@ -19,7 +19,7 @@ import {
   relativeUtilitySample,
 } from "./equations";
 import type { Curve } from "./equations";
-import type { Scenario } from "./types";
+import type { Profile, Scenario } from "./types";
 
 export type { Curve, DensityPoint } from "./equations";
 
@@ -46,12 +46,10 @@ export interface GradeCase {
  */
 export function gradeCurve(
   scenario: Scenario,
-  { difficulty, attempt, relativeUtility }: GradeCase
+  { difficulty, attempt, relativeUtility }: GradeCase,
+  profile: Profile
 ): Curve & { approval: number } {
-  const [alpha, beta] = betaShape(
-    scenario.aptitude_mean,
-    scenario.aptitude_concentration
-  );
+  const [alpha, beta] = betaShape(profile.mean, profile.concentration);
   const exponent = gradeExponent({
     difficulty,
     attempt,
@@ -64,6 +62,26 @@ export function gradeCurve(
     ...densityCurve(xs, ys),
     approval: approvalShare(alpha, beta, exponent, scenario.min_grade),
   };
+}
+
+/** A curva da **disponibilidade** de um perfil: a fração de W_a que o aluno
+ * vai de fato cursar, em [0, 1].
+ *
+ * É a Beta do perfil sem transformação nenhuma — ao contrário da nota, que é a
+ * aptidão elevada à demanda da disciplina. Por isso não há recorte a escolher
+ * aqui: a curva é o próprio parâmetro.
+ *
+ * Reaproveita `gradeDensity` com expoente 1, que nesse caso devolve a Beta
+ * crua sobre a escala de 0 a 10; o eixo volta a [0, 1] na saída. */
+export function availabilityCurve(profile: Profile): Curve {
+  const [alpha, beta] = betaShape(profile.mean, profile.concentration);
+  const { xs, ys } = gradeDensity(alpha, beta, 1);
+  // A densidade acompanha a troca de escala: comprimir o eixo por 10 multiplica
+  // a altura por 10, senão a área deixa de ser 1.
+  return densityCurve(
+    xs.map((x) => x / 10),
+    ys.map((y) => y * 10)
+  );
 }
 
 /** Quantos pontos a curva da utilidade leva para a tela. */

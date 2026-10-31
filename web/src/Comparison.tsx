@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import {
   BoxPlot,
   Histogram,
+  REQUEST_STATES,
   SeriesChart,
   categoricalColors,
   formatCount,
   formatRatio,
+  requestStateColors,
   usePrefersDark,
 } from "./charts";
 import type { SeriesPoint } from "./charts";
@@ -112,6 +114,28 @@ const byPeriod = (key: PeriodValues) => (run: RunSummary) =>
 const byCohort = (key: CohortValues) => (run: RunSummary) =>
   pointsOf(run.by_cohort?.cohort, run.by_cohort?.[key]);
 
+/** Os pontos de um dos seis estados, em média por aluno.
+ *
+ * Uma série por estado, **não empilhada**: empilhar torna a espessura de uma
+ * faixa legível mas a posição dela dependente de tudo o que está embaixo, e
+ * comparar a linha de exclusão entre dois braços com a base balançando é das
+ * leituras mais difíceis que existem. Cada estado também ganha escala própria,
+ * porque "não elegível" gira numa ordem de grandeza e "excluída" em outra. */
+const stateBy =
+  (axis: "period" | "cohort", key: (typeof REQUEST_STATES)[number]["key"]) =>
+  (run: RunSummary) => {
+    const series: PeriodSeries | CohortSeries | undefined =
+      axis === "period" ? run.by_period : run.by_cohort;
+    const steps =
+      axis === "period"
+        ? (series as PeriodSeries | undefined)?.period
+        : (series as CohortSeries | undefined)?.cohort;
+    return pointsOf(
+      steps,
+      series?.request_states?.map((states) => states?.[key] ?? null)
+    );
+  };
+
 const roundByPeriod = (index: number) => (run: RunSummary) =>
   columnOf(run.by_period?.period, run.by_period?.allocations_per_round, index);
 
@@ -172,6 +196,20 @@ const METRICS: Metric[] = [
     series: { period: byPeriod("fairness"), cohort: byCohort("fairness") },
     bounds: [0, 1],
     betterWhen: "higher",
+    format: formatRatio,
+  },
+  {
+    id: "exclusion_rate",
+    title: "Desperdício de vaga",
+    short: "Desperdício",
+    of: (run) => run.exclusion_rate,
+    series: {
+      period: byPeriod("exclusion_rate"),
+      cohort: byCohort("exclusion_rate"),
+    },
+    bounds: [0, 1],
+    // A vaga que ninguém cursou é perda pura: saiu da oferta e não virou aula.
+    betterWhen: "lower",
     format: formatRatio,
   },
   {
@@ -292,10 +330,18 @@ export function Comparison({
   const dark = usePrefersDark();
   const result = run.result;
   const colors = useMemo(() => categoricalColors(ARM_LABELS, dark), [dark]);
+  const stateColors = useMemo(() => requestStateColors(dark), [dark]);
   /** Os dois modos de ler as métricas de alocação. O agregado é o padrão: é
    * nele que a pergunta "qual modelo?" se responde, e o por período é a
    * pergunta seguinte — *onde* no horizonte mora o vão. */
   const [view, setView] = useState<ViewMode>("aggregate");
+
+  /** A escada de ablação só roda quando pedida (`ARMS + ABLATION_ARMS` no
+   * motor). Sem os dois braços do leilão não há o que isolar, e a tabela do
+   * retorno sairia inteira em traços. */
+  const hasAblation = [WITH_RETURN, WITHOUT_RETURN].every((key) =>
+    result.arms.some((arm) => arm.key === key)
+  );
 
   /** Quais eixos esta comparação traz. As gravadas antes de um recorte existir
    * não o trazem, e aí o botão dele some — como a saturação some quando falta
@@ -613,6 +659,36 @@ export function Comparison({
         </section>
       )}
 
+      {mode !== "aggregate" && (
+        <section className="chart-section">
+          <header className="chart-section-head">
+            <h2>Solicitações de disciplinas</h2>
+            <p>
+              Em que estado terminou cada disciplina que ainda falta ao aluno, em
+              média por aluno. Os seis particionam o que falta — o catálogo menos
+              o que ele já aprovou —, então somá-los dá o tamanho desse
+              denominador. Uma escala por estado: lê-se a diferença entre os
+              modelos <em>dentro</em> de cada painel, nunca a altura entre eles.
+            </p>
+          </header>
+          <div className="chart-grid">
+            {REQUEST_STATES.map((state) => (
+              <SeriesChart
+                key={state.key}
+                title={state.label}
+                accent={stateColors[state.key]}
+                groups={samplesOf(stateBy(mode, state.key))}
+                colors={colors}
+                bounds={[0, Infinity]}
+                format={formatCount}
+                runs={result.runs}
+                xLabel={AXIS[mode].point}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {scenarioHistograms.length > 0 && (
         <section className="chart-section">
           <header className="chart-section-head">
@@ -622,6 +698,7 @@ export function Comparison({
         </section>
       )}
 
+      {hasAblation && (
       <div className="panel">
         <h2>O que o retorno de créditos muda</h2>
         <table>
@@ -638,6 +715,7 @@ export function Comparison({
           <tbody>{[...METRICS, ...saturation].map(returnRow)}</tbody>
         </table>
       </div>
+      )}
 
       <div className="panel">
         <h2>Resumo das distribuições</h2>

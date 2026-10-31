@@ -119,12 +119,10 @@ def test_compare_returns_one_summary_per_seed_in_every_arm(client):
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 3}).json()
 
     assert payload["runs"] == 3
-    # Os quatro passos do caminho, na ordem do eixo. Não há braço que rode
-    # sem aparecer nos resultados.
+    # Os dois modelos comparados, na ordem do eixo. Não há braço que rode
+    # sem aparecer nos resultados — a ablação não roda por padrão.
     assert [a["key"] for a in payload["arms"]] == [
         "ranking_greedy",
-        "credits_greedy",
-        "credits_ilp",
         "credits_return",
     ]
     # As seeds vão de 1 a N e são pareadas: a i-ésima execução de cada braço
@@ -151,6 +149,8 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "fidelity",
         "fairness",
         "correlation",
+        "exclusion_rate",
+        "request_states",
         "time_to_graduate",
         "allocations_per_round",
         "by_period",
@@ -168,6 +168,8 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "fidelity",
         "fairness",
         "correlation",
+        "exclusion_rate",
+        "request_states",
         "allocations_per_round",
     }
     # O recorte por geração leva as mesmas, mais o tempo de formatura — que ali
@@ -182,6 +184,8 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "fidelity",
         "fairness",
         "correlation",
+        "exclusion_rate",
+        "request_states",
         "time_to_graduate",
         "allocations_per_round",
     }
@@ -264,8 +268,10 @@ def test_trace_records_every_eligible_discipline_round_by_round(client):
     for record in records:
         assert len(record["bids"]) == rounds
         assert record["utility"] > 0
-        # Vaga obtida tem nota — o período fecha antes do relatório —, e só ela.
-        assert (record["grade"] is None) == (record["won_round"] is None)
+        # Vaga obtida tem nota — o período fecha antes do relatório —, menos
+        # a que ele largou: excluir não é cursar, então não há nota.
+        has_grade = record["won_round"] is not None and not record["excluded"]
+        assert (record["grade"] is not None) == has_grade
     # Vaga ganha numa rodada tem lance **naquela** rodada: é o que a tabela de
     # cada rodada mostra lado a lado. (A vaga garantida é a exceção declarada:
     # ela não veio de rodada nenhuma e leva `won_round` 0.)

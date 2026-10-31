@@ -1,5 +1,6 @@
 import { withUnlocks } from "./curriculum";
 import { COMPARISON_ARMS, creditReturnLabel, horizonFor } from "./types";
+import type { Profile } from "./types";
 import type {
   CompareRequest,
   CompareResponse,
@@ -46,13 +47,16 @@ export function newComparison(
   return { kind: "comparison", ...stamp(), config, result };
 }
 
-/** O cenário de uma execução gravada antes de 29/10/2026, traduzido para os
+/** O cenário de uma execução gravada antes de 31/10/2026, traduzido para os
  * campos de hoje. Sem isto uma entrada antiga derruba a lista inteira — o
  * rótulo lê campos que não existem lá — ou reexecuta calada com outro cenário.
  *
- * **Aptidão**: era descrita pelos dois parâmetros de forma da Beta e passou a
- * ser média e concentração. É a mesma Beta vista do outro lado, com
- * `média = forma_1/(forma_1 + forma_2)` e `concentração = forma_1 + forma_2`.
+ * **Perfis**: a população saía de uma Beta única, descrita por média e
+ * concentração (e, antes disso, pelos dois parâmetros de forma). Hoje são dois
+ * eixos de grupos. A tradução preserva o que a execução antiga de fato rodou:
+ * a Beta que havia vira o **único** perfil de desempenho, e a disponibilidade
+ * entra cheia — porque naquele modelo ninguém excluía. Reexecutar uma entrada
+ * antiga reproduz o resultado antigo, que é o que a lista promete.
  *
  * **Ganhos**: o `interest_coupling` virou `utility_gain` sem mudar de
  * significado, e o `grade_noise` deu lugar ao `retake_gain`. Este último não é
@@ -61,22 +65,35 @@ export function newComparison(
  * o choque já fazia em média. */
 function migrateScenario<
   T extends {
-    aptitude_mean: number;
-    aptitude_concentration: number;
+    performance_profiles: Profile[];
+    availability_profiles: Profile[];
     utility_gain: number;
     retake_gain: number;
   }
 >(config: T): T {
   const legacy = config as T & {
+    aptitude_mean?: number;
+    aptitude_concentration?: number;
     aptitude_alpha?: number;
     aptitude_beta?: number;
     interest_coupling?: number;
   };
   const migrated = { ...config };
-  if (typeof config.aptitude_mean !== "number") {
-    const concentration = (legacy.aptitude_alpha ?? 4) + (legacy.aptitude_beta ?? 2);
-    migrated.aptitude_mean = (legacy.aptitude_alpha ?? 4) / concentration;
-    migrated.aptitude_concentration = concentration;
+  if (!Array.isArray(config.performance_profiles)) {
+    // A Beta de antes, em qualquer das duas formas em que foi gravada.
+    const concentration =
+      legacy.aptitude_concentration ??
+      (legacy.aptitude_alpha ?? 4) + (legacy.aptitude_beta ?? 2);
+    const mean =
+      legacy.aptitude_mean ?? (legacy.aptitude_alpha ?? 4) / concentration;
+    migrated.performance_profiles = [{ name: "população", mean, concentration }];
+  }
+  if (!Array.isArray(config.availability_profiles)) {
+    // Naquele modelo ninguém excluía: a disponibilidade entra praticamente
+    // cheia para que a execução antiga reproduza o resultado antigo.
+    migrated.availability_profiles = [
+      { name: "cheia", mean: 0.999, concentration: 4000 },
+    ];
   }
   if (typeof config.utility_gain !== "number") {
     migrated.utility_gain = legacy.interest_coupling ?? 0;
@@ -159,10 +176,14 @@ function describeScenario(
     config.entry_periods < periods
       ? `${periods} períodos (${config.entry_periods} com ingresso, jubila em ${config.max_residence})`
       : `${periods} períodos`;
-  // As duas normais entram só quando saem do default: num cenário montado a
-  // partir de um preset elas distinguem execuções que, de resto, são iguais.
+  // Os perfis entram pela contagem, não pelos parâmetros: o que distingue
+  // duas execuções à primeira vista é quantos grupos a população tinha, e a
+  // lista inteira não caberia num rótulo de uma linha.
+  const perfis = (axis: Profile[]) =>
+    `${axis.length} ${axis.length === 1 ? "perfil" : "perfis"}`;
   const populacao = [
-    `aptidão: média ${config.aptitude_mean.toLocaleString("pt-BR")} · concentração ${config.aptitude_concentration.toLocaleString("pt-BR")}`,
+    `desempenho: ${perfis(config.performance_profiles)}`,
+    `disponibilidade: ${perfis(config.availability_profiles)}`,
     `u σ ${config.utility_sigma.toLocaleString("pt-BR")}`,
   ];
   return (
