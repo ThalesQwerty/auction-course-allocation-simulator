@@ -9,11 +9,16 @@ A eq. (36) é a do anteprojeto: o que sobrou atravessa o período. Note que
 preço, então o que sobra é o que ele não foi cobrado, não o que guardou.
 
 A variante `none` substitui a equação por um orçamento que recomeça em Γ_min
-todo período. É o degrau de baixo da escada de acúmulo e o único braço em que
-o passado do aluno não entra no poder de compra dele por via alguma — sem ele
-não dá para separar o efeito da sobra do efeito do retorno, que têm sinais
-opostos de incentivo: a sobra premia quem pagou barato, o retorno premia quem
-aprovou.
+todo período: o passado do aluno não entra no poder de compra dele por via
+alguma.
+
+Note que com ela **o retorno fica inerte** — `period_return` entra e não é
+usado —, de modo que a simulação é idêntica com e sem `f_γ` (medido:
+relatórios iguais, período a período). O retorno só existe onde há acúmulo, e
+é por isso que memória e retorno **não formam um cruzamento 2x2**: o segundo é
+aninhado no primeiro. As duas fontes de memória têm sinais opostos de
+incentivo — a sobra premia quem pagou barato, o retorno premia quem aprovou —,
+e separá-las exige o degrau do meio, não uma quarta combinação.
 """
 from __future__ import annotations
 

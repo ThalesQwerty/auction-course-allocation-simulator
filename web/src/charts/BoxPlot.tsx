@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { boxStats, niceScale } from "../equations";
+import { boxStats, paddedScale } from "../equations";
 import { formatRatio } from "./format";
 import { inkFor, usePrefersDark } from "./theme";
 
@@ -22,8 +22,10 @@ const PLOT = { top: 12, right: 16, bottom: 30, left: 50, height: 232 };
  * largura, que não codifica nada. */
 const BOX_WIDTH = 30;
 
-/** Folga proporcional à dispersão: as caixas ficam quase coladas quando as
- * execuções concordam, e é justamente isso que se quer ver. */
+/** Folga proporcional à dispersão, para as métricas **sem** contradomínio —
+ * o tempo de formatura e a saturação. As que têm (ψ̄, λ, as frações) se
+ * desenham na régua inteira delas, e aí não há folga a dar: ver `paddedScale`.
+ * Generosa de propósito, porque os bigodes já alcançam os extremos. */
 const PADDING = 0.25;
 
 /** Largura aproximada de um caractere a 11px. Basta para decidir se o rótulo
@@ -67,9 +69,11 @@ export function BoxPlot({
   groups: BoxGroup[];
   colors: Record<string, string>;
   format?: (value: number) => string;
-  /** Limites naturais da métrica (ψ̄ não passa de 1; λ vive em [−1, 1]). O
-   * domínio é folgado em torno dos dados, mas nunca além deles — uma caixa
-   * encostada no teto tem de se ler como encostada no teto. */
+  /** O contradomínio da métrica (ψ̄ vive em [0, 1]; λ em [−1, 1]). Quando os
+   * dois limites são finitos, **a régua é ele**: a caixa se desenha na escala
+   * da grandeza, e não na da amostra. Com um limite só — a saturação não passa
+   * de zero por baixo, mas não tem teto — a régua se ajusta aos dados e é
+   * aparada desse lado. */
   bounds?: [number, number];
   /** Marca o zero quando o sinal da métrica é o que se lê (λ). */
   zeroLine?: boolean;
@@ -81,7 +85,7 @@ export function BoxPlot({
 
   const boxes = groups.map((group) => ({ ...group, stats: boxStats(group.values) }));
   const all = groups.flatMap((group) => group.values);
-  const scale = scaleFor(all, { bounds, zeroLine });
+  const scale = paddedScale(all, { bounds, zeroLine, padding: PADDING });
 
   const plotWidth = Math.max(0, width - PLOT.left - PLOT.right);
   const plotHeight = PLOT.height - PLOT.top - PLOT.bottom;
@@ -287,24 +291,4 @@ export function BoxPlot({
       </div>
     </figure>
   );
-}
-
-/** A régua vertical: folgada em torno dos dados, arredondada a marcas
- * legíveis e aparada nos limites naturais da métrica. */
-function scaleFor(
-  values: number[],
-  { bounds, zeroLine }: { bounds?: [number, number]; zeroLine: boolean }
-) {
-  if (!values.length) return { from: 0, to: 1, ticks: [0, 1] };
-  let low = Math.min(...values);
-  let high = Math.max(...values);
-  if (zeroLine) {
-    low = Math.min(low, 0);
-    high = Math.max(high, 0);
-  }
-  const pad = (high - low) * PADDING || Math.max(Math.abs(high) * 0.05, 0.01);
-  const nice = niceScale(low - pad, high + pad);
-  return bounds
-    ? { ...nice, from: Math.max(nice.from, bounds[0]), to: Math.min(nice.to, bounds[1]) }
-    : nice;
 }

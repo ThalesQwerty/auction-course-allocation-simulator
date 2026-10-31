@@ -1,9 +1,18 @@
-import { useMemo } from "react";
-import { BoxPlot, Histogram, categoricalColors, formatCount, formatRatio, usePrefersDark } from "./charts";
+import { useMemo, useState } from "react";
+import {
+  BoxPlot,
+  Histogram,
+  SeriesChart,
+  categoricalColors,
+  formatCount,
+  formatRatio,
+  usePrefersDark,
+} from "./charts";
+import type { SeriesPoint } from "./charts";
 import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
-import { CHARTED_ARMS, COMPARISON_ARMS } from "./types";
-import type { RunSummary } from "./types";
+import { COMPARISON_ARMS } from "./types";
+import type { CohortSeries, PeriodSeries, RunSummary } from "./types";
 
 /** Períodos com uma casa: o tempo de formatura anda em frações de período, e
  * duas casas sugeririam uma precisão que a amostra não tem. */
@@ -19,6 +28,14 @@ interface Metric {
   /** Rótulo curto, para a coluna "Métrica" das tabelas. */
   short: string;
   of: (run: RunSummary) => number | null;
+  /** Os pontos da grandeza numa execução, **um acessor por eixo** — o material
+   * de que `of` é a média ponderada.
+   *
+   * O eixo que falta aqui é o eixo em que a grandeza não existe, e é assim que
+   * a exclusão fica estrutural em vez de virar um filtro à parte: o tempo de
+   * formatura não tem `period` porque é da execução inteira, e tem `cohort`
+   * porque cada aluno pertence a uma geração só. */
+  series?: Partial<Record<SeriesMode, (run: RunSummary) => SeriesPoint[]>>;
   /** Limites naturais da grandeza; o domínio é folgado em torno dos dados mas
    * nunca passa daqui. Ausente quando a grandeza não tem teto. */
   bounds?: [number, number];
@@ -32,6 +49,73 @@ interface Metric {
   format: (value: number) => string;
   zeroLine?: boolean;
 }
+
+/** Os eixos ordenados sobre os quais uma métrica vira linha — os dois modos
+ * de leitura que não são o agregado.
+ *
+ * O **período** é o tempo: entre o 5 e o 6 há caminho, e o que se lê é a
+ * trajetória que a redução resume. A **geração** é o período de ingresso: o
+ * aluno fica na dela do ingresso ao diploma, e o eixo também é ordenado — quem
+ * entrou depois encontrou uma universidade mais cheia. É por isso que uma
+ * inclinação ali não se lê como efeito do mecanismo, e a comparação que vale é
+ * a vertical, entre braços no mesmo ponto. */
+type SeriesMode = "period" | "cohort";
+type ViewMode = "aggregate" | SeriesMode;
+
+/** Como cada eixo se chama na tela e num ponto dele. */
+const AXIS: Record<SeriesMode, { label: string; point: (x: number) => string }> = {
+  period: { label: "Por período", point: (x) => `Período ${x}` },
+  cohort: { label: "Por geração", point: (x) => `Geração ${x}` },
+};
+
+/** As listas de um recorte que se desenham como série simples: um número por
+ * ponto do eixo. Ficam de fora o próprio eixo — que é `period` ou `cohort` —,
+ * excluído na hora do uso, e a saturação, que tem uma dimensão a mais. */
+type FlatKeys<T> = {
+  [K in keyof T]: T[K] extends (number | null)[] ? K : never;
+}[keyof T];
+
+type PeriodValues = Exclude<FlatKeys<PeriodSeries>, "period">;
+type CohortValues = Exclude<FlatKeys<CohortSeries>, "cohort">;
+
+/** Os pontos (eixo, valor) de uma lista.
+ *
+ * Posição nula fica **de fora** em vez de virar zero: ninguém concluiu numa
+ * geração é coisa diferente de ter concluído na hora. Recorte ausente —
+ * execução gravada antes dele existir — devolve amostra vazia, e o modo some
+ * em vez de desenhar no vazio. */
+const pointsOf = (
+  axis: number[] | undefined,
+  values: (number | null)[] | undefined
+): SeriesPoint[] => {
+  if (!axis || !values) return [];
+  return axis.flatMap((x, index) => {
+    const y = values[index];
+    return y === null || y === undefined ? [] : [{ x, y }];
+  });
+};
+
+/** Os pontos de **uma rodada**: a coluna `index` da matriz de saturação, lida
+ * ao longo do eixo — a 1ª rodada de cada período (ou de cada geração), a 2ª de
+ * cada um, e assim por diante. */
+const columnOf = (
+  axis: number[] | undefined,
+  matrix: (number | null)[][] | undefined,
+  index: number
+): SeriesPoint[] =>
+  pointsOf(axis, matrix?.map((row) => row?.[index] ?? null));
+
+const byPeriod = (key: PeriodValues) => (run: RunSummary) =>
+  pointsOf(run.by_period?.period, run.by_period?.[key]);
+
+const byCohort = (key: CohortValues) => (run: RunSummary) =>
+  pointsOf(run.by_cohort?.cohort, run.by_cohort?.[key]);
+
+const roundByPeriod = (index: number) => (run: RunSummary) =>
+  columnOf(run.by_period?.period, run.by_period?.allocations_per_round, index);
+
+const roundByCohort = (index: number) => (run: RunSummary) =>
+  columnOf(run.by_cohort?.cohort, run.by_cohort?.allocations_per_round, index);
 
 /** As métricas de alocação — as que avaliam a qualidade do que foi alocado.
  *
@@ -52,6 +136,7 @@ const METRICS: Metric[] = [
     title: "Eficiência de alocação (ψ̄)",
     short: "Eficiência (ψ̄)",
     of: (run) => run.efficiency,
+    series: { period: byPeriod("efficiency"), cohort: byCohort("efficiency") },
     bounds: [0, 1],
     betterWhen: "higher",
     format: formatRatio,
@@ -61,6 +146,7 @@ const METRICS: Metric[] = [
     title: "Aproveitamento da carga",
     short: "Aproveitamento",
     of: (run) => run.utilization,
+    series: { period: byPeriod("utilization"), cohort: byCohort("utilization") },
     bounds: [0, 1],
     betterWhen: "higher",
     format: formatRatio,
@@ -70,6 +156,7 @@ const METRICS: Metric[] = [
     title: "Fidelidade da mensagem",
     short: "Fidelidade",
     of: (run) => run.fidelity,
+    series: { period: byPeriod("fidelity"), cohort: byCohort("fidelity") },
     bounds: [0, 1],
     // Descreve, não pontua: dizer qual lado é melhor exigiria escolher entre
     // expressar intensidade e ser simples de usar, e isso é juízo de quem lê.
@@ -81,6 +168,7 @@ const METRICS: Metric[] = [
     title: "Equidade (índice de Jain, φ)",
     short: "Equidade (φ)",
     of: (run) => run.fairness,
+    series: { period: byPeriod("fairness"), cohort: byCohort("fairness") },
     bounds: [0, 1],
     betterWhen: "higher",
     format: formatRatio,
@@ -90,6 +178,7 @@ const METRICS: Metric[] = [
     title: "Correlação CR × satisfação (λ)",
     short: "Correlação (λ)",
     of: (run) => run.correlation,
+    series: { period: byPeriod("correlation"), cohort: byCohort("correlation") },
     bounds: [-1, 1],
     betterWhen: null,
     format: formatRatio,
@@ -100,11 +189,39 @@ const METRICS: Metric[] = [
     title: "Tempo de formatura (períodos)",
     short: "Tempo (períodos)",
     of: (run) => run.time_to_graduate,
+    // Sem `period`: o tempo é da execução inteira, e a versão por período
+    // ("quanto levou quem concluiu em t") seria outra grandeza, com viés de
+    // sobrevivência. Por geração ele existe — cada aluno pertence a uma só.
+    series: { cohort: byCohort("time_to_graduate") },
     betterWhen: "lower",
     format: formatPeriods,
   },
 ];
 
+
+/** O que cada modo mostra, em uma linha. Fica junto das métricas e não dentro
+ * do JSX porque é texto de leitura, não marcação: é onde a ressalva de cada
+ * eixo está escrita. */
+const NOTES: Record<ViewMode, { metrics: string; saturation: string }> = {
+  aggregate: {
+    metrics:
+      "Cada caixa é a distribuição da métrica sobre as execuções do modelo; o que se compara é a sobreposição delas, não a distância entre as medianas.",
+    saturation:
+      "Um gráfico por rodada, e o que se lê entre eles é o decaimento: quem atende mais demanda cedo começa alto e cai rápido.",
+  },
+  period: {
+    metrics:
+      "A mediana entre as execuções em cada período, com o intervalo interquartil em faixa. O tempo de formatura não entra: é da execução inteira, não do período.",
+    saturation:
+      "A mesma rodada ao longo do horizonte — a 1ª rodada de cada período, a 2ª de cada período —, para o decaimento se ler junto com o momento em que acontece.",
+  },
+  cohort: {
+    metrics:
+      "A mediana entre as execuções em cada geração: quem entrou no período 1, no 2, e assim por diante. As gerações não são intercambiáveis — a primeira encontra a universidade quase vazia e a última a encontra cheia —, então a inclinação ao longo do eixo mistura mecanismo e mercado. O que se lê aqui é a comparação entre os braços num mesmo ponto.",
+    saturation:
+      "A mesma rodada em cada geração — a 1ª rodada de cada uma, a 2ª de cada uma.",
+  },
+};
 
 const ORDINALS = ["1ª", "2ª", "3ª", "4ª", "5ª", "6ª", "7ª", "8ª", "9ª", "10ª"];
 
@@ -119,6 +236,7 @@ const roundMetrics = (rounds: number): Metric[] =>
       title: `Alocações por aluno (${ordinal} rodada)`,
       short: `Alocações (${ordinal} rodada)`,
       of: (run) => run.allocations_per_round?.[index] ?? null,
+      series: { period: roundByPeriod(index), cohort: roundByCohort(index) },
       bounds: [0, Infinity],
       betterWhen: null,
       format: formatCount,
@@ -139,10 +257,7 @@ const BASELINE = "ranking_greedy";
 
 /** Sinal explícito: numa coluna de diferenças, "+0,04" e "−0,04" se distinguem
  * de relance e "0,04" não. */
-/** Os rótulos de **todos** os braços, na ordem do caminho — e não só os
- * plotados, porque as tabelas mostram os de robustez também e a bolinha de
- * cor tem de bater entre tabela e gráfico. Os plotados vêm primeiro, então
- * ficam com as primeiras cores da paleta. Derivado de uma constante do
+/** Os rótulos dos braços, na ordem do caminho. Derivado de uma constante do
  * módulo, então não precisa ser recalculado a cada render. */
 const ARM_LABELS = COMPARISON_ARMS.map((arm) => arm.label);
 
@@ -159,6 +274,27 @@ export function Comparison({
   const dark = usePrefersDark();
   const result = run.result;
   const colors = useMemo(() => categoricalColors(ARM_LABELS, dark), [dark]);
+  /** Os dois modos de ler as métricas de alocação. O agregado é o padrão: é
+   * nele que a pergunta "qual modelo?" se responde, e o por período é a
+   * pergunta seguinte — *onde* no horizonte mora o vão. */
+  const [view, setView] = useState<ViewMode>("aggregate");
+
+  /** Quais eixos esta comparação traz. As gravadas antes de um recorte existir
+   * não o trazem, e aí o botão dele some — como a saturação some quando falta
+   * a lista de rodadas. */
+  const available = useMemo(
+    () => ({
+      period: result.arms.some((arm) =>
+        arm.runs.some((entry) => entry.by_period?.period.length)
+      ),
+      cohort: result.arms.some((arm) =>
+        arm.runs.some((entry) => entry.by_cohort?.cohort.length)
+      ),
+    }),
+    [result.arms]
+  );
+  const modes = (Object.keys(AXIS) as SeriesMode[]).filter((axis) => available[axis]);
+  const mode: ViewMode = view === "aggregate" || available[view] ? view : "aggregate";
 
   /** As execuções de um braço, na ordem das seeds. Execuções gravadas antes de
    * um braço existir simplesmente não o trazem, e o braço sai vazio em vez de
@@ -266,7 +402,6 @@ export function Comparison({
           <td>{index === 0 ? metric.short : ""}</td>
           <td>
             <span className="swatch" style={{ background: colors[arm.label] }} /> {arm.label}
-            {arm.charted ? "" : <span className="arm-aside"> · fora dos gráficos</span>}
           </td>
           <td>{box ? metric.format(box.min) : "—"}</td>
           <td>{box ? metric.format(box.q1) : "—"}</td>
@@ -313,11 +448,57 @@ export function Comparison({
     );
   };
 
+  /** As amostras de uma grandeza por braço, uma lista de pontos por execução —
+   * o que o gráfico de séries resume em mediana e faixa. */
+  const samplesOf = (of: (run: RunSummary) => SeriesPoint[]) =>
+    COMPARISON_ARMS.map((arm) => ({
+      label: arm.label,
+      samples: runsOf(arm.key).map(of),
+    }));
+
+  /** Um gráfico de séries avulso — o que não é métrica mas se lê no mesmo
+   * eixo: o peso de cada ponto, os concluintes de cada geração. */
+  const chartOfSeries = (
+    id: string,
+    title: string,
+    axis: SeriesMode,
+    of: (run: RunSummary) => SeriesPoint[],
+    extra: { bounds?: [number, number]; format?: (value: number) => string } = {}
+  ) => (
+    <SeriesChart
+      key={id}
+      title={title}
+      groups={samplesOf(of)}
+      colors={colors}
+      runs={result.runs}
+      xLabel={AXIS[axis].point}
+      {...extra}
+    />
+  );
+
+  const seriesFor = (metric: Metric, axis: SeriesMode) => {
+    const of = metric.series?.[axis];
+    if (!of) return null;
+    return (
+      <SeriesChart
+        key={metric.id}
+        title={metric.title}
+        groups={samplesOf(of)}
+        colors={colors}
+        bounds={metric.bounds}
+        format={metric.format}
+        zeroLine={metric.zeroLine}
+        runs={result.runs}
+        xLabel={AXIS[axis].point}
+      />
+    );
+  };
+
   const chartFor = (metric: Metric) => (
     <BoxPlot
       key={metric.id}
       title={metric.title}
-      groups={CHARTED_ARMS.map((arm) => ({
+      groups={COMPARISON_ARMS.map((arm) => ({
         label: arm.label,
         short: arm.short,
         values: valuesOf(arm.key, metric),
@@ -341,26 +522,83 @@ export function Comparison({
         </button>
       </div>
 
-      <div className="panel">
+      <div className="panel panel-switch">
         <h2>
           {result.runs} execuções de cada modelo — {result.runs * result.arms.length}{" "}
           simulações
         </h2>
+        {/* Um alternador para a tela inteira, e não um por seção: o que ele
+            troca é o eixo horizontal dos gráficos, e lê-los com eixos
+            diferentes lado a lado é o que não se quer. */}
+        {modes.length > 0 && (
+          <div className="view-switch">
+            <button
+              type="button"
+              className={mode === "aggregate" ? "on" : ""}
+              onClick={() => setView("aggregate")}
+            >
+              Agregado
+            </button>
+            {modes.map((axis) => (
+              <button
+                key={axis}
+                type="button"
+                className={mode === axis ? "on" : ""}
+                onClick={() => setView(axis)}
+              >
+                {AXIS[axis].label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <section className="chart-section">
         <header className="chart-section-head">
           <h2>Métricas de alocação</h2>
-          </header>
-        <div className="chart-grid">{METRICS.map(chartFor)}</div>
+          <p>{NOTES[mode].metrics}</p>
+        </header>
+        <div className="chart-grid">
+          {mode === "aggregate"
+            ? METRICS.map(chartFor)
+            : [
+                ...METRICS.map((metric) => seriesFor(metric, mode)),
+                // O contexto do eixo, no fim da grade. No período é o peso de
+                // cada ponto: ele mostra as três fases do horizonte — a
+                // universidade enchendo, o estado estacionário e a drenagem —,
+                // e sem ele a queda das curvas no fim se leria como mudança de
+                // mecanismo. Na geração é o concluinte: é o denominador do
+                // tempo de formatura, e é onde se vê a primeira geração formar
+                // quase todo mundo enquanto a última não teve horizonte. Em
+                // fração, e não em contagem: o absoluto depende do tamanho do
+                // ingresso, a fração se compara entre gerações.
+                mode === "period"
+                  ? chartOfSeries("students", "Alunos ativos", mode, byPeriod("students"), {
+                      bounds: [0, Infinity],
+                      format: formatCount,
+                    })
+                  : chartOfSeries(
+                      "graduation_rate",
+                      "Fração de concluintes",
+                      mode,
+                      byCohort("graduation_rate"),
+                      { bounds: [0, 1] }
+                    ),
+              ]}
+        </div>
       </section>
 
       {rounds > 0 && (
         <section className="chart-section">
           <header className="chart-section-head">
             <h2>Saturação da demanda</h2>
+            <p>{NOTES[mode].saturation}</p>
           </header>
-          <div className="chart-grid">{saturation.map(chartFor)}</div>
+          <div className="chart-grid">
+            {mode === "aggregate"
+              ? saturation.map(chartFor)
+              : saturation.map((metric) => seriesFor(metric, mode))}
+          </div>
         </section>
       )}
 
@@ -425,7 +663,7 @@ export function Comparison({
           </thead>
           <tbody>
             {Array.from({ length: result.runs }, (_, i) => {
-              const row = CHARTED_ARMS.map((arm) => runsOf(arm.key)[i]).filter(Boolean);
+              const row = COMPARISON_ARMS.map((arm) => runsOf(arm.key)[i]).filter(Boolean);
               if (!row.length) return null;
               const join = (
                 of: (run: RunSummary) => number | null,

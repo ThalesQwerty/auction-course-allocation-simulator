@@ -484,6 +484,77 @@ input.invalid {
   gap: 5px;
 }
 
+/* A legenda das séries alterna: com quatro braços sobrepostos, esconder dois
+   é o que torna um vão legível — e é assim que a figura vai para o texto. */
+.legend-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.legend-toggle.off {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+/* Os dois modos de ler as métricas de alocação: a distribuição entre as
+   execuções e o perfil dentro delas. Não é filtro nem opção de estilo — é a
+   troca do eixo horizontal, e por isso fica no cabeçalho da seção. */
+.view-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.view-switch button {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.view-switch button.on {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+/* O cabeçalho dos resultados carrega o alternador: a contagem de execuções à
+   esquerda, a troca de eixo à direita. Fica acima das duas seções de gráfico
+   porque governa as duas. */
+.panel-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.panel-switch h2 {
+  margin-bottom: 0;
+}
+
+/* Os quartis ao lado da mediana no tooltip da série: leitura secundária, e
+   por isso menor e mais apagada que o número que se compara. */
+.tooltip-aside {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.tooltip-foot {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+}
+
 /* O boxplot é SVG desenhado à mão — não há primitiva dele no recharts. O
    contêiner é o referencial do tooltip, que é posicionado em pixels sobre a
    faixa onde o mouse está. */
@@ -1077,12 +1148,6 @@ button.link:hover {
 
 .muted-cell {
   color: var(--muted);
-}
-
-/* Marca, na tabela de resumo, o braço que roda mas fica fora dos boxplots. */
-.arm-aside {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .outcome.won {

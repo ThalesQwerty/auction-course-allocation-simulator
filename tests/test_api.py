@@ -119,15 +119,13 @@ def test_compare_returns_one_summary_per_seed_in_every_arm(client):
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 3}).json()
 
     assert payload["runs"] == 3
-    # Os quatro passos do caminho primeiro, na ordem do eixo, e os dois de
-    # robustez depois — que rodam, mas ficam fora dos boxplots.
+    # Os quatro passos do caminho, na ordem do eixo. Não há braço que rode
+    # sem aparecer nos resultados.
     assert [a["key"] for a in payload["arms"]] == [
         "ranking_greedy",
         "credits_greedy",
         "credits_ilp",
         "credits_return",
-        "ranking_ilp",
-        "credits_no_memory",
     ]
     # As seeds vão de 1 a N e são pareadas: a i-ésima execução de cada braço
     # parte da mesma população.
@@ -145,6 +143,37 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "seed",
         "periods",
         "graduates",
+        "efficiency",
+        "utilization",
+        "fidelity",
+        "fairness",
+        "correlation",
+        "time_to_graduate",
+        "allocations_per_round",
+        "by_period",
+        "by_cohort",
+    }
+    # A série por período é o mesmo recorte sem reduzir: as mesmas métricas —
+    # a saturação inclusive, que ali vira uma linha por período —, mais o peso
+    # de cada ponto e o número do período a que ele pertence. O tempo de
+    # formatura não entra: é da execução inteira.
+    assert set(payload["arms"][0]["runs"][0]["by_period"]) == {
+        "period",
+        "students",
+        "efficiency",
+        "utilization",
+        "fidelity",
+        "fairness",
+        "correlation",
+        "allocations_per_round",
+    }
+    # O recorte por geração leva as mesmas, mais o tempo de formatura — que ali
+    # existe, porque cada aluno pertence a uma geração só — e os concluintes,
+    # que são o denominador dele.
+    assert set(payload["arms"][0]["runs"][0]["by_cohort"]) == {
+        "cohort",
+        "graduates",
+        "graduation_rate",
         "efficiency",
         "utilization",
         "fidelity",

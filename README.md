@@ -38,9 +38,6 @@ cardinal e resolve por MIP, mas é outro mecanismo — preferências sobre *cest
 orçamentos aproximadamente iguais e preços de equilíbrio. É trabalho
 relacionado, não célula deste desenho.
 
-Rodam ainda dois braços de **robustez** que ficam fora dos boxplots e aparecem
-só nas tabelas: o CR resolvido por PLI e o leilão sem sobra.
-
 Não há cursos: todo aluno é da universidade e cursa a mesma grade, e **toda
 disciplina é obrigatória** — conclui quem aprova em todas. O que ordena a grade
 são os **pré-requisitos**, e o período de cada disciplina sai deles por indução:

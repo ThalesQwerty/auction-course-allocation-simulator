@@ -176,12 +176,14 @@ class SimulationConfig:
     # `grading`. A aptidão de cada par (aluno, disciplina) vem de uma Beta,
     # sorteada uma vez e persistente: é traço, não sorte.
     #
-    # **Beta(4, 2)** é a calibragem contra o modelo que ela substitui: média
-    # 0,67 (nota 6,7, contra 6,5 da normal antiga) e 82% de aprovação numa
-    # disciplina de dificuldade 1 (contra ~84%). Sem isso a população fica
-    # boa demais, ninguém reprova e a recursada some do cenário.
-    aptitude_alpha: float = 4.0
-    aptitude_beta: float = 2.0
+    # **Beta(6,5, 3,5)** — média 0,65 (nota 6,5) e concentração 10 — é a
+    # calibragem da população: desvio 0,14 e 84% de aprovação numa disciplina
+    # de dificuldade 1. Era Beta(4, 2) (média 0,67, concentração 6, desvio
+    # 0,18, 81% de aprovação); a concentração maior aperta as duas caudas sem
+    # mexer no centro. Sem calibrar, a população fica boa demais, ninguém
+    # reprova e a recursada some do cenário.
+    aptitude_alpha: float = 6.5
+    aptitude_beta: float = 3.5
     # **Ganho por utilidade**: o quanto a utilidade mexe no desempenho, como
     # expoente sobre u_rel. **Padrão 0: desligado.** É a única peça da fórmula de nota sem forma
     # justificada, e a única que mexe no resultado principal — em 1 ela
@@ -213,11 +215,12 @@ class SimulationConfig:
     # este valor. O que muda é só a correlação entre semestres, que é
     # literalmente este número.
     #
-    # **Padrão 0**, que reproduz o modelo anterior. Como ela é a hipótese mais
-    # exposta que resta — é o valor que mais protege o lado fraco da tese, já
-    # que a preferência que não persiste desfaz a fila sozinha —, qualquer
-    # resultado em conclusões deveria vir com o valor dela declarado.
-    utility_stability: float = 0.0
+    # **Padrão 0,5**: metade do gosto persiste, metade recomeça. 0 reproduz o
+    # modelo anterior e é o valor que mais protege o lado fraco da tese — a
+    # preferência que não persiste desfaz a fila sozinha —, então ele continua
+    # sendo o contraste a rodar. Como esta é a hipótese mais exposta que
+    # resta, qualquer resultado em conclusões deve vir com o valor declarado.
+    utility_stability: float = 0.5
     # **Utilidades** (u, eqs. 41-43): o desvio da log-normal de onde saem os
     # valores preliminares, antes da normalização de `behavior.draw_utilities`.
     # É o único parâmetro: a média do logaritmo é fixa em 0 porque some na
@@ -230,7 +233,11 @@ class SimulationConfig:
     #
     # Depois do sorteio, `draw_utilities` impõe a invariante de altura:
     # s_x > s_y ⇒ u_x > u_y. O sigma continua mandando *dentro* da mesma altura.
-    utility_sigma: float = 1.0
+    #
+    # **Padrão 0,25**, o pé da faixa: o aluno é quase indiferente entre as
+    # disciplinas de uma mesma altura, e quem ordena a linha dele é sobretudo
+    # a invariante.
+    utility_sigma: float = 0.25
     # W_a — carga horária máxima por período, eq. (4). Igual para todos.
     max_hours: int = 360
     rounds: int = 1  # |R| — rodadas de alocação por período

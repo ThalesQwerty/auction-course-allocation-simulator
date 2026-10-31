@@ -30,6 +30,7 @@
  *     quantile           método 7 (R e numpy)
  *     boxStats           cinco números e as cercas de Tukey
  *     niceScale          domínio e marcas legíveis
+ *     paddedScale        a régua de um gráfico: o contradomínio, ou os dados
  *
  * A grade
  *     induct             a travessia das duas induções
@@ -51,5 +52,7 @@ export { induct } from "./induct";
 export { kernelSmooth } from "./kernelSmooth";
 export { mulberry32 } from "./mulberry32";
 export { niceScale } from "./niceScale";
+export { paddedScale } from "./paddedScale";
+export type { Scale } from "./paddedScale";
 export { quantile } from "./quantile";
 export { relativeUtilitySample } from "./relativeUtilitySample";

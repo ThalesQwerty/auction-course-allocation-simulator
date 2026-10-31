@@ -69,8 +69,8 @@ export interface Scenario {
    *
    * A Beta é descrita aqui por **média** e **concentração**, que é como se lê
    * uma população; o motor as converte nos dois parâmetros de forma que o
-   * sorteio pede. Média 0,67 com concentração 6 é a calibragem contra o modelo
-   * anterior: nota média 6,7 e 82% de aprovação em dificuldade 1. */
+   * sorteio pede. Média 0,65 com concentração 10 é a Beta(6,5, 3,5) calibrada:
+   * nota média 6,5, desvio 0,14 e 84% de aprovação em dificuldade 1. */
   aptitude_mean: number; // em (0, 1)
   /** Quão apertada a aptidão fica em torno da média. Mesma média com
    * concentração maior é uma população mais homogênea — e é a dispersão que dá
@@ -154,9 +154,8 @@ export type Mechanism = "credits" | "ranking";
  * 3. **Retorno**: quem aprova recupera a fatia do preço correspondente à
  *    nota. É a única fonte de mérito do leilão.
  *
- * `charted: false` fica de fora dos boxplots e segue nas tabelas: são
- * verificações de robustez, não passos do caminho, e empilhá-las nas mesmas
- * caixas foi o que tornou a legenda ilegível.
+ * **Só entra aqui o que sai nos resultados**: cada braço é uma caixa do
+ * boxplot e uma linha das tabelas, e nada roda para não ser mostrado.
  *
  * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas. */
 export const COMPARISON_ARMS: {
@@ -166,56 +165,33 @@ export const COMPARISON_ARMS: {
    * fica na legenda. Nomeia **o que mudou em relação à caixa anterior**, que
    * num gráfico que é um caminho é a informação mais útil ali. */
   short: string;
-  /** Se entra nos boxplots. */
-  charted: boolean;
   hint: string;
 }[] = [
   {
     key: "ranking_greedy",
     label: "CR",
     short: "CR",
-    charted: true,
     hint: "a linha de base: matrícula por histórico. Os alunos entram em ordem decrescente de CR e cada um leva o que quer, na própria ordem de preferência, enquanto houver vaga e carga — eqs. (49)-(50). Ordinal: a alocação usa só a ordem, nunca a magnitude",
   },
   {
     key: "credits_greedy",
     label: "Bidding points",
     short: "Bidding points",
-    charted: true,
     hint: "o mecanismo de pontos das business schools (Sönmez & Ünver 2010, sobre Michigan e Yale SOM): o aluno reparte um orçamento em lances e os lances são atendidos em ordem decrescente, enquanto houver vaga e carga. Ordinal como o CR — o que muda em relação a ele é só a mensagem, que passa a ser um número por disciplina em vez de um por aluno",
   },
   {
     key: "credits_ilp",
     label: "Leilão sem retorno",
     short: "Sem retorno",
-    charted: true,
     hint: "o leilão do anteprojeto (Seção 7.1): mesma mensagem do bidding points, resolvida por PLI. Cardinal — a alocação usa as magnitudes e derruba um lance alto para acomodar dois médios, o que a varredura nunca faz. O que muda em relação ao bidding points é só a resolução",
   },
   {
     key: "credits_return",
     label: "Leilão com retorno",
     short: "Com retorno",
-    charted: true,
     hint: "o modelo proposto: o mesmo leilão com a política proporcional de f_γ (eq. 34). Quem aprova recupera a fatia do preço correspondente à nota, então ir bem compra poder de compra no período seguinte — a única política que premia desempenho acima da nota de corte. O que muda em relação à caixa anterior é só o retorno",
   },
-  {
-    key: "ranking_ilp",
-    label: "CR cardinal",
-    short: "CR cardinal",
-    charted: false,
-    hint: "verificação de robustez, fora dos gráficos: o CR resolvido por PLI, como peso num ótimo global. Tem defeito declarado — como todo pedido do aluno tem o mesmo peso, a PLI é indiferente sobre qual cortar, e o aluno não tem voz sobre o que perde",
-  },
-  {
-    key: "credits_no_memory",
-    label: "Leilão sem sobra",
-    short: "Sem sobra",
-    charted: false,
-    hint: "verificação de robustez, fora dos gráficos: o orçamento recomeça em Γ_min todo período. Sem acúmulo o retorno é inerte — o crédito devolvido é descartado —, então esta célula é a mesma simulação com e sem f_γ",
-  },
 ];
-
-/** Só os braços que entram nos boxplots, na ordem do caminho. */
-export const CHARTED_ARMS = COMPARISON_ARMS.filter((arm) => arm.charted);
 
 export const armLabel = (key: string): string =>
   COMPARISON_ARMS.find((arm) => arm.key === key)?.label ?? key;
@@ -234,6 +210,69 @@ export interface CompareRequest
 
 /** Teto de execuções por mecanismo. Espelha `leilao.comparison.MAX_RUNS`. */
 export const MAX_COMPARISON_RUNS = 100;
+
+/** As métricas de período de uma execução, sem reduzir — o que o recorte por
+ * período desenha.
+ *
+ * Listas **paralelas**, e só com os períodos medidos: `period[i]` é o número do
+ * período a que `efficiency[i]` se refere. O primeiro período não aparece (nele
+ * todo mundo acabou de ingressar e não há o que medir), e por isso o número do
+ * período vem explícito em vez de sair do índice.
+ *
+ * `students` é o peso daquele ponto na média ponderada que produz o `RunSummary`
+ * — e é o que cai à vista na drenagem.
+ *
+ * Sem tempo de formatura: ele é da execução inteira, e a versão por período
+ * ("quanto levou quem concluiu em t") seria outra grandeza, com viés de
+ * sobrevivência. */
+export interface PeriodSeries {
+  period: number[];
+  students: number[];
+  efficiency: number[];
+  utilization: number[];
+  fidelity: number[];
+  fairness: number[];
+  correlation: number[];
+  /** A saturação do período, rodada a rodada: `allocations_per_round[i][r]` é o
+   * que foi ganho por aluno na rodada r+1 do período `period[i]`. Uma linha por
+   * período medido, sempre com |R| posições — lê-se por **coluna**: a 1ª rodada
+   * de cada período, a 2ª de cada período, e assim por diante. */
+  allocations_per_round: (number | null)[][];
+}
+
+/** O mesmo resumo da execução, uma linha por geração — o terceiro eixo da tela.
+ *
+ * A geração é o período de ingresso (t_a): a geração 3 é quem entrou no período
+ * 3, e o aluno fica nela do ingresso ao diploma. O recorte particiona a
+ * população, e a redução é a mesma do agregado — o que muda é sobre quem ela
+ * corre.
+ *
+ * **As gerações não são intercambiáveis.** A primeira encontra uma universidade
+ * quase vazia e a última a encontra cheia, de modo que a inclinação ao longo do
+ * eixo mistura mecanismo e mercado. O que se lê com segurança é a comparação
+ * **vertical**: os braços num mesmo ponto, que é a mesma geração da mesma
+ * população sob regras diferentes.
+ *
+ * Aqui o tempo de formatura **entra** — cada aluno pertence a uma geração só —,
+ * e vem com os concluintes, o denominador sem o qual ele não se lê. */
+export interface CohortSeries {
+  cohort: number[];
+  graduates: number[];
+  /** A fração da geração que concluiu: os concluintes sobre quantos entraram
+   * naquele período. É ela que se desenha — a contagem depende do tamanho do
+   * ingresso, a fração é comparável entre gerações. */
+  graduation_rate: number[];
+  efficiency: number[];
+  utilization: number[];
+  fidelity: number[];
+  fairness: number[];
+  correlation: number[];
+  /** `null` na geração em que ninguém concluiu. */
+  time_to_graduate: (number | null)[];
+  /** A saturação da geração, rodada a rodada — lê-se por coluna, como a de
+   * período: a 1ª rodada de cada geração, a 2ª de cada geração. */
+  allocations_per_round: (number | null)[][];
+}
 
 /** Uma execução reduzida a um ponto por métrica — o que vira um valor dentro
  * de uma caixa. As três de período são a média **ponderada pelos alunos
@@ -271,6 +310,14 @@ export interface RunSummary {
    * somadas dão as vagas por aluno do período. E, como o calouro está fora do
    * recorte, a matrícula garantida não infla a primeira. */
   allocations_per_round: (number | null)[];
+  /** As mesmas métricas de período, período a período: o material de que a
+   * média ponderada saiu. **Opcional** porque comparações gravadas antes dela
+   * existir não a trazem — e aí o modo por período some em vez de desenhar
+   * vazio. */
+  by_period?: PeriodSeries;
+  /** O mesmo resumo por geração. **Opcional** pelo mesmo motivo que
+   * `by_period`: execução gravada antes dele existir não o traz. */
+  by_cohort?: CohortSeries;
 }
 
 /** Um dos modelos comparados e as suas N execuções. O rótulo em português está
@@ -503,14 +550,14 @@ export interface SimulateResponse {
 export function defaultScenario(): Scenario {
   return {
     disciplines: [],
-    aptitude_mean: 0.67,
-    aptitude_concentration: 6,
+    aptitude_mean: 0.65,
+    aptitude_concentration: 10,
     utility_gain: 0,
     retake_gain: 1,
-    utility_stability: 0,
+    utility_stability: 0.5,
     resolver: "ilp",
     credit_memory: "carry",
-    utility_sigma: 1,
+    utility_sigma: 0.25,
     max_hours: 360,
     periods: 1,
     entry_periods: null,

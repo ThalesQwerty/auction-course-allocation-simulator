@@ -67,8 +67,8 @@ def test_aptitude_is_drawn_once_per_pair_and_persists():
     aptitudes = draw_aptitudes(students, disciplines, config, np.random.default_rng(0))
     assert len(aptitudes) == 120 * 40
     assert all(0.0 < a < 1.0 for a in aptitudes.values())
-    # Beta(4, 2) tem média 4/6.
-    assert abs(sum(aptitudes.values()) / len(aptitudes) - 4 / 6) < 0.01
+    # Beta(6,5, 3,5) tem média 0,65.
+    assert abs(sum(aptitudes.values()) / len(aptitudes) - 0.65) < 0.01
 
 
 def test_the_grade_is_the_aptitude_when_the_demand_is_standard():

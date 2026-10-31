@@ -1,6 +1,7 @@
 """A linha de base por CR (Seção 7.3.1, eqs. 49-50) e a comparação entre os
 dois mecanismos (Seção 7.3)."""
 import dataclasses
+from collections import Counter
 
 import pytest
 
@@ -13,6 +14,7 @@ from leilao.comparison import (
     run_comparison,
     summarize,
 )
+from leilao.equations import weighted_mean
 from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig
 from leilao.ranking import allocate_by_ilp, allocate_by_ranking, request_set
@@ -305,6 +307,129 @@ def test_the_summary_weights_the_periods_by_the_active_students():
     ]
     assert min(efficiencies) <= summary.efficiency <= max(efficiencies)
     assert summary.periods == len(result.periods)
+
+
+def test_the_series_by_period_is_the_material_of_the_weighted_mean():
+    """As duas leituras saem do mesmo lugar: a média ponderada do que está em
+    `by_period`, com `students` de peso, é o número que foi para o boxplot."""
+    result = run_simulation(make_config())
+    summary = summarize(result, seed=7)
+    series = summary.by_period
+
+    # Uma posição por período medido, e todas as listas do mesmo tamanho.
+    lengths = {
+        len(series.period),
+        len(series.students),
+        len(series.efficiency),
+        len(series.utilization),
+        len(series.fidelity),
+        len(series.fairness),
+        len(series.correlation),
+    }
+    assert lengths == {len(series.period)}
+    assert series.period
+
+    # O primeiro período não se mede: todo mundo acabou de ingressar.
+    assert 1 not in series.period
+    assert series.period == sorted(series.period)
+
+    recomputed = weighted_mean(list(zip(series.efficiency, series.students)))
+    assert recomputed == pytest.approx(summary.efficiency)
+
+
+def test_the_cohorts_partition_the_aggregate():
+    """Somadas com o peso delas, as gerações reproduzem o agregado da execução.
+
+    Vale porque o recorte **particiona** a população: cada aluno-período está em
+    exatamente uma geração. A identidade é exata nas métricas que são média por
+    aluno — ψ̄, aproveitamento e fidelidade. φ e λ ficam de fora e não por
+    descuido: o índice de Jain e a correlação de Pearson não são médias, e o
+    valor do todo não se recompõe dos valores das partes.
+    """
+    result = run_simulation(make_config())
+    summary = summarize(result, seed=3)
+    series = summary.by_cohort
+
+    # O peso de cada geração: os alunos medidos dela, somados no horizonte.
+    weights = {cohort: 0 for cohort in series.cohort}
+    for period in result.periods:
+        for snapshot in period.aggregate.by_cohort:
+            if snapshot.group is None or snapshot.metrics is None:
+                continue
+            if int(snapshot.group) in weights:
+                weights[int(snapshot.group)] += snapshot.metrics.students
+
+    assert sum(weights.values()) > 0
+    for name in ("efficiency", "utilization", "fidelity"):
+        recomposed = weighted_mean(
+            [
+                (value, weights[cohort])
+                for cohort, value in zip(series.cohort, getattr(series, name))
+            ]
+        )
+        assert recomposed == pytest.approx(getattr(summary, name)), name
+
+
+def test_the_cohort_series_carries_the_time_to_graduate_with_its_denominator():
+    """Aqui o tempo de formatura existe — cada aluno pertence a uma geração só.
+    E vem com `graduates`: geração sem concluinte tem tempo nulo, não zero."""
+    summary = summarize(run_simulation(make_config()), seed=3)
+    series = summary.by_cohort
+
+    assert len(series.time_to_graduate) == len(series.cohort)
+    for span, graduates in zip(series.time_to_graduate, series.graduates):
+        assert (span is None) == (graduates == 0)
+
+
+def test_the_graduation_rate_is_the_graduates_over_the_cohort_that_entered():
+    """A fração é a contagem sobre quem entrou naquele período — todo mundo
+    que entrou, e não só quem chegou a ser medido. Por isso ela mora em [0, 1]:
+    ninguém conclui duas vezes, e ninguém conclui sem ter entrado."""
+    result = run_simulation(make_config())
+    series = summarize(result, seed=3).by_cohort
+
+    entered = Counter(student.entry_period for student in result.students)
+
+    assert len(series.graduation_rate) == len(series.cohort)
+    for cohort, graduates, rate in zip(
+        series.cohort, series.graduates, series.graduation_rate
+    ):
+        assert entered[cohort] > 0
+        assert rate == pytest.approx(graduates / entered[cohort])
+        assert 0.0 <= rate <= 1.0
+
+
+def test_the_saturation_by_period_reduces_to_the_aggregate_one():
+    """A saturação por período e a agregada são a mesma grandeza em dois
+    recortes: a média ponderada da linha de cada rodada, com o mesmo peso das
+    outras métricas, devolve a posição correspondente da série agregada.
+
+    O peso servir às duas é o que o modelo garante: o recorte de um período é o
+    mesmo em todas as rodadas — a rodada muda o que foi alocado, não quem é
+    medido."""
+    config = make_config(rounds=3)
+    result = run_simulation(config)
+    summary = summarize(result, seed=11)
+    series = summary.by_period
+
+    assert all(len(row) == 3 for row in series.allocations_per_round)
+
+    for index, aggregate in enumerate(summary.allocations_per_round):
+        pairs = [
+            (row[index], weight)
+            for row, weight in zip(series.allocations_per_round, series.students)
+            if row[index] is not None
+        ]
+        assert weighted_mean(pairs) == pytest.approx(aggregate)
+
+
+def test_the_series_by_period_shows_the_drainage():
+    """O peso de cada ponto é o que cai na drenagem — é por ele que a média
+    ponderada não deixa um período final valer o mesmo que um cheio."""
+    result = run_simulation(make_config())
+    students = summarize(result, seed=1).by_period.students
+
+    assert students[-1] < max(students)
 
 
 def test_the_saturation_has_one_figure_per_round_and_decays():

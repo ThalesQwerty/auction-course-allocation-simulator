@@ -117,12 +117,13 @@ class ScenarioIn(BaseModel):
     # daqui, e a diferença entre dois alunos é só o que a seed sorteou.
     # A aptidão entra por média e concentração, que é como se lê uma
     # população; `grading.beta_shape` as converte nos dois parâmetros de forma
-    # que a Beta pede. Média 0,67 com concentração 6 é a Beta(4, 2) calibrada.
+    # que a Beta pede. Média 0,65 com concentração 10 é a Beta(6,5, 3,5)
+    # calibrada: nota média 6,5 e 84% de aprovação em dificuldade 1.
     aptitude_mean: float = Field(
-        default=0.67, gt=0, lt=1, description="média da aptidão"
+        default=0.65, gt=0, lt=1, description="média da aptidão"
     )
     aptitude_concentration: float = Field(
-        default=6.0, gt=0, description="concentração da aptidão em torno da média"
+        default=10.0, gt=0, description="concentração da aptidão em torno da média"
     )
     utility_gain: float = Field(
         default=0.0,
@@ -135,7 +136,7 @@ class ScenarioIn(BaseModel):
         ),
     )
     utility_stability: float = Field(
-        default=0.0,
+        default=0.5,
         ge=0,
         le=1,
         description=(
@@ -153,7 +154,7 @@ class ScenarioIn(BaseModel):
         ),
     )
     utility_sigma: float = Field(
-        default=1.0,
+        default=0.25,
         gt=0,
         description=(
             "desvio da log-normal de onde saem os valores preliminares da matriz de "
@@ -231,6 +232,66 @@ class CompareRequest(ScenarioIn):
     )
 
 
+class PeriodSeriesOut(BaseModel):
+    """As métricas de período de uma execução, sem reduzir — o que o recorte
+    por período da tela desenha.
+
+    Listas **paralelas** e só com os períodos medidos: `period[i]` é o número do
+    período a que `efficiency[i]` se refere. O primeiro período não aparece (nele
+    todo mundo acabou de ingressar), e por isso o número vem explícito em vez de
+    sair do índice. `students` é o peso do ponto na média ponderada, e cai à
+    vista na drenagem.
+
+    Sem tempo de formatura: é da execução inteira, e a versão por período seria
+    outra grandeza, com viés de sobrevivência.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    period: list[int]
+    students: list[int]
+    efficiency: list[float]
+    utilization: list[float]
+    fidelity: list[float]
+    fairness: list[float]
+    correlation: list[float]
+    # A saturação do período, rodada a rodada: a posição [i][r] é o que foi
+    # ganho por aluno na rodada r+1 do período `period[i]`. Uma linha por
+    # período medido, sempre com |R| posições.
+    allocations_per_round: list[list[float | None]]
+
+
+class CohortSeriesOut(BaseModel):
+    """O mesmo resumo da execução, uma linha por geração — o terceiro eixo da
+    tela.
+
+    A geração é o período de ingresso (t_a), e o aluno fica nela do ingresso ao
+    diploma. A redução é a mesma do agregado; o que muda é sobre quem ela corre.
+
+    **As gerações não são intercambiáveis**: a primeira encontra uma
+    universidade quase vazia e a última a encontra cheia, de modo que a
+    inclinação ao longo do eixo mistura mecanismo e mercado. O que se lê com
+    segurança é a comparação entre braços num mesmo ponto.
+
+    Aqui o tempo de formatura entra — cada aluno pertence a uma geração só —, e
+    vem com os concluintes, o denominador sem o qual ele não se lê: a contagem
+    e a fração dela sobre quantos entraram naquela geração.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    cohort: list[int]
+    graduates: list[int]
+    graduation_rate: list[float]
+    efficiency: list[float]
+    utilization: list[float]
+    fidelity: list[float]
+    fairness: list[float]
+    correlation: list[float]
+    time_to_graduate: list[float | None]
+    allocations_per_round: list[list[float | None]]
+
+
 class RunSummaryOut(BaseModel):
     """Uma execução reduzida a um ponto por métrica — o que vira um valor no
     boxplot. As três de período são a média ponderada pelos alunos medidos, de
@@ -261,6 +322,11 @@ class RunSummaryOut(BaseModel):
     # |R| posições. Mede a **saturação**: o que se lê é o decaimento entre as
     # rodadas, não o nível de cada uma.
     allocations_per_round: list[float | None]
+    # As mesmas métricas de período, período a período: o material de que a
+    # média ponderada saiu.
+    by_period: PeriodSeriesOut
+    # O mesmo resumo por geração: a mesma redução, corrida sobre outro recorte.
+    by_cohort: CohortSeriesOut
 
 
 class ArmResultOut(BaseModel):
@@ -463,8 +529,8 @@ class PlaygroundRequest(BaseModel):
     mechanism: Mechanism
     rounds: int = Field(ge=1, le=10)
     seed: int = 0
-    aptitude_mean: float = Field(default=0.67, gt=0, lt=1)
-    aptitude_concentration: float = Field(default=6.0, gt=0)
+    aptitude_mean: float = Field(default=0.65, gt=0, lt=1)
+    aptitude_concentration: float = Field(default=10.0, gt=0)
     disciplines: list[PlaygroundDisciplineIn]
     students: list[PlaygroundStudentIn]
 

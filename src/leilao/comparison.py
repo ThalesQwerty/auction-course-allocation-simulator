@@ -100,6 +100,7 @@ garantida não infla a primeira rodada — o número é só o que o mecanismo al
 from __future__ import annotations
 
 import dataclasses
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
@@ -121,6 +122,7 @@ from .config import (
     Resolver,
     SimulationConfig,
 )
+from .metrics import Metrics
 from .population import generate_students
 from .simulation import SimulationResult, run_simulation
 
@@ -153,36 +155,128 @@ class Arm:
 # cores, e nela a correlação (eq. 57) se lê de uma vez: do mecanismo em que o
 # CR é o próprio critério ao que o ignora por completo.
 #
-# Os dois últimos não entram nos boxplots (`charted: false` do lado da
-# interface): seguem rodando e aparecem nas tabelas como verificação de
-# robustez. No gráfico eles não são passos do caminho, são perguntas laterais,
-# e empilhá-los nas mesmas caixas foi o que tornou a legenda ilegível.
+# **Só entra aqui o que sai nos resultados**: cada braço é uma caixa do
+# boxplot e uma linha das tabelas, e nada roda para não ser mostrado. Duas
+# células que já foram braços saíram por não serem passos do caminho — o CR
+# resolvido por PLI (que tem defeito declarado: como todo pedido do aluno tem
+# o mesmo peso N_a, a PLI é indiferente sobre qual cortar, e o aluno não tem
+# voz sobre o que perde) e o leilão sem sobra. As duas seguem alcançáveis por
+# `SimulationConfig` — `resolver="ilp"` com `mechanism="ranking"`, e
+# `credit_memory="none"` — se um dia forem precisas para um apêndice.
 ARMS: tuple[Arm, ...] = (
-    # O caminho. `credits_greedy` é o *bidding points* clássico — orçamento de
-    # pontos, lances por disciplina, disciplina fechando no menor lance
-    # atendido (Sönmez & Ünver 2010, sobre Michigan e Yale SOM). Não confundir
-    # com o **Course Match** de Wharton, que substituiu o bidding points de lá
-    # em 2013: aquele é cardinal e resolve por MIP, mas é outro mecanismo —
+    # `credits_greedy` é o *bidding points* clássico — orçamento de pontos,
+    # lances por disciplina, disciplina fechando no menor lance atendido
+    # (Sönmez & Ünver 2010, sobre Michigan e Yale SOM). Não confundir com o
+    # **Course Match** de Wharton, que substituiu o bidding points de lá:
+    # aquele é cardinal e resolve por MIP, mas é outro mecanismo —
     # preferências sobre *cestas*, orçamentos aproximadamente iguais e preços
-    # de equilíbrio, não lance pago a segundo preço. Ele é trabalho
-    # relacionado, não célula deste desenho.
+    # de equilíbrio, não lance pago a segundo preço. É trabalho relacionado,
+    # não célula deste desenho.
     Arm("ranking_greedy", "ranking", "none", resolver="greedy"),
     Arm("credits_greedy", "credits", "none", resolver="greedy"),
     Arm("credits_ilp", "credits", "none", resolver="ilp"),
     Arm("credits_return", "credits", "ratio"),
-    # Robustez, fora dos gráficos.
-    #
-    # `ranking_ilp`: o CR como peso num ótimo global. Tem defeito declarado —
-    # como todo pedido do aluno tem o mesmo peso N_a, a PLI é indiferente
-    # sobre qual cortar e o aluno não tem voz sobre o que perde.
-    #
-    # `credits_no_memory`: o orçamento recomeça em Γ_min todo período. Note
-    # que sem acúmulo **o retorno é inerte** — `next_budget` devolve
-    # `base_credits` e descarta `period_return` —, então esta célula é a mesma
-    # simulação com e sem f_γ, e não há uma quarta combinação a rodar.
-    Arm("ranking_ilp", "ranking", "none", resolver="ilp"),
-    Arm("credits_no_memory", "credits", "none", credit_memory="none"),
 )
+
+
+@dataclass(frozen=True)
+class PeriodSeries:
+    """As métricas de período de uma execução, sem reduzir.
+
+    É o mesmo material de que `summarize` tira a média ponderada — a diferença
+    é que aqui ele não vira um número. A média esconde que o horizonte tem três
+    trechos: o **aquecimento**, com a universidade enchendo; o **estado
+    estacionário**; e a **drenagem**, depois do último ingresso, em que a
+    população só diminui. De um vão entre mecanismos a pergunta seguinte é em
+    qual dos três ele mora — um leilão que só ganha do CR na drenagem disse
+    algo sobre a drenagem, não sobre o mecanismo.
+
+    As listas são **paralelas** e trazem só os períodos **medidos**: `period[i]`
+    é o número do período a que `efficiency[i]` se refere, e posição nenhuma é
+    nula. O primeiro período não aparece — nele todo mundo acabou de ingressar
+    e não há o que medir (ver `summarize`) —, e por isso o número do período vem
+    explícito em vez de sair do índice.
+
+    `students` é o peso daquele ponto na redução. Ele cai à vista na drenagem, e
+    é o que torna a ponderação verificável em vez de confiável: quem lê o
+    gráfico vê o período final de vinte alunos que a média ponderada se recusou
+    a tratar como um período cheio.
+
+    A saturação também está aqui, e com uma dimensão a mais: ela já é uma série
+    por rodada, e por período vira uma matriz. Lê-se uma rodada de cada vez —
+    como a tela faz, um gráfico por rodada —, e aí cada uma é outra série sobre
+    o mesmo eixo.
+
+    O tempo de formatura não está aqui, e não por recorte de escopo: é
+    propriedade da execução inteira. A versão por período — quanto levou quem
+    concluiu em t — seria outra grandeza, com viés de sobrevivência, porque
+    quem conclui cedo é rápido por construção.
+    """
+
+    period: list[int]
+    students: list[int]
+    efficiency: list[float]
+    utilization: list[float]
+    fidelity: list[float]
+    fairness: list[float]
+    correlation: list[float]
+    # A saturação do período, rodada a rodada: `allocations_per_round[i][r]` é o
+    # que foi ganho por aluno na rodada r+1 do período `period[i]`. Uma linha
+    # por período medido, sempre com |R| posições — `None` onde aquele período
+    # não publicou a rodada, ou não teve o que medir nela.
+    #
+    # O peso desta série é o **mesmo** `students` acima, e isso não é
+    # coincidência: o recorte de um período é o mesmo em todas as rodadas — a
+    # rodada muda o que foi alocado, não quem é medido.
+    allocations_per_round: list[list[float | None]]
+
+
+@dataclass(frozen=True)
+class CohortSeries:
+    """O mesmo resumo da execução, uma linha por geração.
+
+    A geração é o período de ingresso (t_a): a geração 3 é quem entrou no
+    período 3, e o aluno fica nela do ingresso ao diploma — o que torna esta
+    leitura mais estável que a idade acadêmica. O recorte **particiona** a
+    população, então somá-lo reproduz o agregado.
+
+    Cada ponto é a mesma média ponderada de `summarize`, restrita aos instantes
+    daquela geração: o eixo troca de significado, a redução não.
+
+    **As gerações não são intercambiáveis, e é o que torna este eixo
+    traiçoeiro.** A geração 1 encontra uma universidade quase vazia e a última
+    encontra a cheia, de modo que a inclinação ao longo do eixo mistura o
+    mecanismo com o mercado que cada uma pegou. O que se lê aqui com segurança
+    é a comparação **vertical** — os braços num mesmo ponto do eixo, que é a
+    mesma geração da mesma população sob regras diferentes.
+
+    Aqui o **tempo de formatura entra**, e por um motivo que o recorte por
+    período não tem: cada aluno pertence a exatamente uma geração, e o tempo do
+    ingresso ao diploma é propriedade dele. Vem com os concluintes ao lado —
+    o denominador sem o qual ele não se lê —, e que nas últimas gerações são
+    poucos ou nenhum, porque o horizonte acabou antes de elas terem tempo.
+    """
+
+    # O t_a de cada geração, em ordem. Só as que tiveram algum instante medido:
+    # quem entrou no último período não chegou a ser medido, e uma linha vazia
+    # ali não seria dado.
+    cohort: list[int]
+    graduates: list[int]
+    # A fração da geração que concluiu: os concluintes sobre quantos entraram
+    # naquele período. É ela que se desenha, e não a contagem: o absoluto
+    # depende do tamanho do ingresso, a fração é comparável entre gerações.
+    graduation_rate: list[float]
+    efficiency: list[float]
+    utilization: list[float]
+    fidelity: list[float]
+    fairness: list[float]
+    correlation: list[float]
+    # `None` na geração em que ninguém concluiu — zero ali se leria como
+    # "formou na hora".
+    time_to_graduate: list[float | None]
+    # A saturação da geração, rodada a rodada: a posição [i][r] é a rodada r+1
+    # da geração `cohort[i]`, na média ponderada sobre os períodos dela.
+    allocations_per_round: list[list[float | None]]
 
 
 @dataclass(frozen=True)
@@ -220,6 +314,13 @@ class RunSummary:
     # o mesmo. `None` numa posição significa que nenhum período teve o que medir
     # naquela rodada.
     allocations_per_round: list[float | None]
+    # As mesmas métricas de período, período a período — o que a média ponderada
+    # resume. É o recorte por período da tela; a redução continua sendo a dos
+    # campos acima, e as duas leituras saem do mesmo material.
+    by_period: PeriodSeries
+    # O mesmo resumo por geração — o terceiro eixo da tela. Aqui a redução é a
+    # mesma; o que muda é sobre quem ela corre.
+    by_cohort: CohortSeries
 
 
 @dataclass(frozen=True)
@@ -286,27 +387,133 @@ def allocations_per_round(result: SimulationResult) -> list[float | None]:
     return series
 
 
+def cohort_series(result: SimulationResult) -> CohortSeries:
+    """Reduz a execução geração a geração.
+
+    É a mesma média ponderada de `summarize`, corrida sobre `by_cohort` em vez
+    de `overall`. O recorte particiona a população, então nenhum aluno-período
+    é contado duas vezes nem fica de fora — e somar as gerações de um período
+    reproduz o agregado dele.
+
+    A filtragem é a mesma do agregado, pelo mesmo motivo: instante sem métrica
+    não entra, e uma geração não tem métrica no período em que ingressou,
+    porque ali ela é toda calouro e o calouro conta como gente, não como dado
+    (ver `simulation.GroupSnapshot`).
+
+    O tempo de formatura e os concluintes não saem dos instantes, e sim de
+    varrer os alunos: cada um pertence a uma geração só, pelo `entry_period`.
+    De lá sai também o tamanho do ingresso, que é o denominador da fração —
+    e que conta **todo mundo** que entrou, inclusive quem nunca chegou a ser
+    medido.
+    """
+    rounds = max((len(period.rounds) for period in result.periods), default=0)
+
+    instants: dict[int, list[tuple[Metrics, int]]] = defaultdict(list)
+    saturation: dict[int, list[list[tuple[float, int]]]] = defaultdict(
+        lambda: [[] for _ in range(rounds)]
+    )
+
+    def collect(report, into) -> None:
+        for snapshot in report.by_cohort:
+            metrics = snapshot.metrics
+            if snapshot.group is None or metrics is None or metrics.students <= 0:
+                continue
+            into(int(snapshot.group), metrics)
+
+    for period in result.periods:
+        collect(
+            period.aggregate,
+            lambda cohort, metrics: instants[cohort].append((metrics, metrics.students)),
+        )
+        for index in range(min(rounds, len(period.rounds))):
+            collect(
+                period.rounds[index],
+                lambda cohort, metrics, index=index: saturation[cohort][index].append(
+                    (metrics.allocations_per_student, metrics.students)
+                ),
+            )
+
+    cohorts = sorted(instants)
+    entrants: dict[int, int] = defaultdict(int)
+    graduates: dict[int, int] = defaultdict(int)
+    spans: dict[int, list[int]] = defaultdict(list)
+    for student in result.students:
+        entrants[student.entry_period] += 1
+        if student.graduated_at is None:
+            continue
+        graduates[student.entry_period] += 1
+        spans[student.entry_period].append(
+            student.graduated_at - student.entry_period + 1
+        )
+
+    def mean(cohort: int, of) -> float:
+        return weighted_mean([(of(m), w) for m, w in instants[cohort]]) or 0.0
+
+    return CohortSeries(
+        cohort=cohorts,
+        graduates=[graduates[cohort] for cohort in cohorts],
+        graduation_rate=[
+            graduates[cohort] / entrants[cohort] if entrants[cohort] else 0.0
+            for cohort in cohorts
+        ],
+        efficiency=[mean(c, lambda m: m.efficiency) for c in cohorts],
+        utilization=[mean(c, lambda m: m.utilization) for c in cohorts],
+        fidelity=[mean(c, lambda m: m.fidelity) for c in cohorts],
+        fairness=[mean(c, lambda m: m.fairness) for c in cohorts],
+        correlation=[mean(c, lambda m: m.correlation) for c in cohorts],
+        time_to_graduate=[mean_span(spans[cohort]) for cohort in cohorts],
+        allocations_per_round=[
+            [weighted_mean(pairs) for pairs in saturation[cohort]] for cohort in cohorts
+        ],
+    )
+
+
 def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     """Reduz uma simulação inteira a um ponto por métrica.
 
     As três de período passam pela média ponderada pelos alunos medidos; o tempo
     de formatura é da execução inteira; a saturação é uma média dessas por
-    rodada.
+    rodada. O ponto não substitui o material de que saiu: `by_period` leva as
+    mesmas métricas sem reduzir, e as duas leituras ficam conferíveis uma contra
+    a outra.
 
     Períodos sem métrica não entram — nem os vazios, nem aquele em que todo
     mundo acabou de ingressar. Um zero ali seria um período em que ninguém ficou
     satisfeito, que é coisa diferente de um período que não se mede.
     """
     graduates = sum(1 for s in result.students if s.graduated_at is not None)
-    by_period = [
-        (period.aggregate.overall.metrics, period.aggregate.overall.metrics.students)
+    measured = [
+        (period, period.aggregate.overall.metrics)
         for period in result.periods
         if period.aggregate.overall.metrics is not None
         and period.aggregate.overall.metrics.students > 0
     ]
+    by_period = [(metrics, metrics.students) for _, metrics in measured]
+    rounds = max((len(period.rounds) for period in result.periods), default=0)
 
     def mean(of) -> float:
         return weighted_mean([(of(m), w) for m, w in by_period]) or 0.0
+
+    def series(of) -> list:
+        return [of(metrics) for _, metrics in measured]
+
+    def saturation(period) -> list[float | None]:
+        """A saturação de um período, com uma posição por rodada do cenário.
+
+        Períodos que publicaram menos rodadas são completados com `None`, para
+        a linha i continuar tendo o mesmo comprimento em todas: quem lê a
+        coluna r está lendo a mesma rodada em todos os períodos.
+        """
+        row: list[float | None] = []
+        for index in range(rounds):
+            report = period.rounds[index] if index < len(period.rounds) else None
+            metrics = report.overall.metrics if report is not None else None
+            row.append(
+                metrics.allocations_per_student
+                if metrics is not None and metrics.students > 0
+                else None
+            )
+        return row
 
     return RunSummary(
         seed=seed,
@@ -319,6 +526,17 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         correlation=mean(lambda m: m.correlation),
         time_to_graduate=time_to_graduate(result),
         allocations_per_round=allocations_per_round(result),
+        by_period=PeriodSeries(
+            period=[period.period for period, _ in measured],
+            students=series(lambda m: m.students),
+            efficiency=series(lambda m: m.efficiency),
+            utilization=series(lambda m: m.utilization),
+            fidelity=series(lambda m: m.fidelity),
+            fairness=series(lambda m: m.fairness),
+            correlation=series(lambda m: m.correlation),
+            allocations_per_round=[saturation(period) for period, _ in measured],
+        ),
+        by_cohort=cohort_series(result),
     )
 
 

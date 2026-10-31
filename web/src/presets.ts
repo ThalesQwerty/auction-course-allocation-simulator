@@ -166,9 +166,13 @@ const STUDENTS_PER_PERIOD = 60;
 /** A população. **Não há perfis**: toda ela sai destas distribuições, e o que
  * distingue um aluno do outro é só o que a seed sorteou. */
 const POPULATION = {
-  aptitude_mean: 0.67,
-  aptitude_concentration: 6,
-  utility_sigma: 1,
+  // Nota média 6,5 com concentração 10 é a Beta(6,5, 3,5): desvio 0,14 e 84%
+  // de aprovação numa disciplina de dificuldade 1.
+  aptitude_mean: 0.65,
+  aptitude_concentration: 10,
+  // σ no pé da faixa: o aluno é quase indiferente entre as disciplinas de uma
+  // mesma altura, e quem ordena a linha dele é sobretudo a invariante.
+  utility_sigma: 0.25,
   max_hours: MAX_HOURS,
 };
 
@@ -259,11 +263,13 @@ const commonScenario = (
   resolver: "ilp",
   credit_memory: "carry",
   utility_gain: 0,
-  // Preferência resorteada a cada período, que é o que o modelo fazia antes
-  // de a estabilidade existir. É a hipótese mais exposta que resta: a
-  // preferência que não persiste desfaz a fila sozinha, e é por isso que
-  // qualquer resultado em conclusões deve vir com este valor declarado.
-  utility_stability: 0,
+  // Metade do gosto persiste, metade recomeça a cada período. Em 0 — o que o
+  // modelo fazia antes de a estabilidade existir — a preferência que não
+  // persiste desfaz a fila sozinha, e é o valor que mais protege o lado fraco
+  // da tese, então ele continua sendo o contraste a rodar. É a hipótese mais
+  // exposta que resta: qualquer resultado em conclusões deve vir com este
+  // valor declarado.
+  utility_stability: 0.5,
   retake_gain: 1,
   credit_return: "none",
   seed: 42,
