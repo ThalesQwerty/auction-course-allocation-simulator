@@ -530,21 +530,42 @@ export interface StudentHistory {
   periods: StudentPeriodRecord[];
 }
 
-export interface SimulateResponse {
-  periods: PeriodReport[];
+/** O pedido do traço de **uma** execução da comparação: o cenário dela mais o
+ * par `(braço, seed)` que endereça a execução.
+ *
+ * Aqui a seed não é ignorada como em `/compare` — ela é o que se pede. E o
+ * retorno de créditos e o resolvedor continuam de fora: quem os impõe é o
+ * braço, que é o que faz o traço ser a mesma execução que o boxplot resumiu. */
+export interface TraceRequest extends Omit<Scenario, "seed" | "credit_return"> {
+  arm: string;
+  seed: number;
+}
+
+/** O contexto de mercado de um período: a oferta disciplina a disciplina. É o
+ * que a vista por disciplina lê no cabeçalho de cada período. */
+export interface TracePeriod {
+  period: number;
+  disciplines: DisciplineSnapshot[];
+}
+
+/** Uma execução inteira, aluno a aluno — a tela de depuração do projeto.
+ *
+ * É a parte pesada do resultado (uns 10 MB no preset Computação, contra 100 kB
+ * do resumo da comparação), e por isso **não** é persistida no `localStorage`
+ * nem vem junto de `/compare`: quem quer o caso individual o pede, e só
+ * daquela execução. A simulação é determinística, então refazê-la custa tempo
+ * e não fidelidade. */
+export interface TraceResponse {
+  arm: string;
+  seed: number;
+  periods: TracePeriod[];
   students: StudentSummary[];
-  /** Detalhe período a período de cada aluno. Pesado (≈1 MB num cenário de 8
-   * períodos), então não vai para o localStorage — ver `history.ts`. */
+  /** Detalhe período a período de cada aluno, com uma linha por disciplina
+   * elegível — inclusive as que ele nem chegou a pedir. */
   histories: StudentHistory[];
   disciplines: string[];
   /** Período de cada disciplina na grade, induzido dos pré-requisitos. */
   curriculum_periods: Record<string, number>;
-  /** As duas distribuições de entrada do cenário, como histogramas: uma fração
-   * por faixa, somando 1. As utilidades são reescaladas por linha (0 a 1); as
-   * notas vão de 0 a 10. Execuções gravadas antes delas existirem não as
-   * trazem, e aí a seção some em vez de aparecer vazia. */
-  utility_distribution?: number[];
-  grade_distribution?: number[];
 }
 
 export function defaultScenario(): Scenario {

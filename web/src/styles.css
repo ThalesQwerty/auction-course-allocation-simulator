@@ -18,6 +18,10 @@
   --accent-contrast: #ffffff;
   --danger: #a8281e;
   --win: #2b6e4b;
+  /* O amarelo da recusa, como **tinta**: o `STATUS.warning` dos gráficos
+     (#fab219) é cor de preenchimento e fica abaixo de 3:1 sobre o creme. Este
+     é o mesmo estado escurecido até 5:1, para poder virar palavra. */
+  --warn: #8a6410;
   --sidebar: #f2f0e7;
   --sidebar-w: 248px;
   --rail-w: 264px;
@@ -41,6 +45,7 @@
     --accent-contrast: #1f1e1d;
     --danger: #e8837a;
     --win: #5fb98a;
+    --warn: #e0b341;
     --sidebar: #1a1a18;
   }
 }
@@ -1076,7 +1081,7 @@ button.link:hover {
   }
 }
 
-/* --------------------------------------------- visualização de um aluno */
+/* ------------------------------- o traço de uma execução: aluno e disciplina */
 
 .student-head {
   align-items: flex-start;
@@ -1086,7 +1091,7 @@ button.link:hover {
   justify-content: space-between;
 }
 
-.student-head h1 {
+.student-head h3 {
   margin: 0;
 }
 
@@ -1114,13 +1119,6 @@ button.link:hover {
   margin: 2px 0 0;
 }
 
-/* O marcador de abrir/fechar só existe com o `display: list-item` padrão do
-   <summary>, então o flex fica num wrapper interno. */
-.period-panel > summary {
-  cursor: pointer;
-  margin-left: 14px;
-}
-
 .period-summary-row {
   align-items: baseline;
   display: flex;
@@ -1129,7 +1127,7 @@ button.link:hover {
   justify-content: space-between;
 }
 
-.period-panel > summary h2 {
+.period-summary-row h3 {
   align-items: center;
   display: inline-flex;
   gap: 8px;
@@ -1143,22 +1141,80 @@ button.link:hover {
 }
 
 .period-panel table {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .muted-cell {
   color: var(--muted);
 }
 
-.outcome.won {
+/* Uma rodada dentro do período. O título é pequeno e a contagem fica ao lado
+   dele: numa tela com |T| × |R| tabelas, o que se procura ao rolar é onde uma
+   rodada começa e quanta coisa ela tem. */
+.round-block + .round-block {
+  margin-top: 18px;
+}
+
+.round-head {
+  align-items: baseline;
+  color: var(--muted);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  letter-spacing: 0.06em;
+  margin: 14px 0 0;
+  text-transform: uppercase;
+}
+
+.round-count {
+  font-size: 10px;
+  letter-spacing: 0;
+  opacity: 0.8;
+  text-transform: none;
+}
+
+/* As quatro saídas de um pedido numa rodada. Fundo diluído e tinta do estado:
+   a cor diz de relance, e a palavra dentro da pílula é o que ela quer dizer —
+   cor de estado nunca diz sozinha o que significa. */
+.outcome {
+  border-radius: 4px;
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.outcome.approved {
+  background: color-mix(in srgb, var(--win) 16%, transparent);
   color: var(--win);
 }
 
-.outcome.refused {
+.outcome.failed {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
   color: var(--danger);
 }
 
-.outcome.unbid {
+.outcome.refused {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn);
+}
+
+.outcome.idle {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  color: var(--muted);
+}
+
+/* "vaga garantida" não é uma quinta saída: é como a vaga veio. Fica ao lado da
+   pílula, em nota, para não disputar com a cor. */
+.outcome-note {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+/* A linha cinza é contexto, não evento: recua para o pedido e a vaga ficarem
+   em primeiro plano. Quem não a quer nem recuada tem o filtro ao lado. */
+.idle-row {
   color: var(--muted);
 }
 
@@ -1168,6 +1224,41 @@ td.approved {
 
 td.failed {
   color: var(--danger);
+}
+
+/* Os seletores do traço, numa linha só: o par (modelo, execução) que endereça
+   a simulação, o que ver dentro dela e o filtro das cinzas. */
+.trace-controls .field-row {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.trace-controls .field select {
+  min-width: 150px;
+}
+
+.trace-controls .field.grow select {
+  min-width: 260px;
+}
+
+.trace-legend {
+  border-top: 1px solid var(--border);
+  line-height: 2;
+  margin-top: 14px;
+  padding-top: 10px;
+}
+
+.checkbox {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  padding-bottom: 5px;
+}
+
+.checkbox input {
+  width: auto;
 }
 
 /* ------------------------------------------------------------ grade curricular

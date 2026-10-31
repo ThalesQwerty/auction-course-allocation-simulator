@@ -11,6 +11,7 @@ import {
 import type { SeriesPoint } from "./charts";
 import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
+import { Trace } from "./Trace";
 import { COMPARISON_ARMS } from "./types";
 import type { CohortSeries, PeriodSeries, RunSummary } from "./types";
 
@@ -690,6 +691,14 @@ export function Comparison({
           </tbody>
         </table>
       </div>
+
+      {/* Por último, o caso individual. Tudo acima é agregado — a distribuição
+          entre as execuções e o perfil dentro delas —, e esta seção é a porta
+          de saída para o outro extremo: um aluno, uma disciplina, uma rodada.
+          Fica no fim porque custa uma simulação a mais, e porque a pergunta
+          que ela responde ("por que este número saiu assim?") só aparece
+          depois de ver o número. */}
+      <Trace run={run} />
     </div>
   );
 }

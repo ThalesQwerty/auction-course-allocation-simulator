@@ -78,6 +78,7 @@ Simulador/
     ├── Playground.tsx    # A decisão de um aluno, passo a passo
     ├── Project.tsx       # Visão teórica do projeto
     ├── Comparison.tsx    # Boxplots e tabelas de uma comparação
+    ├── Trace.tsx         # O caso individual: um aluno ou uma disciplina, rodada a rodada
     └── history.ts        # Histórico de execuções (localStorage)
 ```
 
@@ -94,11 +95,11 @@ interface monta a configuração inteira no navegador e manda para `/compare`,
 que roda o cenário em cada braço, N vezes, e devolve os resumos pareados. Não
 há banco de dados — cada execução é independente e reprodutível pela seed.
 
-O motor ainda sabe rodar **uma** simulação por dentro (`run_simulation`), com
-as séries por período, por rodada e por geração, o detalhe por aluno e os
-relatórios por disciplina — é o que a comparação chama em cada braço, e o que
-os testes exercitam. O que não existe hoje é **tela** para ela: a interface só
-abre comparações.
+O detalhe de **uma** das execuções fica numa rota à parte, `/trace`: o mesmo
+cenário mais o par (braço, seed) que a endereça, e de volta o que cada aluno
+pediu em cada rodada. Ele é pedido sob demanda porque é a resposta grande da
+API — uns 10 MB contra 100 kB do resumo —, e refazer a simulação é legítimo
+porque ela é determinística: a mesma configuração dá a mesma execução.
 
 ## Como a simulação funciona
 
@@ -776,26 +777,10 @@ variar um parâmetro e rodar de novo. O filtro de séries dos alunos é
 independente do das disciplinas: esconder uma geração não desfaz o que estava
 escondido lá.
 
-#### Tela individual do aluno
-
-Na vista de uma execução, a barra lateral **direita** lista os alunos, com
-busca por nome, filtro por geração e ordenação por geração e/ou nome. Clicar num aluno troca o conteúdo pela tela individual dele:
-gráficos de progressão (carga horária aprovada contra a grade inteira, CR,
-satisfação, créditos e disciplinas por período) e, período a período, a tabela
-de tudo o que ele pediu.
-
-Cada linha dessa tabela é uma disciplina elegível no período, com uma das
-quatro saídas — **vaga garantida** (o ingressante, fora do leilão),
-**atendida** (e em que rodada), **recusada** (deu lance e perdeu) ou **sem
-lance** (a disciplina saiu de `B_a^(t,r)` antes do leilão: sem vaga, sem carga
-horária ou sem orçamento). É a tela de depuração do projeto: quando um agregado
-sai fora do esperado, é aqui que se vê por quê.
-
 #### Tela de comparação
 
-Uma comparação não tem gráfico por período, recorte nem tela por aluno: tem
-**quatro boxplots** de alocação, um por métrica, mais **um por rodada** na seção
-de saturação — todos com **uma caixa por modelo**. A linha
+Uma comparação tem **quatro boxplots** de alocação, um por métrica, mais **um
+por rodada** na seção de saturação — todos com **uma caixa por modelo**. A linha
 grossa é a mediana, a caixa é a metade central da amostra (1º ao 3º quartil),
 os bigodes vão até 1,5 IQR e o que sobra aparece como ponto solto. Cada valor
 dentro de uma caixa é uma execução.
@@ -828,12 +813,53 @@ quase todas as seeds a favor é um efeito consistente e pequeno — coisa bem
 diferente de um empate.
 
 O histórico fica no `localStorage` do navegador — sobrevive a um
-recarregamento, guarda as 20 execuções mais recentes (simulações e
-comparações na mesma lista) e é apagado por "Limpar histórico". O detalhe por
-aluno (`histories` na resposta) é a parte pesada do
-resultado — ~1 MB contra 51 kB do resto, num cenário de 8 períodos — e por isso
-**não** é persistido: ao abrir um aluno de uma execução de outra sessão, a
-interface reexecuta a simulação, que a seed garante idêntica.
+recarregamento, guarda as 20 execuções mais recentes e é apagado por "Limpar
+histórico". O que ele guarda é o **resumo** da comparação (uns 100 kB); o
+detalhe aluno a aluno não cabe ali, e é o assunto da seção a seguir.
+
+#### Histórico de um aluno ou de uma disciplina
+
+No fim da tela de comparação está a saída para o outro extremo do agregado: um
+aluno, uma disciplina, uma rodada. Dois seletores endereçam **uma** execução —
+o **modelo** e a **seed**, que juntos são um dos pontos dentro de uma caixa do
+boxplot —, e a interface pede ao `/trace` a simulação daquele par. Ela não vem
+junto do resultado nem é guardada: são uns 10 MB de JSON no preset Computação
+(cerca de 1 comprimido) contra 100 kB do resumo, e a simulação é
+determinística, então refazê-la custa segundos e não fidelidade. A configuração
+passa pelo mesmo `arm_config` que a comparação usou, e é isso que garante que o
+traço seja a execução de que o ponto saiu, e não uma parecida.
+
+Trocar o modelo **mantém o aluno escolhido**: a população, as utilidades e as
+notas saem da seed, então o aluno 42 de uma seed é a mesma pessoa nos quatro
+modelos — é a comparação pareada da Seção 7.3 lida numa pessoa só.
+
+A vista por **aluno** traz o cabeçalho dele (geração, CR, carga aprovada,
+conclusão) e, período a período, **uma tabela por rodada** com as disciplinas
+que lhe eram elegíveis: a utilidade, o lance daquela rodada, o resultado, a
+nota, o que pagou e o que o retorno devolveu. A vista por **disciplina** troca
+o eixo: cada rodada lista quem a pediu, com CR, utilidade e lance, na ordem em
+que o mecanismo os olhou — pelo lance, e pelo CR onde não há lance que os
+separe —, sob o cabeçalho da oferta do período (vagas, preenchidas, garantidas,
+solicitantes, preço médio e aprovações).
+
+O **resultado** de uma linha é sempre o daquela rodada, em quatro saídas:
+**aprovada** (verde: obteve a vaga e passou), **reprovada** (vermelha: obteve e
+não passou), **recusada** (amarela: pediu e não obteve) e **não solicitada**
+(cinza: elegível e sem lance — ou o aluno não quis, ou a disciplina saiu de
+`B_a^(t,r)` antes, por falta de vaga, de carga ou de orçamento). A cinza leva
+ainda **já obtida** quando a vaga veio numa rodada anterior, porque chamá-la de
+não solicitada esconderia justamente o que deu certo; e a vaga do ingressante
+sai marcada como **garantida**, que é como ela veio, não uma quinta saída. A
+palavra está sempre na célula: cor de estado não diz sozinha o que quer dizer,
+e o amarelo não alcança 3:1 sobre o fundo claro.
+
+As cinzas só existem na vista por aluno — na por disciplina elas seriam a
+população inteira em toda linha — e são **ocultáveis**: num período de ingresso
+são 24 das 30 linhas, porque as optativas são elegíveis desde o começo e a
+matrícula garantida já tomou todo o `W_a`.
+
+É a tela de depuração do projeto: quando um agregado sai fora do esperado, é
+aqui que se vê por quê.
 
 ## Convenções de código
 

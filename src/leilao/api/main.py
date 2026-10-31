@@ -1,7 +1,8 @@
 """Ponte FastAPI entre o motor Python e a interface web.
 
-Três rotas, sem persistência nenhuma: `/run` resolve um leilão de uma rodada
-montado à mão, `/compare` roda o cenário nos braços da Seção 7.3 e
+Quatro rotas, sem persistência nenhuma: `/run` resolve um leilão de uma rodada
+montado à mão, `/compare` roda o cenário nos braços da Seção 7.3, `/trace`
+refaz **uma** execução da comparação e devolve o que cada aluno pediu, e
 `/playground` roda uma alocação isolada. O estado vive só no navegador — cada
 requisição carrega o cenário inteiro, e a seed torna o resultado reprodutível.
 
@@ -16,13 +17,15 @@ from __future__ import annotations
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from ..auction import AuctionInput, Bid, run_auction
-from ..comparison import run_comparison
+from ..comparison import ARM_BY_KEY, arm_config, run_comparison
 from ..config import Discipline, SimulationConfig
 from ..entities import Agent, Good, MutualExclusion
 from ..grading import beta_shape
 from ..playground import PlaygroundDiscipline, PlaygroundStudent, run_playground
+from ..simulation import run_simulation
 from .schemas import (
     ArmResultOut,
     CompareRequest,
@@ -36,6 +39,9 @@ from .schemas import (
     RunResponse,
     RunSummaryOut,
     ScenarioIn,
+    TracePeriodOut,
+    TraceRequest,
+    TraceResponse,
 )
 
 app = FastAPI(
@@ -43,6 +49,11 @@ app = FastAPI(
     description="Ponte entre o motor de simulação (Python) e a interface de configuração/execução (TypeScript).",
     version="0.1.0",
 )
+
+# O traço de uma execução é a resposta grande da API — uns 10 MB de JSON no
+# preset Computação, que comprimidos viram cerca de 1. O limite deixa de fora as
+# respostas pequenas, em que o gasto de comprimir não se paga.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Front-end (Vite) roda por padrão em http://localhost:5173 durante o desenvolvimento.
 app.add_middleware(
@@ -166,6 +177,51 @@ def compare(req: CompareRequest) -> CompareResponse:
             )
             for arm in result.arms
         ],
+    )
+
+
+@app.post("/trace", response_model=TraceResponse)
+def trace(req: TraceRequest) -> TraceResponse:
+    """Refaz uma execução da comparação e devolve o que cada aluno pediu.
+
+    O par `(braço, seed)` endereça uma das execuções que `/compare` resumiu num
+    ponto do boxplot, e a configuração passa pelo mesmo `arm_config` que ela
+    usou — então o que volta aqui é literalmente a simulação de que aquele
+    ponto saiu, e não uma parecida.
+
+    É uma simulação completa por requisição (segundos, no preset Computação), e
+    a resposta é a maior da API: vem período a período, aluno a aluno.
+    """
+    arm = ARM_BY_KEY.get(req.arm)
+    if arm is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"modelo desconhecido: {req.arm!r} — os válidos são {sorted(ARM_BY_KEY)}",
+        )
+
+    try:
+        config = arm_config(build_config(req), arm=arm, seed=req.seed)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        result = run_simulation(config)
+    except Exception as exc:  # noqa: BLE001 — reporta falha do solver/instância inviável
+        raise HTTPException(
+            status_code=422, detail=f"falha ao refazer a execução: {exc}"
+        ) from exc
+
+    return TraceResponse(
+        arm=arm.key,
+        seed=req.seed,
+        periods=[
+            TracePeriodOut(period=period.period, disciplines=period.disciplines)
+            for period in result.periods
+        ],
+        students=result.students,
+        histories=result.histories,
+        disciplines=result.disciplines,
+        curriculum_periods=result.curriculum_periods,
     )
 
 

@@ -3,6 +3,8 @@ import type {
   CompareResponse,
   PlaygroundRequest,
   PlaygroundResponse,
+  TraceRequest,
+  TraceResponse,
 } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -14,6 +16,14 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
  * vez de fingir que foi rápido. */
 export async function compare(request: CompareRequest): Promise<CompareResponse> {
   return post("/compare", request);
+}
+
+/** Refaz **uma** execução da comparação — o par (braço, seed) — e devolve o
+ * que cada aluno pediu, período a período. É uma simulação completa no
+ * servidor e a maior resposta da API (uns 10 MB no preset Computação, ~1
+ * comprimidos), então a tela só a pede quando alguém quer o caso individual. */
+export async function trace(request: TraceRequest): Promise<TraceResponse> {
+  return post("/trace", request);
 }
 
 export async function playground(request: PlaygroundRequest): Promise<PlaygroundResponse> {

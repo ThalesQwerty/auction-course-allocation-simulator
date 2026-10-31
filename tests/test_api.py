@@ -221,6 +221,85 @@ def test_compare_reports_one_allocation_figure_per_round(client):
         assert len(run["allocations_per_round"]) == rounds
         assert all(value is None or value >= 0 for value in run["allocations_per_round"])
 
+def test_trace_reproduces_the_execution_the_comparison_summarized(client):
+    """O par (braço, seed) endereça uma execução do boxplot, e o traço é ela —
+    não uma parecida. A simulação é determinística, então refazê-la custa tempo
+    e não fidelidade: o que se confere aqui é que o braço entra dos dois lados
+    pela mesma porta (`arm_config`)."""
+    comparison = client.post("/compare", json={**COMPARE_SCENARIO, **POPULATION, "runs": 2}).json()
+
+    for arm in comparison["arms"]:
+        for run in arm["runs"]:
+            payload = client.post(
+                "/trace",
+                json={**COMPARE_SCENARIO, **POPULATION, "arm": arm["key"], "seed": run["seed"]},
+            ).json()
+
+            assert payload["arm"] == arm["key"]
+            assert payload["seed"] == run["seed"]
+            assert len(payload["periods"]) == run["periods"]
+            graduated = [s for s in payload["students"] if s["graduated_at"] is not None]
+            assert len(graduated) == run["graduates"]
+
+
+def test_trace_records_every_eligible_discipline_round_by_round(client):
+    """Cada linha é uma disciplina elegível no período, com uma posição por
+    rodada do cenário — inclusive as que ficaram em zero, que são o caso que
+    costuma explicar um resultado inesperado."""
+    payload = client.post(
+        "/trace", json={**COMPARE_SCENARIO, **POPULATION, "arm": "credits_return", "seed": 1}
+    ).json()
+
+    rounds = COMPARE_SCENARIO["rounds"]
+    records = [
+        record
+        for history in payload["histories"]
+        for period in history["periods"]
+        for record in period["requests"]
+    ]
+    assert records
+    for record in records:
+        assert len(record["bids"]) == rounds
+        assert record["utility"] > 0
+        # Vaga obtida tem nota — o período fecha antes do relatório —, e só ela.
+        assert (record["grade"] is None) == (record["won_round"] is None)
+    # Vaga ganha numa rodada tem lance **naquela** rodada: é o que a tabela de
+    # cada rodada mostra lado a lado. (A vaga garantida é a exceção declarada:
+    # ela não veio de rodada nenhuma e leva `won_round` 0.)
+    won_in_round = [r for r in records if r["won_round"] is not None and r["won_round"] > 0]
+    assert won_in_round
+    for record in won_in_round:
+        assert record["bids"][record["won_round"] - 1] > 0
+
+
+def test_trace_marks_the_guaranteed_enrollment_of_the_newcomer(client):
+    """A vaga garantida não veio de rodada nenhuma: `won_round` 0 a distingue de
+    uma disputada e ganhada na primeira."""
+    payload = client.post(
+        "/trace", json={**COMPARE_SCENARIO, **POPULATION, "arm": "credits_return", "seed": 1}
+    ).json()
+
+    entry = {s["id"]: s["entry_period"] for s in payload["students"]}
+    guaranteed = [
+        record
+        for history in payload["histories"]
+        for period in history["periods"]
+        if period["period"] == entry[history["student_id"]]
+        for record in period["requests"]
+        if record["won_round"] == 0
+    ]
+    assert guaranteed
+
+
+def test_trace_rejects_an_unknown_arm(client):
+    response = client.post(
+        "/trace", json={**COMPARE_SCENARIO, "arm": "leilao_imaginario", "seed": 1}
+    )
+
+    assert response.status_code == 400
+    assert "credits_return" in response.json()["detail"]
+
+
 def test_compare_rejects_an_invalid_run_count(client):
     assert client.post("/compare", json={**COMPARE_SCENARIO, "runs": 0}).status_code == 422
     assert client.post("/compare", json={**COMPARE_SCENARIO, "runs": 500}).status_code == 422

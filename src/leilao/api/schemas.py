@@ -1,9 +1,10 @@
 """Schemas Pydantic para a API — o corpo da requisição já É o cenário completo
 (sem persistência): a interface monta tudo no navegador e manda de uma vez.
 
-São duas entradas: `/run` recebe um leilão isolado (agentes, bens e lances
-explícitos) e `/simulate` recebe a configuração de uma simulação multi-período
-completa, em que alunos, utilidades e notas são gerados a partir da seed.
+São três entradas: `/run` recebe um leilão isolado (agentes, bens e lances
+explícitos), `/compare` recebe o cenário de uma comparação — a universidade e a
+população, de que alunos, utilidades e notas saem pela seed — e `/trace` recebe
+o mesmo cenário mais o par `(braço, seed)` de uma das execuções que ela rodou.
 """
 from __future__ import annotations
 
@@ -508,6 +509,65 @@ class StudentHistoryOut(BaseModel):
 
     student_id: str
     periods: list[StudentPeriodRecordOut]
+
+
+class TraceRequest(ScenarioIn):
+    """O traço de **uma** execução da comparação: o cenário mais o par
+    `(braço, seed)` que a identifica.
+
+    Aqui a seed não é ignorada como em `/compare` — ela é o que se pede. A
+    comparação roda as seeds de 1 a N em cada braço e devolve um ponto por
+    execução; este par é o endereço de uma delas, e a simulação é refeita em
+    vez de guardada: ela é determinística, então refazê-la custa tempo e não
+    fidelidade. O retorno de créditos e o resolvedor continuam vindo do braço.
+    """
+
+    arm: str = Field(
+        description="chave do modelo, como em `/compare` — ex.: `credits_return`"
+    )
+    seed: int = Field(
+        default=1,
+        ge=1,
+        description="qual execução daquele braço — a mesma seed que o resumo traz",
+    )
+
+
+class TracePeriodOut(BaseModel):
+    """O contexto de mercado de um período: a oferta disciplina a disciplina.
+
+    É o que a vista por disciplina lê no cabeçalho de cada período — vagas,
+    preenchidas, solicitantes, preço e aprovações. As métricas de aluno não
+    entram: elas são da comparação, e aqui o que se olha é um caso.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    period: int
+    disciplines: list[DisciplineSnapshotOut]
+
+
+class TraceResponse(BaseModel):
+    """Uma execução inteira, aluno a aluno — a tela de depuração do projeto.
+
+    É a parte pesada do resultado (uns 10 MB no preset Computação, contra 100 kB
+    do resumo da comparação), e é por isso que ela não vem junto de `/compare`
+    nem é guardada no navegador: quem quiser o caso individual o pede, e só
+    daquela execução.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    arm: str
+    seed: int
+    # A oferta de cada período, para a vista por disciplina.
+    periods: list[TracePeriodOut]
+    students: list[StudentSummaryOut]
+    # Período a período, o que cada aluno pediu e o que recebeu.
+    histories: list[StudentHistoryOut]
+    # As disciplinas na ordem da grade, e o período de cada uma — induzido dos
+    # pré-requisitos, não configurado.
+    disciplines: list[str]
+    curriculum_periods: dict[str, int]
 
 
 class PlaygroundDisciplineIn(BaseModel):

@@ -178,6 +178,10 @@ ARMS: tuple[Arm, ...] = (
     Arm("credits_return", "credits", "ratio"),
 )
 
+# Os braços por chave — como a interface se refere a um deles ao pedir o traço
+# de uma execução.
+ARM_BY_KEY: dict[str, Arm] = {arm.key: arm for arm in ARMS}
+
 
 @dataclass(frozen=True)
 class PeriodSeries:
@@ -589,20 +593,26 @@ def sample_grade_distribution(config: SimulationConfig) -> list[float]:
     return grade_histogram(grades)
 
 
-def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:
-    return summarize(
-        run_simulation(
-            dataclasses.replace(
-                config,
-                mechanism=arm.mechanism,
-                credit_return=arm.credit_return,
-                resolver=arm.resolver,
-                credit_memory=arm.credit_memory,
-                seed=seed,
-            )
-        ),
+def arm_config(config: SimulationConfig, *, arm: Arm, seed: int) -> SimulationConfig:
+    """O cenário como um braço o roda: as quatro escolhas do braço e a seed.
+
+    É o **único** lugar em que um braço vira configuração, e é o que torna o
+    traço de uma execução conferível: a tela individual pede a mesma
+    `(braço, seed)` que o boxplot resumiu e recebe a simulação idêntica, porque
+    a configuração passa por aqui dos dois lados.
+    """
+    return dataclasses.replace(
+        config,
+        mechanism=arm.mechanism,
+        credit_return=arm.credit_return,
+        resolver=arm.resolver,
+        credit_memory=arm.credit_memory,
         seed=seed,
     )
+
+
+def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:
+    return summarize(run_simulation(arm_config(config, arm=arm, seed=seed)), seed=seed)
 
 
 def run_comparison(
