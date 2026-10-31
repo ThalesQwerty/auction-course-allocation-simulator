@@ -300,20 +300,26 @@ const commonScenario = (
 interface Cell {
   hours: number;
   difficulty: number;
+  /** Deslocamento do expoente, não múltiplo: ver `CELLS`. */
   attractiveness: number;
 }
 
 /** As oito células do 2³, em ordem fixa. A ordem é o que faz a rotação por
- * período funcionar, então mexer nela muda o cenário. */
+ * período funcionar, então mexer nela muda o cenário.
+ *
+ * Os três eixos não estão na mesma unidade, e é preciso ter isso em conta ao
+ * comparar a grandeza dos efeitos: carga e dificuldade são **múltiplos** (1,5×
+ * e 2×), a atratividade é **deslocamento do expoente**, de modo que o par
+ * (0, 1) vale e ≈ 2,72× entre os dois níveis. */
 const CELLS: Cell[] = [
+  { hours: 2, difficulty: 1, attractiveness: 0 },
   { hours: 2, difficulty: 1, attractiveness: 1 },
-  { hours: 2, difficulty: 1, attractiveness: 2 },
+  { hours: 2, difficulty: 2, attractiveness: 0 },
   { hours: 2, difficulty: 2, attractiveness: 1 },
-  { hours: 2, difficulty: 2, attractiveness: 2 },
+  { hours: 3, difficulty: 1, attractiveness: 0 },
   { hours: 3, difficulty: 1, attractiveness: 1 },
-  { hours: 3, difficulty: 1, attractiveness: 2 },
+  { hours: 3, difficulty: 2, attractiveness: 0 },
   { hours: 3, difficulty: 2, attractiveness: 1 },
-  { hours: 3, difficulty: 2, attractiveness: 2 },
 ];
 
 const CLASS_SIZE = 20;
@@ -337,24 +343,44 @@ const CLASSES_BY_PERIOD = [9, 8, 7, 6, 5, 4];
  * cartão, e é o que torna o período a única coisa que varia ao longo de uma
  * linha da tela.
  *
- * Sobre esses rótulos corre a cadeia **triangular**: `k.j` destrava a
- * equivalente e a seguinte, `(k+1).j` e `(k+1).(j+1)`, com o sufixo 8 voltando
- * para o 1. Invertendo as arestas, **`(k+1).j` exige `k.j` e `k.(j−1)`** — e
+ * Sobre esses rótulos corre a cadeia **triangular**: `k.j` destrava as duas
+ * células seguintes, `(k+1).(j+1)` e `(k+1).(j+2)`, com o sufixo dando a volta
+ * no 8. Invertendo as arestas, **`(k+1).j` exige `k.(j−1)` e `k.(j−2)`** — e
  * pré-requisito aqui é conjuntivo (`eligible_set` pede `all(...)`), então são
- * as duas, não uma delas.
+ * as duas, não uma delas. O cone para a frente de `1.1` é a figura que batiza
+ * a cadeia — uma frente que ganha uma disciplina por período:
  *
- * O que isso custa, medido contra a diagonal simples no mesmo cenário: o
- * conjunto elegível cai de ~24,6 para ~17,5 disciplinas (−29%), o uso de W_a
- * de 88% para 82%, e o tempo de formatura sobe de 12,8 para ~13,5 períodos.
- * É o preço de uma grade que de fato se emaranha, em vez de oito cadeias que
- * nunca se encontram.
+ *     1.1 → 2.2 2.3 → 3.3 3.4 3.5 → 4.4 4.5 4.6 4.7
+ *         → 5.5 5.6 5.7 5.8 5.1 → 6.6 6.7 6.8 6.1 6.2 6.3
+ *
+ * O deslocamento é de **uma célula, não de zero**, e é aí que a cadeia paga
+ * seu aluguel no fatorial: nenhuma aresta liga duas disciplinas de mesmo
+ * sufixo, então a célula de uma disciplina é independente da célula dos seus
+ * pré-requisitos. Fosse `(k+1).j ← k.j`, metade das arestas ligaria atributos
+ * idênticos e "ser difícil" viria correlacionado com "ter pré-requisito
+ * difícil" — um confundimento dentro do próprio desenho, justamente o que o
+ * 2³ existe para evitar.
+ *
+ * O que o par de pré-requisitos custa, medido em três seeds contra a diagonal
+ * simples — um sucessor só por disciplina, que são oito cadeias paralelas que
+ * nunca se encontram: o conjunto elegível cai de ~25,2 para ~20,6 disciplinas
+ * (−18%), o uso de W_a de 95% para 92%, e o tempo de formatura sobe de 12,8
+ * para ~13,1 períodos. É o preço de uma grade que de fato se emaranha.
+ *
+ * O deslocamento de uma célula, por sua vez, **sai de graça e ainda devolve
+ * troco**: contra o par (+0, +1) — o que fazia cada disciplina herdar a
+ * própria célula —, a formatura cai de 13,6 para 13,1 períodos e a cauda de
+ * ~19 para 17. É o que se espera: ali a dificuldade vinha correlacionada ao
+ * longo da cadeia, então o atraso numa disciplina difícil recaía sobre outra
+ * difícil, na mesma linhagem, e os atrasos se compunham.
  *
  * O que **não** muda: todo nó de um período continua tendo seus sucessores no
  * período seguinte, então a altura segue uniforme dentro de cada período e a
  * invariante da eq. (41) continua fora do fatorial — os três eixos operam numa
  * única camada, que é onde sigma e a atratividade agem. Era essa a condição a
  * preservar, e a triangular a preserva. */
-const nextSuffix = (suffix: number) => (suffix % CELLS.length) + 1;
+const shiftSuffix = (suffix: number, by: number) =>
+  ((suffix - 1 + by) % CELLS.length) + 1;
 
 const requiredName = (period: number, suffix: number) =>
   `Obrigatória ${period}.${suffix}`;
@@ -374,8 +400,8 @@ const FACTORIAL_REQUIRED: DisciplineInput[] = Array.from(
       unlocks:
         period < FACTORIAL_PERIODS
           ? [
-              requiredName(period + 1, suffix),
-              requiredName(period + 1, nextSuffix(suffix)),
+              requiredName(period + 1, shiftSuffix(suffix, 1)),
+              requiredName(period + 1, shiftSuffix(suffix, 2)),
             ]
           : [],
       // As oito do 1º período entram por matrícula garantida. Elas somam
@@ -442,9 +468,8 @@ export const PRESETS: Preset[] = [
         FACTORIAL_STUDENTS,
         FACTORIAL_ELECTIVE_HOURS,
         // 8 gerações, e 20 períodos de residência em vez dos 12 do formulário
-        // em branco: medido
-        // em três seeds, o tempo de formatura fica em 13,7 períodos na média,
-        // com cauda até 19. São 150 h a aprovar (120 de obrigatória + 30 de
+        // em branco: medido em cinco seeds, o tempo de formatura fica em 13,1
+        // períodos na média, com cauda em 17. São 150 h a aprovar (120 de
         // optativa) e ~1,5 tentativa por disciplina na média do fatorial —
         // metade dele é dificuldade 2, que exige aptidão >= 0,707 e só passa
         // ~35% de primeira —, mais a espera pelo **par** de pré-requisitos que
@@ -453,11 +478,11 @@ export const PRESETS: Preset[] = [
         // O jubilamento **não morde** aqui: 100% concluem, 0% jubilam. É de
         // propósito. Jubilamento que morde censura o tempo de formatura, e aí
         // ele volta a medir quem sobreviveu em vez de quem foi rápido — o viés
-        // de sobrevivência que o |T| = 14 do preset Computação escondia. Em 19
-        // ele também não morde, mas sem folga nenhuma (a cauda bate exatamente
-        // em 19); o período a mais é seguro e sai de graça, porque a simulação
-        // para assim que a população esvazia. Quem quiser o jubilamento como
-        // tratamento encurta a residência e lê o tempo com essa ressalva.
+        // de sobrevivência que o |T| = 14 do preset Computação escondia. Com
+        // 20 sobram três períodos sobre a cauda medida — folga que não custa
+        // nada, porque a simulação para assim que a população esvazia e de
+        // fato ela usa ~22 dos 27. Quem quiser o jubilamento como tratamento
+        // encurta a residência e lê o tempo com essa ressalva.
         // |T| = 8 + 20 - 1 = 27.
         8,
         20,

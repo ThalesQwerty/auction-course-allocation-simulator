@@ -1,14 +1,16 @@
 /** Uma amostra de utilidade relativa, como o motor a produz.
  *
- *     u'_x = A_x · exp(σ · Z_x),  Z ~ N(0, 1)  log-normal, deslocada por A
+ *     u'_x = exp(A_x + σ · Z_x),  Z ~ N(0, 1)  log-normal de média log A_x
+ *                                              (A_x é a média do expoente)
  *     u_x  = u'_x / Σ_y u'_y                   normalização da linha
  *     u_rel_x = u_x · |disciplinas|            múltiplos da indiferença
  *
  * A **atratividade** entra como o recorte que se olha: a amostra é a de uma
- * disciplina de atratividade `attractiveness` **quando as demais estão em 1**.
- * É assim que ela se lê — múltiplos da disciplina média —, e é o que torna a
- * prévia comparável entre valores. Em 1 a conta se reduz a `x / Σx` e cada
- * linha devolve todas as suas disciplinas, que é o que ela sempre fez.
+ * disciplina de atratividade `attractiveness` **quando as demais estão em 0**.
+ * Ela é a média do expoente, de modo que o fator sobre a focal é e^{A_x} — em
+ * múltiplos da disciplina média —, e é o que torna a prévia comparável entre
+ * valores. Em 0 a conta se reduz a `x / Σx` e cada linha devolve todas as suas
+ * disciplinas, que é o que ela sempre fez.
  *
  * Espelha dois dos três passos de `behavior.draw_utilities`. A régua é a
  * **utilidade relativa** — a fração vezes o número de disciplinas, de modo
@@ -40,7 +42,7 @@ const SEED = 20261029;
 export function relativeUtilitySample(
   size: number,
   sigma: number,
-  attractiveness = 1
+  attractiveness = 0
 ): number[] {
   const random = mulberry32(SEED);
   const row = new Array<number>(size).fill(0);
@@ -61,10 +63,11 @@ export function relativeUtilitySample(
     let sum = 0;
     for (let j = 0; j < size; j++) sum += row[j];
     // Cada disciplina da linha entra uma vez como a **focal** — a que carrega
-    // a atratividade —, com as outras em 1. Daí o denominador se refazer a
+    // a atratividade —, com as outras em 0. Daí o denominador se refazer a
     // cada j: o que muda de uma para outra é só o próprio termo dela.
+    const shift = Math.exp(attractiveness);
     for (let j = 0; j < size; j++) {
-      const focal = attractiveness * row[j];
+      const focal = shift * row[j];
       values[at++] = (focal / (focal + sum - row[j])) * size;
     }
   }

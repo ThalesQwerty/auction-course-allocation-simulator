@@ -14,11 +14,13 @@ export interface DisciplineInput {
    * pré-requisito não faz a disciplina ser de entrada — a optativa também não
    * tem e fica fora da garantia. */
   entry: boolean;
-  /** A_x — atratividade, em múltiplos da disciplina média. É a parte do gosto
-   * **comum a toda a população**, enquanto `utility_sigma` é a privada de cada
-   * aluno; a razão entre as duas é a correlação de preferência entre alunos.
-   * Ordena dentro de uma mesma altura da grade, nunca entre alturas — a
-   * invariante de altura é maior que qualquer A. Opcional: ausente é 1. */
+  /** A_x — atratividade, a **média do expoente** da log-normal da utilidade:
+   * 0 é a disciplina média, negativo gravita abaixo dela e positivo acima, e
+   * em múltiplos da média o fator é e^A. É a parte do gosto **comum a toda a
+   * população**, enquanto `utility_sigma` é a privada de cada aluno — mesma
+   * unidade, e a razão entre as duas é a correlação de preferência entre
+   * alunos. Ordena dentro de uma mesma altura da grade, nunca entre alturas —
+   * a invariante de altura é maior que qualquer A. Opcional: ausente é 0. */
   attractiveness?: number;
   /** Optativa: não desbloqueia nada, não é de entrada, e concluir não exige
    * aprovar em cada uma — exige somar `elective_hours` entre as aprovadas. É
@@ -274,10 +276,6 @@ export interface CohortSeries {
    * naquele período. É ela que se desenha — a contagem depende do tamanho do
    * ingresso, a fração é comparável entre gerações. */
   graduation_rate: number[];
-  /** A fração da geração que foi **jubilada**, mesmo denominador. As duas só
-   * somam 1 na geração que já se esvaziou: nas tardias falta o pedaço que
-   * ainda estava em curso quando o horizonte acabou. */
-  dismissal_rate: number[];
   efficiency: number[];
   utilization: number[];
   fidelity: number[];

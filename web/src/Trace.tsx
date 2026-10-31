@@ -219,9 +219,11 @@ export function Trace({ run }: { run: ComparisonRun }) {
                         {people.map((person) => (
                           <option key={person.id} value={person.id}>
                             {person.name}
-                            {person.graduated_at === null
-                              ? ""
-                              : ` — formou no período ${person.graduated_at}`}
+                            {person.graduated_at !== null
+                              ? ` — formou no período ${person.graduated_at}`
+                              : person.dismissed_at !== null
+                                ? ` — jubilado no período ${person.dismissed_at}`
+                                : ""}
                           </option>
                         ))}
                       </optgroup>
@@ -416,8 +418,18 @@ function StudentTrace({
             <dd>{formatRatio(student.mean_satisfaction)}</dd>
           </div>
           <div>
-            <dt>Conclusão</dt>
-            <dd>{student.graduated_at ? `período ${student.graduated_at}` : "em curso"}</dd>
+            {/* As duas portas de saída num campo só: elas são exclusivas, e
+                separá-las daria sempre um dos dois vazio. "Em curso" ficou
+                reservado a quem o horizonte alcançou ainda disputando — o que
+                só acontece em cenário sem jubilamento. */}
+            <dt>Saída</dt>
+            <dd>
+              {student.graduated_at
+                ? `formou no período ${student.graduated_at}`
+                : student.dismissed_at
+                  ? `jubilado no período ${student.dismissed_at}`
+                  : "em curso"}
+            </dd>
           </div>
         </dl>
       </div>

@@ -53,7 +53,7 @@ export function Config({
   const [difficulty, setDifficulty] = useState(1);
   const [attempt, setAttempt] = useState(1);
   const [relativeUtility, setRelativeUtility] = useState(1);
-  const [attractiveness, setAttractiveness] = useState(1);
+  const [attractiveness, setAttractiveness] = useState(0);
 
   // As duas distribuições de entrada, recalculadas a cada tecla. São curvas, e
   // não barras: aqui não há dado contado, e sim a forma que os parâmetros
@@ -240,12 +240,11 @@ export function Config({
                       <label>Atratividade</label>
                       {/* O recorte, não o cenário: a curva é a de uma
                           disciplina com esta atratividade quando as demais
-                          estão em 1. No cenário ela é declarada por
-                          disciplina. O min é a base da escada do stepper, e
-                          o 0 é aparado na prévia. */}
+                          estão em 0. No cenário ela é declarada por
+                          disciplina. Sem `min`: o eixo é ℝ inteiro, e
+                          negativo é gosto abaixo da disciplina média. */}
                       <input
                         type="number"
-                        min={0}
                         step={0.1}
                         value={attractiveness}
                         onChange={(e) => setAttractiveness(Number(e.target.value))}

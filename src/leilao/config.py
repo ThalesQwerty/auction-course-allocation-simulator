@@ -122,13 +122,17 @@ class Discipline:
     # vez de girar, e é essa sincronia (e não a persistência em si) que trava a
     # fila. Por aluno ou por célula o efeito se dilui.
     stability: float | None = None
-    # A_x — a **atratividade**, em múltiplos da disciplina média. Entra como
-    # deslocamento do logaritmo da utilidade preliminar, antes da invariante de
-    # altura: é a componente do gosto **comum a toda a população**, enquanto
-    # sigma é a privada de cada aluno. A razão entre as duas é a correlação de
-    # preferência entre alunos — com A uniforme as linhas são independentes e
-    # ninguém pode prever a disputa pelo próprio gosto; com A espalhado, querer
-    # muito uma disciplina passa a ser sinal de que os colegas também a querem.
+    # A_x — a **atratividade**, que é a **média do expoente** da log-normal da
+    # utilidade preliminar: em 0 o valor gravita em torno de 1, negativo o puxa
+    # para dentro de (0, 1) e positivo o leva acima de 1. Em múltiplos da
+    # disciplina média o fator é e^A, de modo que A = 1 é ≈ 2,72×.
+    #
+    # É a componente do gosto **comum a toda a população**, enquanto sigma é a
+    # privada de cada aluno, e as duas estão na mesma unidade — por isso A/σ se
+    # lê direto como a correlação de preferência entre alunos. Com A uniforme as
+    # linhas são independentes e ninguém pode prever a disputa pelo próprio
+    # gosto; com A espalhado, querer muito uma disciplina passa a ser sinal de
+    # que os colegas também a querem.
     #
     # Ela é a irmã estática de `stability`: aquela sincroniza a persistência
     # entre concorrentes no *tempo*, esta sincroniza o *nível*.
@@ -136,7 +140,7 @@ class Discipline:
     # A invariante de altura a domina entre camadas — `u'_x` soma
     # `(amplitude + 1)·s_x`, que é maior que qualquer atratividade —, então A
     # ordena **dentro** de uma mesma altura, que é exatamente onde sigma age.
-    attractiveness: float = 1.0
+    attractiveness: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -147,8 +151,6 @@ class Discipline:
             raise ValueError(f"disciplina {self.name!r}: carga horária (w_x) deve ser > 0")
         if self.difficulty <= 0:
             raise ValueError(f"disciplina {self.name!r}: dificuldade deve ser > 0")
-        if self.attractiveness <= 0:
-            raise ValueError(f"disciplina {self.name!r}: atratividade deve ser > 0")
         if self.stability is not None and not 0.0 <= self.stability <= 1.0:
             raise ValueError(
                 f"disciplina {self.name!r}: a estabilidade deve estar em [0, 1]"

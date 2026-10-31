@@ -521,14 +521,14 @@ def test_attractiveness_moves_the_whole_population_the_same_way():
     preferência alheia — sem ela as linhas são independentes e ninguém pode
     antecipar a disputa a partir do que gosta."""
     mean_of = lambda a: np.mean([row["X"] for row in _rows_for(_pair(a)).values()])
-    assert mean_of(2.0) > mean_of(1.0) > mean_of(0.5)
+    assert mean_of(1.0) > mean_of(0.0) > mean_of(-1.0)
 
 
-def test_attractiveness_one_is_the_neutral():
-    """1 é a disciplina média, e declarar 1 tem de dar exatamente o que dá não
+def test_attractiveness_zero_is_the_neutral():
+    """0 é a disciplina média, e declarar 0 tem de dar exatamente o que dá não
     declarar nada — é a regressão que garante que o eixo novo não mexeu nos
     cenários que não o usam."""
-    assert _rows_for(_pair(1.0)) == _rows_for(
+    assert _rows_for(_pair(0.0)) == _rows_for(
         [Discipline(name="X", seats=20, hours=60, entry=True),
          Discipline(name="Y", seats=20, hours=60, entry=True)]
     )
@@ -545,11 +545,16 @@ def test_the_height_invariant_beats_any_attractiveness():
         Discipline(name="OBR", seats=20, hours=60, entry=True, unlocks=("SEG",)),
         Discipline(name="SEG", seats=20, hours=60),
         Discipline(name="OPT", seats=20, hours=60, elective=True,
-                   attractiveness=50.0),
+                   attractiveness=10.0),
     ], elective_hours=60)
     assert all(row["OBR"] > row["OPT"] for row in rows.values())
 
 
-def test_attractiveness_must_be_positive():
-    with pytest.raises(ValueError, match="atratividade"):
-        Discipline(name="X", seats=1, hours=60, attractiveness=0.0)
+def test_negative_attractiveness_is_a_discipline_below_the_average():
+    """O eixo é ℝ inteiro: a atratividade é a média de um expoente, não um
+    multiplicador, então negativo não é valor inválido — é a disciplina que a
+    população quer menos que a média, e a linha continua estritamente
+    positiva porque e^A nunca chega a zero."""
+    rows = _rows_for(_pair(-3.0))
+    assert all(row["X"] > 0 for row in rows.values())
+    assert all(row["X"] < row["Y"] for row in rows.values())

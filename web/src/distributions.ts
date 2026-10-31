@@ -75,9 +75,6 @@ const FINE_CELLS = 600;
 /** Largura do núcleo gaussiano, em células do grid fino. */
 const KERNEL_CELLS = 10;
 
-/** Campo vazio vira 0, e atratividade 0 zeraria a linha inteira. */
-const MIN_ATTRACTIVENESS = 0.1;
-
 /** A curva de como um aluno reparte a preferência, em **utilidade relativa**:
  * a fração vezes o número de disciplinas, de modo que 1 é a indiferença e a
  * média é exatamente 1 em qualquer cenário. O eixo vai de 0 ao maior valor
@@ -85,23 +82,20 @@ const MIN_ATTRACTIVENESS = 0.1;
  *
  * A `attractiveness` é o **recorte** que se olha, como a dificuldade é na
  * prévia das notas: a curva é a de uma disciplina com aquela atratividade,
- * quando as demais estão em 1. Não é parâmetro de cenário — lá ela é
- * declarada por disciplina.
+ * quando as demais estão em 0. Não é parâmetro de cenário — lá ela é
+ * declarada por disciplina. Campo vazio vira 0, que agora é justamente o
+ * neutro.
  *
  * A régua da **fração** saiu em 30/10/2026: ela mede a mesma distribuição
  * dividida por |disciplinas|, e com isso o eixo x encolhia na mesma
  * proporção — numa grade de 60 a massa inteira cabia em 4% do eixo e a
  * densidade subia a 100, o que não se lê.
  */
-export function utilityCurve(scenario: Scenario, attractiveness = 1): Curve {
+export function utilityCurve(scenario: Scenario, attractiveness = 0): Curve {
   const size = scenario.disciplines.length;
   if (size < 2) return { points: [], mode: 0 };
 
-  const values = relativeUtilitySample(
-    size,
-    scenario.utility_sigma,
-    attractiveness > 0 ? attractiveness : MIN_ATTRACTIVENESS
-  );
+  const values = relativeUtilitySample(size, scenario.utility_sigma, attractiveness);
   const highest = values.reduce((max, value) => Math.max(max, value), 0);
   if (!(highest > 0)) return { points: [], mode: 0 };
 

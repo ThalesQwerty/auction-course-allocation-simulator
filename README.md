@@ -560,12 +560,17 @@ em período, com o aviso no subtítulo.
   horizonte deixa de ser escolha — `|T| = entry_periods + max_residence − 1` é
   quando a última geração sai e a universidade fica vazia.
 - **Atratividade** (`A_x`): a parte do gosto **comum a toda a população**,
-  contra o `utility_sigma`, que é a privada de cada aluno. A razão entre as
-  duas é a correlação de preferência entre alunos. Ela ordena *dentro* de uma
-  mesma altura da grade: a invariante da eq. (41) é maior que qualquer `A`,
-  então nenhuma atratividade põe optativa à frente de obrigatória.
+  contra o `utility_sigma`, que é a privada de cada aluno. É a **média do
+  expoente** da log-normal da utilidade: em 0 o valor gravita em torno de 1,
+  negativo o puxa para dentro de (0, 1) e positivo o leva acima — em múltiplos
+  da disciplina média o fator é `e^A`, de modo que `A = 1` é ≈ 2,72×. Por
+  estar na mesma unidade de sigma, `A/σ` se lê direto como a correlação de
+  preferência entre alunos. Ela ordena *dentro* de uma mesma altura da grade:
+  a invariante da eq. (41) é maior que qualquer `A`, então nenhuma
+  atratividade põe optativa à frente de obrigatória.
 - **Utilidades**: um valor por par (aluno, disciplina, período), tirado de uma
-  log-normal de desvio `utility_sigma` e dividido pelo somatório da linha — uma
+  log-normal de média `A_x` e desvio `utility_sigma`, dividido pelo somatório
+  da linha — uma
   linha por (aluno, período). O anteprojeto não fixa a distribuição nem
   o valor de `U_a`; aqui `U_a^(t)` é a soma do que está ao alcance do aluno
   naquele período, e ele gasta tudo o que tem, porque não há transferência de
@@ -766,10 +771,10 @@ proporção — numa grade de 60 a massa inteira cabia em 4% dele.
 
 Como a prévia das notas, ela desenha **um caso de cada vez**, e o campo abaixo
 do gráfico diz qual: a **atratividade** da disciplina, quando as demais estão
-em 1. É o recorte, não o cenário — lá a atratividade é declarada por
-disciplina. Em 1 a curva é a da disciplina média; dobrá-la desloca a
-distribuição inteira para a direita, porque a atratividade é a parte do gosto
-comum a toda a população.
+em 0. É o recorte, não o cenário — lá a atratividade é declarada por
+disciplina. Em 0 a curva é a da disciplina média; subi-la desloca a
+distribuição inteira para a direita e baixá-la para a esquerda, porque a
+atratividade é a parte do gosto comum a toda a população.
 
 Os gráficos são a representação principal e saem em **dois lados do mercado**.
 

@@ -15,14 +15,17 @@ interface Arrow {
 
 const formatHours = (hours: number) => hours.toLocaleString("pt-BR");
 
-/** Dificuldade e atratividade do cartão. As duas se leem em **múltiplos da
- * disciplina média**, então 1 é o neutro e é o que não merece destaque: o que
- * a vista precisa achar numa grade de dezenas de cartões é quem foge dele.
- * Daí o peso only acima de 1 e o recuo abaixo — a escala é a mesma, a ênfase é
- * que é assimétrica. */
-const trait = (value: number | undefined) => {
-  const amount = value ?? 1;
-  const level = amount > 1 ? "is-high" : amount < 1 ? "is-low" : undefined;
+/** Dificuldade e atratividade do cartão. **Cada uma tem o seu neutro**, e por
+ * isso ele é argumento: a dificuldade se lê em múltiplos da disciplina média,
+ * onde o neutro é 1, e a atratividade é deslocamento do expoente da utilidade,
+ * onde o neutro é 0. É o neutro que não merece destaque — o que a vista
+ * precisa achar numa grade de dezenas de cartões é quem foge dele. Daí o peso
+ * só acima e o recuo abaixo: a escala é a mesma, a ênfase é que é
+ * assimétrica. */
+const trait = (value: number | undefined, neutral: number) => {
+  const amount = value ?? neutral;
+  const level =
+    amount > neutral ? "is-high" : amount < neutral ? "is-low" : undefined;
   return (
     <span className={level}>{amount.toLocaleString("pt-BR")}</span>
   );
@@ -201,7 +204,8 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
         {discipline.entry && <em>entrada</em>}
       </p>
       <p className="grade-traits">
-        dif. {trait(discipline.difficulty)} · atr. {trait(discipline.attractiveness)}
+        dif. {trait(discipline.difficulty, 1)} · atr.{" "}
+        {trait(discipline.attractiveness, 0)}
       </p>
     </article>
   );

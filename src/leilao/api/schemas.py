@@ -101,13 +101,14 @@ class DisciplineIn(BaseModel):
         ),
     )
     attractiveness: float = Field(
-        default=1.0,
-        gt=0,
+        default=0.0,
         description=(
-            "A_x — atratividade, em múltiplos da disciplina média. É a parte do gosto "
-            "comum a toda a população, enquanto `utility_sigma` é a privada de cada "
-            "aluno; a razão entre as duas é a correlação de preferência entre alunos. "
-            "Ordena dentro de uma mesma altura da grade, não entre alturas."
+            "A_x — atratividade, a média do expoente da log-normal da utilidade: 0 é "
+            "a disciplina média, negativo gravita abaixo dela e positivo acima, e em "
+            "múltiplos da média o fator é e^A. É a parte do gosto comum a toda a "
+            "população, enquanto `utility_sigma` é a privada de cada aluno — mesma "
+            "unidade, e a razão entre as duas é a correlação de preferência entre "
+            "alunos. Ordena dentro de uma mesma altura da grade, não entre alturas."
         ),
     )
     elective: bool = Field(
@@ -323,7 +324,6 @@ class CohortSeriesOut(BaseModel):
     cohort: list[int]
     graduates: list[int]
     graduation_rate: list[float]
-    dismissal_rate: list[float]
     efficiency: list[float]
     utilization: list[float]
     fidelity: list[float]

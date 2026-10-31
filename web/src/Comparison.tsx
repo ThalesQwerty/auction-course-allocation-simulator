@@ -192,22 +192,13 @@ const METRICS: Metric[] = [
     of: (run) => (run.population ? run.graduates / run.population : null),
     // Fração, e não contagem: o absoluto depende do tamanho do ingresso, e os
     // braços só são comparáveis na mesma escala.
+    //
+    // **Não há gráfico de jubilados ao lado.** Como o horizonte é derivado do
+    // ciclo de vida, ao fim dele todo mundo saiu por uma das duas portas, e a
+    // fração de jubilados é exatamente `1 − esta`. Seria a mesma curva
+    // espelhada, ocupando espaço e convidando a ler duas vezes o mesmo fato.
     series: { cohort: byCohort("graduation_rate") },
     betterWhen: "higher",
-    bounds: [0, 1],
-    format: formatRatio,
-  },
-  {
-    id: "dismissal_rate",
-    title: "Fração de jubilados",
-    short: "Jubilados",
-    of: (run) => (run.population ? run.dismissed / run.population : null),
-    // Não é o complemento da anterior: entre as duas fica quem ainda estava em
-    // curso quando o horizonte acabou. Nas gerações tardias esse resto é
-    // grande, e é por isso que as duas se leem juntas e não uma no lugar da
-    // outra.
-    series: { cohort: byCohort("dismissal_rate") },
-    betterWhen: "lower",
     bounds: [0, 1],
     format: formatRatio,
   },
@@ -590,27 +581,20 @@ export function Comparison({
             ? METRICS.map(chartFor)
             : [
                 ...METRICS.map((metric) => seriesFor(metric, mode)),
-                // O contexto do eixo, no fim da grade. No período é o peso de
-                // cada ponto: ele mostra as três fases do horizonte — a
-                // universidade enchendo, o estado estacionário e a drenagem —,
-                // e sem ele a queda das curvas no fim se leria como mudança de
-                // mecanismo. Na geração é o concluinte: é o denominador do
-                // tempo de formatura, e é onde se vê a primeira geração formar
-                // quase todo mundo enquanto a última não teve horizonte. Em
-                // fração, e não em contagem: o absoluto depende do tamanho do
-                // ingresso, a fração se compara entre gerações.
+                // O contexto do eixo, no fim da grade: o peso de cada ponto.
+                // Ele mostra as três fases do horizonte — a universidade
+                // enchendo, o estado estacionário e a drenagem —, e sem ele a
+                // queda das curvas no fim se leria como mudança de mecanismo.
+                //
+                // Só no período. Na geração o contexto é o concluinte, e ele
+                // **já está na grade como métrica** (`graduation_rate`):
+                // repeti-lo aqui desenhava a mesma curva duas vezes.
                 mode === "period"
                   ? chartOfSeries("students", "Alunos ativos", mode, byPeriod("students"), {
                       bounds: [0, Infinity],
                       format: formatCount,
                     })
-                  : chartOfSeries(
-                      "graduation_rate",
-                      "Fração de concluintes",
-                      mode,
-                      byCohort("graduation_rate"),
-                      { bounds: [0, 1] }
-                    ),
+                  : null,
               ]}
         </div>
       </section>

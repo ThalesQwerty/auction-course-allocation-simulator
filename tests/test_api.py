@@ -177,7 +177,6 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "cohort",
         "graduates",
         "graduation_rate",
-        "dismissal_rate",
         "efficiency",
         "utilization",
         "fidelity",

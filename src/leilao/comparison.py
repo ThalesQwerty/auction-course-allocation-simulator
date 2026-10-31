@@ -270,10 +270,10 @@ class CohortSeries:
     # naquele período. É ela que se desenha, e não a contagem: o absoluto
     # depende do tamanho do ingresso, a fração é comparável entre gerações.
     graduation_rate: list[float]
-    # A fração da geração que foi **jubilada**, mesmo denominador. As duas
-    # frações só somam 1 na geração que já se esvaziou; nas tardias falta o
-    # pedaço que ainda está em curso quando o horizonte acaba.
-    dismissal_rate: list[float]
+    # Não há `dismissal_rate` ao lado: com o horizonte derivado do ciclo de
+    # vida, ao fim dele toda geração já se esvaziou pelas duas portas, e a
+    # fração de jubilados é exatamente `1 − graduation_rate`. Guardá-la seria
+    # transportar a mesma série espelhada.
     efficiency: list[float]
     utilization: list[float]
     fidelity: list[float]
@@ -452,12 +452,9 @@ def cohort_series(result: SimulationResult) -> CohortSeries:
     cohorts = sorted(instants)
     entrants: dict[int, int] = defaultdict(int)
     graduates: dict[int, int] = defaultdict(int)
-    dismissals: dict[int, int] = defaultdict(int)
     spans: dict[int, list[int]] = defaultdict(list)
     for student in result.students:
         entrants[student.entry_period] += 1
-        if student.dismissed_at is not None:
-            dismissals[student.entry_period] += 1
         if student.graduated_at is None:
             continue
         graduates[student.entry_period] += 1
@@ -473,10 +470,6 @@ def cohort_series(result: SimulationResult) -> CohortSeries:
         graduates=[graduates[cohort] for cohort in cohorts],
         graduation_rate=[
             graduates[cohort] / entrants[cohort] if entrants[cohort] else 0.0
-            for cohort in cohorts
-        ],
-        dismissal_rate=[
-            dismissals[cohort] / entrants[cohort] if entrants[cohort] else 0.0
             for cohort in cohorts
         ],
         efficiency=[mean(c, lambda m: m.efficiency) for c in cohorts],

@@ -107,20 +107,27 @@ def _stability_by_discipline(config: SimulationConfig) -> np.ndarray:
 
 
 def _attractiveness(config: SimulationConfig) -> np.ndarray:
-    """A_x de cada disciplina, pronta para somar no logaritmo.
+    """A_x de cada disciplina — a média do expoente da log-normal.
 
     É a **componente comum** do gosto: todo aluno a recebe igual, enquanto
     sigma reparte o que é privado de cada um. A razão entre as duas é
     literalmente a correlação de preferência entre dois alunos no mesmo
     período — a irmã do que `stability` faz entre dois períodos do mesmo aluno.
 
-    Entra como deslocamento do log porque a utilidade preliminar é log-normal:
-    multiplicar o sorteio por A é somar ln A antes de exponenciar, e aí A
-    continua sendo "múltiplos da disciplina média" em vez de virar um segundo
-    botão de dispersão.
+    Entra **somada ao log, sem transformação**, e é isso que a põe na mesma
+    unidade de sigma: A é a média do expoente, sigma é o desvio dele. Em 0 o
+    valor preliminar gravita em torno de 1, negativo o puxa para dentro de
+    (0, 1) e positivo o leva acima; em múltiplos da disciplina média o fator é
+    e^{A_x}.
+
+    O nível comum **quase** se cancela na normalização, mas não de todo: a eq.
+    (41) soma `(amplitude + 1)·s_x`, e esse 1 é absoluto, de modo que
+    multiplicar a linha inteira por c equivale a encolher a margem para 1/c.
+    Subir A em bloco afrouxa um pouco o degrau entre alturas — nunca o
+    inverte, porque o degrau continua maior que a amplitude.
     """
-    return np.log(
-        np.array([d.attractiveness for d in config.disciplines], dtype=float)
+    return np.array(
+        [d.attractiveness for d in config.disciplines], dtype=float
     ).reshape(1, 1, -1)
 
 
@@ -129,7 +136,7 @@ def draw_utilities(
 ) -> dict[tuple[str, int], dict[str, float]]:
     """Sorteia a matriz inteira: uma linha por (aluno, período), sobre a grade.
 
-    O valor preliminar vem de uma **log-normal** de média logarítmica 0 e
+    O valor preliminar vem de uma **log-normal** de média logarítmica A_x e
     desvio σ, repartida entre uma peça permanente e um ruído do semestre
     (`preference_split`). A log-normal é o que se obtém quando a grandeza é
     **produto** de muitos fatores independentes — e é assim que se forma o
@@ -140,16 +147,15 @@ def draw_utilities(
     σ é o único parâmetro de dispersão, e **grande concentra, pequeno
     achata**: o coeficiente de variação é √(e^{σ²} − 1), que cresce depressa,
     de modo que a faixa útil inteira cabe entre ~0,25 (aluno quase
-    indiferente) e ~3 (quer uma disciplina e despreza o resto). A média do
-    logaritmo não é configurável porque some na normalização — deslocá-la
-    multiplica a linha por uma constante. E a moda do sorteio cru é e^{−σ²},
-    sempre positiva: não há limiar de σ a respeitar.
+    indiferente) e ~3 (quer uma disciplina e despreza o resto). E a moda do
+    sorteio cru é e^{A_x − σ²}, sempre positiva: não há limiar de σ a respeitar.
 
-    **A atratividade da disciplina desloca esse logaritmo** (`_attractiveness`):
-    sigma é a dispersão privada de cada aluno, A_x é o nível comum a todos. Com
-    A uniforme as linhas são independentes e a disputa por uma disciplina não
-    tem como ser antecipada pelo próprio gosto; com A espalhado, gostar muito de
-    algo passa a ser sinal de que os colegas também gostam.
+    **A média desse logaritmo é a atratividade da disciplina**
+    (`_attractiveness`): sigma é a dispersão privada de cada aluno, A_x é o
+    nível comum a todos, e as duas estão na mesma unidade. Em A = 0 as linhas
+    são independentes e a disputa por uma disciplina não tem como ser
+    antecipada pelo próprio gosto; com A espalhado, gostar muito de algo passa
+    a ser sinal de que os colegas também gostam.
 
     O que vem depois do sorteio — deslocamento por altura e normalização —
     está em `equations.utility_row`. Note que **a invariante de altura domina a
