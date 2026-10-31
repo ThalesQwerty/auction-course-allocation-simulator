@@ -74,6 +74,11 @@ class GroupSnapshot:
     # este número que se tira a fração de formados.
     population: int
     graduated: int  # concluintes acumulados até aqui
+    # Jubilados acumulados até aqui. Com `graduated`, reparte `population` em
+    # três: quem saiu por cima, quem saiu por baixo e quem ainda disputa. As
+    # duas frações que a tela mostra saem daqui, e somam 1 só no fim do
+    # horizonte — antes dele o resto ainda está em curso.
+    dismissed: int
     mean_credits: float | None  # saldo médio ao fim do recorte
     mean_approved_hours: float | None
     # Oferta de crédito do início do período (C_a^(t,1), antes de qualquer
@@ -132,6 +137,7 @@ class PeriodReport:
     aggregate: RoundReport
     disciplines: list[DisciplineSnapshot]
     graduated_now: int
+    dismissed_now: int
 
 
 @dataclass(frozen=True)
@@ -201,6 +207,7 @@ class StudentSummary:
     approvals: int
     mean_satisfaction: float
     graduated_at: int | None
+    dismissed_at: int | None
 
 
 @dataclass(frozen=True)

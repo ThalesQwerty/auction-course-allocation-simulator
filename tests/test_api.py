@@ -135,14 +135,17 @@ def test_compare_returns_one_summary_per_seed_in_every_arm(client):
 
 def test_compare_returns_only_the_allocation_metrics(client):
     """Nada de crédito: orçamento, preço e retorno não existem do lado da linha
-    de base, e nenhum recorte — o que se compara é o mecanismo. `periods` e
-    `graduates` não são métricas: são o contexto para ler as que são."""
+    de base, e nenhum recorte — o que se compara é o mecanismo. `periods`,
+    `graduates`, `dismissed` e `population` não são métricas: são o contexto
+    para ler as que são — as duas frações da tela saem deles."""
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
 
     assert set(payload["arms"][0]["runs"][0]) == {
         "seed",
         "periods",
         "graduates",
+        "dismissed",
+        "population",
         "efficiency",
         "utilization",
         "fidelity",
@@ -174,6 +177,7 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "cohort",
         "graduates",
         "graduation_rate",
+        "dismissal_rate",
         "efficiency",
         "utilization",
         "fidelity",

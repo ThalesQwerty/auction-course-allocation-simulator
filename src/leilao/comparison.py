@@ -270,6 +270,10 @@ class CohortSeries:
     # naquele período. É ela que se desenha, e não a contagem: o absoluto
     # depende do tamanho do ingresso, a fração é comparável entre gerações.
     graduation_rate: list[float]
+    # A fração da geração que foi **jubilada**, mesmo denominador. As duas
+    # frações só somam 1 na geração que já se esvaziou; nas tardias falta o
+    # pedaço que ainda está em curso quando o horizonte acaba.
+    dismissal_rate: list[float]
     efficiency: list[float]
     utilization: list[float]
     fidelity: list[float]
@@ -296,6 +300,14 @@ class RunSummary:
     seed: int
     periods: int
     graduates: int  # quantos concluíram o curso — eq. (40)
+    # Quantos foram **jubilados**: esgotaram os períodos de residência sem
+    # fechar a grade. Com `graduates`, reparte `population` em três — saiu por
+    # cima, saiu por baixo, e (só se o horizonte não esgotou) continua em curso.
+    dismissed: int
+    # Quantos ingressaram ao todo, que é o denominador das duas frações. Sem
+    # ele os dois números acima são contagens sem escala: 40 formados é muito
+    # ou pouco conforme a geração tenha 60 ou 600 pessoas.
+    population: int
     efficiency: float  # psi-barra — eq. (53)
     # Aproveitamento: a contraparte em carga do psi, que é em utilidade. As
     # duas se separam onde está a patologia que interessa — quem concentra o
@@ -440,9 +452,12 @@ def cohort_series(result: SimulationResult) -> CohortSeries:
     cohorts = sorted(instants)
     entrants: dict[int, int] = defaultdict(int)
     graduates: dict[int, int] = defaultdict(int)
+    dismissals: dict[int, int] = defaultdict(int)
     spans: dict[int, list[int]] = defaultdict(list)
     for student in result.students:
         entrants[student.entry_period] += 1
+        if student.dismissed_at is not None:
+            dismissals[student.entry_period] += 1
         if student.graduated_at is None:
             continue
         graduates[student.entry_period] += 1
@@ -458,6 +473,10 @@ def cohort_series(result: SimulationResult) -> CohortSeries:
         graduates=[graduates[cohort] for cohort in cohorts],
         graduation_rate=[
             graduates[cohort] / entrants[cohort] if entrants[cohort] else 0.0
+            for cohort in cohorts
+        ],
+        dismissal_rate=[
+            dismissals[cohort] / entrants[cohort] if entrants[cohort] else 0.0
             for cohort in cohorts
         ],
         efficiency=[mean(c, lambda m: m.efficiency) for c in cohorts],
@@ -486,6 +505,7 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     satisfeito, que é coisa diferente de um período que não se mede.
     """
     graduates = sum(1 for s in result.students if s.graduated_at is not None)
+    dismissed = sum(1 for s in result.students if s.dismissed_at is not None)
     measured = [
         (period, period.aggregate.overall.metrics)
         for period in result.periods
@@ -523,6 +543,8 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         seed=seed,
         periods=len(result.periods),
         graduates=graduates,
+        dismissed=dismissed,
+        population=len(result.students),
         efficiency=mean(lambda m: m.efficiency),
         utilization=mean(lambda m: m.utilization),
         fidelity=mean(lambda m: m.fidelity),

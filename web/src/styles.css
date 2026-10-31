@@ -1307,8 +1307,7 @@ td.failed {
 
 /* Os cartões ficam **sobre** as setas: a linha sai da borda de um e morre na
    borda do outro, sem atravessar texto. */
-.grade-columns,
-.grade-square {
+.grade-columns {
   position: relative;
   z-index: 1;
 }
@@ -1336,12 +1335,6 @@ td.failed {
   padding-bottom: 6px;
   text-align: center;
   text-transform: uppercase;
-}
-
-.grade-square {
-  display: grid;
-  grid-template-columns: repeat(var(--grade-cols, 5), var(--grade-card-w));
-  gap: 10px 28px;
 }
 
 .grade-arrows {
@@ -1390,6 +1383,23 @@ td.failed {
   color: var(--muted);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
+}
+
+/* Dificuldade e atratividade: a segunda linha do cartão. Fica um degrau mais
+   apagada que a primeira porque vagas e carga são o que posiciona a disciplina
+   na grade, e estas duas são o que a caracteriza depois de achada. */
+.grade-traits {
+  margin-top: 3px !important;
+  opacity: 0.85;
+}
+
+.grade-traits .is-high {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.grade-traits .is-low {
+  opacity: 0.6;
 }
 
 .grade-card em {

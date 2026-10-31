@@ -1,5 +1,4 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import { CYCLIC, curriculumPeriods } from "./curriculum";
 import type { DisciplineInput } from "./types";
 
@@ -15,6 +14,19 @@ interface Arrow {
 }
 
 const formatHours = (hours: number) => hours.toLocaleString("pt-BR");
+
+/** Dificuldade e atratividade do cartão. As duas se leem em **múltiplos da
+ * disciplina média**, então 1 é o neutro e é o que não merece destaque: o que
+ * a vista precisa achar numa grade de dezenas de cartões é quem foge dele.
+ * Daí o peso only acima de 1 e o recuo abaixo — a escala é a mesma, a ênfase é
+ * que é assimétrica. */
+const trait = (value: number | undefined) => {
+  const amount = value ?? 1;
+  const level = amount > 1 ? "is-high" : amount < 1 ? "is-low" : undefined;
+  return (
+    <span className={level}>{amount.toLocaleString("pt-BR")}</span>
+  );
+};
 
 const totalHours = (list: DisciplineInput[]) =>
   list.reduce((sum, discipline) => sum + discipline.hours, 0);
@@ -42,10 +54,27 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
   }, [required, periods]);
 
   /** A optativa não tem período a mostrar: não destrava nada e não é
-   * pré-requisito de ninguém, então não há cadeia que ordene o catálogo. Sem
-   * eixo, o bloco tende ao **quadrado** — tantas colunas quanto a raiz do
-   * número de disciplinas, e as linhas que daí saírem. */
-  const electiveColumns = Math.max(1, Math.ceil(Math.sqrt(electives.length)));
+   * pré-requisito de ninguém, então não há cadeia que ordene o catálogo. Quem
+   * ordena no lugar dele é a **oferta**: uma coluna por patamar de vagas, da
+   * mais abundante para a mais apertada.
+   *
+   * É o mesmo gesto das obrigatórias, e de propósito. Ali as colunas correm da
+   * entrada larga à ponta estreita do funil; aqui correm do patamar farto ao
+   * escasso. Nos dois blocos, andar para a direita é andar para a disputa — e
+   * como vagas é justamente o eixo que o obrigatório não consegue medir (lá
+   * ele está confundido com o período), é no bloco das optativas que ele
+   * precisa estar legível. */
+  const electiveColumns = useMemo(() => {
+    const bySeats = new Map<number, DisciplineInput[]>();
+    for (const discipline of electives) {
+      const group = bySeats.get(discipline.seats);
+      if (group) group.push(discipline);
+      else bySeats.set(discipline.seats, [discipline]);
+    }
+    return [...bySeats.entries()]
+      .sort(([a], [b]) => b - a)
+      .map(([seats, cards]) => ({ seats, cards }));
+  }, [electives]);
 
   const links = useMemo(() => {
     const incoming = new Map<string, string[]>();
@@ -171,6 +200,9 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
         {discipline.seats} vagas · {discipline.hours} h
         {discipline.entry && <em>entrada</em>}
       </p>
+      <p className="grade-traits">
+        dif. {trait(discipline.difficulty)} · atr. {trait(discipline.attractiveness)}
+      </p>
     </article>
   );
 
@@ -223,11 +255,13 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
                   · sem pré-requisito e sem período
                 </p>
               </header>
-              <div
-                className="grade-square"
-                style={{ "--grade-cols": electiveColumns } as CSSProperties}
-              >
-                {electives.map(card)}
+              <div className="grade-columns">
+                {electiveColumns.map((column) => (
+                  <div className="grade-column" key={column.seats}>
+                    <div className="grade-column-head">{column.seats} vagas</div>
+                    {column.cards.map(card)}
+                  </div>
+                ))}
               </div>
             </section>
           )}

@@ -1,5 +1,5 @@
 import { withUnlocks } from "./curriculum";
-import { COMPARISON_ARMS, creditReturnLabel } from "./types";
+import { COMPARISON_ARMS, creditReturnLabel, horizonFor } from "./types";
 import type {
   CompareRequest,
   CompareResponse,
@@ -57,7 +57,8 @@ export function newComparison(
  * **Ganhos**: o `interest_coupling` virou `utility_gain` sem mudar de
  * significado, e o `grade_noise` deu lugar ao `retake_gain`. Este último não é
  * tradução — o choque não vira coeficiente —, então a execução antiga recebe o
- * padrão 1 e passa a valer o `D/t`, que é o que o choque já fazia em média. */
+ * padrão 1 e passa a valer a dificuldade dividida pela tentativa, que é o que
+ * o choque já fazia em média. */
 function migrateScenario<
   T extends {
     aptitude_mean: number;
@@ -145,16 +146,19 @@ function describeScenario(
   config: Scenario | CompareRequest,
   { withCreditReturn }: { withCreditReturn: boolean }
 ): string {
-  const { periods, rounds, disciplines } = config;
+  const { rounds, disciplines } = config;
+  const periods = horizonFor(config.entry_periods, config.max_residence);
   // Uma geração por período *com ingresso*: a população é o que entra por
-  // período vezes L, não vezes |T|.
-  const entrySpan = Math.min(config.entry_periods ?? periods, periods);
-  const students = config.students_per_period * entrySpan;
+  // período vezes a quantidade desses períodos, não vezes |T|.
+  const students = config.students_per_period * config.entry_periods;
   const rodadas = rounds === 1 ? "1 rodada" : `${rounds} rodadas`;
-  // A fase de drenagem muda o resultado inteiro, não só a escala: duas
-  // execuções que só diferem nela precisam se distinguir.
+  // O ciclo de vida muda o resultado inteiro, não só a escala: duas execuções
+  // que só diferem nele precisam se distinguir. E como |T| é derivado dos dois
+  // números, mostrá-lo sozinho esconderia qual deles mudou.
   const horizonte =
-    entrySpan < periods ? `${periods} períodos (${entrySpan} com ingresso)` : `${periods} períodos`;
+    config.entry_periods < periods
+      ? `${periods} períodos (${config.entry_periods} com ingresso, jubila em ${config.max_residence})`
+      : `${periods} períodos`;
   // As duas normais entram só quando saem do default: num cenário montado a
   // partir de um preset elas distinguem execuções que, de resto, são iguais.
   const populacao = [

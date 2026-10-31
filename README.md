@@ -389,11 +389,11 @@ pior que métrica ausente — ela vira zero, e zero num gráfico se lê como que
 
 1. **Todo período publicado tem pelo menos um aluno ativo**, e a numeração vai
    de 1 a `len(periods)` sem buraco. Vale por construção: os ingressos ocorrem
-   em períodos consecutivos a partir do primeiro e, passado o último (`L`), a
+   em períodos consecutivos a partir do primeiro e, passado o último deles, a
    população só diminui — então o primeiro período vazio, se houver, só é
    seguido de períodos vazios, e a simulação para ali. Com ingresso em todo
    período o relatório traz os `|T|` períodos inteiros; com uma fase de
-   drenagem (`L < |T|`) a parada é o fim natural dela, quando o último aluno
+   drenagem a parada é o fim natural dela, quando o último aluno
    sai. Na entrada, cenários sem nenhum aluno ou sem nenhuma disciplina são
    recusados.
 2. **Recorte sem aluno no período não reporta métrica**: `metrics`,
@@ -548,9 +548,22 @@ em período, com o aviso no subtítulo.
 - **CR do período**: o `N_a^(t)` usado nas métricas é o vigente no início do
   período — as notas do período só entram no CR do período seguinte, como numa
   matrícula real.
-- **Conclusão de curso**: toda disciplina é obrigatória, então a eq. (40) vira
-  aprovar na grade inteira — não há carga horária mínima a somar à parte, e
-  `hours_to_graduate` é a soma de `w_x` sobre a grade, igual para todos.
+- **Conclusão de curso**: a eq. (40) vira aprovar em **todas as obrigatórias**
+  e somar `elective_hours` entre as optativas aprovadas — não aprovar em cada
+  optativa, e é essa substituibilidade que dá ao aluno o que escolher. O
+  `hours_to_graduate` é a carga das obrigatórias mais a exigência optativa,
+  igual para todos.
+- **Jubilamento**: quem chega ao fim dos períodos de residência
+  (`max_residence`) sem fechar a grade sai da simulação. É a segunda porta de
+  saída, e vem **depois** da conclusão: quem fecha a grade no último período
+  permitido conta como concluinte. Com ele e os períodos de ingresso o
+  horizonte deixa de ser escolha — `|T| = entry_periods + max_residence − 1` é
+  quando a última geração sai e a universidade fica vazia.
+- **Atratividade** (`A_x`): a parte do gosto **comum a toda a população**,
+  contra o `utility_sigma`, que é a privada de cada aluno. A razão entre as
+  duas é a correlação de preferência entre alunos. Ela ordena *dentro* de uma
+  mesma altura da grade: a invariante da eq. (41) é maior que qualquer `A`,
+  então nenhuma atratividade põe optativa à frente de obrigatória.
 - **Utilidades**: um valor por par (aluno, disciplina, período), tirado de uma
   log-normal de desvio `utility_sigma` e dividido pelo somatório da linha — uma
   linha por (aluno, período). O anteprojeto não fixa a distribuição nem
@@ -559,17 +572,19 @@ em período, com o aviso no subtítulo.
   saldo entre períodos que justificasse poupar.
 - **Ingresso escalonado** (`t_a`, eq. 31): o cenário diz quantos alunos entram
   **por período** (`students_per_period`), e uma geração entra a cada período
-  letivo, do primeiro ao `L`-ésimo (`entry_periods`, padrão `|T|`). A população
-  é, portanto, `students_per_period * L`, e todas as gerações têm exatamente o
+  letivo, do primeiro ao último com ingresso (`entry_periods`, padrão `|T|`). A
+  população é, portanto, `students_per_period * entry_periods`, e todas as
+  gerações têm exatamente o
   mesmo tamanho. O anteprojeto não fixa a
   distribuição dos ingressos; esta é a que imita um vestibular por semestre.
-- **Fase de drenagem** (`L < |T|`): depois do `L`-ésimo período ninguém mais
-  entra e a população só diminui. Existem **`L` gerações**, não `|T|` — os
+- **Fase de drenagem** (`entry_periods < |T|`): passado o último período com
+  ingresso ninguém mais entra e a população só diminui. Há **uma geração por
+  período com ingresso**, não `|T|` — os
   períodos de drenagem não têm geração correspondente. Sem ela a última geração
   vivia um período só e nunca chegava a se formar, de modo que a série por
   geração media quanto tempo de simulação sobrou em vez de medir o mecanismo.
   Em troca, as gerações deixam de ser intercambiáveis: a primeira encontra uma
-  universidade quase vazia e a `L`-ésima encontra a cheia, e depois a
+  universidade quase vazia e a última encontra a cheia, e depois a
   esvaziando. Pelo mesmo motivo, as curvas **por período** caem no fim porque
   há menos gente disputando, não porque o mecanismo melhorou — o recorte por
   geração não tem essa distorção.
@@ -592,11 +607,10 @@ em período, com o aviso no subtítulo.
   apareceria com uma regra que cobrasse a aposta.
 - Persistência de cenários no servidor: o histórico de execuções fica no
   navegador, mas não há como salvar, nomear ou exportar um cenário.
-- **Qualquer saída sem diploma.** A conclusão (eq. 40) é a única porta: quem
-  não concluiu continua disputando até o fim do horizonte. Nem jubilamento por
-  decurso de prazo, nem evasão comportamental. A evasão em particular responde
-  ao mecanismo, e é contra a linha de base por CR que ela precisaria ser
-  medida — agora que ela existe, é comparação possível.
+- **Evasão comportamental.** Há duas portas de saída — concluir e ser jubilado
+  por decurso de prazo —, mas nenhuma delas é decisão do aluno. A evasão
+  responde ao mecanismo, e é contra a linha de base por CR que ela precisaria
+  ser medida — agora que ela existe, é comparação possível.
 
 ## Como rodar
 
@@ -710,17 +724,18 @@ de modo que a prévia e o histograma do resultado se leem lado a lado. A das
 notas é quadratura sobre a Beta — exata, e por isso não treme enquanto se
 digita —, e traz a média e a aprovação ao pé.
 
-Ela desenha **um caso de cada vez**, escolhido ali: uma disciplina de
-dificuldade `D` (decimal) na `t`-ésima tentativa (inteiro), com uma dada
-**utilidade relativa** (decimal: a fração de utilidade vezes o número de
-disciplinas, de modo que 1 é a indiferença). O padrão é `D = 1`, `t = 1`,
-utilidade relativa 1, que é onde a nota *é* a aptidão. O título carrega
-o caso ("Notas · dificuldade 1,2 · 2ª tentativa"), senão duas leituras
-diferentes do mesmo histograma ficariam indistinguíveis — e a utilidade só
-entra nele quando o **ganho por utilidade** é maior que zero, porque é só aí
-que ela move o gráfico: ela age como expoente dele, e em ganho 0 o fator vale
-1. Como os três entram na fórmula pela razão
-`D/(u_rel^ganho_utilidade · tentativas)`, dificuldade 2 na segunda tentativa
+Ela desenha **um caso de cada vez**, escolhido nos campos abaixo do próprio
+gráfico: uma disciplina de uma dada dificuldade (decimal) numa dada tentativa
+(inteiro), com uma **utilidade relativa** (decimal: a fração de utilidade vezes
+o número de disciplinas, de modo que 1 é a indiferença). O padrão é dificuldade
+1, tentativa 1, utilidade relativa 1, que é onde a nota *é* a aptidão. Os campos
+ficam junto da curva de propósito: eles **são** a legenda do caso, e sem isso
+duas leituras diferentes do mesmo gráfico ficariam indistinguíveis. A utilidade
+só entra quando o **ganho por utilidade** é maior que zero, porque é só aí que
+ela move o gráfico: ela age como expoente dele, e em ganho 0 o fator vale 1.
+Como os três entram na fórmula pela razão
+`dificuldade/(u_rel^ganho_utilidade · tentativas)`, dificuldade 2 na segunda
+tentativa
 desenha exatamente o mesmo gráfico que dificuldade 1 na primeira — com ganho
 por recursada 1 —, e dificuldade 2 com `u_rel` 2 em ganho por utilidade 1
 também: o que serve de conferência da própria prévia. Em `t > 1` o gráfico é
@@ -742,14 +757,19 @@ o fundo claro.
 A prévia **das utilidades** sorteia linhas de semente fixa e **deixa o degrau
 por altura de fora**: ele é curricular, não populacional, e domina tanto a linha
 que, com ele, o desenho não se mexeria com σ (as faixas andam menos de 2 pontos
-entre σ = 0,25 e σ = 3; sem ele, vão de um sino a 92% na primeira faixa). O
-seletor dentro do card troca a régua: em **fração de utilidade** o eixo vai de 0
-a 1 em dez faixas de 0,1 — o intervalo em que a grandeza vive por definição, e o
-mesmo em todo cenário —; em **utilidade relativa** (a fração vezes o número de
-disciplinas, em que 1 é a indiferença) ele vai de 0 ao maior valor sorteado. Os
-eixos não são proporcionais um ao outro, então as faixas são recontadas a cada
-troca. Numa grade grande a fração média é 1/|disciplinas|, e é a vista em
-utilidade relativa que abre o desenho.
+entre σ = 0,25 e σ = 3; sem ele, vão de um sino a 92% na primeira faixa). A
+régua é a **utilidade relativa** — a fração vezes o número de disciplinas, de
+modo que 1 é a indiferença e a média é 1 em qualquer cenário —, e o eixo vai de
+0 ao maior valor sorteado. A régua da fração saiu: ela mede a mesma
+distribuição dividida por |disciplinas|, e com isso o eixo encolhia na mesma
+proporção — numa grade de 60 a massa inteira cabia em 4% dele.
+
+Como a prévia das notas, ela desenha **um caso de cada vez**, e o campo abaixo
+do gráfico diz qual: a **atratividade** da disciplina, quando as demais estão
+em 1. É o recorte, não o cenário — lá a atratividade é declarada por
+disciplina. Em 1 a curva é a da disciplina média; dobrá-la desloca a
+distribuição inteira para a direita, porque a atratividade é a parte do gosto
+comum a toda a população.
 
 Os gráficos são a representação principal e saem em **dois lados do mercado**.
 

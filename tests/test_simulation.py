@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from disciplines import disciplines_from_predecessors
-from leilao.config import Discipline, SimulationConfig
+from leilao.config import Discipline, SimulationConfig, horizon_for_lifecycle
 from leilao.grading import credit_return
 from leilao.metrics import demand_per_seat, jain_index, pearson, semestralization
 from leilao.population import generate_students
@@ -28,7 +28,8 @@ WORKLOAD = 180
 # O calouro não entra nas métricas (ver `GroupSnapshot`), então o 1º período não
 # publica nenhuma — ali todo mundo acabou de ingressar. Os testes que precisam
 # do caso "ninguém aprovou nada ainda" o reconstroem no 2º período: ingresso só
-# no primeiro (L = 1, todos veteranos em t = 2) e uma nota de corte que ninguém
+# no primeiro (um período com ingresso, todos veteranos em t = 2) e uma nota
+# de corte que ninguém
 # alcança, de modo que o conjunto elegível continue sendo o de 1º período.
 NEVER_APPROVES = dict(
     periods=2,
@@ -892,8 +893,8 @@ def test_scenario_without_students_or_disciplines_is_rejected():
 
 
 def test_entry_periods_limits_how_many_generations_enter():
-    """L < |T|: só os L primeiros períodos recebem geração nova, e a população
-    deixa de crescer com o horizonte."""
+    """Com menos períodos de ingresso que |T|, só os primeiros recebem geração
+    nova, e a população deixa de crescer com o horizonte."""
     config = make_config(periods=10, entry_periods=4)
     assert config.entry_span == 4
     assert config.total_students() == 12  # 3 por geração em 4 gerações
@@ -1177,3 +1178,79 @@ def test_utilization_is_the_share_of_the_workload_cap_that_was_filled():
         metrics = reported[(period, None)]
         assert metrics is not None
         assert metrics.utilization == pytest.approx(sum(shares) / len(shares))
+
+
+# --- o jubilamento ---------------------------------------------------------
+
+
+def test_dismissal_lands_on_the_last_period_of_residence():
+    """Quem entra em t_a cursa os períodos de residência a partir dali, e é ao
+    fim do último deles que o jubilamento o alcança. Com uma nota de corte que
+    ninguém alcança, ninguém conclui, e aí a porta de saída é só essa."""
+    config = make_config(periods=9, entry_periods=3, max_residence=4, min_grade=10.0)
+    result = run_simulation(config)
+    assert all(s.graduated_at is None for s in result.students)
+    for student in result.students:
+        assert student.dismissed_at == student.entry_period + 4 - 1
+
+
+def test_the_two_exits_are_exclusive_and_graduation_wins():
+    """Conclusão e jubilamento são exclusivos, e a ordem importa: quem fecha a
+    grade **no** último período de residência sai concluinte, não jubilado.
+
+    A residência é derivada em vez de escolhida: roda-se primeiro sem
+    jubilamento para achar em que período alguém conclui, e só então se aperta
+    o prazo até exatamente esse período. Com um prazo fixo o teste passaria sem
+    exercer a precedência — bastaria ninguém concluir no fio."""
+    loose = run_simulation(make_config(periods=12, entry_periods=4))
+    graduated = [s for s in loose.students if s.graduated_at is not None]
+    assert graduated, "ninguém concluiu nem sem prazo"
+    # O prazo que faz o primeiro concluinte fechar a grade no último dia dele.
+    first = min(graduated, key=lambda s: s.graduated_at - s.entry_period)
+    residence = first.graduated_at - first.entry_period + 1
+
+    tight = run_simulation(
+        make_config(periods=12, entry_periods=4, max_residence=residence)
+    )
+    for student in tight.students:
+        assert not (student.graduated_at and student.dismissed_at)
+    on_the_wire = next(s for s in tight.students if s.id == first.id)
+    assert on_the_wire.graduated_at == first.graduated_at
+    assert on_the_wire.dismissed_at is None
+
+
+def test_the_dismissed_stop_disputing():
+    """Jubilado sai de `active` e não aparece em período nenhum depois disso —
+    é a mesma saída que a conclusão, pela outra porta."""
+    result = run_simulation(make_config(periods=9, entry_periods=3, max_residence=4,
+                                        min_grade=10.0))
+    by_id = {s.id: s for s in result.students}
+    for history in result.histories:
+        student = by_id[history.student_id]
+        if history.periods:
+            assert max(r.period for r in history.periods) <= student.dismissed_at
+
+
+def test_without_max_residence_nobody_is_dismissed():
+    """`None` desliga o jubilamento e devolve o modelo em que a conclusão é a
+    única porta de saída — a regressão que garante que o campo novo não mexeu
+    nos cenários que não o declaram."""
+    result = run_simulation(make_config(periods=12, min_grade=10.0))
+    assert all(s.dismissed_at is None for s in result.students)
+    last = result.periods[-1].aggregate.overall
+    assert last.dismissed == 0
+
+
+def test_the_horizon_of_a_lifecycle_empties_the_population():
+    """O horizonte derivado é exatamente o que esgota a população: a última
+    geração entra no último período com ingresso e sai, por uma porta ou outra,
+    ao fim da residência dela. Um período a menos cortaria alguém pela metade;
+    um a mais simularia uma universidade vazia."""
+    entry, residence = 3, 5
+    horizon = horizon_for_lifecycle(entry_periods=entry, max_residence=residence)
+    assert horizon == 7
+    result = run_simulation(make_config(periods=horizon, entry_periods=entry,
+                                        max_residence=residence))
+    assert all(s.graduated_at or s.dismissed_at for s in result.students)
+    last = result.periods[-1].aggregate.overall
+    assert last.graduated + last.dismissed == last.population

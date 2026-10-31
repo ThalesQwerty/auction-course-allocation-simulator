@@ -229,14 +229,18 @@ const toElectives = (entries: Entry[]): DisciplineInput[] =>
     elective: true,
   }));
 
-/** O que não varia entre execuções. `electiveHours` e `periods` andam juntos:
- * a exigência optativa sobe o piso de períodos, porque W_a é exatamente um
- * período da grade e cada hora de optativa desloca uma de obrigatória. */
+/** O que não varia entre execuções.
+ *
+ * O horizonte **não entra aqui**: |T| deixou de ser escolha e passou a sair do
+ * ciclo de vida da população (`horizonFor`), que é o par ingresso × residência.
+ * O que cada preset declara é quantos períodos recebem geração nova e quantos
+ * o aluno tem para concluir antes de ser jubilado. */
 const commonScenario = (
   disciplines: DisciplineInput[],
   studentsPerPeriod: number,
   electiveHours: number,
-  periods: number,
+  entryPeriods: number,
+  maxResidence: number,
 ): Omit<
   Scenario,
   | "aptitude_mean"
@@ -247,14 +251,14 @@ const commonScenario = (
 > => ({
   disciplines,
   elective_hours: electiveHours,
-  periods,
-  // Ingresso nos 6 primeiros e drenagem no resto. Sem a drenagem as
-  // últimas gerações eram cortadas pelo horizonte antes de poderem se formar —
-  // a última geração vivia um período só —, e a série por geração media quanto
-  // tempo de simulação sobrou, não o mecanismo. Seis é o piso teórico da grade:
-  // a cadeia de pré-requisitos tem seis elos, então ninguém conclui em menos
-  // que isso nem no melhor dos casos.
-  entry_periods: 6,
+  // Depois do último ingresso vem a drenagem: ninguém mais entra e a população
+  // só diminui. Sem ela as últimas gerações eram cortadas pelo horizonte antes
+  // de poderem se formar — a última vivia um período só —, e a série por
+  // geração media quanto tempo de simulação sobrou, não o mecanismo. Agora a
+  // drenagem é consequência aritmética: o horizonte é ingresso + residência − 1,
+  // então ela dura exatamente o que a última geração precisa para terminar.
+  entry_periods: entryPeriods,
+  max_residence: maxResidence,
   students_per_period: studentsPerPeriod,
   rounds: 2,
   min_grade: 5,
@@ -275,20 +279,221 @@ const commonScenario = (
   seed: 42,
 });
 
+
+// ---------------------------------------------------------------------------
+// O preset Fatorial — a grade como instrumento, não como retrato
+// ---------------------------------------------------------------------------
+//
+// O Computação acima imita um currículo real. Este não imita nada: é um
+// delineamento experimental. Três eixos binários cruzados, **todas as oito
+// combinações presentes em todo período da grade**, de modo que carga,
+// dificuldade e atratividade ficam balanceadas dentro de cada período e,
+// portanto, ortogonais tanto ao período quanto às vagas. Uma diferença entre
+// grupos é da grandeza em tela, nunca de composição.
+//
+// O preço desse desenho é que **vagas sai do fatorial no obrigatório**: elas
+// variam por período (o funil), então ali não dá para separar "tem poucas
+// vagas" de "é avançada". Quem recupera o eixo são as optativas, que não têm
+// período: os três patamares de oferta cruzam o mesmo 2³. O obrigatório mede
+// três eixos limpos, o optativo mede os quatro.
+
+interface Cell {
+  hours: number;
+  difficulty: number;
+  attractiveness: number;
+}
+
+/** As oito células do 2³, em ordem fixa. A ordem é o que faz a rotação por
+ * período funcionar, então mexer nela muda o cenário. */
+const CELLS: Cell[] = [
+  { hours: 2, difficulty: 1, attractiveness: 1 },
+  { hours: 2, difficulty: 1, attractiveness: 2 },
+  { hours: 2, difficulty: 2, attractiveness: 1 },
+  { hours: 2, difficulty: 2, attractiveness: 2 },
+  { hours: 3, difficulty: 1, attractiveness: 1 },
+  { hours: 3, difficulty: 1, attractiveness: 2 },
+  { hours: 3, difficulty: 2, attractiveness: 1 },
+  { hours: 3, difficulty: 2, attractiveness: 2 },
+];
+
+const CLASS_SIZE = 20;
+const FACTORIAL_PERIODS = 6;
+
+/** O **funil**: turmas por período, da entrada larga à ponta estreita. A
+ * demanda por disciplina é constante ao longo da grade — todo aluno passa em
+ * cada uma exatamente uma vez —, enquanto a oferta cai, de modo que a ocupação
+ * sobe monotonicamente e a escassez fica concentrada no fim do curso.
+ *
+ * A ponta estreita é o que dimensiona o cenário: ela precisa entregar, por
+ * período, tantas aprovações quantos alunos ingressam. Daí o teto de ingresso
+ * ser `menor oferta × taxa de aprovação` — 80 × ~0,6 ≈ 48, e por isso
+ * `FACTORIAL_STUDENTS` fica em 40, com folga. Acima disso a fila nos últimos
+ * períodos cresce sem drenar e ninguém conclui. */
+const CLASSES_BY_PERIOD = [9, 8, 7, 6, 5, 4];
+
+/** **O sufixo é a célula.** `Obrigatória k.5` tem os mesmos três atributos em
+ * qualquer período k, e a `Optativa g.5` também. Sufixo igual, atributos
+ * iguais — em 72 disciplinas, é o que permite ler a grade sem consultar cada
+ * cartão, e é o que torna o período a única coisa que varia ao longo de uma
+ * linha da tela.
+ *
+ * Sobre esses rótulos corre a cadeia **triangular**: `k.j` destrava a
+ * equivalente e a seguinte, `(k+1).j` e `(k+1).(j+1)`, com o sufixo 8 voltando
+ * para o 1. Invertendo as arestas, **`(k+1).j` exige `k.j` e `k.(j−1)`** — e
+ * pré-requisito aqui é conjuntivo (`eligible_set` pede `all(...)`), então são
+ * as duas, não uma delas.
+ *
+ * O que isso custa, medido contra a diagonal simples no mesmo cenário: o
+ * conjunto elegível cai de ~24,6 para ~17,5 disciplinas (−29%), o uso de W_a
+ * de 88% para 82%, e o tempo de formatura sobe de 12,8 para ~13,5 períodos.
+ * É o preço de uma grade que de fato se emaranha, em vez de oito cadeias que
+ * nunca se encontram.
+ *
+ * O que **não** muda: todo nó de um período continua tendo seus sucessores no
+ * período seguinte, então a altura segue uniforme dentro de cada período e a
+ * invariante da eq. (41) continua fora do fatorial — os três eixos operam numa
+ * única camada, que é onde sigma e a atratividade agem. Era essa a condição a
+ * preservar, e a triangular a preserva. */
+const nextSuffix = (suffix: number) => (suffix % CELLS.length) + 1;
+
+const requiredName = (period: number, suffix: number) =>
+  `Obrigatória ${period}.${suffix}`;
+
+const FACTORIAL_REQUIRED: DisciplineInput[] = Array.from(
+  { length: FACTORIAL_PERIODS * CELLS.length },
+  (_, index) => {
+    const period = Math.floor(index / CELLS.length) + 1;
+    const suffix = (index % CELLS.length) + 1;
+    const cell = CELLS[suffix - 1];
+    return {
+      name: requiredName(period, suffix),
+      hours: cell.hours,
+      seats: CLASSES_BY_PERIOD[period - 1] * CLASS_SIZE,
+      difficulty: cell.difficulty,
+      attractiveness: cell.attractiveness,
+      unlocks:
+        period < FACTORIAL_PERIODS
+          ? [
+              requiredName(period + 1, suffix),
+              requiredName(period + 1, nextSuffix(suffix)),
+            ]
+          : [],
+      // As oito do 1º período entram por matrícula garantida. Elas somam
+      // 20 h, e é essa soma que fixa o piso de W_a: a eq. (4) exige que o
+      // pacote inteiro caiba de uma vez, já que o ingressante o recebe sem
+      // disputar e sem poder recusar.
+      entry: period === 1,
+    };
+  },
+);
+
+/** As 24 optativas: três grupos de oito, cada grupo o 2³ completo num patamar
+ * de oferta. Como optativa não tem período, aqui os **quatro** eixos ficam
+ * cruzados — é o único lugar do cenário em que vagas é eixo medível.
+ *
+ * O grupo de 1 turma vai ser violentamente disputado: toda a população é
+ * elegível a ele o tempo todo, porque optativa não tem pré-requisito. É o
+ * ponto mais apertado do cenário, e é de propósito. */
+const ELECTIVE_CLASSES = [3, 2, 1];
+
+const FACTORIAL_ELECTIVES: DisciplineInput[] = ELECTIVE_CLASSES.flatMap(
+  (classes, group) =>
+    CELLS.map((cell, index) => ({
+      name: `Optativa ${group + 1}.${index + 1}`,
+      hours: cell.hours,
+      seats: classes * CLASS_SIZE,
+      difficulty: cell.difficulty,
+      attractiveness: cell.attractiveness,
+      unlocks: [] as string[],
+      entry: false,
+      elective: true,
+    })),
+);
+
+/** W_a = 20 h, que é exatamente o que o 1º período oferece (4×2 + 4×3) — e o
+ * piso imposto pela matrícula garantida, que entrega as oito de uma vez.
+ *
+ * Isso significa que o aluno **em dia** cursa o período inteiro e não escolhe
+ * nada no lado obrigatório. Mas em dia quase ninguém está: metade do fatorial
+ * é dificuldade 2, que exige aptidão ≥ 0,707 e só passa ~35% de primeira,
+ * então o normal é carregar pendência — e aí o conjunto elegível passa de
+ * W_a e a mochila volta a ter o que decidir. A escolha existe, só não é do
+ * aluno exemplar: é de quem ficou para trás, que é quase todo mundo. */
+const FACTORIAL_MAX_HOURS = 20;
+
+/** X — exigência optativa, contra 60 h ofertadas no catálogo. A folga é o que
+ * dá o que escolher; o teto é de capacidade, não de catálogo: as 24 optativas
+ * entregam ~2 400 vaga-hora por período, e a `elective_hours × ingresso`
+ * precisa caber nisso com folga. 30 h deixa ~40%. */
+const FACTORIAL_ELECTIVE_HOURS = 30;
+
+/** Ingresso por período: 2 turmas. O teto é a ponta do funil — ver
+ * `CLASSES_BY_PERIOD`. */
+const FACTORIAL_STUDENTS = 40;
+
 export const PRESETS: Preset[] = [
+  {
+    id: "fatorial",
+    name: "Fatorial",
+    hint: "48 obrigatórias (6 × 8, as oito combinações de carga × dificuldade × atratividade em todo período) e 24 optativas, com cadeia triangular. Oferta em funil, 320 alunos em 8 gerações, 27 períodos.",
+    build: (): Scenario => ({
+      ...commonScenario(
+        [...FACTORIAL_REQUIRED, ...FACTORIAL_ELECTIVES],
+        FACTORIAL_STUDENTS,
+        FACTORIAL_ELECTIVE_HOURS,
+        // 8 gerações, e 20 períodos de residência em vez dos 12 do formulário
+        // em branco: medido
+        // em três seeds, o tempo de formatura fica em 13,7 períodos na média,
+        // com cauda até 19. São 150 h a aprovar (120 de obrigatória + 30 de
+        // optativa) e ~1,5 tentativa por disciplina na média do fatorial —
+        // metade dele é dificuldade 2, que exige aptidão >= 0,707 e só passa
+        // ~35% de primeira —, mais a espera pelo **par** de pré-requisitos que
+        // a cadeia triangular impõe.
+        //
+        // O jubilamento **não morde** aqui: 100% concluem, 0% jubilam. É de
+        // propósito. Jubilamento que morde censura o tempo de formatura, e aí
+        // ele volta a medir quem sobreviveu em vez de quem foi rápido — o viés
+        // de sobrevivência que o |T| = 14 do preset Computação escondia. Em 19
+        // ele também não morde, mas sem folga nenhuma (a cauda bate exatamente
+        // em 19); o período a mais é seguro e sai de graça, porque a simulação
+        // para assim que a população esvazia. Quem quiser o jubilamento como
+        // tratamento encurta a residência e lê o tempo com essa ressalva.
+        // |T| = 8 + 20 - 1 = 27.
+        8,
+        20,
+      ),
+      ...POPULATION,
+      max_hours: FACTORIAL_MAX_HOURS,
+      // Γ_min alto porque o conjunto elegível é grande: ~8 obrigatórias do
+      // período mais as 24 optativas, que não têm pré-requisito e estão sempre
+      // abertas. Com poucos créditos o lance quantiza — o aluno não consegue
+      // sequer diferenciar o que quer — e a mensagem vira um conjunto, que é
+      // justamente o que a linha de base por CR já envia.
+      base_credits: 60,
+    }),
+  },
   {
     id: "computacao",
     name: "Computação",
-    hint: "Grade de 6 períodos × 6 disciplinas encadeadas, mais 24 optativas. 360 alunos em 6 gerações, 14 períodos.",
+    hint: "Grade de 6 períodos × 6 disciplinas encadeadas, mais 24 optativas. 360 alunos em 6 gerações, 22 períodos.",
     build: (): Scenario => ({
       ...commonScenario(
         [...toDisciplines(GRADE), ...toElectives(OPTATIVAS)],
         STUDENTS_PER_PERIOD,
         ELECTIVE_HOURS,
-        // |T| = 14. O piso para concluir é 8 períodos com as optativas (era 6),
-        // e na prática ele sai um acima do teórico. Com L = 6, a última geração
-        // entra em t = 6 e precisa chegar ao fim: 6 - 1 + 9 = 14.
-        14,
+        // 6 gerações — o piso teórico da grade, que tem seis elos de cadeia.
+        //
+        // Residência de 17, e não os 9 que reproduziriam o |T| = 14 histórico deste
+        // preset. Com 9 o jubilamento morderia quase todo mundo: o piso para
+        // concluir já é 8 períodos com as optativas, e na prática sai acima
+        // disso. Pior, |T| = 14 era justamente o horizonte que **truncava** —
+        // medido a 22 períodos, os três braços formam 360/360, e o vão em
+        // diplomas que aparecia em 14 era a cauda direita da distribuição, não
+        // lentidão. Dezessete dá à geração mais tardia os mesmos períodos que
+        // ela tinha ali (22 − 6 + 1), de modo que o jubilamento não morde e o
+        // tempo de formatura sai sem viés de sobrevivência. |T| = 22.
+        6,
+        17,
       ),
       ...POPULATION,
       // Γ_min = 40. Com ~12 elegíveis na fase em que a exigência optativa

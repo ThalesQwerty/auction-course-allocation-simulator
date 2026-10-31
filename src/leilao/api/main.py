@@ -105,14 +105,15 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
     return SimulationConfig(
         disciplines=[
             Discipline(
-                d.name,
-                d.seats,
-                d.hours,
-                d.difficulty,
-                tuple(d.unlocks),
-                d.entry,
-                d.elective,
-                d.stability,
+                name=d.name,
+                seats=d.seats,
+                hours=d.hours,
+                difficulty=d.difficulty,
+                unlocks=tuple(d.unlocks),
+                entry=d.entry,
+                elective=d.elective,
+                stability=d.stability,
+                attractiveness=d.attractiveness,
             )
             for d in req.disciplines
         ],
@@ -127,6 +128,7 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
         max_hours=req.max_hours,
         periods=req.periods,
         entry_periods=req.entry_periods,
+        max_residence=req.max_residence,
         students_per_period=req.students_per_period,
         rounds=req.rounds,
         min_grade=req.min_grade,

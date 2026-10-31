@@ -89,7 +89,8 @@ export function Project() {
       <h2>A universidade simulada</h2>
       <p>
         Não há cursos: todo aluno é da universidade e cursa a mesma grade, e{" "}
-        <strong>toda disciplina é obrigatória</strong> — conclui quem aprova em todas. O que ordena
+        a <strong>obrigatória</strong> tem de ser aprovada uma a uma e a{" "}
+        <strong>optativa</strong> conta só pela carga. O que ordena
         a grade são os <strong>sucessores</strong>: cada disciplina declara quais outras
         desbloqueia. A <strong>altura</strong> s<sub>x</sub> sai por indução nessa DAG (0 se não
         desbloqueia nada; senão 1 + max das alturas dos sucessores) e entra na invariante de
@@ -341,8 +342,9 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           divisão no saldo. O anteprojeto não trata do ingresso.
         </li>
         <li>
-          <strong>Conclusão de curso:</strong> toda disciplina é obrigatória, então a eq. (40) vira
-          aprovar na grade inteira — não há carga horária mínima a somar separadamente.
+          <strong>Conclusão de curso:</strong> a eq. (40) vira aprovar em todas as
+          obrigatórias e somar a carga optativa exigida entre as optativas aprovadas — não
+          aprovar em cada uma delas, e é essa substituibilidade que dá ao aluno o que escolher.
         </li>
         <li>
           <strong>Utilidades (u):</strong> um valor por par (aluno, disciplina, período), tirado
@@ -362,7 +364,8 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         </li>
         <li>
           <strong>Ingresso escalonado (t<sub>a</sub>):</strong> entra uma geração nova a cada
-          período, do primeiro ao L-ésimo, com o número de alunos que o cenário definir — como um
+          período, do primeiro ao último com ingresso, com o número de alunos que o cenário
+          definir — como um
           vestibular por semestre. Todas as gerações têm o mesmo tamanho. O anteprojeto não fixa
           a distribuição dos ingressos.
         </li>
@@ -381,9 +384,9 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         </li>
         <li>Choque de horário: existe no motor, mas a simulação ainda não gera horários.</li>
         <li>
-          Qualquer saída sem diploma: a conclusão é a única porta, então não há jubilamento por
-          decurso de prazo nem evasão comportamental. A evasão responde ao mecanismo, e é contra a
-          linha de base por CR que ela precisaria ser medida.
+          Evasão comportamental: há duas portas de saída — concluir e ser jubilado por decurso
+          de prazo —, mas nenhuma é decisão do aluno. A evasão responde ao mecanismo, e é contra
+          a linha de base por CR que ela precisaria ser medida.
         </li>
       </ul>
 

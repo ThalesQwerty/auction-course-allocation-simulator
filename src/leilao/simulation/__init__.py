@@ -66,7 +66,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     **Invariante dos relatórios**: todo período publicado tem pelo menos um
     aluno ativo, e a numeração vai de 1 a `len(periods)` sem buraco. Vale por
     construção — os ingressos ocorrem em períodos consecutivos a partir do
-    primeiro e, passado o último (L), a população só diminui, então o primeiro
+    primeiro e, passado o último deles, a população só diminui, então o primeiro
     período vazio só é seguido de períodos vazios. A simulação para ali.
     """
     draws = prepare(config)
@@ -82,9 +82,10 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     signals = Signals(win={}, pass_rate={}, hours=draws.hours, reach=draws.reach)
 
     for period in range(1, config.periods + 1):
-        # Matriculados: já ingressaram (t_a) e ainda não concluíram.
+        # Matriculados: já ingressaram (t_a) e ainda não saíram — por
+        # conclusão (eq. 40) ou por jubilamento.
         active = [
-            s for s in students if s.entry_period <= period and s.graduated_at is None
+            s for s in students if s.entry_period <= period and s.left_at is None
         ]
         if not active:
             break
@@ -122,6 +123,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 approvals=len(s.approved(config.min_grade)),
                 mean_satisfaction=mean(satisfactions[s.id]),
                 graduated_at=s.graduated_at,
+                dismissed_at=s.dismissed_at,
             )
             for s in students
         ],

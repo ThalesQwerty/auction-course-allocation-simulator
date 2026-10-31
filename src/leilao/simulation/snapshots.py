@@ -139,6 +139,7 @@ def snapshot(
     total_seats: int,
     population: int,
     graduated: int,
+    dismissed: int,
     uses_credits: bool,
 ) -> GroupSnapshot:
     """Um recorte qualquer: a universidade inteira ou uma geração.
@@ -157,6 +158,7 @@ def snapshot(
             active=len(members),
             population=population,
             graduated=graduated,
+            dismissed=dismissed,
             mean_credits=None,
             mean_approved_hours=None,
             credits_per_student=None,
@@ -191,6 +193,7 @@ def snapshot(
         active=len(members),
         population=population,
         graduated=graduated,
+        dismissed=dismissed,
         mean_credits=in_credits(mean(pick(values.credits))),
         mean_approved_hours=mean(pick(values.approved_hours)),
         credits_per_student=in_credits(supply / len(ids)),
@@ -228,7 +231,13 @@ def snapshot_groups(
     livro por eixo que pudesse divergir do estado real.
     """
 
-    def take(group: str | None, members: list[Student], population: int, graduated: int):
+    def take(
+        group: str | None,
+        members: list[Student],
+        population: int,
+        graduated: int,
+        dismissed: int,
+    ):
         return snapshot(
             group=group,
             members=members,
@@ -238,6 +247,7 @@ def snapshot_groups(
             total_seats=total_seats,
             population=population,
             graduated=graduated,
+            dismissed=dismissed,
             uses_credits=config.uses_credits,
         )
 
@@ -247,6 +257,7 @@ def snapshot_groups(
         active,
         len(entered),
         sum(1 for s in entered if s.graduated_at is not None),
+        sum(1 for s in entered if s.dismissed_at is not None),
     )
 
     members: dict[str, list[Student]] = {key: [] for key in axis.order}
@@ -254,6 +265,8 @@ def snapshot_groups(
         members[axis.key(student)].append(student)
     population = Counter(axis.key(s) for s in entered)
     graduated = Counter(axis.key(s) for s in entered if s.graduated_at is not None)
+    dismissed = Counter(axis.key(s) for s in entered if s.dismissed_at is not None)
     return overall, [
-        take(key, members[key], population[key], graduated[key]) for key in axis.order
+        take(key, members[key], population[key], graduated[key], dismissed[key])
+        for key in axis.order
     ]

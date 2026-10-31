@@ -446,6 +446,7 @@ def run_period(
                 prices=prices,
             ),
             graduated_now=closing.graduated_now,
+            dismissed_now=closing.dismissed_now,
         ),
         records=_student_records(
             config=config,

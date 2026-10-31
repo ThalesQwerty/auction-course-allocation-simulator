@@ -1,9 +1,12 @@
-"""O fim do período: notas, retorno de créditos e conclusão de curso.
+"""O fim do período: notas, retorno de créditos, conclusão e jubilamento.
 
 Depois da última rodada saem as notas (eq. 33) das disciplinas obtidas, o
 retorno de créditos que elas geram (eq. 34), o saldo do período seguinte
-(eq. 36) e as conclusões (eq. 40). É a única parte da simulação que escreve
-no `Student`.
+(eq. 36), as conclusões (eq. 40) e os jubilamentos. É a única parte da
+simulação que escreve no `Student`.
+
+As duas saídas são exclusivas e **nesta ordem**: quem fecha a grade no último
+período de residência conta como concluinte, não como jubilado.
 """
 from __future__ import annotations
 
@@ -33,6 +36,7 @@ class PeriodClosing:
     credits_returned: dict[str, int] = field(default_factory=dict)  # Σγ por aluno
     first_grades: list[float] = field(default_factory=list)
     graduated_now: int = 0
+    dismissed_now: int = 0
 
 
 def _grade(
@@ -138,5 +142,11 @@ def close_period(
         ):
             student.graduated_at = period
             closing.graduated_now += 1
+        elif config.dismissal_period(student.entry_period) == period:
+            # Jubilamento: esgotou os períodos de residência sem fechar a
+            # grade. Vem **depois** da conclusão de propósito — quem fecha a
+            # grade no último período permitido sai pela porta da frente.
+            student.dismissed_at = period
+            closing.dismissed_now += 1
 
     return closing

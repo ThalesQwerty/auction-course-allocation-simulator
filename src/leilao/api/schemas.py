@@ -12,7 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..auction import AuctionResult
 from ..comparison import MAX_RUNS
-from ..config import CreditMemory, CreditReturnPolicy, Mechanism, Resolver
+from ..config import (
+    CreditMemory,
+    CreditReturnPolicy,
+    Mechanism,
+    Resolver,
+    horizon_for_lifecycle,
+)
 
 
 class AgentIn(BaseModel):
@@ -89,8 +95,19 @@ class DisciplineIn(BaseModel):
         default=1.0,
         gt=0,
         description=(
-            "D_x — quantas tentativas a disciplina custa para render o que uma de "
+            "a dificuldade, em quantas tentativas a disciplina custa para render "
+            "o que uma de "
             "dificuldade 1 rende de primeira"
+        ),
+    )
+    attractiveness: float = Field(
+        default=1.0,
+        gt=0,
+        description=(
+            "A_x — atratividade, em múltiplos da disciplina média. É a parte do gosto "
+            "comum a toda a população, enquanto `utility_sigma` é a privada de cada "
+            "aluno; a razão entre as duas é a correlação de preferência entre alunos. "
+            "Ordena dentro de uma mesma altura da grade, não entre alturas."
         ),
     )
     elective: bool = Field(
@@ -151,7 +168,8 @@ class ScenarioIn(BaseModel):
         ge=0,
         description=(
             "ganho por recursada: quanta tentativa efetiva cada repetição "
-            "acrescenta no denominador do expoente. 1 recupera o D/t"
+            "acrescenta no denominador do expoente. 1 recupera a dificuldade "
+            "dividida pela tentativa"
         ),
     )
     utility_sigma: float = Field(
@@ -168,22 +186,43 @@ class ScenarioIn(BaseModel):
     max_hours: int = Field(
         default=360, ge=1, description="W_a — carga horária máxima por período"
     )
-    periods: int = Field(default=1, ge=1, le=40, description="|T| — períodos letivos")
-    entry_periods: int | None = Field(
-        default=None,
+    entry_periods: int = Field(
+        default=8,
         ge=1,
         le=40,
         description=(
-            "L — em quantos dos |T| períodos entra geração nova, contados do primeiro. "
-            "Null = em todos. Com L < |T| há uma fase de drenagem depois do último "
-            "ingresso, em que a população só diminui."
+            "em quantos períodos entra geração nova, contados do primeiro. Depois "
+            "do último ingresso vem a fase de drenagem, em que a população só diminui."
         ),
     )
+    max_residence: int = Field(
+        default=12,
+        ge=1,
+        le=40,
+        description=(
+            "períodos que o aluno tem para concluir, contados do ingresso. Quem chega "
+            "ao fim do último sem fechar a grade é jubilado e sai da simulação."
+        ),
+    )
+
+    @property
+    def periods(self) -> int:
+        """|T|, derivado — ver `config.horizon_for_lifecycle`.
+
+        Não é campo porque não é escolha: a última geração sai ao fim da
+        residência dela e depois disso não há mais ninguém a simular. Deixá-lo
+        configurável permitiria um horizonte que corta gerações pela metade ou
+        que roda períodos vazios no fim.
+        """
+        return horizon_for_lifecycle(
+            entry_periods=self.entry_periods, max_residence=self.max_residence
+        )
     students_per_period: int = Field(
         default=1,
         ge=1,
         description=(
-            "alunos que ingressam em cada período com ingresso; a população é isto × L. "
+            "alunos que ingressam em cada período com ingresso; a população é isto "
+            "vezes a quantidade desses períodos. "
             "Não pode passar da menor oferta entre as disciplinas de entrada, porque "
             "o ingressante tem vaga garantida em todas elas."
         ),
@@ -284,6 +323,7 @@ class CohortSeriesOut(BaseModel):
     cohort: list[int]
     graduates: list[int]
     graduation_rate: list[float]
+    dismissal_rate: list[float]
     efficiency: list[float]
     utilization: list[float]
     fidelity: list[float]
@@ -308,6 +348,10 @@ class RunSummaryOut(BaseModel):
     # Concluintes da execução — o contexto sem o qual `time_to_graduate` não se
     # lê: quem forma menos pode exibir um tempo menor só por sobrarem os rápidos.
     graduates: int
+    # Jubilados da execução, e o total que entrou — o denominador das duas
+    # frações que a tela mostra.
+    dismissed: int
+    population: int
     efficiency: float  # eq. (53)
     # Aproveitamento: a contraparte em carga do psi, que é em utilidade.
     utilization: float
@@ -392,6 +436,7 @@ class GroupSnapshotOut(BaseModel):
     # denominador da fração de formados.
     population: int
     graduated: int
+    dismissed: int
     mean_credits: float | None
     mean_approved_hours: float | None
     credits_per_student: float | None
@@ -455,6 +500,7 @@ class PeriodReportOut(BaseModel):
     aggregate: RoundReportOut
     disciplines: list[DisciplineSnapshotOut]
     graduated_now: int
+    dismissed_now: int
 
 
 class StudentSummaryOut(BaseModel):
@@ -471,6 +517,7 @@ class StudentSummaryOut(BaseModel):
     approvals: int
     mean_satisfaction: float
     graduated_at: int | None
+    dismissed_at: int | None
 
 
 class RequestRecordOut(BaseModel):

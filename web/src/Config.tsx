@@ -3,7 +3,7 @@ import { DensityChart, STATUS } from "./charts";
 import { entryDisciplines } from "./curriculum";
 import { gradeCurve, utilityCurve } from "./distributions";
 import { PresetList } from "./PresetList";
-import { COMPARISON_ARMS, MAX_COMPARISON_RUNS } from "./types";
+import { COMPARISON_ARMS, MAX_COMPARISON_RUNS, horizonFor } from "./types";
 import type { Scenario } from "./types";
 
 export function Config({
@@ -43,6 +43,9 @@ export function Config({
     ? Math.min(...entryCourses.map((d) => d.seats))
     : 0;
   const entryTooLarge = config.students_per_period > smallestEntrySeats;
+  // |T| não se configura: sai do ciclo de vida da população. Depois que a
+  // última geração sai — concluída ou jubilada — não há mais ninguém a simular.
+  const horizon = horizonFor(config.entry_periods, config.max_residence);
   const entryTooHeavy = entryHours > config.max_hours;
 
   // O recorte que cada prévia desenha. Nada disto é parâmetro de cenário: não
@@ -50,6 +53,7 @@ export function Config({
   const [difficulty, setDifficulty] = useState(1);
   const [attempt, setAttempt] = useState(1);
   const [relativeUtility, setRelativeUtility] = useState(1);
+  const [attractiveness, setAttractiveness] = useState(1);
 
   // As duas distribuições de entrada, recalculadas a cada tecla. São curvas, e
   // não barras: aqui não há dado contado, e sim a forma que os parâmetros
@@ -58,7 +62,10 @@ export function Config({
     () => gradeCurve(config, { difficulty, attempt, relativeUtility }),
     [config, difficulty, attempt, relativeUtility]
   );
-  const utilities = useMemo(() => utilityCurve(config), [config]);
+  const utilities = useMemo(
+    () => utilityCurve(config, attractiveness),
+    [config, attractiveness]
+  );
   // O eixo da utilidade é o suporte da própria amostra, que a curva já carrega
   // no último ponto.
   const utilityTop = utilities.points.length
@@ -100,27 +107,31 @@ export function Config({
 
           <div className="field-row">
             <div className="field">
-              <label>Períodos (|T|)</label>
-              <input
-                type="number"
-                min={1}
-                max={40}
-                value={config.periods}
-                onChange={(e) => patch({ periods: Number(e.target.value) })}
-              />
-            </div>
-            <div className="field">
               <label>Períodos com ingresso</label>
               <input
                 type="number"
                 min={1}
-                max={config.periods}
-                placeholder={String(config.periods)}
-                value={config.entry_periods ?? ""}
-                onChange={(e) =>
-                  patch({ entry_periods: e.target.value === "" ? null : Number(e.target.value) })
-                }
+                max={40}
+                value={config.entry_periods}
+                onChange={(e) => patch({ entry_periods: Number(e.target.value) })}
               />
+              <span className="field-hint">
+                Quantas gerações entram. Depois da última vem a drenagem.
+              </span>
+            </div>
+            <div className="field">
+              <label>Jubilamento</label>
+              <input
+                type="number"
+                min={1}
+                max={40}
+                value={config.max_residence}
+                onChange={(e) => patch({ max_residence: Number(e.target.value) })}
+              />
+              <span className="field-hint">
+                Períodos para concluir. Daí <strong>|T| = {horizon}</strong>: é quando a
+                última geração sai, e depois dela não há mais quem simular.
+              </span>
             </div>
             <div className="field">
               <label>Alunos novos por período</label>
@@ -223,6 +234,25 @@ export function Config({
                 points={utilities.points}
                 domain={[0, utilityTop]}
                 footer={<>mais provável: {utilityValue(utilities.mode)}</>}
+                controls={
+                  <div className="field-row">
+                    <div className="field">
+                      <label>Atratividade</label>
+                      {/* O recorte, não o cenário: a curva é a de uma
+                          disciplina com esta atratividade quando as demais
+                          estão em 1. No cenário ela é declarada por
+                          disciplina. O min é a base da escada do stepper, e
+                          o 0 é aparado na prévia. */}
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={attractiveness}
+                        onChange={(e) => setAttractiveness(Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                }
               />
             </div>
           </div>
@@ -325,7 +355,7 @@ export function Config({
                 controls={
                   <div className="field-row">
                     <div className="field">
-                      <label>Dificuldade (D)</label>
+                      <label>Dificuldade</label>
                       {/* O min é a base da escada do stepper: com min 0 e passo
                           0,1 a grade é 0 · 0,1 · 0,2, e o padrão (1) cai nela.
                           O 0 é aparado na prévia. */}
@@ -338,7 +368,7 @@ export function Config({
                       />
                     </div>
                     <div className="field">
-                      <label>Tentativa (t)</label>
+                      <label>Tentativa</label>
                       <input
                         type="number"
                         min={1}

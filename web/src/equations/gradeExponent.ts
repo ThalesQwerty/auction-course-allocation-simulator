@@ -1,15 +1,15 @@
 /** O expoente da fórmula da nota.
  *
- *     E = D / ( u_rel^g_u · tentativas )
- *     tentativas = 1 + g_t · (t − 1)
+ *     E = dificuldade / ( u_rel^g_u · esforço )
+ *     esforço = 1 + g_t · (tentativa − 1)
  *
  * O denominador de `equations.grade_for_attempt`, isolado porque é o que a
  * prévia precisa: com ele, a densidade da nota sai em forma fechada e a
  * aprovação sai da quadratura.
  *
  * Os dois ganhos dividem este lugar, e por isso se leem juntos: com os dois em
- * 1 o expoente é `D/t`, de modo que **dificuldade 2 na segunda tentativa
- * equivale a dificuldade 1 na primeira**.
+ * 1 o expoente é a dificuldade dividida pela tentativa, de modo que
+ * **dificuldade 2 na segunda tentativa equivale a dificuldade 1 na primeira**.
  *
  * Os pisos são da prévia, não do modelo: aqui eles evitam um gráfico
  * degenerado enquanto se digita; no motor é a validação do cenário que

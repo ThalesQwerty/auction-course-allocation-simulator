@@ -2,22 +2,24 @@
 
     n = round(100 · a^E) / 10
 
-        E           = D / (u_rel^g_u · tentativas)
-        tentativas  = 1 + g_t · (t − 1)
+        E           = dificuldade / (u_rel^g_u · esforço)
+        esforço     = 1 + g_t · (tentativa − 1)
 
 - **a** é a aptidão do aluno naquela disciplina, em (0, 1), sorteada uma vez
   e persistente. Com E = 1 a nota *é* a aptidão, o que lhe dá leitura direta:
   "a nota que este aluno tiraria nesta disciplina, de dificuldade padrão, de
   primeira".
-- **D** é a dificuldade, em múltiplos da disciplina padrão.
+- A **dificuldade** entra em múltiplos da disciplina padrão.
 - **u_rel** é a utilidade da disciplina para o aluno em múltiplos da
   indiferença (`u · |disciplinas|`), e **g_u** o ganho por utilidade.
-- **t** é a tentativa e **g_t** o ganho por recursada.
+- A **tentativa** é a vez em que ele está cursando, e **g_t** o ganho por
+  recursada.
 
 Os dois ganhos dividem o denominador do expoente, e por isso se leem juntos:
 cada um diz quanto um fator desconta da demanda que a disciplina faz. Com os
-dois em 1 o expoente é `D/t`, de modo que **dificuldade 2 na segunda tentativa
-equivale a dificuldade 1 na primeira** — a lei de potência da prática.
+dois em 1 o expoente é a dificuldade dividida pela tentativa, de modo que
+**dificuldade 2 na segunda tentativa equivale a dificuldade 1 na primeira** —
+a lei de potência da prática.
 
 A forma de potência tem história generativa: se a disciplina são E unidades
 independentes e o aluno domina cada uma com probabilidade `a`, então `a^E` é a

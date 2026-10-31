@@ -34,9 +34,19 @@ class Student:
     # a aprovação. A nota de cada tentativa vive no histórico do período.
     grades: dict[str, float] = field(default_factory=dict)
     attempts: dict[str, int] = field(default_factory=dict)
-    # Período em que concluiu — eq. (40). É a **única** porta de saída: quem
-    # não concluiu continua disputando até o fim do horizonte.
+    # Período em que concluiu — eq. (40).
     graduated_at: int | None = None
+    # Período em que foi **jubilado**: chegou ao fim da residência sem fechar a
+    # grade. A segunda (e última) porta de saída, e só existe quando o cenário
+    # declara `max_residence`. Quem conclui *no* último período de residência
+    # sai concluinte — a conclusão é testada antes.
+    dismissed_at: int | None = None
+
+    @property
+    def left_at(self) -> int | None:
+        """O período em que o aluno deixou a simulação, por qualquer das duas
+        portas. `None` enquanto ele ainda disputa."""
+        return self.graduated_at if self.graduated_at is not None else self.dismissed_at
     # Como este aluno traduz utilidade em mensagem. Hoje todo mundo carrega o
     # neutro, que reproduz o modelo sem comportamento bit a bit; o campo
     # existe para que a evolução desses coeficientes seja um experimento, e
@@ -68,10 +78,11 @@ def generate_students(
     (eq. 37).
 
     O ingresso (t_a, eq. 31) é escalonado: entra uma geração nova a cada
-    período letivo, do primeiro ao L-ésimo, com exatamente
+    período letivo, do primeiro ao último com ingresso, com exatamente
     `students_per_period` alunos — como numa universidade, que abre vestibular
-    todo semestre em vez de matricular toda a população de uma vez. Quando
-    L < |T| os períodos seguintes não recebem ninguém: é a fase de drenagem.
+    todo semestre em vez de matricular toda a população de uma vez. Quando são
+    menos que |T|, os períodos seguintes não recebem ninguém: é a fase de
+    drenagem.
 
     O período de ingresso **não** vem da seed. As gerações têm todas o mesmo
     tamanho, em períodos consecutivos, e isso importa para comparar cenários:

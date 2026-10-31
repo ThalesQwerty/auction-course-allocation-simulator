@@ -186,6 +186,32 @@ const METRICS: Metric[] = [
     zeroLine: true,
   },
   {
+    id: "graduation_rate",
+    title: "Fração de concluintes",
+    short: "Concluintes",
+    of: (run) => (run.population ? run.graduates / run.population : null),
+    // Fração, e não contagem: o absoluto depende do tamanho do ingresso, e os
+    // braços só são comparáveis na mesma escala.
+    series: { cohort: byCohort("graduation_rate") },
+    betterWhen: "higher",
+    bounds: [0, 1],
+    format: formatRatio,
+  },
+  {
+    id: "dismissal_rate",
+    title: "Fração de jubilados",
+    short: "Jubilados",
+    of: (run) => (run.population ? run.dismissed / run.population : null),
+    // Não é o complemento da anterior: entre as duas fica quem ainda estava em
+    // curso quando o horizonte acabou. Nas gerações tardias esse resto é
+    // grande, e é por isso que as duas se leem juntas e não uma no lugar da
+    // outra.
+    series: { cohort: byCohort("dismissal_rate") },
+    betterWhen: "lower",
+    bounds: [0, 1],
+    format: formatRatio,
+  },
+  {
     id: "time_to_graduate",
     title: "Tempo de formatura (períodos)",
     short: "Tempo (períodos)",

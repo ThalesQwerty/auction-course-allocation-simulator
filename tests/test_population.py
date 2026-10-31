@@ -486,3 +486,70 @@ def test_a_discipline_can_carry_its_own_stability():
 
     assert lag_correlation("FIXA") > 0.9
     assert abs(lag_correlation("SOLTA")) < 0.2
+
+
+# --- a atratividade --------------------------------------------------------
+
+
+def _rows_for(disciplines, **overrides):
+    config = SimulationConfig(
+        disciplines=disciplines,
+        periods=3,
+        students_per_period=12,
+        max_hours=240,
+        seed=11,
+        **overrides,
+    )
+    rng = np.random.default_rng(config.seed)
+    return draw_utilities(generate_students(config, rng), config, rng)
+
+
+def _pair(attractiveness):
+    """Duas disciplinas de mesma altura — a única diferença é o A de X."""
+    return [
+        Discipline(name="X", seats=20, hours=60, entry=True,
+                   attractiveness=attractiveness),
+        Discipline(name="Y", seats=20, hours=60, entry=True),
+    ]
+
+
+def test_attractiveness_moves_the_whole_population_the_same_way():
+    """A_x é a parte do gosto **comum**: ela desloca a média da população, e é
+    isso que a distingue de sigma, que só espalha cada aluno em torno dela.
+
+    É essa componente comum que torna a própria preferência um sinal sobre a
+    preferência alheia — sem ela as linhas são independentes e ninguém pode
+    antecipar a disputa a partir do que gosta."""
+    mean_of = lambda a: np.mean([row["X"] for row in _rows_for(_pair(a)).values()])
+    assert mean_of(2.0) > mean_of(1.0) > mean_of(0.5)
+
+
+def test_attractiveness_one_is_the_neutral():
+    """1 é a disciplina média, e declarar 1 tem de dar exatamente o que dá não
+    declarar nada — é a regressão que garante que o eixo novo não mexeu nos
+    cenários que não o usam."""
+    assert _rows_for(_pair(1.0)) == _rows_for(
+        [Discipline(name="X", seats=20, hours=60, entry=True),
+         Discipline(name="Y", seats=20, hours=60, entry=True)]
+    )
+
+
+def test_the_height_invariant_beats_any_attractiveness():
+    """A_x ordena **dentro** de uma altura, nunca entre alturas: o degrau da
+    eq. (41) é a amplitude da linha mais 1, maior que qualquer atratividade.
+
+    A consequência que importa no cenário é esta: optativa tem altura 0, então
+    nenhuma atratividade a faz passar à frente de uma obrigatória, e o aluno
+    não troca progresso por gosto."""
+    rows = _rows_for([
+        Discipline(name="OBR", seats=20, hours=60, entry=True, unlocks=("SEG",)),
+        Discipline(name="SEG", seats=20, hours=60),
+        Discipline(name="OPT", seats=20, hours=60, elective=True,
+                   attractiveness=50.0),
+    ], elective_hours=60)
+    assert all(row["OBR"] > row["OPT"] for row in rows.values())
+
+
+def test_attractiveness_must_be_positive():
+    with pytest.raises(ValueError, match="atratividade"):
+        Discipline(name="X", seats=1, hours=60, attractiveness=0.0)

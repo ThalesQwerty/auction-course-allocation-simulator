@@ -4,9 +4,9 @@ export interface DisciplineInput {
   name: string;
   seats: number; // q_x — vagas
   hours: number; // w_x — carga horária
-  /** D_x — quantas tentativas a disciplina custa para render o que uma de
-   * dificuldade 1 rende de primeira. Na fórmula da nota entra como a razão
-   * D/t. Opcional: ausente é 1. */
+  /** A dificuldade, em quantas tentativas a disciplina custa para render o
+   * que uma de dificuldade 1 rende de primeira. Na fórmula da nota ela entra
+   * dividida pela tentativa. Opcional: ausente é 1. */
   difficulty?: number;
   /** Sucessores: disciplinas que esta desbloqueia. Vazio = terminal, altura 0. */
   unlocks: string[];
@@ -14,6 +14,12 @@ export interface DisciplineInput {
    * pré-requisito não faz a disciplina ser de entrada — a optativa também não
    * tem e fica fora da garantia. */
   entry: boolean;
+  /** A_x — atratividade, em múltiplos da disciplina média. É a parte do gosto
+   * **comum a toda a população**, enquanto `utility_sigma` é a privada de cada
+   * aluno; a razão entre as duas é a correlação de preferência entre alunos.
+   * Ordena dentro de uma mesma altura da grade, nunca entre alturas — a
+   * invariante de altura é maior que qualquer A. Opcional: ausente é 1. */
+  attractiveness?: number;
   /** Optativa: não desbloqueia nada, não é de entrada, e concluir não exige
    * aprovar em cada uma — exige somar `elective_hours` entre as aprovadas. É
    * isso que as torna substituíveis entre si. Ortogonal a `entry`. */
@@ -84,8 +90,9 @@ export interface Scenario {
    * principal, então ela é parâmetro reportado e não suposição silenciosa. */
   utility_gain: number; // >= 0
   /** **Ganho por recursada**: quanta tentativa efetiva cada repetição
-   * acrescenta no denominador do expoente. Em 1 o denominador é o próprio `t`
-   * e o expoente é `D/t`; em 0 a recursada não rende nada, e aí quem reprova
+   * acrescenta no denominador do expoente. Em 1 o denominador é a própria
+   * tentativa e o expoente é a dificuldade dividida por ela; em 0 a recursada
+   * não rende nada, e aí quem reprova
    * uma vez reprova sempre. Os dois ganhos dividem o mesmo lugar na fórmula,
    * e é por isso que se leem juntos. */
   retake_gain: number; // >= 0
@@ -102,15 +109,20 @@ export interface Scenario {
   utility_sigma: number; // > 0
   /** W_a — carga horária máxima por período, eq. (4). Igual para todos. */
   max_hours: number;
-  periods: number; // |T|
-  /** L — em quantos dos |T| períodos entra geração nova, contados do primeiro.
-   * `null` = em todos. Com L < |T| há uma fase de drenagem depois do último
-   * ingresso: ninguém mais entra e a população só diminui, o que dá às gerações
-   * tardias tempo de chegar ao fim do curso em vez de serem cortadas pelo
-   * horizonte. **Só existem L gerações** — os períodos de drenagem não têm
+  /** Em quantos períodos entra geração nova, contados do primeiro. Depois do
+   * último ingresso vem a drenagem: ninguém mais entra e a população só
+   * diminui, o que dá às gerações tardias tempo de chegar ao fim do curso.
+   * **Só há uma geração por período com ingresso** — os de drenagem não têm
    * geração correspondente. */
-  entry_periods: number | null;
-  /** Alunos que ingressam em cada período com ingresso; a população é isto × L.
+  entry_periods: number;
+  /** Períodos que o aluno tem para concluir, contados do ingresso. Quem chega
+   * ao fim do último sem fechar a grade é **jubilado** e sai da simulação. Com
+   * `entry_periods`, fecha o ciclo de vida da população e determina |T|
+   * (`horizonFor`): o motor recebe o horizonte, mas quem o escolhe são estes
+   * dois. */
+  max_residence: number;
+  /** Alunos que ingressam em cada período com ingresso; a população é isto
+   * vezes a quantidade desses períodos.
    * Não pode passar da menor oferta entre as disciplinas de entrada, porque o
    * ingressante tem vaga garantida em todas elas. */
   students_per_period: number;
@@ -262,6 +274,10 @@ export interface CohortSeries {
    * naquele período. É ela que se desenha — a contagem depende do tamanho do
    * ingresso, a fração é comparável entre gerações. */
   graduation_rate: number[];
+  /** A fração da geração que foi **jubilada**, mesmo denominador. As duas só
+   * somam 1 na geração que já se esvaziou: nas tardias falta o pedaço que
+   * ainda estava em curso quando o horizonte acabou. */
+  dismissal_rate: number[];
   efficiency: number[];
   utilization: number[];
   fidelity: number[];
@@ -288,6 +304,10 @@ export interface RunSummary {
    * `time_to_graduate` não se lê — quem forma menos gente pode exibir um tempo
    * menor só porque sobraram os rápidos. */
   graduates: number;
+  /** Jubilados da execução: esgotaram a residência sem fechar a grade. */
+  dismissed: number;
+  /** Quantos ingressaram ao todo — o denominador das duas frações. */
+  population: number;
   efficiency: number; // ψ̄ — eq. (53)
   /** Aproveitamento: carga horária obtida ÷ W_a. A contraparte em carga do ψ,
    * que é em utilidade — as duas se separam onde está a patologia que
@@ -399,6 +419,10 @@ export interface GroupSnapshot {
    * denominador da fração de formados. */
   population: number;
   graduated: number;
+  /** Jubilados acumulados. Com `graduated`, reparte `population` em três: quem
+   * saiu por cima, quem saiu por baixo e quem ainda disputa. As duas frações
+   * só somam 1 no fim do horizonte. */
+  dismissed: number;
   mean_credits: number | null;
   mean_approved_hours: number | null;
   /** Oferta de créditos do início do período (C_a^(t,1), antes dos lances),
@@ -470,6 +494,7 @@ export interface PeriodReport {
   aggregate: RoundReport;
   disciplines: DisciplineSnapshot[];
   graduated_now: number;
+  dismissed_now: number;
 }
 
 export interface StudentSummary {
@@ -488,6 +513,7 @@ export interface StudentSummary {
   /** Período em que concluiu o curso — a **única** porta de saída. Quem não
    * concluiu continua disputando até o fim do horizonte. */
   graduated_at: number | null;
+  dismissed_at: number | null;
 }
 
 /** Rodada de `won_round` quando a vaga não veio de rodada nenhuma: é a
@@ -580,8 +606,8 @@ export function defaultScenario(): Scenario {
     credit_memory: "carry",
     utility_sigma: 0.25,
     max_hours: 360,
-    periods: 1,
-    entry_periods: null,
+    entry_periods: 8,
+    max_residence: 12,
     students_per_period: 1,
     rounds: 1,
     min_grade: 5,
@@ -628,3 +654,14 @@ export interface PlaygroundResponse {
   rounds: PlaygroundRound[];
   grades: { student_id: string; discipline: string; grade: number }[];
 }
+
+/** |T| — o horizonte que esgota a população, dado o ciclo de vida dela.
+ *
+ * Espelha `config.horizon_for_lifecycle` do motor, porque a tela de
+ * configuração precisa do número ao vivo, enquanto o usuário mexe nos dois
+ * controles de que ele sai. O **menos um** é a sobreposição do primeiro
+ * período: a geração que entra em t = 1 já gasta ali o primeiro período de
+ * residência dela.
+ */
+export const horizonFor = (entryPeriods: number, maxResidence: number): number =>
+  entryPeriods + maxResidence - 1;

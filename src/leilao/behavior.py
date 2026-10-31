@@ -106,6 +106,24 @@ def _stability_by_discipline(config: SimulationConfig) -> np.ndarray:
     ).reshape(1, 1, -1)
 
 
+def _attractiveness(config: SimulationConfig) -> np.ndarray:
+    """A_x de cada disciplina, pronta para somar no logaritmo.
+
+    É a **componente comum** do gosto: todo aluno a recebe igual, enquanto
+    sigma reparte o que é privado de cada um. A razão entre as duas é
+    literalmente a correlação de preferência entre dois alunos no mesmo
+    período — a irmã do que `stability` faz entre dois períodos do mesmo aluno.
+
+    Entra como deslocamento do log porque a utilidade preliminar é log-normal:
+    multiplicar o sorteio por A é somar ln A antes de exponenciar, e aí A
+    continua sendo "múltiplos da disciplina média" em vez de virar um segundo
+    botão de dispersão.
+    """
+    return np.log(
+        np.array([d.attractiveness for d in config.disciplines], dtype=float)
+    ).reshape(1, 1, -1)
+
+
 def draw_utilities(
     students: list["Student"], config: SimulationConfig, rng: np.random.Generator
 ) -> dict[tuple[str, int], dict[str, float]]:
@@ -127,8 +145,18 @@ def draw_utilities(
     multiplica a linha por uma constante. E a moda do sorteio cru é e^{−σ²},
     sempre positiva: não há limiar de σ a respeitar.
 
+    **A atratividade da disciplina desloca esse logaritmo** (`_attractiveness`):
+    sigma é a dispersão privada de cada aluno, A_x é o nível comum a todos. Com
+    A uniforme as linhas são independentes e a disputa por uma disciplina não
+    tem como ser antecipada pelo próprio gosto; com A espalhado, gostar muito de
+    algo passa a ser sinal de que os colegas também gostam.
+
     O que vem depois do sorteio — deslocamento por altura e normalização —
-    está em `equations.utility_row`.
+    está em `equations.utility_row`. Note que **a invariante de altura domina a
+    atratividade**: o degrau entre camadas é a amplitude da linha mais 1, maior
+    que qualquer A, de modo que A ordena dentro de uma altura e não entre
+    alturas. Como optativa tem altura 0, nenhuma atratividade a faz passar à
+    frente de uma obrigatória.
     """
     names = [d.name for d in config.disciplines]
     shape = (len(students), config.periods, len(names))
@@ -137,7 +165,7 @@ def draw_utilities(
         seasonal=rng.normal(0.0, 1.0, size=shape),
         stability=_stability_by_discipline(config),
         sigma=config.utility_sigma,
-    )
+    ) + _attractiveness(config)
     heights = config.heights()
     normalized = normalize_with_height_shift(
         np.maximum(np.exp(log), UNDERFLOW_GUARD),

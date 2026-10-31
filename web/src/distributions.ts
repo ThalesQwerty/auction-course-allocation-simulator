@@ -23,8 +23,9 @@ import type { Scenario } from "./types";
 
 export type { Curve, DensityPoint } from "./equations";
 
-/** O caso que a prévia das notas desenha: uma disciplina de dificuldade `D`
- * na `t`-ésima tentativa. Não é parâmetro de cenário — é o recorte que se
+/** O caso que a prévia das notas desenha: uma disciplina de uma dada
+ * dificuldade, numa dada tentativa. Não é parâmetro de cenário — é o recorte
+ * que se
  * escolhe para olhar, e por isso vive na tela e não em `Scenario`. */
 export interface GradeCase {
   difficulty: number;
@@ -36,8 +37,8 @@ export interface GradeCase {
   relativeUtility: number;
 }
 
-/** A curva das notas de uma disciplina de dificuldade `D` na `t`-ésima
- * tentativa, sobre a escala inteira de 0 a 10.
+/** A curva das notas de uma disciplina de uma dada dificuldade, na tentativa
+ * escolhida, sobre a escala inteira de 0 a 10.
  *
  * Curva para a forma, quadratura para o número: a **aprovação** não sai da
  * curva, porque a quadratura integra certo mesmo onde a densidade diverge na
@@ -74,21 +75,33 @@ const FINE_CELLS = 600;
 /** Largura do núcleo gaussiano, em células do grid fino. */
 const KERNEL_CELLS = 10;
 
+/** Campo vazio vira 0, e atratividade 0 zeraria a linha inteira. */
+const MIN_ATTRACTIVENESS = 0.1;
+
 /** A curva de como um aluno reparte a preferência, em **utilidade relativa**:
  * a fração vezes o número de disciplinas, de modo que 1 é a indiferença e a
  * média é exatamente 1 em qualquer cenário. O eixo vai de 0 ao maior valor
  * sorteado — é o suporte da distribuição, e é ele que uma densidade desenha.
+ *
+ * A `attractiveness` é o **recorte** que se olha, como a dificuldade é na
+ * prévia das notas: a curva é a de uma disciplina com aquela atratividade,
+ * quando as demais estão em 1. Não é parâmetro de cenário — lá ela é
+ * declarada por disciplina.
  *
  * A régua da **fração** saiu em 30/10/2026: ela mede a mesma distribuição
  * dividida por |disciplinas|, e com isso o eixo x encolhia na mesma
  * proporção — numa grade de 60 a massa inteira cabia em 4% do eixo e a
  * densidade subia a 100, o que não se lê.
  */
-export function utilityCurve(scenario: Scenario): Curve {
+export function utilityCurve(scenario: Scenario, attractiveness = 1): Curve {
   const size = scenario.disciplines.length;
   if (size < 2) return { points: [], mode: 0 };
 
-  const values = relativeUtilitySample(size, scenario.utility_sigma);
+  const values = relativeUtilitySample(
+    size,
+    scenario.utility_sigma,
+    attractiveness > 0 ? attractiveness : MIN_ATTRACTIVENESS
+  );
   const highest = values.reduce((max, value) => Math.max(max, value), 0);
   if (!(highest > 0)) return { points: [], mode: 0 };
 

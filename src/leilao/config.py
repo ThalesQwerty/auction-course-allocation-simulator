@@ -11,8 +11,10 @@ sorteou para ele. Os eixos de aptidão e afinidade existiram até
 08/10/2026 e foram removidos a pedido: a heterogeneidade continua, mas deixa de
 ser *sistemática*, e com ela sai o recorte dos relatórios por perfil.
 
-Não há cursos: todo aluno é da universidade e cursa a mesma grade, e **toda
-disciplina é obrigatória** — só se forma quem aprova em todas. O que ordena a
+Não há cursos: todo aluno é da universidade e cursa a mesma grade. A
+obrigatória tem de ser aprovada uma a uma; a **optativa** (`elective`) conta só
+pela carga, e concluir exige somar `elective_hours` entre as aprovadas — é essa
+substituibilidade que dá ao aluno o que escolher. O que ordena a
 grade são os **sucessores** (`unlocks`): cada disciplina declara quais outras
 ela desbloqueia. A **altura** s_x sai por indução nessa DAG — 0 se não
 desbloqueia nada, senão 1 + max das alturas dos sucessores — e substitui a
@@ -103,11 +105,12 @@ class Discipline:
     name: str
     seats: int  # q_x — vagas
     hours: int  # w_x — carga horária
-    # D_x — a dificuldade, lida em **quantas tentativas a disciplina custa**
-    # para render o que uma de dificuldade 1 rende de primeira: na fórmula da
-    # nota ela entra como a razão D/t, então D = 2 na 2ª tentativa equivale a
-    # D = 1 na 1ª. Ela não precisa ser pública: o que o aluno lê é a taxa de
-    # aprovação do período anterior, que é D filtrada pela população.
+    # A **dificuldade**, lida em **quantas tentativas a disciplina custa** para
+    # render o que uma de dificuldade 1 rende de primeira: na fórmula da nota
+    # ela entra dividida pela tentativa, então dificuldade 2 na 2ª tentativa
+    # equivale a dificuldade 1 na 1ª. Ela não precisa ser pública: o que o
+    # aluno lê é a taxa de aprovação do período anterior, que é a dificuldade
+    # filtrada pela população.
     difficulty: float = 1.0
     unlocks: tuple[str, ...] = ()
     entry: bool = False
@@ -119,6 +122,21 @@ class Discipline:
     # vez de girar, e é essa sincronia (e não a persistência em si) que trava a
     # fila. Por aluno ou por célula o efeito se dilui.
     stability: float | None = None
+    # A_x — a **atratividade**, em múltiplos da disciplina média. Entra como
+    # deslocamento do logaritmo da utilidade preliminar, antes da invariante de
+    # altura: é a componente do gosto **comum a toda a população**, enquanto
+    # sigma é a privada de cada aluno. A razão entre as duas é a correlação de
+    # preferência entre alunos — com A uniforme as linhas são independentes e
+    # ninguém pode prever a disputa pelo próprio gosto; com A espalhado, querer
+    # muito uma disciplina passa a ser sinal de que os colegas também a querem.
+    #
+    # Ela é a irmã estática de `stability`: aquela sincroniza a persistência
+    # entre concorrentes no *tempo*, esta sincroniza o *nível*.
+    #
+    # A invariante de altura a domina entre camadas — `u'_x` soma
+    # `(amplitude + 1)·s_x`, que é maior que qualquer atratividade —, então A
+    # ordena **dentro** de uma mesma altura, que é exatamente onde sigma age.
+    attractiveness: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -129,6 +147,8 @@ class Discipline:
             raise ValueError(f"disciplina {self.name!r}: carga horária (w_x) deve ser > 0")
         if self.difficulty <= 0:
             raise ValueError(f"disciplina {self.name!r}: dificuldade deve ser > 0")
+        if self.attractiveness <= 0:
+            raise ValueError(f"disciplina {self.name!r}: atratividade deve ser > 0")
         if self.stability is not None and not 0.0 <= self.stability <= 1.0:
             raise ValueError(
                 f"disciplina {self.name!r}: a estabilidade deve estar em [0, 1]"
@@ -155,17 +175,32 @@ class SimulationConfig:
 
     disciplines: list[Discipline] = field(default_factory=list)
     periods: int = 1  # |T| — períodos letivos
-    # L — em quantos dos |T| períodos entra geração nova, contados do primeiro.
+    # Em quantos dos |T| períodos entra geração nova, contados do primeiro.
     # `None` = em todos, e aí o último período recebe uma geração que só vive
-    # esse período. Com L < |T| a simulação ganha uma fase de drenagem: depois
-    # do último ingresso a população só diminui, e as gerações tardias têm
-    # tempo de chegar ao fim do curso em vez de serem cortadas pelo horizonte.
+    # esse período. Quando são menos que |T|, a simulação ganha uma fase de
+    # drenagem: depois do último ingresso a população só diminui, e as gerações
+    # tardias têm tempo de chegar ao fim do curso em vez de serem cortadas pelo
+    # horizonte.
     entry_periods: int | None = None
-    # Alunos que ingressam em cada um dos L períodos com ingresso. O ingressante
-    # tem vaga garantida nas disciplinas de entrada, então o ritmo de entrada
-    # não pode passar da menor oferta entre elas — senão a garantia não caberia.
-    # A população é este número vezes L.
+    # Alunos que ingressam em cada período com ingresso. O ingressante tem vaga
+    # garantida nas disciplinas de entrada, então o ritmo de entrada não pode
+    # passar da menor oferta entre elas — senão a garantia não caberia. A
+    # população é este número vezes a quantidade de períodos com ingresso.
     students_per_period: int = 1
+    # **Jubilamento**: quantos períodos o aluno tem para concluir, contados do
+    # ingresso. Quem chega ao fim do último sem concluir sai da simulação e não
+    # disputa mais nada. `None` desliga, e aí a conclusão (eq. 40) volta a ser a
+    # única porta de saída.
+    #
+    # É o que fecha o ciclo de vida da população: o último ingressante sai um
+    # período de residência depois do último ingresso, menos a sobreposição do
+    # primeiro, e depois dele não há mais ninguém. Daí o horizonte derivado em
+    # `horizon_for_lifecycle`, que é o |T| que a tela de configuração mostra.
+    #
+    # A ordem importa no fechamento do período: quem conclui **no** último
+    # período de residência conta como concluinte, não como jubilado — o
+    # jubilamento só alcança quem chegou ao fim dele sem fechar a grade.
+    max_residence: int | None = None
     # --- as duas distribuições que descrevem um aluno -----------------------
     #
     # Todo aluno é igual a todos os outros *em distribuição*: não há mais perfis,
@@ -193,8 +228,9 @@ class SimulationConfig:
     # transforma a suposição em número declarado.
     utility_gain: float = 0.0
     # **Ganho por recursada**: quanta tentativa efetiva cada repetição
-    # acrescenta no denominador do expoente. Em 1 o denominador é o próprio t,
-    # e o expoente é o D/t da lei de potência da prática; em 0,5 a recursada
+    # acrescenta no denominador do expoente. Em 1 o denominador é a própria
+    # tentativa, e o expoente é a dificuldade dividida por ela — a lei de
+    # potência da prática; em 0,5 a recursada
     # rende metade; em 0 ela não rende nada — e aí, com a nota determinística e
     # sem jubilamento, quem reprova uma vez ocupa vaga até o fim do horizonte.
     #
@@ -296,6 +332,8 @@ class SimulationConfig:
             raise ValueError("créditos base (Gamma_min) deve ser >= 1")
         if self.max_hours < 1:
             raise ValueError("carga horária máxima (W_a) deve ser >= 1")
+        if self.max_residence is not None and self.max_residence < 1:
+            raise ValueError("o tempo até o jubilamento deve ser >= 1")
 
     def _check_population(self) -> None:
         # Sem disciplina ou sem aluno não há o que alocar: a simulação não
@@ -388,13 +426,24 @@ class SimulationConfig:
                 "ingressante cursa todas elas de uma vez"
             )
 
+    def dismissal_period(self, entry_period: int) -> int | None:
+        """O último período em que o aluno que entrou em `entry_period` ainda
+        disputa. `None` quando o cenário não jubila.
+
+        Ele cursa os períodos de residência a partir do t_a, e é ao fim do
+        último deles que o jubilamento o alcança, se não tiver concluído antes.
+        """
+        if self.max_residence is None:
+            return None
+        return entry_period + self.max_residence - 1
+
     @property
     def entry_span(self) -> int:
-        """L — quantos períodos recebem geração nova, resolvido o `None`."""
+        """Quantos períodos recebem geração nova, resolvido o `None`."""
         return self.periods if self.entry_periods is None else self.entry_periods
 
     def total_students(self) -> int:
-        """|A| — uma geração do mesmo tamanho em cada um dos L períodos."""
+        """|A| — uma geração do mesmo tamanho em cada período com ingresso."""
         return self.students_per_period * self.entry_span
 
     def prerequisites_by_discipline(self) -> dict[str, tuple[str, ...]]:
@@ -482,3 +531,21 @@ class SimulationConfig:
         by_hours = -(-self.hours_to_graduate() // self.max_hours)
         by_chain = max(self.curriculum_periods().values(), default=0)
         return max(by_hours, by_chain)
+
+
+def horizon_for_lifecycle(*, entry_periods: int, max_residence: int) -> int:
+    """|T| — o horizonte que esgota a população, dado o ciclo de vida dela.
+
+    A última geração entra no último período com ingresso e sai, concluída ou
+    jubilada, ao fim da residência dela. Depois disso não resta ninguém para
+    disputar, e simular além seria medir uma universidade vazia.
+
+    O **menos um** é a sobreposição do primeiro período: a geração que entra em
+    t = 1 já gasta ali o primeiro período de residência dela. Sem ele o
+    horizonte teria sempre um período final sem aluno nenhum.
+
+    É função solta, e não método de `SimulationConfig`, porque a tela de
+    configuração precisa do número **antes** de haver cenário — ela mostra o |T|
+    enquanto o usuário mexe nos dois controles de que ele sai.
+    """
+    return entry_periods + max_residence - 1
