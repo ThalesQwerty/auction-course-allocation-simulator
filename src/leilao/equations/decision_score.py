@@ -1,54 +1,97 @@
-"""O score com que o aluno decide, em cima da linha de utilidades.
+"""O score com que o aluno decide, em cima da linha de utilidades elegíveis.
 
-    ln score_x = β · ln u_rel_x + ρ · ln[ P̂(obter)_x · P̂(aprovar)_x · w_x · (1 + d_x) ]
+    score_x = ũ_x^β_u · oferta_x^β_v · aprovação_x^β_n
 
-Ou, sem logaritmo:
+Ou, em logaritmo:
 
-    score_x = u_rel_x^β · (avanço esperado_x)^ρ
+    ln score_x = β_u·ln ũ_x + β_v·ln oferta_x + β_n·ln aprovação_x
 
-- **u_rel** é a utilidade em múltiplos da indiferença (`u · |disciplinas|`), a
-  mesma normalização da fórmula de nota: vale 1 quando o aluno é indiferente,
-  e sobrevive ao catálogo crescer.
-- **β** (`concentration`) é o viés de satisfação: o quanto o aluno exagera as
-  diferenças de gosto. Em 1 o score **é** `u_rel`; acima de 1 concentra; perto
-  de 0 achata até a mensagem virar um conjunto, que é exatamente o que a linha
-  de base por CR envia.
-- **ρ** (`progress`) é o viés de progresso, sobre o *avanço esperado* da
-  vaga — uma grandeza só: chance de obter, vezes chance de aprovar, vezes
-  carga, vezes um mais o que ela destrava. Um coeficiente sobre o produto é
-  melhor que quatro sobre as partes, e deixa as partes se correlacionarem sem
-  criar crista entre genes.
+O modelo é **log-linear**: os três genes são expoentes sobre três sinais, os
+efeitos ficam aditivos em log, e é exatamente isso que uma regressão sobre a
+primeira coorte estima.
 
-Com os valores neutros (β = 1, ρ = 0) o score é proporcional à utilidade, e
-as duas mochilas decidem exatamente o que decidiriam sem comportamento
-nenhum. **É assim que a população roda hoje.**
+OS TRÊS EXPOENTES
+-----------------
+
+- **ũ** é a utilidade elegível (`equations.eligible_utility`): a participação
+  da disciplina no que o aluno ainda quer, somando 1 na linha.
+- **oferta** e **aprovação** são os sinais que a universidade publicou no
+  período anterior (`equations.supply_index`, `equations.approval_index`),
+  ambos em (0, 1) com 1/2 como ausência de informação.
+
+Em **0 o gene ignora o sinal**, porque `x⁰ = 1` para todos — é a leitura
+comum aos quatro genes do genoma. A linha de base é `β_u = 1` (pede
+proporcional à utilidade) com os outros dois em 0, e nela as duas mochilas
+decidem exatamente o que decidiriam sem comportamento nenhum.
+
+| β | efeito |
+| > 1 | concentra no sinal alto |
+| 1 | proporcional ao sinal |
+| 0 | ignora o sinal |
+| < 0 | inverte: concentra no sinal baixo |
+
+É uma regra de Luce temperada — o expoente é o inverso da temperatura.
+
+POR QUE POTÊNCIA, E NÃO FATOR LINEAR
+-------------------------------------
+
+A forma anterior sobre os sinais era `1 + β·(2·índice − 1)`, e ela só fica
+positiva com β preso em [−1, 1]: em β = 2 com índice 0 o fator vale −1, peso
+negativo, que não significa nada. **Potência de base positiva é sempre
+positiva**, então o gene aceita qualquer real e não existe fronteira para
+tratar — nem clipe, nem reflexão, nem rejeição. No genoma inteiro sobra uma
+só restrição, `alpha_u ≥ 0`, e ela é da reserva, não daqui.
+
+`approval_index` garante base estritamente entre 0 e 1 pela suavização de
+Laplace, então aquela potência nunca estoura. A utilidade e a oferta podem
+zerar, e para elas a guarda de positividade vale.
 
 Disciplina de utilidade não positiva não entra: o zero marca o inelegível.
 A **ordem da saída** é a de `utilities`, que é a ordem da grade — é dela que
 as duas mochilas tiram o desempate.
+
+Substitui o score anterior, que era `u_rel^β · avanço^ρ`. O composto `avanço`
+(chance de obter × chance de aprovar × carga × alcance transitivo) foi
+desmontado: o alcance migrou para a matriz de utilidade elegível, as duas
+chances viraram índices explícitos com um gene cada, e a carga foi
+descartada — ela respondia por 1,8% da variância intralinha e não pagava um
+gene.
 """
 from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
 
+# A potência exige base estritamente positiva: expoente negativo sobre zero
+# divide por zero. O menor positivo normalizado é a guarda mais barata que não
+# muda conta nenhuma.
+POSITIVE_GUARD = sys.float_info.min
+
+# Ausência de informação nos dois sinais — ver `supply_index`.
+NEUTRAL_SIGNAL = 0.5
+
 
 @dataclass(frozen=True)
 class Behavior:
-    """Como um aluno traduz utilidade em mensagem.
+    """O genoma: como um aluno traduz utilidade e sinais em mensagem.
 
     **É função, não matriz.** A utilidade é resorteada a cada período, então
-    um genoma com um valor por par (aluno, disciplina) descreveria o que fazer
-    com a linha deste semestre e não diria nada sobre a do próximo.
+    um genoma com um valor por par (aluno, disciplina) descreveria o que
+    fazer com a linha deste semestre e não diria nada sobre a do próximo.
+
+    Nos quatro, **0 quer dizer "ignora esse sinal"**. Três são expoentes; o
+    quarto corta o conjunto de escolha.
     """
 
-    concentration: float = 1.0
-    progress: float = 0.0
-    # Utilidade de reserva: o aluno compra crédito enquanto o ganho marginal
-    # exceder `r`, e deixa de pedir o que vale menos que ela. Numa regra só
-    # decide *quais* disciplinas entram, *quantos* créditos cada uma recebe e
-    # *quanto* se gasta no total — o orçamento vira teto, não meta.
-    reserve: float = 0.0
+    # Viés de utilidade: o quanto o aluno exagera as diferenças de gosto.
+    beta_u: float = 1.0
+    # Viés de oferta: positivo foge de lotação, negativo caça vaga escassa.
+    beta_v: float = 0.0
+    # Viés de aprovação: positivo busca disciplina que aprova mais.
+    beta_n: float = 0.0
+    # Utilidade de reserva: a participação mínima para a disciplina entrar no
+    # pedido. Na mesma unidade da utilidade elegível — ver `admitted_set`.
+    alpha_u: float = 0.0
 
 
 NEUTRAL = Behavior()
@@ -58,35 +101,17 @@ NEUTRAL = Behavior()
 class Signals:
     """O que a universidade publicou no período anterior, por disciplina.
 
-    É todo o conjunto de informação do aluno, e ele é deliberadamente pobre:
-    nada de conhecer a dificuldade declarada nem a própria aptidão por
-    matéria. O que existe é o que um aluno real lê — a concorrência e a taxa
-    de aprovação do semestre passado — mais o próprio histórico.
+    É todo o conjunto de informação do aluno sobre a disciplina, e ele é
+    deliberadamente pobre: nada de conhecer a dificuldade declarada nem a
+    própria aptidão por matéria. O que existe é o que um aluno real lê — a
+    folga e a taxa de aprovação do semestre passado.
 
-    **Sem histórico (1º período) os dois P̂ valem 1**, e o termo de progresso
-    cai no neutro sozinho.
+    **Sem histórico (1º período) os dois índices valem 1/2**, e os dois genes
+    caem no neutro sozinhos.
     """
 
-    win: dict[str, float] = field(default_factory=dict)
-    pass_rate: dict[str, float] = field(default_factory=dict)
-    hours: dict[str, int] = field(default_factory=dict)
-    reach: dict[str, int] = field(default_factory=dict)
-
-
-# O produto do avanço esperado nunca chega a zero com sinais plausíveis, mas
-# elevá-lo a um expoente exige que ele seja estritamente positivo. O menor
-# positivo normalizado é a guarda mais barata que não muda conta nenhuma.
-POSITIVE_GUARD = sys.float_info.min
-
-
-def expected_advance(name: str, signals: Signals) -> float:
-    """P̂(obter) · P̂(aprovar) · w_x · (1 + d_x) — o avanço esperado da vaga."""
-    return (
-        signals.win.get(name, 1.0)
-        * signals.pass_rate.get(name, 1.0)
-        * max(signals.hours.get(name, 1), 1)
-        * (1 + signals.reach.get(name, 0))
-    )
+    supply: dict[str, float] = field(default_factory=dict)
+    approval: dict[str, float] = field(default_factory=dict)
 
 
 def decision_scores(
@@ -94,16 +119,18 @@ def decision_scores(
     utilities: dict[str, float],
     behavior: Behavior = NEUTRAL,
     signals: Signals | None = None,
-    catalogue: int = 0,
 ) -> dict[str, float]:
-    scale = catalogue or len(utilities) or 1
     scores: dict[str, float] = {}
     for name, utility in utilities.items():
         if utility <= 0.0:
             continue
-        score = (utility * scale) ** behavior.concentration
-        if behavior.progress and signals is not None:
-            advance = max(expected_advance(name, signals), POSITIVE_GUARD)
-            score *= advance**behavior.progress
+        score = max(utility, POSITIVE_GUARD) ** behavior.beta_u
+        if signals is not None:
+            if behavior.beta_v:
+                supply = signals.supply.get(name, NEUTRAL_SIGNAL)
+                score *= max(supply, POSITIVE_GUARD) ** behavior.beta_v
+            if behavior.beta_n:
+                approval = signals.approval.get(name, NEUTRAL_SIGNAL)
+                score *= max(approval, POSITIVE_GUARD) ** behavior.beta_n
         scores[name] = score
     return scores

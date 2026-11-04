@@ -7,9 +7,9 @@
  * É a convenção de **Tukey**. Os bigodes não são o mínimo e o máximo: eles
  * param no último dado que ainda está perto do corpo da distribuição, e o que
  * sobra aparece como ponto, que é o que distingue "a amostra é dispersa" de
- * "houve uma execução estranha".
+ * "houve uma observação estranha".
  *
- * Cada valor dentro de uma caixa é uma execução; a comparação entre caixas é
+ * Cada valor dentro de uma caixa é uma observação; a comparação entre caixas é
  * a **sobreposição** delas, e não a distância entre as medianas.
  */
 import { quantile } from "./quantile";

@@ -47,7 +47,6 @@ def concave_bids(
     scores: dict[str, float],
     available: Iterable[str],
     budget: int,
-    reserve: float = 0.0,
 ) -> dict[str, int]:
     wanted = set(available)
     pool = [name for name in scores if name in wanted and scores[name] > 0.0]
@@ -62,9 +61,7 @@ def concave_bids(
 
     bids: dict[str, int] = {}
     for _ in range(budget):
-        gain, _rank, name, credits_here = heapq.heappop(frontier)
-        if -gain <= reserve:
-            break
+        _gain, _rank, name, credits_here = heapq.heappop(frontier)
         bids[name] = bids.get(name, 0) + 1
         following = credits_here + 1
         heapq.heappush(frontier, (-scores[name] / following, rank[name], name, following))

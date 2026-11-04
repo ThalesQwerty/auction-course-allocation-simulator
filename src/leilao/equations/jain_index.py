@@ -19,4 +19,7 @@ def jain_index(values: Sequence[float]) -> float:
     square_sum = sum(value**2 for value in values)
     if square_sum == 0:
         return 0.0
-    return sum(values) ** 2 / (len(values) * square_sum)
+    # O teto é exato na matemática — φ = 1 com todos iguais — mas a soma de
+    # quadrados em ponto flutuante devolve 1 + 1e-16. Cortar aqui evita que
+    # uma métrica declarada em [1/n, 1] saia da própria faixa.
+    return min(1.0, sum(values) ** 2 / (len(values) * square_sum))

@@ -1,7 +1,18 @@
+import json
+import pathlib
+
 import pytest
 from fastapi.testclient import TestClient
 
 from leilao.api.main import app
+
+
+@pytest.fixture(autouse=True)
+def results_dir(tmp_path, monkeypatch):
+    """Toda rota que roda grava a execução em disco. Sem isto a suíte deixaria
+    arquivos na pasta do projeto a cada `pytest`."""
+    monkeypatch.setenv("LEILAO_RESULTS_DIR", str(tmp_path / "resultados"))
+    return tmp_path / "resultados"
 
 
 @pytest.fixture
@@ -93,10 +104,13 @@ def test_run_with_no_bids_returns_empty_allocation(client):
 # garantida) e "Física I" desbloqueada por "Cálculo I".
 COMPARE_SCENARIO = {
     "disciplines": [
-        {"name": "Cálculo I", "seats": 6, "hours": 60, "unlocks": ["Física I"], "entry": True},
-        {"name": "Programação", "seats": 6, "hours": 60, "unlocks": [], "entry": True},
-        {"name": "Física I", "seats": 6, "hours": 60, "unlocks": [], "entry": False},
+        {"name": "Cálculo I", "classes": 6, "hours": 60, "unlocks": ["Física I"], "entry": True},
+        {"name": "Programação", "classes": 6, "hours": 60, "unlocks": [], "entry": True},
+        {"name": "Física I", "classes": 6, "hours": 60, "unlocks": [], "entry": False},
     ],
+    # Uma turma por vaga: estes cenários foram calibrados em vagas, e
+    # `class_size = 1` preserva as contas de antes de a grade declarar turmas.
+    "class_size": 1,
     "periods": 3,
     "students_per_period": 4,
     "rounds": 2,
@@ -129,6 +143,154 @@ def test_compare_returns_one_summary_per_seed_in_every_arm(client):
     # parte da mesma população.
     for arm in payload["arms"]:
         assert [r["seed"] for r in arm["runs"]] == [1, 2, 3]
+
+
+def test_compare_runs_only_the_arms_asked_for(client):
+    """Um braço só é o caso de quem está calibrando cenário: metade do tempo.
+
+    A seed continua sendo o eixo da amostra, e o que muda é só quantos braços
+    a percorrem — nada no resumo de um braço depende do outro ter rodado.
+    """
+    payload = client.post(
+        "/compare", json={**COMPARE_SCENARIO, "runs": 2, "arms": ["credits_return"]}
+    ).json()
+
+    assert [a["key"] for a in payload["arms"]] == ["credits_return"]
+    assert [r["seed"] for r in payload["arms"][0]["runs"]] == [1, 2]
+
+
+def test_compare_orders_the_arms_canonically_whatever_the_request_says(client):
+    """A tela acha o braço pela chave, então a ordem do pedido não pode vazar
+    para o resumo: duas requisições com as mesmas chaves dão o mesmo eixo."""
+    payload = client.post(
+        "/compare",
+        json={**COMPARE_SCENARIO, "runs": 1, "arms": ["credits_return", "ranking_greedy"]},
+    ).json()
+
+    assert [a["key"] for a in payload["arms"]] == ["ranking_greedy", "credits_return"]
+
+
+def test_compare_rejects_an_unknown_arm(client):
+    response = client.post(
+        "/compare", json={**COMPARE_SCENARIO, "runs": 1, "arms": ["xpto"]}
+    )
+
+    assert response.status_code == 400
+    assert "xpto" in response.json()["detail"]
+
+
+EVOLVE_SCENARIO = {
+    "disciplines": [
+        {"name": "A", "classes": 16, "hours": 60, "entry": True, "unlocks": ["C", "D"]},
+        {"name": "B", "classes": 16, "hours": 60, "entry": True},
+        {"name": "C", "classes": 5, "hours": 60},
+        {"name": "D", "classes": 5, "hours": 60},
+    ],
+    "class_size": 1,
+    "students_per_period": 16,
+    "entry_periods": 2,
+    "periods": 10,
+    "max_hours": 120,
+    "mechanism": "credits",
+    "seed": 3,
+    # Grade pequena: 2 x 2 x 2 x 2 = 16, o tamanho da coorte.
+    "levels": {
+        "beta_u": [0.0, 3.0],
+        "beta_v": [-1.0, 1.0],
+        "beta_n": [-1.0, 1.0],
+        "alpha_u": [0.0, 0.3],
+    },
+    "observations": 1,
+    "max_generations": 2,
+    "window": 2,
+}
+
+
+def test_a_run_is_written_to_disk_in_the_history_format(client, results_dir):
+    """O arquivo gravado é uma entrada de histórico: carregá-lo na interface é
+    só acrescentá-lo à lista, sem conversão e sem segundo esquema."""
+    payload = client.post("/evolve", json=EVOLVE_SCENARIO).json()
+
+    saved = pathlib.Path(payload["saved_to"])
+    assert saved.parent == results_dir
+    stored = json.loads(saved.read_text(encoding="utf-8"))
+    assert sorted(stored) == ["at", "config", "kind", "result"]
+    assert stored["kind"] == "evolution"
+    assert stored["result"]["generations"] == payload["generations"]
+
+
+def test_two_runs_in_the_same_second_do_not_overwrite_each_other(client, results_dir):
+    first = client.post("/evolve", json=EVOLVE_SCENARIO).json()["saved_to"]
+    second = client.post("/evolve", json=EVOLVE_SCENARIO).json()["saved_to"]
+
+    assert first != second
+    assert len(list(results_dir.glob("*.json"))) == 2
+
+
+def test_a_disk_that_refuses_does_not_fail_the_request(client, tmp_path, monkeypatch):  # noqa: PT019
+    """Quem pediu a simulação quer o resultado: perder uma rodada de dezenas
+    de minutos porque o registro não coube seria o pior dos dois mundos."""
+    blocked = tmp_path / "arquivo"
+    blocked.write_text("não é pasta", encoding="utf-8")
+    monkeypatch.setenv("LEILAO_RESULTS_DIR", str(blocked))
+
+    payload = client.post("/evolve", json=EVOLVE_SCENARIO).json()
+
+    assert payload["saved_to"] is None
+    assert len(payload["generations"]) == 2
+
+
+def test_evolve_returns_one_report_per_generation(client):
+    payload = client.post("/evolve", json=EVOLVE_SCENARIO).json()
+
+    assert [g["generation"] for g in payload["generations"]] == [1, 2]
+    # Uma linhagem por coorte de ingresso, em toda geração — elas evoluem
+    # independentes entre si.
+    for generation in payload["generations"]:
+        assert [c["entry_period"] for c in generation["cohorts"]] == [1, 2]
+        assert all(len(c["mean"]) == 4 for c in generation["cohorts"])
+    assert len(payload["scales"]) == 4
+
+
+def test_evolve_sends_an_unclosed_window_as_null(client):
+    """JSON não tem infinito, e a deriva da 1ª geração não existe: a janela
+    precisa de pelo menos dois pontos."""
+    payload = client.post("/evolve", json=EVOLVE_SCENARIO).json()
+
+    assert payload["generations"][0]["drift"] is None
+    assert payload["generations"][-1]["drift"] is not None
+
+
+def test_evolve_runs_the_negative_control(client):
+    payload = client.post("/evolve", json={**EVOLVE_SCENARIO, "neutral": True}).json()
+
+    assert payload["neutral"] is True
+    assert len(payload["generations"]) == 2
+
+
+def test_evolve_stops_on_the_drift_trigger(client):
+    """Com ε enorme o gatilho dispara assim que o piso de gerações permite."""
+    payload = client.post(
+        "/evolve",
+        json={
+            **EVOLVE_SCENARIO,
+            "min_generations": 2,
+            "max_generations": 8,
+            "epsilon": 10.0,
+        },
+    ).json()
+
+    assert payload["stopped_by"] == "convergiu"
+    assert len(payload["generations"]) == 2
+
+
+def test_evolve_rejects_a_gene_without_levels(client):
+    response = client.post(
+        "/evolve",
+        json={**EVOLVE_SCENARIO, "levels": {**EVOLVE_SCENARIO["levels"], "beta_u": []}},
+    )
+
+    assert response.status_code == 422
 
 
 def test_compare_returns_only_the_allocation_metrics(client):
@@ -215,6 +377,10 @@ def test_compare_ignores_the_scenario_seed_and_credit_return(client):
         "/compare", json={**COMPARE_SCENARIO, "seed": 77, "credit_return": "unit", "runs": 2}
     ).json()
 
+    # `saved_to` é onde a execução foi gravada, não o que ela calculou: duas
+    # chamadas nunca compartilham arquivo, e compará-lo não diria nada sobre
+    # o cenário.
+    assert first.pop("saved_to") != second.pop("saved_to")
     assert first == second
 
 

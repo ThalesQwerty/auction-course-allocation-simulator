@@ -5,7 +5,7 @@
  * imutável — não evolui, não responde a sinal e o aluno não o conhece.
  *
  * **Não há porcentagem a editar.** A repartição entre as combinações dos dois
- * eixos é igualitária: com 3 perfis de cada lado são 9 pares e ~11% da geração
+ * eixos é igualitária: com 3 perfis de cada lado são 9 pares e ~11% da coorte
  * em cada um. O que o usuário escolhe é quantos grupos existem; as fatias saem
  * disso.
  *
@@ -19,14 +19,23 @@ import type { Profile } from "./types";
  *
  * `grade` mostra a média da aptidão como **nota** (o mesmo número vezes 10):
  * em dificuldade 1 e primeira tentativa a nota *é* a aptidão, então é assim
- * que ela se lê. `fraction` mostra a disponibilidade como ela é, uma fração
- * de W_a. */
-export type MeanScale = "grade" | "fraction";
+ * que ela se lê. `hours` mostra a disponibilidade em **carga horária** — a
+ * fração de W_a que ela é, vezes W_a —, que é a unidade em que a exclusão se
+ * pensa e a mesma em que a curva ao lado é desenhada.
+ *
+ * O modelo guarda a fração nos dois casos; a escala é só a régua da tela. */
+export type MeanScale = "grade" | "hours";
 
-const SCALES = {
-  grade: { factor: 10, min: 0.1, max: 9.9, step: 0.1, label: "Nota média" },
-  fraction: { factor: 1, min: 0.01, max: 0.99, step: 0.01, label: "Fração média" },
-} as const;
+/** `top` é o teto da régua em horas, ignorado fora da escala de carga.
+ *
+ * Em horas o passo é 1 e a casa decimal some: hora é inteira no modelo — o
+ * teto do aluno é `round(δ · W_a)` —, e mostrar 28,5 ofereceria uma precisão
+ * que a simulação não usa. O preço é que editar requantiza a média em
+ * múltiplos de 1/W_a, que é a granularidade com que o motor de fato trabalha. */
+const rulerFor = (scale: MeanScale, top: number) =>
+  scale === "grade"
+    ? { factor: 10, min: 0.1, max: 9.9, step: 0.1, digits: 3, label: "Nota média" }
+    : { factor: top, min: 0, max: top, step: 1, digits: 0, label: "Média" };
 
 export function ProfileList({
   profiles,
@@ -34,6 +43,7 @@ export function ProfileList({
   selected,
   onSelect,
   scale,
+  top = 1,
   newName,
 }: {
   profiles: Profile[];
@@ -41,10 +51,12 @@ export function ProfileList({
   selected: number;
   onSelect: (index: number) => void;
   scale: MeanScale;
+  /** O teto da régua, na escala de carga horária: W_a. */
+  top?: number;
   /** Nome do perfil criado pelo botão, numerado para não colidir. */
   newName: string;
 }) {
-  const ruler = SCALES[scale];
+  const ruler = rulerFor(scale, top);
 
   const replace = (index: number, values: Partial<Profile>) =>
     onChange(profiles.map((p, i) => (i === index ? { ...p, ...values } : p)));
@@ -97,7 +109,10 @@ export function ProfileList({
               min={ruler.min}
               max={ruler.max}
               step={ruler.step}
-              value={Math.round(profile.mean * ruler.factor * 1000) / 1000}
+              value={
+                Math.round(profile.mean * ruler.factor * 10 ** ruler.digits) /
+                10 ** ruler.digits
+              }
               onChange={(e) =>
                 replace(index, { mean: Number(e.target.value) / ruler.factor })
               }
@@ -142,16 +157,10 @@ export function ProfileList({
  *
  * A fatia é a **deste eixo**, não a da combinação: o que a lista acima edita
  * são os grupos de desempenho *ou* os de disponibilidade, e dizer 11% ali
- * responderia a uma pergunta que a seção não faz. A contagem de combinações
- * vem depois, nomeando o outro eixo como o que ela é — consequência de
- * multiplicar os dois.
+ * responderia a uma pergunta que a seção não faz.
  */
-export const axisShare = (profiles: number, other: number): string => {
+export const axisShare = (profiles: number): string => {
   const share = profiles > 0 ? 100 / profiles : 0;
-  const pairs = Math.max(1, profiles * other);
   const pct = share.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
-  return (
-    `${profiles} ${profiles === 1 ? "perfil" : "perfis"} · ${pct}% da geração ` +
-    `em cada · ${pairs} ${pairs === 1 ? "combinação" : "combinações"} com o outro eixo`
-  );
+  return `${profiles} ${profiles === 1 ? "perfil" : "perfis"} · ${pct}% da coorte em cada`;
 };

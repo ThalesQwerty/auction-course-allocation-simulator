@@ -2,7 +2,7 @@
 
 Amarra as peças: a inicialização sorteia tudo da seed (`setup`), cada período
 roda as suas rodadas e fecha com notas e conclusões (`period`, `rounds`,
-`closing`), e os relatórios saem recortados por geração (`snapshots`,
+`closing`), e os relatórios saem recortados por coorte (`snapshots`,
 `reports`). As contas moram em `equations/`.
 
 Não há cursos: a universidade inteira cursa a mesma grade. Toda disciplina
@@ -15,7 +15,7 @@ também não tem e fica fora da garantia.
 
 O aluno sai do conjunto ativo por uma única porta: concluindo o curso
 (eq. 40). Quem não concluiu continua disputando até o fim do horizonte, e é a
-fase de drenagem que dá às gerações tardias tempo de chegar lá.
+fase de drenagem que dá às coortes tardias tempo de chegar lá.
 
 **Dois mecanismos, um cenário.** `config.mechanism` troca só o miolo da
 rodada. Tudo o mais — população, utilidades, notas, pré-requisitos, matrícula
@@ -77,9 +77,9 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     satisfactions: dict[str, list[float]] = {s.id: [] for s in students}
     enrollments: dict[str, int] = {s.id: 0 for s in students}
     first_grades: list[float] = []
-    # No 1º período não há histórico, e os dois P̂ valem 1 — o termo de
-    # progresso cai no neutro sozinho.
-    signals = Signals(win={}, pass_rate={}, hours=draws.hours, reach=draws.reach)
+    # No 1º período não há histórico, e os dois índices caem no neutro de 1/2
+    # sozinhos — os genes de oferta e de aprovação não agem.
+    signals = Signals()
 
     for period in range(1, config.periods + 1):
         # Matriculados: já ingressaram (t_a) e ainda não saíram — por

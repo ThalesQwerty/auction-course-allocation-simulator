@@ -35,7 +35,7 @@ export interface SavedPreset {
  * antes dos perfis não tem como ser convertido — a Beta única virou duas
  * listas de grupos, e a disponibilidade não existia. Em vez de carregar meio
  * vazio, a v1 simplesmente não lê o que veio antes dela. */
-const STORAGE_KEY = "leilao.cenarios.v1";
+const STORAGE_KEY = "leilao.cenarios.v2";
 
 /** Teto de cenários guardados. Não é limitação de espaço — cada um é pequeno —,
  * é que uma lista maior que isso deixa de se escolher de relance. */

@@ -1535,16 +1535,6 @@ td.failed {
 .rail-row:hover .nav-delete {
   opacity: 1;
 }
-.rail-section {
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  margin: 6px 0 0;
-  padding: 10px 12px 4px;
-  text-transform: uppercase;
-}
-
 /* Os dois perfis do aluno, no cabeçalho da tela individual. Usam o chip
    neutro: são rótulo de grupo, não estado de uma solicitação — a paleta de
    estado está reservada para as saídas de um pedido. */
@@ -1556,4 +1546,16 @@ td.failed {
 }
 .trace-profiles .chip {
   cursor: default;
+}
+
+/* "Carregar resultado": o rótulo é o botão, e o input fica fora de vista — o
+   seletor de arquivo nativo não aceita estilo, e um botão falso ao lado dele
+   daria dois alvos para a mesma ação. */
+.file-item {
+  cursor: pointer;
+  display: block;
+}
+
+.file-item input[type="file"] {
+  display: none;
 }

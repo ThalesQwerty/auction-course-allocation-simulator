@@ -136,7 +136,7 @@ def close_period(
             gammas.append(gamma)
 
         # A ordem é a da grade, vinda da mochila — e não a de um conjunto, que
-        # varia com o hash das strings entre execuções.
+        # varia com o hash das strings entre observações.
         for name in kept:
             attempt = student.attempts.get(name, 0) + 1
             student.attempts[name] = attempt

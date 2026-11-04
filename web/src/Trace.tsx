@@ -82,7 +82,7 @@ const bidCell = (credits: number, usesCredits: boolean) =>
 export function Trace({ run }: { run: ComparisonRun }) {
   const result = run.result;
   /** Só os braços que esta comparação de fato rodou: uma gravada antes de um
-   * braço existir não o traz, e pedir o traço dele não encontraria execução. */
+   * braço existir não o traz, e pedir o traço dele não encontraria observação. */
   const arms = useMemo(
     () => COMPARISON_ARMS.filter((arm) => result.arms.some((a) => a.key === arm.key)),
     [result.arms]
@@ -94,7 +94,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
   const [seed, setSeed] = useState(1);
   /** O traço custa uma simulação completa no servidor, então ele não vem
    * sozinho: a seção abre com o botão, e dali em diante trocar de modelo ou de
-   * execução já refaz. */
+   * observação já refaz. */
   const [started, setStarted] = useState(false);
   /** Contador de tentativas: é o que dá ao botão "tentar de novo" o que mudar
    * quando o par (braço, seed) continua o mesmo. */
@@ -114,7 +114,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
     setLoading(true);
     setError(null);
     // `runs` é da comparação, não do cenário: o que o traço pede é uma
-    // execução só, endereçada pelo par (braço, seed).
+    // observação só, endereçada pelo par (braço, seed).
     const { runs: _runs, ...scenario } = run.config;
     trace({ ...scenario, arm: armKey, seed })
       .then((payload) => {
@@ -155,8 +155,8 @@ export function Trace({ run }: { run: ComparisonRun }) {
       <header className="chart-section-head">
         <h2>Histórico de um aluno ou de uma disciplina</h2>
         <p>
-          O caso individual por trás dos agregados: uma execução, período a período e
-          rodada a rodada. O par (modelo, execução) endereça um dos pontos dos boxplots, e
+          O caso individual por trás dos agregados: uma observação, período a período e
+          rodada a rodada. O par (modelo, observação) endereça um dos pontos dos boxplots, e
           a simulação é refeita no servidor — determinística, então é a mesma de que o
           ponto saiu. A vista por aluno lista todas as disciplinas elegíveis dele, inclusive
           as que não pediu; a por disciplina lista quem a pediu naquela rodada.
@@ -180,7 +180,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="trace-seed">Execução (seed)</label>
+            <label htmlFor="trace-seed">Observação (seed)</label>
             <select
               id="trace-seed"
               value={seed}
@@ -307,7 +307,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
       {error && <div className="error-banner">{error}</div>}
       {loading && (
         <p className="empty-state">
-          Refazendo a execução {seed} de {armLabel(armKey)} — é uma simulação completa.
+          Refazendo a observação {seed} de {armLabel(armKey)} — é uma simulação completa.
         </p>
       )}
 
@@ -333,7 +333,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
   );
 }
 
-/** Os alunos por geração, na ordem do ingresso — como o seletor os agrupa. */
+/** Os alunos por coorte, na ordem do ingresso — como o seletor os agrupa. */
 function cohortsOf(students: StudentSummary[]): [number, StudentSummary[]][] {
   const groups = new Map<number, StudentSummary[]>();
   for (const student of students) {
@@ -643,7 +643,7 @@ function DisciplineTrace({
           <p className="note">
             {first
               ? `${first.hours} h · ${first.seats} vagas · período ${first.curriculum_period} da grade`
-              : "fora da oferta desta execução"}
+              : "fora da oferta desta observação"}
           </p>
         </div>
       </div>
@@ -704,7 +704,7 @@ function DisciplineTrace({
                       <thead>
                         <tr>
                           <th>Aluno</th>
-                          <th>Geração</th>
+                          <th>Coorte</th>
                           <th>CR</th>
                           <th>Utilidade</th>
                           {usesCredits && <th>Lance</th>}

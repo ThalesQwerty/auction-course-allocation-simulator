@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { compare } from "./api";
+import { useEffect, useMemo, useState } from "react";
+import { compare, evolve } from "./api";
+import { findCalibration } from "./calibration";
+import type { Calibration } from "./calibration";
 import { Comparison } from "./Comparison";
 import { Config } from "./Config";
 import { choosePreset, editConfig, initialChoice, PresetChoice } from "./presets";
@@ -13,13 +15,69 @@ import {
   HistoryEntry,
   loadHistory,
   MAX_RUNS,
+  entryFromFile,
   newComparison,
+  newEvolution,
   saveHistory,
 } from "./history";
 import { GradeGraph } from "./GradeGraph";
 import { createPlaygroundDraft, Playground, PlaygroundDraft } from "./Playground";
 import { Project } from "./Project";
 import { Sidebar, View } from "./Sidebar";
+import { Evolution } from "./Evolution";
+import { COMPARISON_ARMS, DEFAULT_LEVELS } from "./types";
+import type { EvolveRequest, GenomeLevels, Scenario } from "./types";
+
+/** Qual simulação o formulário dispara. A ingênua compara os mecanismos com
+ * todo mundo na linha de base; a evolutiva roda o algoritmo genético. */
+export type Mode = "naive" | "evolutionary";
+
+/** Os parâmetros do algoritmo genético. Não são do cenário: o mesmo cenário
+ * se compara uma vez ou se evolui por M gerações. */
+export interface EvolutionSettings {
+  levels: GenomeLevels;
+  observations: number;
+  min_generations: number;
+  max_generations: number;
+  window: number;
+  /** Se a parada usa o ε do controle negativo. Guarda-se a **intenção**, não
+   * o número: o ε é lido do histórico na hora de enviar, de modo que mexer no
+   * cenário depois de marcar a caixa não dispara uma parada calibrada para
+   * outra coisa. */
+  calibrated: boolean;
+  tournament: number;
+  elites: number;
+  step: number;
+  neutral: boolean;
+}
+
+/** O pedido que o formulário monta. O ε entra por último porque não é escolha
+ * do usuário: vem do controle negativo que já rodou nestas condições. */
+function evolveRequest(
+  config: Scenario,
+  evolution: EvolutionSettings,
+  calibration: Calibration | null
+): EvolveRequest {
+  const { calibrated, ...ga } = evolution;
+  return {
+    ...config,
+    ...ga,
+    epsilon: calibrated && calibration ? calibration.epsilon : null,
+  };
+}
+
+const DEFAULT_EVOLUTION: EvolutionSettings = {
+  levels: DEFAULT_LEVELS,
+  observations: 5,
+  min_generations: 5,
+  max_generations: 30,
+  window: 5,
+  calibrated: false,
+  tournament: 2,
+  elites: 10,
+  step: 0.3,
+  neutral: false,
+};
 
 export default function App() {
   const [choice, setChoice] = useState<PresetChoice>(initialChoice);
@@ -33,6 +91,18 @@ export default function App() {
   // O modo e o número de execuções não são do cenário: o mesmo cenário se roda
   // uma vez ou se compara N vezes, e trocar de modo não pode mexer nele.
   const [runs, setRuns] = useState(20);
+  // Quais braços a comparação roda. Rodar um só é o caso de quem está
+  // calibrando cenário e não quer esperar o outro lado a cada tentativa.
+  const [arms, setArms] = useState<string[]>(() => COMPARISON_ARMS.map((arm) => arm.key));
+  const [mode, setMode] = useState<Mode>("naive");
+  const [evolution, setEvolution] = useState<EvolutionSettings>(DEFAULT_EVOLUTION);
+  // O ε disponível: o do controle negativo mais recente que rodou com este
+  // cenário e estes parâmetros. Recalculado a cada tecla, de modo que mexer no
+  // formulário derruba a calibragem na hora em que ela deixa de valer.
+  const calibration = useMemo(
+    () => findCalibration(history, evolveRequest(config, evolution, null)),
+    [history, config, evolution]
+  );
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -42,6 +112,20 @@ export default function App() {
     const kept = saveHistory(history);
     if (kept.length !== history.length) setHistory(kept);
   }, [history]);
+
+  /** Carrega um resultado gravado em disco e o abre. Ele entra no histórico
+   * como qualquer execução — o arquivo tem o mesmo formato. */
+  async function handleLoadFile(file: File) {
+    setError(null);
+    try {
+      const entry = entryFromFile(await file.text());
+      setHistory((current) => [entry, ...current].slice(0, MAX_RUNS));
+      navigate({ kind: "run", id: entry.id });
+    } catch (e) {
+      setError(`não foi possível ler ${file.name}: ${(e as Error).message}`);
+      navigate({ kind: "config" });
+    }
+  }
 
   function navigate(next: View) {
     setView(next);
@@ -56,11 +140,18 @@ export default function App() {
     setRunning(true);
     setError(null);
     try {
-      const { seed: _seed, credit_return: _return, ...scenario } = config;
-      const request = { ...scenario, runs };
-      const entry = newComparison(request, await compare(request));
-      setHistory((current) => [entry, ...current].slice(0, MAX_RUNS));
-      navigate({ kind: "run", id: entry.id });
+      if (mode === "evolutionary") {
+        const request = evolveRequest(config, evolution, calibration);
+        const entry = newEvolution(request, await evolve(request));
+        setHistory((current) => [entry, ...current].slice(0, MAX_RUNS));
+        navigate({ kind: "run", id: entry.id });
+      } else {
+        const { seed: _seed, credit_return: _return, ...scenario } = config;
+        const request = { ...scenario, runs, arms };
+        const entry = newComparison(request, await compare(request));
+        setHistory((current) => [entry, ...current].slice(0, MAX_RUNS));
+        navigate({ kind: "run", id: entry.id });
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -88,11 +179,24 @@ export default function App() {
    * comparação devolve também o N e o modo, senão "reabrir" daria um
    * formulário que não reproduz o que está na tela. */
   function reuseConfig(entry: HistoryEntry) {
-    const { runs: count, ...scenario } = entry.config;
+    if (entry.kind === "evolution") {
+      const { levels, observations, min_generations, max_generations, window,
+        epsilon, tournament, elites, step, neutral, ...scenario } = entry.config;
+      setChoice((c) => editConfig(c, { ...c.config, ...scenario }));
+      setEvolution({ levels, observations, min_generations, max_generations,
+        window, calibrated: epsilon !== null, tournament, elites, step, neutral });
+      setMode("evolutionary");
+      setError(null);
+      navigate({ kind: "config" });
+      return;
+    }
+    const { runs: count, arms: chosen, ...scenario } = entry.config;
     // Sem seed: ela não fez parte da comparação, então a do formulário fica
     // como está em vez de ser sobrescrita por um valor inventado.
     setChoice((c) => editConfig(c, { ...c.config, ...scenario }));
     setRuns(count);
+    setArms(chosen ?? COMPARISON_ARMS.map((arm) => arm.key));
+    setMode("naive");
     setError(null);
     navigate({ kind: "config" });
   }
@@ -109,7 +213,14 @@ export default function App() {
         {menuOpen ? "fechar" : "menu"}
       </button>
 
-      <Sidebar view={view} history={history} onNavigate={navigate} onDelete={handleDelete} onClear={handleClear} />
+      <Sidebar
+        view={view}
+        history={history}
+        onNavigate={navigate}
+        onDelete={handleDelete}
+        onClear={handleClear}
+        onLoadFile={handleLoadFile}
+      />
 
       <main className="main wide">
         {showConfig && (
@@ -118,6 +229,13 @@ export default function App() {
             setConfig={(update) => setChoice((c) => editConfig(c, update(c.config)))}
             runs={runs}
             setRuns={setRuns}
+            arms={arms}
+            setArms={setArms}
+            mode={mode}
+            setMode={setMode}
+            evolution={evolution}
+            setEvolution={setEvolution}
+            calibration={calibration}
             running={running}
             error={error}
             onRun={handleRun}
@@ -145,7 +263,9 @@ export default function App() {
           />
         )}
         {view.kind === "project" && <Project />}
-        {view.kind === "graph" && <GradeGraph disciplines={config.disciplines} />}
+        {view.kind === "graph" && (
+          <GradeGraph disciplines={config.disciplines} classSize={config.class_size} />
+        )}
         {view.kind === "playground" && (
           <Playground
             config={config}
@@ -153,11 +273,18 @@ export default function App() {
             setDraft={setPlayground}
           />
         )}
-        {current && (
+        {current?.kind === "comparison" && (
           <Comparison
             key={current.id}
             run={current}
             onReuseConfig={() => reuseConfig(current)}
+          />
+        )}
+        {current?.kind === "evolution" && (
+          <Evolution
+            key={current.id}
+            result={current.result}
+            onReuse={() => reuseConfig(current)}
           />
         )}
       </main>

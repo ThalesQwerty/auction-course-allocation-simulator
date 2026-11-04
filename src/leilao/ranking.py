@@ -17,7 +17,14 @@ universidade concede) e `grade_average` (a prioridade, eq. 49).
 from __future__ import annotations
 
 from .entities import Agent, Demand, Good, Problem
-from .equations import NEUTRAL, Behavior, Signals, decision_scores, serial_dictatorship
+from .equations import (
+    NEUTRAL,
+    Behavior,
+    Signals,
+    admitted_set,
+    decision_scores,
+    serial_dictatorship,
+)
 from .equations import request_set as rank_requests
 from .wdp_solver import solve_wdp
 
@@ -32,18 +39,15 @@ def request_set(
     available: list[str],
     behavior: Behavior = NEUTRAL,
     signals: Signals | None = None,
-    catalogue: int = 0,
 ) -> list[str]:
     """D_a^(t,r) — ver `equations.request_set`."""
     return rank_requests(
         scores=decision_scores(
-            utilities=utilities,
+            utilities=admitted_set(utilities=utilities, reserve=behavior.alpha_u),
             behavior=behavior,
             signals=signals,
-            catalogue=catalogue,
         ),
         available=available,
-        reserve=behavior.reserve,
     )
 
 

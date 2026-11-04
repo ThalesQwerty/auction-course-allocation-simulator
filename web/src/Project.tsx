@@ -108,7 +108,7 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         disciplinas e deixando o resto da divisão no saldo — é esse valor que alimenta o retorno
         de créditos da eq. (34). A garantia vale só no ingresso: recursar uma dessas disciplinas é
         disputá-la no leilão como qualquer outra. Daí os dois limites do ritmo de entrada: a
-        geração não pode passar da menor oferta entre as disciplinas de entrada, nem a carga
+        coorte não pode passar da menor oferta entre as disciplinas de entrada, nem a carga
         somada delas pode passar de W<sub>a</sub>.
       </p>
       <p>
@@ -195,7 +195,7 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         O resultado de cada período é medido pelas métricas da Seção 7.3.3, e elas se dividem
         pelos dois lados do mercado. As <strong>do aluno</strong> — eficiência, equidade,
         correlação, semestralização, progressão, créditos — são agregadas pelo recorte da{" "}
-        <strong>geração</strong>, que parte a mesma população do agregado: somá-la reproduz a
+        <strong>coorte</strong>, que parte a mesma população do agregado: somá-la reproduz a
         universidade. Com dezenas de alunos, qualquer recorte mais granular vira ruído.
       </p>
       <p>
@@ -363,10 +363,10 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           (eq. 20), que é <em>entre alunos</em>.
         </li>
         <li>
-          <strong>Ingresso escalonado (t<sub>a</sub>):</strong> entra uma geração nova a cada
+          <strong>Ingresso escalonado (t<sub>a</sub>):</strong> entra uma coorte nova a cada
           período, do primeiro ao último com ingresso, com o número de alunos que o cenário
           definir — como um
-          vestibular por semestre. Todas as gerações têm o mesmo tamanho. O anteprojeto não fixa
+          vestibular por semestre. Todas as coortes têm o mesmo tamanho. O anteprojeto não fixa
           a distribuição dos ingressos.
         </li>
       </ul>
@@ -394,9 +394,9 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
       <p>
         Uma <strong>comparação</strong> abre quatro boxplots — satisfação (ψ̄), equidade (φ),
         correlação (λ) e tempo de formatura —, com uma caixa por modelo: a linha grossa é a
-        mediana, a caixa é a metade central das execuções, os bigodes vão até 1,5 IQR. Nas três
-        primeiras, cada valor é uma execução reduzida à média dos períodos ponderada pelos alunos
-        medidos; o tempo de formatura é da execução inteira. O que se lê é a sobreposição — caixas
+        mediana, a caixa é a metade central das observações, os bigodes vão até 1,5 IQR. Nas três
+        primeiras, cada valor é uma observação reduzida à média dos períodos ponderada pelos alunos
+        medidos; o tempo de formatura é da observação inteira. O que se lê é a sobreposição — caixas
         que não se tocam separam os mecanismos; caixas sobrepostas dizem que a diferença entre as
         medianas cabe dentro da variação entre populações. Como as seeds são pareadas, a tabela
         ainda informa em quantas delas o leilão saiu melhor, que é uma leitura independente da
@@ -422,11 +422,11 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         O <strong>tempo de formatura</strong> tem viés de seleção e não se lê sozinho: a média só
         existe sobre quem concluiu, então um mecanismo que forma menos gente pode exibir um tempo
         menor só porque sobraram os rápidos. Por isso a tabela traz, ao lado dele, quantos se
-        formaram em cada execução.
+        formaram em cada observação.
       </p>
       <p>
         Uma <strong>simulação</strong> abre os gráficos do cenário, em dois blocos. Os{" "}
-        <strong>gráficos por aluno</strong> trazem uma linha por geração, com o eixo
+        <strong>gráficos por aluno</strong> trazem uma linha por coorte, com o eixo
         horizontal por período ou por rodada, divididos em métricas principais, progressão e
         economia de créditos. Os <strong>gráficos por disciplina</strong> trazem uma linha por
         período da grade, por número de vagas ou por carga horária, sempre em período. Depois vêm
@@ -435,7 +435,7 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         fica no navegador, então execuções antigas sobrevivem a um recarregamento da página.
       </p>
       <p>
-        A barra lateral à direita lista os alunos daquela execução, e filtra por geração. Clicar
+        A barra lateral à direita lista os alunos daquela observação, e filtra por coorte. Clicar
         num deles abre a tela individual: a progressão dele período a período
         e, em cada período, tudo o que pediu. Cada pedido tem uma de quatro saídas —{" "}
         <strong>vaga garantida</strong> (o ingressante, fora do leilão),{" "}

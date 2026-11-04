@@ -73,14 +73,16 @@ export function gradeCurve(
  *
  * Reaproveita `gradeDensity` com expoente 1, que nesse caso devolve a Beta
  * crua sobre a escala de 0 a 10; o eixo volta a [0, 1] na saída. */
-export function availabilityCurve(profile: Profile): Curve {
+export function availabilityCurve(profile: Profile, top = 1): Curve {
   const [alpha, beta] = betaShape(profile.mean, profile.concentration);
   const { xs, ys } = gradeDensity(alpha, beta, 1);
-  // A densidade acompanha a troca de escala: comprimir o eixo por 10 multiplica
-  // a altura por 10, senão a área deixa de ser 1.
+  // `top` é a unidade do eixo: 1 desenha a fração de W_a, W_a desenha as horas
+  // que ela significa. A densidade acompanha a troca de escala — esticar o
+  // eixo divide a altura na mesma razão, senão a área deixa de ser 1.
+  const factor = top / 10;
   return densityCurve(
-    xs.map((x) => x / 10),
-    ys.map((y) => y * 10)
+    xs.map((x) => x * factor),
+    ys.map((y) => y / factor)
   );
 }
 

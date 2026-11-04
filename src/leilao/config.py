@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from .equations import (
+    Behavior,
     beta_shape,
     curriculum_heights,
     curriculum_periods,
@@ -244,10 +245,10 @@ class SimulationConfig:
 
     disciplines: list[Discipline] = field(default_factory=list)
     periods: int = 1  # |T| — períodos letivos
-    # Em quantos dos |T| períodos entra geração nova, contados do primeiro.
-    # `None` = em todos, e aí o último período recebe uma geração que só vive
+    # Em quantos dos |T| períodos entra coorte nova, contados do primeiro.
+    # `None` = em todos, e aí o último período recebe uma coorte que só vive
     # esse período. Quando são menos que |T|, a simulação ganha uma fase de
-    # drenagem: depois do último ingresso a população só diminui, e as gerações
+    # drenagem: depois do último ingresso a população só diminui, e as coortes
     # tardias têm tempo de chegar ao fim do curso em vez de serem cortadas pelo
     # horizonte.
     entry_periods: int | None = None
@@ -298,6 +299,17 @@ class SimulationConfig:
     # é do modelo, inteiro. Reportá-lo ao lado do resultado é o que
     # transforma a suposição em número declarado.
     utility_gain: float = 0.0
+    # **Genomas por coorte**, na ordem crescente de período de ingresso: cada
+    # tupla traz o genótipo de cada aluno daquela coorte, por posição. Vazio
+    # quer dizer que todo mundo carrega a linha de base, que é como a
+    # simulação ingênua roda.
+    #
+    # Quem preenche é `evolution.run_evolution`, e é por aqui que uma coorte
+    # do algoritmo genético vira uma observação da simulação. Fica no cenário, e
+    # não num parâmetro de `run_simulation`, porque a comparação entre braços
+    # troca só o miolo da rodada: os dois lados têm de receber a mesma
+    # população com os mesmos genes.
+    genomes: tuple[tuple[Behavior, ...], ...] = ()
     # **Ganho por recursada**: quanta tentativa efetiva cada repetição
     # acrescenta no denominador do expoente. Em 1 o denominador é a própria
     # tentativa, e o expoente é a dificuldade dividida por ela — a lei de
@@ -495,7 +507,7 @@ class SimulationConfig:
 
     def _check_guaranteed_enrolment(self) -> None:
         """A matrícula garantida não escolhe quem a recebe, então a oferta de
-        entrada tem de comportar a geração inteira de uma vez."""
+        entrada tem de comportar a coorte inteira de uma vez."""
         entry = self.entry_disciplines()
         if not entry:
             raise ValueError("o cenário precisa de pelo menos uma disciplina de entrada")
@@ -532,11 +544,11 @@ class SimulationConfig:
 
     @property
     def entry_span(self) -> int:
-        """Quantos períodos recebem geração nova, resolvido o `None`."""
+        """Quantos períodos recebem coorte nova, resolvido o `None`."""
         return self.periods if self.entry_periods is None else self.entry_periods
 
     def total_students(self) -> int:
-        """|A| — uma geração do mesmo tamanho em cada período com ingresso."""
+        """|A| — uma coorte do mesmo tamanho em cada período com ingresso."""
         return self.students_per_period * self.entry_span
 
     def profile_combinations(self) -> int:
@@ -547,18 +559,18 @@ class SimulationConfig:
         """O par (desempenho, disponibilidade) do aluno de índice global.
 
         A repartição é **igualitária entre as combinações**: com 3 perfis em
-        cada eixo são 9 pares, e cada um fica com ~11% da geração. Não há
+        cada eixo são 9 pares, e cada um fica com ~11% da coorte. Não há
         porcentagem a configurar — o que o usuário escolhe é quantos perfis
         existem em cada eixo, e as fatias saem disso.
 
-        O rodízio é sobre o índice **global**, não o índice dentro da geração.
-        Com os dois iguais a conta seria a mesma quando a geração é múltipla
+        O rodízio é sobre o índice **global**, não o índice dentro da coorte.
+        Com os dois iguais a conta seria a mesma quando a coorte é múltipla
         do número de pares; quando não é, o índice global faz a sobra girar
-        entre as gerações, enquanto o índice local daria o excedente sempre
+        entre as coortes, enquanto o índice local daria o excedente sempre
         aos mesmos primeiros pares. É largest-remainder com o resto rodando.
 
         O perfil **não sai da seed**, pelo mesmo motivo que o período de
-        ingresso não sai: duas execuções com seeds diferentes têm a mesma
+        ingresso não sai: duas observações com seeds diferentes têm a mesma
         estrutura de perfis, então a diferença entre elas não é quem calhou de
         ser frágil. Da seed vêm os dois escalares, não o grupo.
         """
@@ -602,7 +614,7 @@ class SimulationConfig:
         Vem da flag `entry`, e **não** de não ter pré-requisito: a optativa
         também não tem e não é entrada. É este conjunto que dimensiona as
         validações de `students_per_period` e `max_hours` — o que a oferta
-        precisa comportar é a geração inteira entrando de uma vez.
+        precisa comportar é a coorte inteira entrando de uma vez.
         """
         return [d.name for d in self.disciplines if d.entry]
 
@@ -647,8 +659,8 @@ class SimulationConfig:
         disciplina de n-ésimo período não pode ser cursada antes do n-ésimo
         período do aluno.
 
-        Serve para dimensionar a fase de drenagem: abaixo disso nenhuma geração
-        tem tempo de chegar ao fim, e a série por geração mediria o horizonte em
+        Serve para dimensionar a fase de drenagem: abaixo disso nenhuma coorte
+        tem tempo de chegar ao fim, e a série por coorte mediria o horizonte em
         vez do mecanismo.
         """
         by_hours = -(-self.hours_to_graduate() // self.max_hours)
@@ -659,11 +671,11 @@ class SimulationConfig:
 def horizon_for_lifecycle(*, entry_periods: int, max_residence: int) -> int:
     """|T| — o horizonte que esgota a população, dado o ciclo de vida dela.
 
-    A última geração entra no último período com ingresso e sai, concluída ou
+    A última coorte entra no último período com ingresso e sai, concluída ou
     jubilada, ao fim da residência dela. Depois disso não resta ninguém para
     disputar, e simular além seria medir uma universidade vazia.
 
-    O **menos um** é a sobreposição do primeiro período: a geração que entra em
+    O **menos um** é a sobreposição do primeiro período: a coorte que entra em
     t = 1 já gasta ali o primeiro período de residência dela. Sem ele o
     horizonte teria sempre um período final sem aluno nenhum.
 

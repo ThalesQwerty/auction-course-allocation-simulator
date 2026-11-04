@@ -119,17 +119,24 @@ def test_unknown_successor_is_rejected():
         )
 
 
-def test_utilities_respect_height_invariant():
-    """s_x > s_y ⇒ u_x > u_y em toda linha sorteada."""
+def test_the_drawn_row_is_taste_alone_and_sums_to_one():
+    """A invariante de altura saiu: a posição na grade **não** ordena mais a
+    utilidade. O valor curricular entra depois, na redistribuição de
+    `eligible_utility`, e não dentro do gosto."""
     config = make_config(periods=4)
     students = [student(id=f"a{i}") for i in range(5)]
     rows = draw_utilities(students, config, np.random.default_rng(0))
     heights = config.heights()
-    for row in rows.values():
-        for x, ux in row.items():
-            for y, uy in row.items():
-                if heights[x] > heights[y]:
-                    assert ux > uy, (x, y, ux, uy, heights[x], heights[y])
+
+    assert all(sum(row.values()) == pytest.approx(1.0) for row in rows.values())
+    # Alguma linha tem de inverter a ordem por altura — se nenhuma invertesse,
+    # a invariante ainda estaria lá disfarçada.
+    inverted = any(
+        row[x] < row[y]
+        for row in rows.values()
+        for x, y in [(a, b) for a in row for b in row if heights[a] > heights[b]]
+    )
+    assert inverted
 
 
 def test_utility_matrix_covers_only_the_eligible_disciplines():
@@ -142,11 +149,11 @@ def test_utility_matrix_covers_only_the_eligible_disciplines():
     utilities = utility_matrix(row=row, student=novice, config=config)
     # Quem não aprovou nada só alcança o 1º período da grade.
     assert set(utilities) == {"D1", "D2", "D3"}
-    # eq. (41): utilidades distintas entre si.
     assert len(set(utilities.values())) == len(utilities)
-    # eq. (43): a soma do recorte é o U_a^(t), menor que 1 porque metade da
-    # grade está fora do alcance dele — a linha inteira é que vale 1.
-    assert 0 < sum(utilities.values()) < 1
+    # A redistribuição conserva a massa: o que estava fora do alcance desceu
+    # para quem o destrava, então o recorte soma o mesmo que a linha inteira.
+    # É isso que põe `alpha_u` na mesma unidade da utilidade.
+    assert sum(utilities.values()) == pytest.approx(1.0)
     assert sum(row.values()) == pytest.approx(1.0)
 
 
@@ -181,10 +188,10 @@ def test_utility_matrix_is_a_pure_function_of_the_row():
     assert utility_matrix(row=row, student=student(), config=config) == first
 
 
-def test_approving_a_discipline_only_drops_it_from_the_matrix():
-    """Aprovar uma disciplina tira ela da matriz e **não mexe nas outras**: sem
-    renormalização, o que sobra vale exatamente o que valia. É o que faz a
-    preferência do aluno ser a mesma do início ao fim da simulação."""
+def test_approving_a_discipline_spreads_its_utility_over_what_is_left():
+    """Aprovar tira a disciplina da matriz e **distribui a utilidade dela
+    igualmente entre as elegíveis** — é o que impede o veterano de ficar com
+    pouca massa e perder todo leilão. A massa total não se mexe."""
     config = make_config()
     row = draw_utilities([student()], config, np.random.default_rng(9))[("a1", 1)]
 
@@ -192,8 +199,10 @@ def test_approving_a_discipline_only_drops_it_from_the_matrix():
     # D3 aprovada: D1 e D2 continuam elegíveis, e D5 não entra (falta D2).
     after = utility_matrix(row=row, student=student(grades={"D3": 8.0}), config=config)
     assert "D3" in before and "D3" not in after
-    assert after["D1"] == before["D1"] and after["D2"] == before["D2"]
-    assert sum(after.values()) == pytest.approx(sum(before.values()) - before["D3"])
+    assert sum(after.values()) == pytest.approx(sum(before.values()))
+    # D1 recebe exatamente metade de D3, que é a divisão igual entre as duas
+    # elegíveis. D2 recebe essa metade e mais a parte de D5 que D3 segurava.
+    assert after["D1"] - before["D1"] == pytest.approx(row["D3"] / 2)
 
 
 def test_an_empty_eligible_set_gives_no_utility():
@@ -377,10 +386,9 @@ def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
 # --- os genes de comportamento --------------------------------------------
 
 
-def test_the_neutral_behavior_reproduces_the_model_without_genes():
-    """β = 1, ρ = 0, r = 0 têm de dar exatamente o que o modelo dava antes de
-    haver comportamento — é a regressão que garante que acrescentar os genes
-    não mudou nada por acidente. Hoje **toda a população roda no neutro**."""
+def test_the_baseline_genome_asks_in_proportion_to_utility():
+    """β_u = 1 com os outros dois em 0 é a linha de base: o score **é** a
+    utilidade, e as duas mochilas decidem o que decidiriam sem genoma."""
     utilities = {"D1": 0.4, "D2": 0.3, "D3": 0.2, "D4": 0.1}
     pool = list(utilities)
     assert compute_bids(
@@ -388,66 +396,91 @@ def test_the_neutral_behavior_reproduces_the_model_without_genes():
     ) == compute_bids(
         utilities=utilities, available=pool, budget=10, behavior=NEUTRAL
     )
-    # E o score neutro é proporcional à utilidade: a mochila decide igual.
-    scores = decision_scores(utilities=utilities, catalogue=len(utilities))
+    scores = decision_scores(utilities=utilities)
     ratios = [scores[n] / utilities[n] for n in utilities]
     assert max(ratios) == pytest.approx(min(ratios))
 
 
-def test_the_concentration_gene_moves_the_budget_to_the_favourite():
-    """β é o viés de satisfação: grande concentra, e β → 0 achata a mensagem
-    até ela virar um conjunto — que é exatamente o que o CR envia."""
+def test_a_gene_at_zero_ignores_its_signal():
+    """A leitura comum aos quatro: 0 quer dizer "ignora esse sinal", porque
+    x⁰ = 1 para todos."""
+    utilities = {"D1": 0.6, "D2": 0.4}
+    signals = Signals(supply={"D1": 0.1, "D2": 0.9}, approval={"D1": 0.2, "D2": 0.8})
+
+    assert decision_scores(
+        utilities=utilities, behavior=Behavior(beta_u=1.0), signals=signals
+    ) == decision_scores(utilities=utilities, behavior=Behavior(beta_u=1.0))
+
+    # β_u = 0 achata a própria preferência: os dois scores ficam iguais.
+    flat = decision_scores(utilities=utilities, behavior=Behavior(beta_u=0.0))
+    assert flat["D1"] == pytest.approx(flat["D2"])
+
+
+def test_the_utility_gene_concentrates_and_inverts():
+    """β_u é expoente: acima de 1 concentra nas mais úteis, abaixo de 0
+    inverte e concentra nas menos úteis."""
     utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
     pool = list(utilities)
 
-    def bids(beta):
+    def bids(beta_u):
         return compute_bids(
             utilities=utilities,
             available=pool,
             budget=20,
-            behavior=Behavior(concentration=beta),
+            behavior=Behavior(beta_u=beta_u),
         )
 
     assert bids(3.0)["D1"] > bids(1.0)["D1"] > bids(0.2)["D1"]
-    # Achatado, os três recebem quase o mesmo.
-    flat = bids(0.05)
+    flat = bids(0.0)
     assert max(flat.values()) - min(flat.values()) <= 1
+    # Expoente negativo põe o orçamento na que ele menos quer.
+    inverted = bids(-2.0)
+    assert inverted["D3"] > inverted["D1"]
 
 
-def test_the_reserve_gene_stops_the_spending():
-    """A reserva corta no ganho marginal, e numa regra só decide quais entram,
-    quantos créditos cada uma recebe e quanto se gasta no total: o orçamento
-    vira teto, não meta."""
-    utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
+def test_the_reserve_gene_cuts_the_choice_set():
+    """`alpha_u` está na mesma unidade da utilidade elegível: com elegíveis
+    valendo 0,6 e 0,4 e reserva 0,5, só a primeira entra. O orçamento
+    continua indo inteiro para o que foi admitido."""
+    utilities = {"D1": 0.6, "D2": 0.4}
     pool = list(utilities)
+
     full = compute_bids(utilities=utilities, available=pool, budget=20)
-    assert sum(full.values()) == 20  # neutro gasta tudo
+    assert set(full) == {"D1", "D2"}
+    assert sum(full.values()) == 20
 
-    thrifty = compute_bids(
-        utilities=utilities, available=pool, budget=20, behavior=Behavior(reserve=1.0)
+    picky = compute_bids(
+        utilities=utilities, available=pool, budget=20, behavior=Behavior(alpha_u=0.5)
     )
-    assert sum(thrifty.values()) < 20  # sobra crédito
-    assert set(thrifty) <= set(full)  # e ele pede menos disciplinas, nunca mais
+    assert set(picky) == {"D1"}
+    assert sum(picky.values()) == 20
 
 
-def test_the_progress_gene_reads_the_published_signals():
-    """ρ pesa o avanço esperado — `P(obter)·P(aprovar)·carga·(1+alcance)`. Com
-    ρ = 0 os sinais são ignorados; com ρ > 0, duas disciplinas de utilidade
-    igual se separam pelo que a universidade publicou."""
+def test_the_published_signals_separate_equal_utilities():
+    """β_v e β_n pesam o que a universidade publicou. Com utilidade igual,
+    duas disciplinas só se separam pelos índices — e o sinal do gene diz para
+    que lado."""
     utilities = {"D1": 0.5, "D2": 0.5}
+    # D1 é disputada e reprova mais; D2 é folgada e aprova mais.
     signals = Signals(
-        win={"D1": 0.2, "D2": 1.0},  # D1 é disputada
-        pass_rate={"D1": 1.0, "D2": 1.0},
-        hours={"D1": 60, "D2": 60},
-        reach={"D1": 0, "D2": 0},
+        supply={"D1": 0.1, "D2": 0.9}, approval={"D1": 0.3, "D2": 0.8}
     )
-    neutral = decision_scores(utilities=utilities, signals=signals, catalogue=2)
+
+    neutral = decision_scores(utilities=utilities, signals=signals)
     assert neutral["D1"] == pytest.approx(neutral["D2"])
 
-    aware = decision_scores(
-        utilities=utilities,
-        behavior=Behavior(progress=1.0),
-        signals=signals,
-        catalogue=2,
+    averse = decision_scores(
+        utilities=utilities, behavior=Behavior(beta_v=1.0), signals=signals
     )
-    assert aware["D2"] > aware["D1"]  # foge do congestionamento
+    assert averse["D2"] > averse["D1"]
+
+    # Negativo caça vaga escassa — o mesmo gene, o outro lado.
+    seeker = decision_scores(
+        utilities=utilities, behavior=Behavior(beta_v=-1.0), signals=signals
+    )
+    assert seeker["D1"] > seeker["D2"]
+
+    easy = decision_scores(
+        utilities=utilities, behavior=Behavior(beta_n=1.0), signals=signals
+    )
+    assert easy["D2"] > easy["D1"]

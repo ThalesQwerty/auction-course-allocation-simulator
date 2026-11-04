@@ -2,7 +2,9 @@
 
 export interface DisciplineInput {
   name: string;
-  seats: number; // q_x — vagas
+  /** Turmas ofertadas. As vagas são `classes × class_size`: a grade diz a
+   * estrutura da oferta, o cenário diz a lotação. */
+  classes: number;
   hours: number; // w_x — carga horária
   /** A dificuldade, em quantas tentativas a disciplina custa para render o
    * que uma de dificuldade 1 rende de primeira. Na fórmula da nota ela entra
@@ -58,15 +60,15 @@ export const CREDIT_RETURN_POLICIES: {
 export const creditReturnLabel = (policy: CreditReturnPolicy): string =>
   CREDIT_RETURN_POLICIES.find((option) => option.value === policy)?.label ?? policy;
 
-/** Nome de uma geração — o grupo que ingressou naquele período (geração 3 =
+/** Nome de uma coorte — o grupo que ingressou naquele período (coorte 3 =
  * quem entrou no período 3, esteja ele hoje em que semestre estiver). O aluno
- * nasce numa geração e fica nela até o fim, que é o que mantém cada série
+ * nasce numa coorte e fica nela até o fim, que é o que mantém cada série
  * falando sempre do mesmo conjunto de alunos.
  *
- * Com os cursos fora do modelo, a geração é o único recorte de aluno que
+ * Com os cursos fora do modelo, a coorte é o único recorte de aluno que
  * sobra — e é também o que mais separa as curvas, porque a posição na cadeia de
  * pré-requisitos é o que de fato distingue um aluno de outro aqui. */
-export const cohortLabel = (entryPeriod: number): string => `Geração ${entryPeriod}`;
+export const cohortLabel = (entryPeriod: number): string => `Coorte ${entryPeriod}`;
 
 /** Um grupo da população num dos dois eixos de perfil.
  *
@@ -89,6 +91,10 @@ export interface Profile {
 
 export interface Scenario {
   disciplines: DisciplineInput[];
+  /** Alunos por turma — `q_x = classes × este`. É o botão de estresse do
+   * cenário: a mesma grade sob 20 ou 40 por turma é o mesmo currículo com o
+   * dobro de aperto. */
+  class_size: number;
   /** Perfis de **desempenho**: governam a Beta da aptidão, e por aí a
    * frequência com que o aluno reprova. A nota sai da aptidão elevada à
    * demanda da disciplina: `round(100 · a^(D/(u_rel^ganho · tentativas)))/10`.
@@ -135,11 +141,11 @@ export interface Scenario {
   utility_sigma: number; // > 0
   /** W_a — carga horária máxima por período, eq. (4). Igual para todos. */
   max_hours: number;
-  /** Em quantos períodos entra geração nova, contados do primeiro. Depois do
+  /** Em quantos períodos entra coorte nova, contados do primeiro. Depois do
    * último ingresso vem a drenagem: ninguém mais entra e a população só
-   * diminui, o que dá às gerações tardias tempo de chegar ao fim do curso.
-   * **Só há uma geração por período com ingresso** — os de drenagem não têm
-   * geração correspondente. */
+   * diminui, o que dá às coortes tardias tempo de chegar ao fim do curso.
+   * **Só há uma coorte por período com ingresso** — os de drenagem não têm
+   * coorte correspondente. */
   entry_periods: number;
   /** Períodos que o aluno tem para concluir, contados do ingresso. Quem chega
    * ao fim do último sem fechar a grade é **jubilado** e sai da simulação. Com
@@ -232,7 +238,7 @@ export const COMPARISON_ARMS: ArmDescription[] = [
  *
  * Separam o vão em três parcelas, e o motor os alcança por
  * `run_comparison(..., arms=ARMS + ABLATION_ARMS)`. Ficam aqui só para que o
- * traço de uma execução antiga continue com rótulo legível. */
+ * traço de uma observação antiga continue com rótulo legível. */
 export const ABLATION_ARMS: ArmDescription[] = [
   {
     key: "credits_greedy",
@@ -254,19 +260,94 @@ export const armLabel = (key: string): string =>
 /** Uma comparação: o mesmo cenário rodado em cada modelo, N vezes.
  *
  * Dois campos do cenário não entram. A **seed**, porque as seeds são 1..N e são
- * pareadas, de modo que a i-ésima execução de cada braço parte da mesma
+ * pareadas, de modo que a i-ésima observação de cada braço parte da mesma
  * população, das mesmas utilidades e das mesmas notas (condição metodológica da
  * Seção 7.3). E o **retorno de créditos**, porque ele é o eixo do experimento:
  * cada braço impõe o seu. */
 export interface CompareRequest
   extends Omit<Scenario, "seed" | "credit_return"> {
   runs: number; // N
+  /** Quais braços rodar, pelas chaves de `COMPARISON_ARMS`. Rodar um só custa
+   * metade do tempo: os painéis que comparam os dois lados somem, o resto da
+   * tela desenha o que veio. Espelha `CompareRequest.arms` da API. */
+  arms: string[];
 }
 
-/** Teto de execuções por mecanismo. Espelha `leilao.comparison.MAX_RUNS`. */
+/** Os quatro genes, na ordem em que o motor publica a média de cada um.
+ * Espelha `leilao.evolution.GENES`. */
+export const GENES = [
+  { key: "beta_u", label: "β_u", name: "viés de utilidade", baseline: 1 },
+  { key: "beta_v", label: "β_v", name: "viés de oferta", baseline: 0 },
+  { key: "beta_n", label: "β_n", name: "viés de aprovação", baseline: 0 },
+  { key: "alpha_u", label: "α_u", name: "utilidade de reserva", baseline: 0 },
+] as const;
+
+/** Os valores fixados da 1ª geração, um conjunto por gene. O **produto** deles
+ * é o tamanho da população inicial e precisa bater com `students_per_period`.
+ * Espelha `GenomeLevelsIn`. */
+export interface GenomeLevels {
+  beta_u: number[];
+  beta_v: number[];
+  beta_n: number[];
+  alpha_u: number[];
+}
+
+export const DEFAULT_LEVELS: GenomeLevels = {
+  beta_u: [-1, 0, 1, 2, 3],
+  beta_v: [-1, 0, 1],
+  beta_n: [-1, 0, 1],
+  // Múltiplos arredondados da participação média: nada, metade da média, a
+  // média, o dobro. Níveis redondos como ⅔ e 1 não seriam estratégias, seriam
+  // desligamentos — ver `equations.genome_grid`.
+  alpha_u: [0, 0.05, 0.1, 0.2],
+};
+
+export const gridSize = (levels: GenomeLevels): number =>
+  levels.beta_u.length * levels.beta_v.length * levels.beta_n.length * levels.alpha_u.length;
+
+/** Uma rodada do algoritmo genético. Espelha `EvolveRequest`. */
+export interface EvolveRequest extends Scenario {
+  levels: GenomeLevels;
+  observations: number;
+  min_generations: number;
+  max_generations: number;
+  window: number;
+  epsilon: number | null;
+  tournament: number;
+  elites: number;
+  step: number;
+  neutral: boolean;
+}
+
+export interface CohortGeneration {
+  entry_period: number;
+  /** A média de cada gene, na ordem de `GENES`. */
+  mean: number[];
+  best_fitness: number;
+  mean_fitness: number;
+}
+
+export interface Generation {
+  generation: number;
+  cohorts: CohortGeneration[];
+  /** `null` enquanto a janela do critério de parada não fecha. */
+  drift: number | null;
+}
+
+export interface EvolveResponse {
+  /** Onde a API gravou esta execução, ou `null` se o disco recusou. */
+  saved_to: string | null;
+  generations: Generation[];
+  stopped_by: string;
+  neutral: boolean;
+  /** O espalhamento de cada gene na 1ª geração — a escala fixa da deriva. */
+  scales: number[];
+}
+
+/** Teto de observações por mecanismo. Espelha `leilao.comparison.MAX_RUNS`. */
 export const MAX_COMPARISON_RUNS = 100;
 
-/** As métricas de período de uma execução, sem reduzir — o que o recorte por
+/** As métricas de período de uma observação, sem reduzir — o que o recorte por
  * período desenha.
  *
  * Listas **paralelas**, e só com os períodos medidos: `period[i]` é o número do
@@ -277,7 +358,7 @@ export const MAX_COMPARISON_RUNS = 100;
  * `students` é o peso daquele ponto na média ponderada que produz o `RunSummary`
  * — e é o que cai à vista na drenagem.
  *
- * Sem tempo de formatura: ele é da execução inteira, e a versão por período
+ * Sem tempo de formatura: ele é da observação inteira, e a versão por período
  * ("quanto levou quem concluiu em t") seria outra grandeza, com viés de
  * sobrevivência. */
 export interface PeriodSeries {
@@ -305,27 +386,27 @@ export interface PeriodSeries {
   allocations_per_round: (number | null)[][];
 }
 
-/** O mesmo resumo da execução, uma linha por geração — o terceiro eixo da tela.
+/** O mesmo resumo da observação, uma linha por coorte — o terceiro eixo da tela.
  *
- * A geração é o período de ingresso (t_a): a geração 3 é quem entrou no período
+ * A coorte é o período de ingresso (t_a): a coorte 3 é quem entrou no período
  * 3, e o aluno fica nela do ingresso ao diploma. O recorte particiona a
  * população, e a redução é a mesma do agregado — o que muda é sobre quem ela
  * corre.
  *
- * **As gerações não são intercambiáveis.** A primeira encontra uma universidade
+ * **As coortes não são intercambiáveis.** A primeira encontra uma universidade
  * quase vazia e a última a encontra cheia, de modo que a inclinação ao longo do
  * eixo mistura mecanismo e mercado. O que se lê com segurança é a comparação
- * **vertical**: os braços num mesmo ponto, que é a mesma geração da mesma
+ * **vertical**: os braços num mesmo ponto, que é a mesma coorte da mesma
  * população sob regras diferentes.
  *
- * Aqui o tempo de formatura **entra** — cada aluno pertence a uma geração só —,
+ * Aqui o tempo de formatura **entra** — cada aluno pertence a uma coorte só —,
  * e vem com os concluintes, o denominador sem o qual ele não se lê. */
 export interface CohortSeries {
   cohort: number[];
   graduates: number[];
-  /** A fração da geração que concluiu: os concluintes sobre quantos entraram
+  /** A fração da coorte que concluiu: os concluintes sobre quantos entraram
    * naquele período. É ela que se desenha — a contagem depende do tamanho do
-   * ingresso, a fração é comparável entre gerações. */
+   * ingresso, a fração é comparável entre coortes. */
   graduation_rate: number[];
   efficiency: number[];
   utilization: number[];
@@ -334,28 +415,28 @@ export interface CohortSeries {
   correlation: number[];
   exclusion_rate: number[];
   request_states: RequestStates[];
-  /** `null` na geração em que ninguém concluiu. */
+  /** `null` na coorte em que ninguém concluiu. */
   time_to_graduate: (number | null)[];
-  /** A saturação da geração, rodada a rodada — lê-se por coluna, como a de
-   * período: a 1ª rodada de cada geração, a 2ª de cada geração. */
+  /** A saturação da coorte, rodada a rodada — lê-se por coluna, como a de
+   * período: a 1ª rodada de cada coorte, a 2ª de cada coorte. */
   allocations_per_round: (number | null)[][];
 }
 
-/** Uma execução reduzida a um ponto por métrica — o que vira um valor dentro
+/** Uma observação reduzida a um ponto por métrica — o que vira um valor dentro
  * de uma caixa. As três de período são a média **ponderada pelos alunos
  * medidos**: a simulação termina numa fase de drenagem, e uma média simples
  * daria a um período final de vinte alunos o mesmo peso de um período cheio. O
- * tempo de formatura não é de período — é da execução inteira. */
+ * tempo de formatura não é de período — é da observação inteira. */
 export interface RunSummary {
   seed: number;
   /** Períodos efetivamente publicados; menor que |T| se a população se
    * esvaziou antes do horizonte. */
   periods: number;
-  /** Concluintes da execução. Não é métrica: é o denominador sem o qual
+  /** Concluintes da observação. Não é métrica: é o denominador sem o qual
    * `time_to_graduate` não se lê — quem forma menos gente pode exibir um tempo
    * menor só porque sobraram os rápidos. */
   graduates: number;
-  /** Jubilados da execução: esgotaram a residência sem fechar a grade. */
+  /** Jubilados da observação: esgotaram a residência sem fechar a grade. */
   dismissed: number;
   /** Quantos ingressaram ao todo — o denominador das duas frações. */
   population: number;
@@ -393,12 +474,12 @@ export interface RunSummary {
    * existir não a trazem — e aí o modo por período some em vez de desenhar
    * vazio. */
   by_period?: PeriodSeries;
-  /** O mesmo resumo por geração. **Opcional** pelo mesmo motivo que
+  /** O mesmo resumo por coorte. **Opcional** pelo mesmo motivo que
    * `by_period`: execução gravada antes dele existir não o traz. */
   by_cohort?: CohortSeries;
 }
 
-/** Um dos modelos comparados e as suas N execuções. O rótulo em português está
+/** Um dos modelos comparados e as suas N observações. O rótulo em português está
  * em `COMPARISON_ARMS`, casado por `key`; a API manda só o identificador e o
  * que define o braço. */
 export interface ArmResult {
@@ -409,10 +490,12 @@ export interface ArmResult {
 }
 
 export interface CompareResponse {
+  /** Onde a API gravou esta execução, ou `null` se o disco recusou. */
+  saved_to: string | null;
   runs: number;
   arms: ArmResult[];
   /** As duas distribuições de entrada do cenário. Não variam entre braços nem
-   * entre seeds — são do cenário, não da execução. */
+   * entre seeds — são do cenário, não da observação. */
   utility_distribution?: number[];
   grade_distribution?: number[];
 }
@@ -505,7 +588,7 @@ export interface Metrics {
 }
 
 /** Um recorte de alunos num instante: a universidade inteira (`overall`) ou uma
- * geração (`by_cohort`). Os dois trazem os mesmos campos, então um gráfico só
+ * coorte (`by_cohort`). Os dois trazem os mesmos campos, então um gráfico só
  * troca de lista para trocar de agregação. */
 export interface GroupSnapshot {
   /** Quem é este recorte: `null` na universidade inteira e o período de
@@ -546,7 +629,7 @@ export interface GroupSnapshot {
 
 /** Dispersão do preço de mercado (π_x, eq. 24) entre as disciplinas que
  * estavam no mercado no instante — as que ainda tinham vaga. O preço não é
- * grandeza de aluno nem de geração: é o que a faixa entre a disciplina mais
+ * grandeza de aluno nem de coorte: é o que a faixa entre a disciplina mais
  * cara e a mais barata diz sobre onde o crédito se concentrou. */
 export interface PriceStats {
   min: number;
@@ -559,9 +642,9 @@ export interface RoundReport {
   round: number; // 0 = agregado do período
   /** Toda a universidade. */
   overall: GroupSnapshot;
-  /** O mesmo instante agregado por geração. Só as gerações que já ingressaram,
-   * então a série de uma geração começa no período do seu ingresso — e o aluno
-   * fica na mesma geração do início ao fim. */
+  /** O mesmo instante agregado por coorte. Só as coortes que já ingressaram,
+   * então a série de uma coorte começa no período do seu ingresso — e o aluno
+   * fica na mesma coorte do início ao fim. */
   by_cohort: GroupSnapshot[];
   /** `null` quando nenhuma disciplina estava no mercado: sem oferta não há
    * preço, e 0 ali se leria como "de graça". */
@@ -678,12 +761,12 @@ export interface StudentHistory {
   periods: StudentPeriodRecord[];
 }
 
-/** O pedido do traço de **uma** execução da comparação: o cenário dela mais o
- * par `(braço, seed)` que endereça a execução.
+/** O pedido do traço de **uma** observação da comparação: o cenário dela mais o
+ * par `(braço, seed)` que endereça a observação.
  *
  * Aqui a seed não é ignorada como em `/compare` — ela é o que se pede. E o
  * retorno de créditos e o resolvedor continuam de fora: quem os impõe é o
- * braço, que é o que faz o traço ser a mesma execução que o boxplot resumiu. */
+ * braço, que é o que faz o traço ser a mesma observação que o boxplot resumiu. */
 export interface TraceRequest extends Omit<Scenario, "seed" | "credit_return"> {
   arm: string;
   seed: number;
@@ -696,12 +779,12 @@ export interface TracePeriod {
   disciplines: DisciplineSnapshot[];
 }
 
-/** Uma execução inteira, aluno a aluno — a tela de depuração do projeto.
+/** Uma observação inteira, aluno a aluno — a tela de depuração do projeto.
  *
  * É a parte pesada do resultado (uns 10 MB no preset Computação, contra 100 kB
  * do resumo da comparação), e por isso **não** é persistida no `localStorage`
  * nem vem junto de `/compare`: quem quer o caso individual o pede, e só
- * daquela execução. A simulação é determinística, então refazê-la custa tempo
+ * daquela observação. A simulação é determinística, então refazê-la custa tempo
  * e não fidelidade. */
 export interface TraceResponse {
   arm: string;
@@ -714,38 +797,6 @@ export interface TraceResponse {
   disciplines: string[];
   /** Período de cada disciplina na grade, induzido dos pré-requisitos. */
   curriculum_periods: Record<string, number>;
-}
-
-export function defaultScenario(): Scenario {
-  return {
-    disciplines: [],
-    performance_profiles: [
-      { name: "Alto desempenho", mean: 0.8, concentration: 25 },
-      { name: "Médio desempenho", mean: 0.65, concentration: 15 },
-      { name: "Baixo desempenho", mean: 0.5, concentration: 10 },
-    ],
-    availability_profiles: [
-      { name: "Alta disponibilidade", mean: 0.95, concentration: 50 },
-      { name: "Média disponibilidade", mean: 0.85, concentration: 20 },
-      { name: "Baixa disponibilidade", mean: 0.6, concentration: 10 },
-    ],
-    utility_gain: 0,
-    retake_gain: 1,
-    utility_stability: 0.5,
-    resolver: "ilp",
-    credit_memory: "carry",
-    utility_sigma: 0.25,
-    max_hours: 360,
-    entry_periods: 8,
-    max_residence: 12,
-    students_per_period: 1,
-    rounds: 1,
-    min_grade: 5,
-    elective_hours: 0,
-    base_credits: 10,
-    credit_return: "none",
-    seed: 0,
-  };
 }
 
 export interface PlaygroundRequest {
@@ -790,7 +841,7 @@ export interface PlaygroundResponse {
  * Espelha `config.horizon_for_lifecycle` do motor, porque a tela de
  * configuração precisa do número ao vivo, enquanto o usuário mexe nos dois
  * controles de que ele sai. O **menos um** é a sobreposição do primeiro
- * período: a geração que entra em t = 1 já gasta ali o primeiro período de
+ * período: a coorte que entra em t = 1 já gasta ali o primeiro período de
  * residência dela.
  */
 export const horizonFor = (entryPeriods: number, maxResidence: number): number =>

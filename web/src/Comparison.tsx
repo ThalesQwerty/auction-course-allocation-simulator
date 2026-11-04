@@ -31,13 +31,13 @@ interface Metric {
   /** Rótulo curto, para a coluna "Métrica" das tabelas. */
   short: string;
   of: (run: RunSummary) => number | null;
-  /** Os pontos da grandeza numa execução, **um acessor por eixo** — o material
+  /** Os pontos da grandeza numa observação, **um acessor por eixo** — o material
    * de que `of` é a média ponderada.
    *
    * O eixo que falta aqui é o eixo em que a grandeza não existe, e é assim que
    * a exclusão fica estrutural em vez de virar um filtro à parte: o tempo de
-   * formatura não tem `period` porque é da execução inteira, e tem `cohort`
-   * porque cada aluno pertence a uma geração só. */
+   * formatura não tem `period` porque é da observação inteira, e tem `cohort`
+   * porque cada aluno pertence a uma coorte só. */
   series?: Partial<Record<SeriesMode, (run: RunSummary) => SeriesPoint[]>>;
   /** Limites naturais da grandeza; o domínio é folgado em torno dos dados mas
    * nunca passa daqui. Ausente quando a grandeza não tem teto. */
@@ -57,7 +57,7 @@ interface Metric {
  * de leitura que não são o agregado.
  *
  * O **período** é o tempo: entre o 5 e o 6 há caminho, e o que se lê é a
- * trajetória que a redução resume. A **geração** é o período de ingresso: o
+ * trajetória que a redução resume. A **coorte** é o período de ingresso: o
  * aluno fica na dela do ingresso ao diploma, e o eixo também é ordenado — quem
  * entrou depois encontrou uma universidade mais cheia. É por isso que uma
  * inclinação ali não se lê como efeito do mecanismo, e a comparação que vale é
@@ -68,7 +68,7 @@ type ViewMode = "aggregate" | SeriesMode;
 /** Como cada eixo se chama na tela e num ponto dele. */
 const AXIS: Record<SeriesMode, { label: string; point: (x: number) => string }> = {
   period: { label: "Por período", point: (x) => `Período ${x}` },
-  cohort: { label: "Por geração", point: (x) => `Geração ${x}` },
+  cohort: { label: "Por coorte", point: (x) => `Coorte ${x}` },
 };
 
 /** As listas de um recorte que se desenham como série simples: um número por
@@ -84,7 +84,7 @@ type CohortValues = Exclude<FlatKeys<CohortSeries>, "cohort">;
 /** Os pontos (eixo, valor) de uma lista.
  *
  * Posição nula fica **de fora** em vez de virar zero: ninguém concluiu numa
- * geração é coisa diferente de ter concluído na hora. Recorte ausente —
+ * coorte é coisa diferente de ter concluído na hora. Recorte ausente —
  * execução gravada antes dele existir — devolve amostra vazia, e o modo some
  * em vez de desenhar no vazio. */
 const pointsOf = (
@@ -99,7 +99,7 @@ const pointsOf = (
 };
 
 /** Os pontos de **uma rodada**: a coluna `index` da matriz de saturação, lida
- * ao longo do eixo — a 1ª rodada de cada período (ou de cada geração), a 2ª de
+ * ao longo do eixo — a 1ª rodada de cada período (ou de cada coorte), a 2ª de
  * cada um, e assim por diante. */
 const columnOf = (
   axis: number[] | undefined,
@@ -146,13 +146,13 @@ const roundByCohort = (index: number) => (run: RunSummary) =>
  *
  * Nada de crédito: orçamento, preço e retorno não existem do lado da linha de
  * base, e comparar um mecanismo com o vazio não compara nada. E nenhum recorte
- * por geração: aqui a pergunta é sobre o modelo, não sobre o que acontece
+ * por coorte: aqui a pergunta é sobre o modelo, não sobre o que acontece
  * dentro de cada um.
  *
  * Duas saíram em 08/10. A **ocupação** (θ), porque com o calouro fora do
  * recorte ela deixou de se ler como "o quanto a universidade encheu" — as vagas
  * garantidas continuam ocupadas e não entram mais no numerador; quem quer essa
- * leitura a tem nos gráficos por disciplina de uma execução. E a
+ * leitura a tem nos gráficos por disciplina de uma observação. E a
  * **semestralização**, que deu lugar ao tempo de formatura: mede a mesma coisa
  * — progressão na grade — num número que se lê direto. */
 const METRICS: Metric[] = [
@@ -245,9 +245,9 @@ const METRICS: Metric[] = [
     title: "Tempo de formatura (períodos)",
     short: "Tempo (períodos)",
     of: (run) => run.time_to_graduate,
-    // Sem `period`: o tempo é da execução inteira, e a versão por período
+    // Sem `period`: o tempo é da observação inteira, e a versão por período
     // ("quanto levou quem concluiu em t") seria outra grandeza, com viés de
-    // sobrevivência. Por geração ele existe — cada aluno pertence a uma só.
+    // sobrevivência. Por coorte ele existe — cada aluno pertence a uma só.
     series: { cohort: byCohort("time_to_graduate") },
     betterWhen: "lower",
     format: formatPeriods,
@@ -261,28 +261,28 @@ const METRICS: Metric[] = [
 const NOTES: Record<ViewMode, { metrics: string; saturation: string }> = {
   aggregate: {
     metrics:
-      "Cada caixa é a distribuição da métrica sobre as execuções do modelo; o que se compara é a sobreposição delas, não a distância entre as medianas.",
+      "Cada caixa é a distribuição da métrica sobre as observações do modelo; o que se compara é a sobreposição delas, não a distância entre as medianas.",
     saturation:
       "Um gráfico por rodada, e o que se lê entre eles é o decaimento: quem atende mais demanda cedo começa alto e cai rápido.",
   },
   period: {
     metrics:
-      "A mediana entre as execuções em cada período, com o intervalo interquartil em faixa. O tempo de formatura não entra: é da execução inteira, não do período.",
+      "A mediana entre as observações em cada período, com o intervalo interquartil em faixa. O tempo de formatura não entra: é da observação inteira, não do período.",
     saturation:
       "A mesma rodada ao longo do horizonte — a 1ª rodada de cada período, a 2ª de cada período —, para o decaimento se ler junto com o momento em que acontece.",
   },
   cohort: {
     metrics:
-      "A mediana entre as execuções em cada geração: quem entrou no período 1, no 2, e assim por diante. As gerações não são intercambiáveis — a primeira encontra a universidade quase vazia e a última a encontra cheia —, então a inclinação ao longo do eixo mistura mecanismo e mercado. O que se lê aqui é a comparação entre os braços num mesmo ponto.",
+      "A mediana entre as observações em cada coorte: quem entrou no período 1, no 2, e assim por diante. As coortes não são intercambiáveis — a primeira encontra a universidade quase vazia e a última a encontra cheia —, então a inclinação ao longo do eixo mistura mecanismo e mercado. O que se lê aqui é a comparação entre os braços num mesmo ponto.",
     saturation:
-      "A mesma rodada em cada geração — a 1ª rodada de cada uma, a 2ª de cada uma.",
+      "A mesma rodada em cada coorte — a 1ª rodada de cada uma, a 2ª de cada uma.",
   },
 };
 
 const ORDINALS = ["1ª", "2ª", "3ª", "4ª", "5ª", "6ª", "7ª", "8ª", "9ª", "10ª"];
 
 /** Uma métrica por rodada do cenário: as vagas obtidas por aluno naquela
- * rodada. Quantas são depende do |R| da execução, então elas são construídas a
+ * rodada. Quantas são depende do |R| da observação, então elas são construídas a
  * partir do resultado, e não de uma lista fixa. */
 const roundMetrics = (rounds: number): Metric[] =>
   Array.from({ length: rounds }, (_, index) => {
@@ -367,7 +367,7 @@ export function Comparison({
     result.arms.find((arm) => arm.key === key)?.runs ?? [];
 
   /** As duas distribuições de entrada do cenário. Não variam entre braços nem
-   * entre seeds: são do cenário, não da execução. */
+   * entre seeds: são do cenário, não da observação. */
   const scenarioHistograms = [
     result.grade_distribution?.length ? (
       <Histogram
@@ -512,7 +512,7 @@ export function Comparison({
     );
   };
 
-  /** As amostras de uma grandeza por braço, uma lista de pontos por execução —
+  /** As amostras de uma grandeza por braço, uma lista de pontos por observação —
    * o que o gráfico de séries resume em mediana e faixa. */
   const samplesOf = (of: (run: RunSummary) => SeriesPoint[]) =>
     COMPARISON_ARMS.map((arm) => ({
@@ -521,7 +521,7 @@ export function Comparison({
     }));
 
   /** Um gráfico de séries avulso — o que não é métrica mas se lê no mesmo
-   * eixo: o peso de cada ponto, os concluintes de cada geração. */
+   * eixo: o peso de cada ponto, os concluintes de cada coorte. */
   const chartOfSeries = (
     id: string,
     title: string,
@@ -588,7 +588,7 @@ export function Comparison({
 
       <div className="panel panel-switch">
         <h2>
-          {result.runs} execuções de cada modelo — {result.runs * result.arms.length}{" "}
+          {result.runs} observações de cada modelo — {result.runs * result.arms.length}{" "}
           simulações
         </h2>
         {/* Um alternador para a tela inteira, e não um por seção: o que ele
@@ -632,7 +632,7 @@ export function Comparison({
                 // enchendo, o estado estacionário e a drenagem —, e sem ele a
                 // queda das curvas no fim se leria como mudança de mecanismo.
                 //
-                // Só no período. Na geração o contexto é o concluinte, e ele
+                // Só no período. Na coorte o contexto é o concluinte, e ele
                 // **já está na grade como métrica** (`graduation_rate`):
                 // repeti-lo aqui desenhava a mesma curva duas vezes.
                 mode === "period"
@@ -738,7 +738,7 @@ export function Comparison({
       </div>
 
       <div className="panel">
-        <h2>Execução a execução</h2>
+        <h2>Observação a observação</h2>
         <table>
           <thead>
             <tr>
@@ -781,7 +781,7 @@ export function Comparison({
       </div>
 
       {/* Por último, o caso individual. Tudo acima é agregado — a distribuição
-          entre as execuções e o perfil dentro delas —, e esta seção é a porta
+          entre as observações e o perfil dentro delas —, e esta seção é a porta
           de saída para o outro extremo: um aluno, uma disciplina, uma rodada.
           Fica no fim porque custa uma simulação a mais, e porque a pergunta
           que ela responde ("por que este número saiu assim?") só aparece

@@ -4,6 +4,8 @@ import type { Profile } from "./types";
 import type {
   CompareRequest,
   CompareResponse,
+  EvolveRequest,
+  EvolveResponse,
   Scenario,
 } from "./types";
 
@@ -15,7 +17,15 @@ export interface ComparisonRun {
   result: CompareResponse;
 }
 
-export type HistoryEntry = ComparisonRun;
+export interface EvolutionRun {
+  kind: "evolution";
+  id: string;
+  at: string; // ISO 8601
+  config: EvolveRequest;
+  result: EvolveResponse;
+}
+
+export type HistoryEntry = ComparisonRun | EvolutionRun;
 
 /** A versão faz parte da chave porque o formato do resultado mudou com o
  * modelo: a v1 guardava recortes por curso (`by_course`) e um `overall` que era
@@ -29,7 +39,7 @@ export type HistoryEntry = ComparisonRun;
  * os perfis de aluno saíram do modelo. Uma execução da v2 traz `by_aptitude`,
  * `by_affinity` e um cenário sem as duas normais que o substituíram, e não há
  * como converter — a tela leria `undefined` onde espera número. */
-const STORAGE_KEY = "leilao.historico.v3";
+const STORAGE_KEY = "leilao.historico.v4";
 
 /** Teto de execuções guardadas: cada resultado carrega todas as séries e todos
  * os alunos, então o histórico é podado pelas mais antigas. */
@@ -45,6 +55,13 @@ export function newComparison(
   result: CompareResponse
 ): ComparisonRun {
   return { kind: "comparison", ...stamp(), config, result };
+}
+
+export function newEvolution(
+  config: EvolveRequest,
+  result: EvolveResponse
+): EvolutionRun {
+  return { kind: "evolution", ...stamp(), config, result };
 }
 
 /** O cenário de uma execução gravada antes de 31/10/2026, traduzido para os
@@ -110,14 +127,18 @@ export function loadHistory(): HistoryEntry[] {
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
     // Grade legada ainda pode trazer `prerequisites` no lugar de `unlocks`;
-    // o resto do cenário legado passa por `migrateScenario`.
-    return (parsed as HistoryEntry[]).map((entry) => ({
-      ...entry,
-      config: migrateScenario({
-        ...entry.config,
-        disciplines: withUnlocks(entry.config.disciplines ?? []),
-      }),
-    }));
+    // o resto do cenário legado passa por `migrateScenario`. O genérico
+    // preserva o tipo de cada entrada: espalhar o cenário migrado apagaria a
+    // união discriminada e a tela não saberia mais qual painel desenhar.
+    const migrate = <T extends HistoryEntry>(entry: T): T =>
+      ({
+        ...entry,
+        config: migrateScenario({
+          ...entry.config,
+          disciplines: withUnlocks(entry.config.disciplines ?? []),
+        }),
+      }) as T;
+    return (parsed as HistoryEntry[]).map(migrate);
   } catch {
     // localStorage indisponível (modo privado) ou conteúdo corrompido
     return [];
@@ -144,6 +165,35 @@ export function saveHistory(entries: HistoryEntry[]): HistoryEntry[] {
   return kept;
 }
 
+/** Uma execução gravada em disco pela API, de volta para a lista.
+ *
+ * O arquivo tem exatamente o formato de uma entrada daqui — é por isso que
+ * carregar é só acrescentar. O `id` é novo: ele identifica a entrada *nesta*
+ * lista, e o mesmo arquivo carregado duas vezes vira duas entradas em vez de
+ * uma substituir a outra calada.
+ *
+ * O cenário passa pela mesma migração do histórico do navegador, de modo que
+ * um arquivo gravado por uma versão anterior do motor continua abrindo. */
+export function entryFromFile(text: string): HistoryEntry {
+  const parsed = JSON.parse(text);
+  if (parsed?.kind !== "evolution" && parsed?.kind !== "comparison") {
+    throw new Error("arquivo não é um resultado do simulador");
+  }
+  if (!parsed.config || !parsed.result) {
+    throw new Error("arquivo sem cenário ou sem resultado");
+  }
+  return {
+    ...parsed,
+    ...stamp(),
+    // A data do arquivo vale mais que a de agora: é quando a simulação rodou.
+    at: typeof parsed.at === "string" ? parsed.at : new Date().toISOString(),
+    config: migrateScenario({
+      ...parsed.config,
+      disciplines: withUnlocks(parsed.config.disciplines ?? []),
+    }),
+  } as HistoryEntry;
+}
+
 /** "01/10/2026, 14:32" — rótulo de cada execução na barra lateral. */
 export function formatRunDate(at: string): string {
   const date = new Date(at);
@@ -165,7 +215,7 @@ function describeScenario(
 ): string {
   const { rounds, disciplines } = config;
   const periods = horizonFor(config.entry_periods, config.max_residence);
-  // Uma geração por período *com ingresso*: a população é o que entra por
+  // Uma coorte por período *com ingresso*: a população é o que entra por
   // período vezes a quantidade desses períodos, não vezes |T|.
   const students = config.students_per_period * config.entry_periods;
   const rodadas = rounds === 1 ? "1 rodada" : `${rounds} rodadas`;
@@ -199,11 +249,26 @@ function describeScenario(
 
 export function describeComparison(run: ComparisonRun): string {
   // O número de execuções vem primeiro: é o que muda a leitura do resultado —
-  // com poucas seeds a dispersão da caixa mal se lê.
-  return `${run.config.runs} seeds × ${COMPARISON_ARMS.length} modelos · ${describeScenario(
-    run.config,
-    { withCreditReturn: false }
-  )}`;
+  // com poucas seeds a dispersão da caixa mal se lê. E são os braços **que
+  // rodaram**, não os dois canônicos: rodar um só é metade do tempo e metade
+  // do que a tela mostra.
+  const arms = run.config.arms?.length ?? COMPARISON_ARMS.length;
+  return `${run.config.runs} seeds × ${arms} ${
+    arms === 1 ? "modelo" : "modelos"
+  } · ${describeScenario(run.config, { withCreditReturn: false })}`;
 }
 
-export const describeEntry = (entry: HistoryEntry): string => describeComparison(entry);
+export function describeEvolution(run: EvolutionRun): string {
+  // Gerações e observações primeiro: são os dois números que dizem quanto a
+  // rodada custou e quanta resolução ela tem.
+  const generations = run.result.generations.length;
+  return (
+    `${generations} ${generations === 1 ? "geração" : "gerações"}` +
+    ` × ${run.config.observations} obs` +
+    `${run.result.neutral ? " · controle negativo" : ""}` +
+    ` · ${describeScenario(run.config, { withCreditReturn: false })}`
+  );
+}
+
+export const describeEntry = (entry: HistoryEntry): string =>
+  entry.kind === "evolution" ? describeEvolution(entry) : describeComparison(entry);

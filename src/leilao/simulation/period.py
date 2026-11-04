@@ -16,9 +16,9 @@ from ..equations import (
     Signals,
     demand_per_seat,
     mean_price,
-    pass_rate_estimate,
+    approval_index,
     satisfaction,
-    win_estimate,
+    supply_index,
 )
 from ..population import Student
 from .closing import PeriodClosing, close_period
@@ -56,7 +56,7 @@ def _scarcities(
     ainda pode cursar.
 
     Conta toda a universidade em "quantos querem", e não só o recorte: quem
-    disputa uma vaga com o aluno não é só quem está na geração dele.
+    disputa uma vaga com o aluno não é só quem está na coorte dele.
     Disciplina sem vaga fica de fora — não é oferta, e a razão seria divisão
     por zero.
     """
@@ -100,34 +100,57 @@ def _contentions(
     return contentions, demand
 
 
+def _eligible_count(
+    utilities: dict[str, dict[str, float]],
+) -> dict[str, int]:
+    """Quantos alunos tinham cada disciplina no conjunto elegível.
+
+    Sai das próprias linhas de utilidade elegível: elas já são o recorte do
+    que cada aluno podia pedir, então não há segunda fonte de verdade.
+    """
+    count: dict[str, int] = {}
+    for row in utilities.values():
+        for name in row:
+            count[name] = count.get(name, 0) + 1
+    return count
+
+
 def _publish_signals(
     *,
     config: SimulationConfig,
-    draws: Draws,
     state: PeriodState,
     closing: PeriodClosing,
     demand: dict[str, int],
+    eligible: dict[str, int],
 ) -> Signals:
     """Os sinais do próximo período, saídos do que este acabou de publicar.
 
     É todo o conjunto de informação do aluno sobre a disciplina, e é o mesmo
-    que um aluno real lê. As fórmulas estão em `equations.win_estimate` e
-    `equations.pass_rate_estimate`.
+    que um aluno real lê. As fórmulas estão em `equations.supply_index` e
+    `equations.approval_index`.
+
+    `eligible` é quantos alunos **podiam** pedir cada disciplina neste
+    período. Entra só no índice de oferta, e serve para separar "ninguém
+    quis" de "ninguém podia querer": sem essa distinção, a disciplina que
+    acaba de destravar anunciaria folga máxima e atrairia o estouro de
+    pedidos que vai lotá-la.
     """
     return Signals(
-        win={
-            d.name: win_estimate(seats=d.seats, requests=demand.get(d.name, 0))
-            for d in config.disciplines
-        },
-        pass_rate={
-            d.name: pass_rate_estimate(
-                approvals=closing.approvals[d.name],
-                enrolled=d.seats - state.seats[d.name],
+        supply={
+            d.name: supply_index(
+                seats=d.seats,
+                requests=demand.get(d.name, 0),
+                eligible=eligible.get(d.name, 0),
             )
             for d in config.disciplines
         },
-        hours=draws.hours,
-        reach=draws.reach,
+        approval={
+            d.name: approval_index(
+                approvals=closing.approvals[d.name],
+                allocations=d.seats - state.seats[d.name],
+            )
+            for d in config.disciplines
+        },
     )
 
 
@@ -171,7 +194,7 @@ class _Reporter:
     """Monta um `RoundReport` a partir do que muda no instante.
 
     O contexto que **não** muda dentro do período — quem está ativo, o eixo
-    das gerações, as utilidades, a escassez e a concorrência — fica guardado
+    das coortes, as utilidades, a escassez e a concorrência — fica guardado
     aqui, de modo que cada chamada passe só o instante.
     """
 
@@ -485,6 +508,10 @@ def run_period(
         satisfaction=period_satisfaction,
         first_grades=closing.first_grades,
         signals=_publish_signals(
-            config=config, draws=draws, state=state, closing=closing, demand=demand
+            config=config,
+            state=state,
+            closing=closing,
+            demand=demand,
+            eligible=_eligible_count(utilities),
         ),
     )

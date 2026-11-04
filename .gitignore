@@ -10,6 +10,11 @@ web/node_modules/
 web/dist/
 *.tsbuildinfo
 
+# Resultados gravados em disco pela API — registro local de execuções, nunca
+# versionado: são grandes, são da máquina de quem rodou, e a API não depende
+# de nenhum deles existir. A pasta sai de LEILAO_RESULTS_DIR.
+resultados/
+
 # Editor / SO
 .vscode/
 .DS_Store

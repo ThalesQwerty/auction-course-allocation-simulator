@@ -8,7 +8,7 @@
  * então **estendido** até cobrir os dados, e não o contrário — uma caixa não
  * pode sair pela borda do gráfico.
  *
- * Amostra sem dispersão (todas as execuções iguais) não tem escala: abre-se
+ * Amostra sem dispersão (todas as observações iguais) não tem escala: abre-se
  * uma folga de 5% em torno do valor para a linha não ficar colada no eixo.
  */
 const STEPS = [1, 2, 2.5, 5, 10];

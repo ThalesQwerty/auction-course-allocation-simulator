@@ -1,6 +1,6 @@
 """Como um instante da simulação vira linhas de relatório.
 
-Dois recortes do mesmo instante: a universidade inteira e cada geração. O
+Dois recortes do mesmo instante: a universidade inteira e cada coorte. O
 recorte **particiona** a população do agregado, então somá-lo reproduz
 `overall` — é isso que permite trocar de agregação sem trocar de gráfico.
 
@@ -37,9 +37,9 @@ class Axis:
 
     @classmethod
     def cohorts(cls, entry_periods: list[int], period: int) -> "Axis":
-        """O eixo das gerações até o período corrente.
+        """O eixo das coortes até o período corrente.
 
-        Uma geração só entra na lista depois do seu t_a, e nunca mais sai —
+        Uma coorte só entra na lista depois do seu t_a, e nunca mais sai —
         nem quando esvazia na fase de drenagem, senão a série dela sumiria
         justamente quando termina de contar por onde cada um saiu.
         """
@@ -187,7 +187,7 @@ def snapshot(
     dismissed: int,
     uses_credits: bool,
 ) -> GroupSnapshot:
-    """Um recorte qualquer: a universidade inteira ou uma geração.
+    """Um recorte qualquer: a universidade inteira ou uma coorte.
 
     `members` é quem está matriculado — a contagem de pessoas. `measured` é o
     subconjunto que de fato disputou: os mesmos, menos os calouros do

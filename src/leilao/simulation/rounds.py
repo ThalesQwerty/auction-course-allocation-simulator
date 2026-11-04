@@ -90,7 +90,6 @@ def _run_credit_round(
             budget=state.budget[student.id],
             behavior=student.behavior,
             signals=signals,
-            catalogue=draws.catalogue,
         )
         for name, credits in posted.items():
             state.record_bid(student.id, name, round_number, credits)
@@ -157,7 +156,6 @@ def _run_ranking_round(
             available=available[student.id],
             behavior=student.behavior,
             signals=signals,
-            catalogue=draws.catalogue,
         ):
             state.record_bid(student.id, name, round_number, 1)
             requests.append((student.id, name))

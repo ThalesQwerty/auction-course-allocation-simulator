@@ -22,7 +22,7 @@ GUARANTEED_ROUND = 0
 class PriceStats:
     """Dispersão de π_x (eq. 24) entre as disciplinas num instante.
 
-    O preço não é grandeza de aluno nem de geração: é do mercado. O que se lê
+    O preço não é grandeza de aluno nem de coorte: é do mercado. O que se lê
     dele ao longo do tempo é a faixa — a mais cara, a média e a mais barata —,
     porque uma média sozinha esconde se o crédito está concentrado em poucas
     disputas ou espalhado por todas.
@@ -62,7 +62,7 @@ class GroupSnapshot:
     métrica nenhuma: ali todo mundo é calouro.
     """
 
-    # `None` na universidade inteira; o período de ingresso (t_a) por geração.
+    # `None` na universidade inteira; o período de ingresso (t_a) por coorte.
     # É texto porque o eixo é genérico — um recorte novo entra como outra
     # lista de `GroupSnapshot`, sem mexer na estrutura.
     group: str | None
@@ -103,9 +103,9 @@ class RoundReport:
     period: int
     round: int
     overall: GroupSnapshot
-    # O mesmo instante por geração. Só as que já ingressaram, então a série de
-    # uma geração começa no período do seu t_a — e o aluno fica na mesma
-    # geração do início ao fim, que é o que torna essa leitura mais estável
+    # O mesmo instante por coorte. Só as que já ingressaram, então a série de
+    # uma coorte começa no período do seu t_a — e o aluno fica na mesma
+    # coorte do início ao fim, que é o que torna essa leitura mais estável
     # que a idade. O recorte **particiona** a população do agregado: somá-lo
     # reproduz `overall`.
     by_cohort: list[GroupSnapshot]
@@ -235,6 +235,6 @@ class SimulationResult:
     disciplines: list[str] = field(default_factory=list)
     curriculum_periods: dict[str, int] = field(default_factory=dict)
     # As duas distribuições de **entrada**, como histogramas. Saem das
-    # matrizes que esta execução de fato usou, e não de uma amostra à parte.
+    # matrizes que esta observação de fato usou, e não de uma amostra à parte.
     utility_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)

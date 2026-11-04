@@ -2,7 +2,7 @@
  *
  * Duas delas leem o mesmo material da comparação por eixos diferentes. O
  * **boxplot** põe os modelos num eixo categórico e mostra a distribuição de
- * uma média entre as execuções; a **série** põe o período num eixo ordenado e
+ * uma média entre as observações; a **série** põe o período num eixo ordenado e
  * mostra a trajetória que essa média resume. A linha só é lícita onde o eixo
  * tem ordem — sobre as seeds ela desenharia a ordem do sorteio.
  *

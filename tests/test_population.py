@@ -301,21 +301,25 @@ def test_only_the_zeros_change_between_periods():
     # porque depende de D2.
     assert set(first) == {"D1", "D2"}
     assert set(second) == {"D2", "D3"}
-    # O que sobrevive aos dois recortes vale exatamente o mesmo, e o mesmo que
-    # na linha sorteada: nada é renormalizado.
-    assert first["D2"] == second["D2"] == row["D2"]
+    # A linha sorteada é a mesma nos dois recortes — o que muda é para onde a
+    # utilidade do inelegível desce, e isso é função do conjunto elegível.
+    assert sum(first.values()) == pytest.approx(sum(second.values()))
+    assert first["D2"] >= row["D2"] and second["D2"] >= row["D2"]
 
 
-def test_the_eligible_sum_is_the_period_utility():
-    """Sem renormalização, a soma do recorte é o U_a^(t) da eq. (43): 1 só
-    quando a grade inteira é elegível, menor sempre que algo está fora."""
+def test_the_eligible_sum_is_always_one():
+    """A redistribuição conserva a massa da linha, então o recorte elegível
+    soma 1 em qualquer estágio — substitui o U_a^(t) da eq. (43), que era
+    menor que 1 sempre que algo estava fora do alcance."""
     config = make_config()
     students = generate_students(config, np.random.default_rng(6))
     row = draw_utilities(students, config, np.random.default_rng(6))[(students[0].id, 1)]
 
     novice = Student(id="x", name="X", credits=10)
     partial = sum(utility_matrix(row=row, student=novice, config=config).values())
-    assert 0 < partial < 1
+    # A redistribuição conserva a massa: o recorte elegível soma 1 em qualquer
+    # estágio do aluno, e é isso que põe `alpha_u` na mesma unidade.
+    assert partial == pytest.approx(1.0)
 
     # Numa grade sem pré-requisito nenhum, tudo é elegível de saída e a soma é 1.
     flat = SimulationConfig(
@@ -534,20 +538,19 @@ def test_attractiveness_zero_is_the_neutral():
     )
 
 
-def test_the_height_invariant_beats_any_attractiveness():
-    """A_x ordena **dentro** de uma altura, nunca entre alturas: o degrau da
-    eq. (41) é a amplitude da linha mais 1, maior que qualquer atratividade.
-
-    A consequência que importa no cenário é esta: optativa tem altura 0, então
-    nenhuma atratividade a faz passar à frente de uma obrigatória, e o aluno
-    não troca progresso por gosto."""
+def test_attractiveness_now_outranks_the_position_in_the_curriculum():
+    """A invariante de altura saiu, e com ela a regra de que obrigatória vence
+    optativa por construção. Uma optativa muito atraente **passa à frente** no
+    sorteio — o que a faz valer menos na decisão é a redistribuição, que dá à
+    porteira o valor de tudo que ela destrava, e não uma desigualdade imposta
+    sobre o gosto."""
     rows = _rows_for([
         Discipline(name="OBR", seats=20, hours=60, entry=True, unlocks=("SEG",)),
         Discipline(name="SEG", seats=20, hours=60),
         Discipline(name="OPT", seats=20, hours=60, elective=True,
                    attractiveness=10.0),
     ], elective_hours=60)
-    assert all(row["OBR"] > row["OPT"] for row in rows.values())
+    assert all(row["OPT"] > row["OBR"] for row in rows.values())
 
 
 def test_negative_attractiveness_is_a_discipline_below_the_average():

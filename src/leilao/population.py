@@ -96,7 +96,7 @@ def generate_students(
     """Cria a população inteira a partir da seed. Todos começam em Γ_min
     (eq. 37).
 
-    O ingresso (t_a, eq. 31) é escalonado: entra uma geração nova a cada
+    O ingresso (t_a, eq. 31) é escalonado: entra uma coorte nova a cada
     período letivo, do primeiro ao último com ingresso, com exatamente
     `students_per_period` alunos — como numa universidade, que abre vestibular
     todo semestre em vez de matricular toda a população de uma vez. Quando são
@@ -104,9 +104,9 @@ def generate_students(
     drenagem.
 
     O período de ingresso **não** vem da seed, e o par de perfis também não.
-    As gerações têm todas o mesmo tamanho, em períodos consecutivos, e os
+    As coortes têm todas o mesmo tamanho, em períodos consecutivos, e os
     perfis se repartem igualmente entre as combinações — e isso importa para
-    comparar cenários: duas execuções com seeds diferentes têm a mesma
+    comparar cenários: duas observações com seeds diferentes têm a mesma
     estrutura de entrada e os mesmos grupos, então a diferença entre elas não
     é quem entrou quando nem quem calhou de ser frágil. Da seed vem o nome —
     e, fora daqui, a aptidão, a disponibilidade e as utilidades.

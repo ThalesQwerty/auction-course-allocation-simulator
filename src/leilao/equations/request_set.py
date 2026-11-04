@@ -31,11 +31,11 @@ from collections.abc import Iterable
 
 
 def request_set(
-    *, scores: dict[str, float], available: Iterable[str], reserve: float = 0.0
+    *, scores: dict[str, float], available: Iterable[str]
 ) -> list[str]:
     wanted = set(available)
     ordered = sorted(
         ((name, score) for name, score in scores.items() if name in wanted),
         key=lambda item: -item[1],
     )
-    return [name for name, score in ordered if score > reserve]
+    return [name for name, _score in ordered]

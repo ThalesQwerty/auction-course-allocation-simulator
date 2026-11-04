@@ -4,14 +4,14 @@
 São três entradas: `/run` recebe um leilão isolado (agentes, bens e lances
 explícitos), `/compare` recebe o cenário de uma comparação — a universidade e a
 população, de que alunos, utilidades e notas saem pela seed — e `/trace` recebe
-o mesmo cenário mais o par `(braço, seed)` de uma das execuções que ela rodou.
+o mesmo cenário mais o par `(braço, seed)` de uma das observações que ela rodou.
 """
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..auction import AuctionResult
-from ..comparison import MAX_RUNS
+from ..comparison import ARMS, MAX_RUNS
 from ..config import (
     DEFAULT_AVAILABILITY,
     DEFAULT_PERFORMANCE,
@@ -74,7 +74,13 @@ class RunResponse(BaseModel):
 
 class DisciplineIn(BaseModel):
     name: str
-    seats: int = Field(ge=0, description="q_x — vagas")
+    classes: int = Field(
+        ge=0,
+        description=(
+            "turmas ofertadas; as vagas são `classes × class_size` — ver "
+            "`ScenarioIn.class_size`"
+        ),
+    )
     hours: int = Field(gt=0, description="w_x — carga horária")
     unlocks: list[str] = Field(
         default_factory=list,
@@ -154,15 +160,22 @@ class ScenarioIn(BaseModel):
     população, sem dizer *como* ele será executado.
 
     Os dois modos partem daqui e acrescentam só o que lhes é próprio: uma
-    execução única acrescenta a seed, e a comparação acrescenta quantas
-    execuções fazer. É o que garante que os dois lados de uma comparação rodem
+    observação única acrescenta a seed, e a comparação acrescenta quantas
+    observações fazer. É o que garante que os dois lados de uma comparação rodem
     exatamente o mesmo cenário — a condição metodológica da Seção 7.3.
     """
 
     disciplines: list[DisciplineIn] = Field(default_factory=list)
+    # A grade declara **turmas**; quantos cabem em cada uma é do cenário, e é
+    # o botão de estresse: a mesma grade sob 20 ou 40 por turma é o mesmo
+    # currículo com o dobro de aperto. Multiplicar aqui, e não na grade, é o
+    # que mantém a oferta como estrutura e a lotação como tratamento.
+    class_size: int = Field(
+        default=25, gt=0, description="alunos por turma — q_x = classes × este"
+    )
     # Os dois eixos de perfil. Cada um é uma lista de grupos, e a repartição
     # entre as combinações é **igualitária**: com 3 em cada eixo são 9 pares e
-    # ~11% da geração em cada um. Não há porcentagem a enviar — o que define as
+    # ~11% da coorte em cada um. Não há porcentagem a enviar — o que define as
     # fatias é quantos perfis existem.
     performance_profiles: list[ProfileIn] = Field(
         default_factory=lambda: [ProfileIn.of(x) for x in DEFAULT_PERFORMANCE],
@@ -225,7 +238,7 @@ class ScenarioIn(BaseModel):
         ge=1,
         le=40,
         description=(
-            "em quantos períodos entra geração nova, contados do primeiro. Depois "
+            "em quantos períodos entra coorte nova, contados do primeiro. Depois "
             "do último ingresso vem a fase de drenagem, em que a população só diminui."
         ),
     )
@@ -243,9 +256,9 @@ class ScenarioIn(BaseModel):
     def periods(self) -> int:
         """|T|, derivado — ver `config.horizon_for_lifecycle`.
 
-        Não é campo porque não é escolha: a última geração sai ao fim da
+        Não é campo porque não é escolha: a última coorte sai ao fim da
         residência dela e depois disso não há mais ninguém a simular. Deixá-lo
-        configurável permitiria um horizonte que corta gerações pela metade ou
+        configurável permitiria um horizonte que corta coortes pela metade ou
         que roda períodos vazios no fim.
         """
         return horizon_for_lifecycle(
@@ -301,13 +314,128 @@ class CompareRequest(ScenarioIn):
         le=MAX_RUNS,
         description=(
             "N — quantas simulações de cada mecanismo, com as seeds de 1 a N. "
-            "São 2N simulações no total, e a seed pareia os dois lados."
+            "São N × |arms| simulações no total, e a seed pareia os braços."
+        ),
+    )
+    arms: list[str] = Field(
+        default_factory=lambda: [arm.key for arm in ARMS],
+        min_length=1,
+        description=(
+            "Quais braços rodar. O padrão são os dois do trabalho — "
+            "`ranking_greedy` e `credits_return`. Rodar um só custa metade do "
+            "tempo e serve para calibrar cenário; os painéis que comparam os "
+            "dois lados simplesmente não aparecem. Também aceita os braços de "
+            "ablação, `credits_greedy` e `credits_ilp`."
         ),
     )
 
 
+class GenomeLevelsIn(BaseModel):
+    """Os valores fixados da 1ª geração, um conjunto por gene.
+
+    O **produto** deles é o tamanho da população inicial, e precisa bater com
+    `students_per_period`: sobrar genótipo faria parte da grade não rodar, e
+    faltar faria alguns pesarem o dobro na seleção. Os padrões dão
+    5 · 3 · 3 · 4 = 180.
+
+    Os níveis de `alpha_u` são o fundo de [0, 1] de propósito. Como as
+    utilidades elegíveis somam 1, no máximo `⌊1/α_u⌋` disciplinas passam do
+    corte, e a maior participação de uma linha de n disciplinas vale em média
+    `H_n/n` — cerca de 0,31 com n = 9. Níveis redondos como ⅔ e 1 não seriam
+    estratégias, seriam desligamentos.
+    """
+
+    beta_u: list[float] = Field(default=[-1.0, 0.0, 1.0, 2.0, 3.0], min_length=1)
+    beta_v: list[float] = Field(default=[-1.0, 0.0, 1.0], min_length=1)
+    beta_n: list[float] = Field(default=[-1.0, 0.0, 1.0], min_length=1)
+    alpha_u: list[float] = Field(default=[0.0, 0.05, 0.11, 0.22], min_length=1)
+
+
+class EvolveRequest(ScenarioIn):
+    """Uma rodada do algoritmo genético sobre o cenário.
+
+    Custa `observations × gerações` simulações completas, então os dois tetos
+    são o que separa um teste de minutos de um de horas.
+    """
+
+    # A seed do cenário vale aqui, ao contrário de `/compare`: ela fixa a
+    # população e, por um fluxo próprio, o sorteio da evolução. As seeds das
+    # observações continuam sendo 1..N, de modo que o que muda entre gerações
+    # é o genoma e nada mais.
+    seed: int = 0
+    levels: GenomeLevelsIn = Field(default_factory=GenomeLevelsIn)
+    observations: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description=(
+            "N — observações da simulação por geração. O erro padrão da aptidão "
+            "de um genótipo é 1,36/√N: 0,61 com 5 e 0,30 com 20, contra um "
+            "efeito extremo-a-extremo de 0,7. Com N baixo o torneio vira "
+            "quase sorteio."
+        ),
+    )
+    min_generations: int = Field(default=5, ge=1, le=200)
+    max_generations: int = Field(default=30, ge=1, le=200)
+    window: int = Field(
+        default=5, ge=2, le=50, description="a janela do critério de parada"
+    )
+    epsilon: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "o limiar de deriva. Vazio desliga o gatilho e a rodada vai até o "
+            "teto — é o que o controle negativo usa, porque é ele quem produz "
+            "o ε."
+        ),
+    )
+    tournament: int = Field(default=2, ge=2, le=20)
+    elites: int = Field(default=10, ge=0, le=200)
+    step: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=5.0,
+        description="o passo da mutação como fração do espaçamento de cada gene",
+    )
+    neutral: bool = Field(
+        default=False,
+        description=(
+            "controle negativo: o genoma é selecionado e mutado mas não chega "
+            "à simulação, de modo que o que a população andar é deriva"
+        ),
+    )
+
+
+class CohortGenerationOut(BaseModel):
+    entry_period: int
+    # A média de cada gene, na ordem beta_u, beta_v, beta_n, alpha_u.
+    mean: list[float]
+    best_fitness: float
+    mean_fitness: float
+
+
+class GenerationOut(BaseModel):
+    generation: int
+    cohorts: list[CohortGenerationOut]
+    # `null` enquanto a janela não fecha — JSON não tem infinito.
+    drift: float | None
+
+
+class EvolveResponse(BaseModel):
+    # Onde a observação foi gravada, ou `null` se o disco recusou. Quem pediu a
+    # simulação quer o resultado: falhar a requisição porque o registro não
+    # coube seria o pior dos dois mundos.
+    saved_to: str | None = None
+    generations: list[GenerationOut]
+    stopped_by: str
+    neutral: bool
+    # O espalhamento de cada gene na 1ª geração: a escala fixa da deriva, e o
+    # que torna o ε de uma rodada comparável ao de outra.
+    scales: list[float]
+
+
 class PeriodSeriesOut(BaseModel):
-    """As métricas de período de uma execução, sem reduzir — o que o recorte
+    """As métricas de período de uma observação, sem reduzir — o que o recorte
     por período da tela desenha.
 
     Listas **paralelas** e só com os períodos medidos: `period[i]` é o número do
@@ -316,7 +444,7 @@ class PeriodSeriesOut(BaseModel):
     sair do índice. `students` é o peso do ponto na média ponderada, e cai à
     vista na drenagem.
 
-    Sem tempo de formatura: é da execução inteira, e a versão por período seria
+    Sem tempo de formatura: é da observação inteira, e a versão por período seria
     outra grandeza, com viés de sobrevivência.
     """
 
@@ -340,20 +468,20 @@ class PeriodSeriesOut(BaseModel):
 
 
 class CohortSeriesOut(BaseModel):
-    """O mesmo resumo da execução, uma linha por geração — o terceiro eixo da
+    """O mesmo resumo da observação, uma linha por coorte — o terceiro eixo da
     tela.
 
-    A geração é o período de ingresso (t_a), e o aluno fica nela do ingresso ao
+    A coorte é o período de ingresso (t_a), e o aluno fica nela do ingresso ao
     diploma. A redução é a mesma do agregado; o que muda é sobre quem ela corre.
 
-    **As gerações não são intercambiáveis**: a primeira encontra uma
+    **As coortes não são intercambiáveis**: a primeira encontra uma
     universidade quase vazia e a última a encontra cheia, de modo que a
     inclinação ao longo do eixo mistura mecanismo e mercado. O que se lê com
     segurança é a comparação entre braços num mesmo ponto.
 
-    Aqui o tempo de formatura entra — cada aluno pertence a uma geração só —, e
+    Aqui o tempo de formatura entra — cada aluno pertence a uma coorte só —, e
     vem com os concluintes, o denominador sem o qual ele não se lê: a contagem
-    e a fração dela sobre quantos entraram naquela geração.
+    e a fração dela sobre quantos entraram naquela coorte.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -373,10 +501,10 @@ class CohortSeriesOut(BaseModel):
 
 
 class RunSummaryOut(BaseModel):
-    """Uma execução reduzida a um ponto por métrica — o que vira um valor no
+    """Uma observação reduzida a um ponto por métrica — o que vira um valor no
     boxplot. As três de período são a média ponderada pelos alunos medidos, de
     modo que a fase de drenagem não pese como um período cheio; o tempo de
-    formatura é da execução inteira."""
+    formatura é da observação inteira."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -384,10 +512,10 @@ class RunSummaryOut(BaseModel):
     # Períodos efetivamente publicados; menor que |T| se a população se esvaziou
     # antes do horizonte.
     periods: int
-    # Concluintes da execução — o contexto sem o qual `time_to_graduate` não se
+    # Concluintes da observação — o contexto sem o qual `time_to_graduate` não se
     # lê: quem forma menos pode exibir um tempo menor só por sobrarem os rápidos.
     graduates: int
-    # Jubilados da execução, e o total que entrou — o denominador das duas
+    # Jubilados da observação, e o total que entrou — o denominador das duas
     # frações que a tela mostra.
     dismissed: int
     population: int
@@ -416,12 +544,12 @@ class RunSummaryOut(BaseModel):
     # As mesmas métricas de período, período a período: o material de que a
     # média ponderada saiu.
     by_period: PeriodSeriesOut
-    # O mesmo resumo por geração: a mesma redução, corrida sobre outro recorte.
+    # O mesmo resumo por coorte: a mesma redução, corrida sobre outro recorte.
     by_cohort: CohortSeriesOut
 
 
 class ArmResultOut(BaseModel):
-    """Um dos modelos comparados e as suas N execuções.
+    """Um dos modelos comparados e as suas N observações.
 
     `key` é o identificador estável da série; o rótulo em português é da
     interface, não da API.
@@ -436,6 +564,7 @@ class ArmResultOut(BaseModel):
 
 
 class CompareResponse(BaseModel):
+    saved_to: str | None = None
     """As amostras dos três braços, pareadas pela seed: o i-ésimo elemento de
     cada lista é a mesma população sob regras diferentes."""
 
@@ -544,7 +673,7 @@ class RoundReportOut(BaseModel):
     period: int
     round: int
     overall: GroupSnapshotOut
-    # Agregado por geração; só as gerações que já ingressaram.
+    # Agregado por coorte; só as coortes que já ingressaram.
     by_cohort: list[GroupSnapshotOut]
     # E pelos dois eixos de perfil, na ordem em que o cenário os declara. Os
     # três recortes particionam a mesma população: somar qualquer um deles
@@ -654,12 +783,12 @@ class StudentHistoryOut(BaseModel):
 
 
 class TraceRequest(ScenarioIn):
-    """O traço de **uma** execução da comparação: o cenário mais o par
+    """O traço de **uma** observação da comparação: o cenário mais o par
     `(braço, seed)` que a identifica.
 
     Aqui a seed não é ignorada como em `/compare` — ela é o que se pede. A
     comparação roda as seeds de 1 a N em cada braço e devolve um ponto por
-    execução; este par é o endereço de uma delas, e a simulação é refeita em
+    observação; este par é o endereço de uma delas, e a simulação é refeita em
     vez de guardada: ela é determinística, então refazê-la custa tempo e não
     fidelidade. O retorno de créditos e o resolvedor continuam vindo do braço.
     """
@@ -670,7 +799,7 @@ class TraceRequest(ScenarioIn):
     seed: int = Field(
         default=1,
         ge=1,
-        description="qual execução daquele braço — a mesma seed que o resumo traz",
+        description="qual observação daquele braço — a mesma seed que o resumo traz",
     )
 
 
@@ -689,12 +818,12 @@ class TracePeriodOut(BaseModel):
 
 
 class TraceResponse(BaseModel):
-    """Uma execução inteira, aluno a aluno — a tela de depuração do projeto.
+    """Uma observação inteira, aluno a aluno — a tela de depuração do projeto.
 
     É a parte pesada do resultado (uns 10 MB no preset Computação, contra 100 kB
     do resumo da comparação), e é por isso que ela não vem junto de `/compare`
     nem é guardada no navegador: quem quiser o caso individual o pede, e só
-    daquela execução.
+    daquela observação.
     """
 
     model_config = ConfigDict(from_attributes=True)

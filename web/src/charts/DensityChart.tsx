@@ -52,6 +52,7 @@ export function DensityChart({
   split,
   controls,
   footer,
+  format,
   id,
 }: {
   title: string;
@@ -59,6 +60,10 @@ export function DensityChart({
   domain: [number, number];
   split?: DensitySplit;
   controls?: ReactNode;
+  /** Como o tooltip escreve o valor do eixo x. O padrão é uma casa a mais que
+   * a régua; quem passa isto tem um valor que o motor **discretiza**, e aí a
+   * casa extra mostraria uma precisão que a simulação não usa. */
+  format?: (value: number) => string;
   /** Os números que a curva não mostra sozinha — o valor mais provável e, nas
    * notas, a aprovação. Vão ao pé do card, e não no título, porque são
    * leitura do desenho e não identificação dele. */
@@ -83,7 +88,7 @@ export function DensityChart({
     value.toLocaleString("pt-BR", { maximumFractionDigits: digits });
   // O mouse cai **entre** as marcas do eixo, então ele precisa de uma casa a
   // mais: no eixo das notas as marcas são inteiras, e a nota não é.
-  const exact = fixed(digits + 1);
+  const exact = format ?? fixed(digits + 1);
 
   // Topo da régua: o primeiro inteiro acima do pico. O piso é 1, de modo que
   // uma curva baixa — a das notas, cujo pico é 0,21 — se leia como baixa, em

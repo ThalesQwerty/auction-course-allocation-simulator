@@ -1,0 +1,108 @@
+"""A utilidade redistribuída sobre o que o aluno pode cursar agora.
+
+    ũ_x = u_x + Σ_{y bloqueada} u_y / |alvos(y)|,     x elegível
+
+    alvos(y) = ancestrais elegíveis de y, se y trava por pré-requisito
+             = todas as elegíveis,        se y já saiu da grade do aluno
+
+Substitui a invariante de altura da eq. (41). Lá a utilidade era ordenada
+pela posição na grade, de modo que a disciplina-porteira valia mais por
+imposição. Aqui ela vale mais porque **acumulou o valor de tudo que
+destrava** — quem não quer nada à frente não é empurrado para lá, e o gosto
+volta a ser gosto.
+
+OS DOIS CASOS
+-------------
+
+**Travada por pré-requisito.** A utilidade desce para as elegíveis que estão
+na cadeia de pré-requisitos dela — as que, aprovadas, abrem caminho até ela.
+Pré-requisito já aprovado não entra: não trava nada, e mandar utilidade para
+lá gastaria o sinal onde ele não tem efeito.
+
+**Fora da grade do aluno.** Já aprovada, ou optativa que a cota dispensou:
+divide igualmente entre todas as elegíveis. Adição igual não muda a ordem de
+preferência — só o nível —, e é o que impede o veterano de ficar com pouca
+massa de utilidade e perder todo leilão.
+
+POR QUE NO DESTINO, E NÃO AO LONGO DO CAMINHO
+---------------------------------------------
+
+A alternativa seria cascatear em ordem topológica reversa, cada disciplina
+repassando o acumulado aos seus pré-requisitos faltantes. As duas regras só
+divergem quando a ramificação é assimétrica dentro de uma mesma cadeia: se C
+exige B1 e B2, B1 exige A1 e B2 exige A2, A3 e A4, a cascata dá 1/2 a A1
+contra 1/6 aos outros; distribuindo no destino, 1/4 para cada.
+
+Como os pré-requisitos são **conjuntivos** — precisa de todos —, os quatro
+são igualmente necessários para chegar em C, e o peso da cascata reflete
+posição na árvore, não necessidade.
+
+NÃO EXISTE ÓRFÃ
+---------------
+
+Se uma disciplina está travada, algum pré-requisito dela falta; subindo a
+cadeia, ou se chega a uma sem pré-requisito faltante — elegível por
+definição — ou o grafo tem ciclo. Sendo acíclico e finito, o conjunto de
+destino nunca é vazio e a massa total se conserva sem regra de exceção. A
+cláusula de guarda existe só para o caso degenerado de a cadeia terminar
+numa disciplina que saiu da grade por outro motivo.
+
+**A linha resultante soma o que a linha inteira somava** — 1, depois da
+normalização do sorteio. É isso que põe `alpha_u` na mesma unidade da
+utilidade: o aluno compara participações, e `alpha_u` é um valor nessa mesma
+escala.
+
+A **ordem das chaves** é a de `eligible`, que é a ordem da grade, e é carga:
+é dela que as duas mochilas tiram o desempate.
+
+Não está no anteprojeto: substitui a eq. (41).
+"""
+from __future__ import annotations
+
+from collections.abc import Sequence, Set
+
+
+def eligible_utility(
+    *,
+    row: dict[str, float],
+    eligible: Sequence[str],
+    approved: Set[str],
+    prerequisites: dict[str, tuple[str, ...]],
+) -> dict[str, float]:
+    chosen = list(eligible)
+    if not chosen:
+        return {}
+
+    open_now = set(chosen)
+    redistributed = {name: row.get(name, 0.0) for name in chosen}
+    unlocking: dict[str, frozenset[str]] = {}
+
+    def unlockers(name: str) -> frozenset[str]:
+        """As elegíveis na cadeia de pré-requisitos de `name`."""
+        cached = unlocking.get(name)
+        if cached is not None:
+            return cached
+        # Marca antes de descer: grade cíclica seria erro de cenário, e a
+        # marca a transforma em conjunto vazio em vez de recursão infinita.
+        unlocking[name] = frozenset()
+        found: set[str] = set()
+        for previous in prerequisites.get(name, ()):
+            if previous in approved:
+                continue
+            if previous in open_now:
+                found.add(previous)
+            else:
+                found |= unlockers(previous)
+        unlocking[name] = frozenset(found)
+        return unlocking[name]
+
+    for name, utility in row.items():
+        if name in open_now or utility <= 0.0:
+            continue
+        missing = any(p not in approved for p in prerequisites.get(name, ()))
+        targets = sorted(unlockers(name)) if missing else []
+        share = utility / len(targets or chosen)
+        for target in targets or chosen:
+            redistributed[target] += share
+
+    return redistributed

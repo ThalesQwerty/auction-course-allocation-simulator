@@ -49,7 +49,6 @@ class Draws:
     hours: dict[str, int]
     difficulty: dict[str, float]
     curriculum: dict[str, int]
-    reach: dict[str, int]
     entry_courses: list[str]
     required: set[str]
     elective_hours_by_discipline: dict[str, int]
@@ -61,9 +60,33 @@ class Draws:
     entry_periods: list[int]
 
 
+def _assign_genomes(
+    students: list[Student], genomes: tuple[tuple, ...]
+) -> list[Student]:
+    """Dá a cada aluno o genótipo da sua posição dentro da coorte de ingresso.
+
+    `genomes` vem indexado pela ordem crescente de período de ingresso, que é
+    a mesma ordem em que `run_evolution` mantém as linhagens. Coorte sem
+    genoma declarado fica na linha de base, e genoma mais curto que a coorte
+    recicla — nenhum dos dois acontece no cenário evolutivo, onde a grade tem
+    exatamente o tamanho da coorte, mas os dois precisam ter resposta.
+    """
+    if not genomes:
+        return students
+    entries = sorted({s.entry_period for s in students})
+    seen = {entry: 0 for entry in entries}
+    for student in students:
+        cohort = entries.index(student.entry_period)
+        if cohort < len(genomes) and genomes[cohort]:
+            pool = genomes[cohort]
+            student.behavior = pool[seen[student.entry_period] % len(pool)]
+        seen[student.entry_period] += 1
+    return students
+
+
 def prepare(config: SimulationConfig) -> Draws:
     rng = np.random.default_rng(config.seed)
-    students = generate_students(config, rng)
+    students = _assign_genomes(generate_students(config, rng), config.genomes)
     aptitudes = draw_aptitudes(students, config.disciplines, config, rng)
     availability = draw_availability(students, config, rng)
     utility_rows = draw_utilities(students, config, rng)
@@ -90,7 +113,6 @@ def prepare(config: SimulationConfig) -> Draws:
         hours=config.hours_by_discipline(),
         difficulty={d.name: d.difficulty for d in config.disciplines},
         curriculum=config.curriculum_periods(),
-        reach=config.reach(),
         entry_courses=config.entry_disciplines(),
         required=config.required_disciplines(),
         elective_hours_by_discipline=config.elective_hours_by_discipline(),

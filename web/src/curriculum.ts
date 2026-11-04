@@ -24,9 +24,9 @@ type StoredDiscipline = Omit<DisciplineInput, "unlocks" | "entry"> & {
  * 1º período. */
 export function withUnlocks(disciplines: StoredDiscipline[]): DisciplineInput[] {
   const normalized = disciplines.every((d) => Array.isArray(d.unlocks))
-    ? disciplines.map(({ name, seats, hours, unlocks }) => ({
+    ? disciplines.map(({ name, classes, hours, unlocks }) => ({
         name,
-        seats,
+        classes,
         hours,
         unlocks: unlocks ?? [],
       }))
@@ -49,9 +49,9 @@ function fromPrerequisites(disciplines: StoredDiscipline[]): Unlocked[] {
       unlocks.get(predecessor)?.push(discipline.name);
     }
   }
-  return disciplines.map(({ name, seats, hours }) => ({
+  return disciplines.map(({ name, classes, hours }) => ({
     name,
-    seats,
+    classes,
     hours,
     unlocks: unlocks.get(name) ?? [],
   }));

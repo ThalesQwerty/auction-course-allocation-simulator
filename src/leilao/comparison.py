@@ -16,8 +16,8 @@ existe para fazer as duas valerem de uma vez:
    configurações: N populações diferentes, cada uma vista pelos dois
    mecanismos.
 
-Juntas, as duas isolam o nexo causal no mecanismo. Uma execução só não diria
-nada — a diferença poderia ser daquela população; e N execuções sem parear as
+Juntas, as duas isolam o nexo causal no mecanismo. Uma observação só não diria
+nada — a diferença poderia ser daquela população; e N observações sem parear as
 seeds mediriam a variação entre populações junto da variação entre mecanismos.
 
 **São dois braços** (`ARMS`): a ordenação por CR e o leilão com retorno. A
@@ -58,7 +58,7 @@ Por isso a política de retorno e o resolvedor **não são parâmetros do cenár
 aqui**: são eixos do experimento, e o que vier na configuração é ignorado,
 como a seed. Cada braço impõe o seu.
 
-**Uma execução vira um número por métrica**, que é o ponto do boxplot. Para as
+**Uma observação vira um número por métrica**, que é o ponto do boxplot. Para as
 três métricas de período a redução é a média **ponderada pelos alunos medidos**:
 a simulação termina numa fase de drenagem, em que a população só diminui, e uma
 média simples daria a um período final de vinte alunos o mesmo peso de um
@@ -71,7 +71,7 @@ período, em que todo mundo acabou de ingressar, simplesmente não entra na méd
 
 **As quatro métricas.** Satisfação (psi-barra), equidade (phi) e correlação
 (lambda) são de período e passam pela média ponderada. O **tempo de formatura**
-não é: é propriedade da execução inteira, a média de quantos períodos cada
+não é: é propriedade da observação inteira, a média de quantos períodos cada
 concluinte levou do ingresso ao diploma.
 
 Ficaram de fora, e por motivos diferentes. Nada de **crédito**: orçamento, preço
@@ -129,8 +129,8 @@ from .metrics import Metrics
 from .population import generate_students
 from .simulation import SimulationResult, run_simulation
 
-# Teto de execuções por braço. Não é limitação técnica: é que o boxplot para de
-# ganhar informação muito antes disso, e cada execução a mais custa uma
+# Teto de observações por braço. Não é limitação técnica: é que o boxplot para de
+# ganhar informação muito antes disso, e cada observação a mais custa uma
 # simulação inteira em cada braço.
 MAX_RUNS = 100
 
@@ -193,15 +193,39 @@ ABLATION_ARMS: tuple[Arm, ...] = (
     Arm("credits_ilp", "credits", "none", resolver="ilp"),
 )
 
+
 # Os braços por chave — como a interface se refere a um deles ao pedir o traço
-# de uma execução. Inclui a ablação: o traço de um braço que não rodou por
+# de uma observação. Inclui a ablação: o traço de um braço que não rodou por
 # padrão continua reproduzível.
 ARM_BY_KEY: dict[str, Arm] = {arm.key: arm for arm in ARMS + ABLATION_ARMS}
 
 
+def arms_from_keys(keys: list[str]) -> tuple[Arm, ...]:
+    """Os braços que essas chaves nomeiam, na ordem canônica de `ARM_BY_KEY`.
+
+    A ordem em que as chaves chegam é ignorada de propósito: a tela acha o
+    braço pela chave, e fixar a ordem aqui faz o resumo sair idêntico seja
+    qual for a ordem do pedido. Chave repetida entra uma vez só.
+
+    Existe porque rodar **um** braço é o caso comum enquanto se mexe no
+    cenário: a comparação custa uma simulação completa por braço e por seed, e
+    quem está calibrando a grade não precisa do outro lado a cada tentativa.
+    O que sai daqui serve direto em `run_comparison(..., arms=...)` — a
+    resposta traz menos braços, e a tela desenha o que veio.
+    """
+    wanted = set(keys)
+    unknown = sorted(wanted - ARM_BY_KEY.keys())
+    if unknown:
+        raise ValueError(f"braço desconhecido: {', '.join(unknown)}")
+    chosen = tuple(arm for key, arm in ARM_BY_KEY.items() if key in wanted)
+    if not chosen:
+        raise ValueError("escolha ao menos um braço para comparar")
+    return chosen
+
+
 @dataclass(frozen=True)
 class PeriodSeries:
-    """As métricas de período de uma execução, sem reduzir.
+    """As métricas de período de uma observação, sem reduzir.
 
     É o mesmo material de que `summarize` tira a média ponderada — a diferença
     é que aqui ele não vira um número. A média esconde que o horizonte tem três
@@ -228,7 +252,7 @@ class PeriodSeries:
     o mesmo eixo.
 
     O tempo de formatura não está aqui, e não por recorte de escopo: é
-    propriedade da execução inteira. A versão por período — quanto levou quem
+    propriedade da observação inteira. A versão por período — quanto levou quem
     concluiu em t — seria outra grandeza, com viés de sobrevivência, porque
     quem conclui cedo é rápido por construção.
     """
@@ -259,41 +283,41 @@ class PeriodSeries:
 
 @dataclass(frozen=True)
 class CohortSeries:
-    """O mesmo resumo da execução, uma linha por geração.
+    """O mesmo resumo da observação, uma linha por coorte.
 
-    A geração é o período de ingresso (t_a): a geração 3 é quem entrou no
+    A coorte é o período de ingresso (t_a): a coorte 3 é quem entrou no
     período 3, e o aluno fica nela do ingresso ao diploma — o que torna esta
     leitura mais estável que a idade acadêmica. O recorte **particiona** a
     população, então somá-lo reproduz o agregado.
 
     Cada ponto é a mesma média ponderada de `summarize`, restrita aos instantes
-    daquela geração: o eixo troca de significado, a redução não.
+    daquela coorte: o eixo troca de significado, a redução não.
 
-    **As gerações não são intercambiáveis, e é o que torna este eixo
-    traiçoeiro.** A geração 1 encontra uma universidade quase vazia e a última
+    **As coortes não são intercambiáveis, e é o que torna este eixo
+    traiçoeiro.** A coorte 1 encontra uma universidade quase vazia e a última
     encontra a cheia, de modo que a inclinação ao longo do eixo mistura o
     mecanismo com o mercado que cada uma pegou. O que se lê aqui com segurança
     é a comparação **vertical** — os braços num mesmo ponto do eixo, que é a
-    mesma geração da mesma população sob regras diferentes.
+    mesma coorte da mesma população sob regras diferentes.
 
     Aqui o **tempo de formatura entra**, e por um motivo que o recorte por
-    período não tem: cada aluno pertence a exatamente uma geração, e o tempo do
+    período não tem: cada aluno pertence a exatamente uma coorte, e o tempo do
     ingresso ao diploma é propriedade dele. Vem com os concluintes ao lado —
-    o denominador sem o qual ele não se lê —, e que nas últimas gerações são
+    o denominador sem o qual ele não se lê —, e que nas últimas coortes são
     poucos ou nenhum, porque o horizonte acabou antes de elas terem tempo.
     """
 
-    # O t_a de cada geração, em ordem. Só as que tiveram algum instante medido:
+    # O t_a de cada coorte, em ordem. Só as que tiveram algum instante medido:
     # quem entrou no último período não chegou a ser medido, e uma linha vazia
     # ali não seria dado.
     cohort: list[int]
     graduates: list[int]
-    # A fração da geração que concluiu: os concluintes sobre quantos entraram
+    # A fração da coorte que concluiu: os concluintes sobre quantos entraram
     # naquele período. É ela que se desenha, e não a contagem: o absoluto
-    # depende do tamanho do ingresso, a fração é comparável entre gerações.
+    # depende do tamanho do ingresso, a fração é comparável entre coortes.
     graduation_rate: list[float]
     # Não há `dismissal_rate` ao lado: com o horizonte derivado do ciclo de
-    # vida, ao fim dele toda geração já se esvaziou pelas duas portas, e a
+    # vida, ao fim dele toda coorte já se esvaziou pelas duas portas, e a
     # fração de jubilados é exatamente `1 − graduation_rate`. Guardá-la seria
     # transportar a mesma série espelhada.
     efficiency: list[float]
@@ -303,17 +327,17 @@ class CohortSeries:
     correlation: list[float]
     exclusion_rate: list[float]
     request_states: list[RequestStates]
-    # `None` na geração em que ninguém concluiu — zero ali se leria como
+    # `None` na coorte em que ninguém concluiu — zero ali se leria como
     # "formou na hora".
     time_to_graduate: list[float | None]
-    # A saturação da geração, rodada a rodada: a posição [i][r] é a rodada r+1
-    # da geração `cohort[i]`, na média ponderada sobre os períodos dela.
+    # A saturação da coorte, rodada a rodada: a posição [i][r] é a rodada r+1
+    # da coorte `cohort[i]`, na média ponderada sobre os períodos dela.
     allocations_per_round: list[list[float | None]]
 
 
 @dataclass(frozen=True)
 class RunSummary:
-    """Uma execução reduzida a um ponto por métrica.
+    """Uma observação reduzida a um ponto por métrica.
 
     `periods` é quantos períodos a simulação de fato publicou — pode ser menor
     que |T| se a população se esvaziou antes do horizonte —, e serve para
@@ -330,7 +354,7 @@ class RunSummary:
     dismissed: int
     # Quantos ingressaram ao todo, que é o denominador das duas frações. Sem
     # ele os dois números acima são contagens sem escala: 40 formados é muito
-    # ou pouco conforme a geração tenha 60 ou 600 pessoas.
+    # ou pouco conforme a coorte tenha 60 ou 600 pessoas.
     population: int
     efficiency: float  # psi-barra — eq. (53)
     # Aproveitamento: a contraparte em carga do psi, que é em utilidade. As
@@ -365,14 +389,14 @@ class RunSummary:
     # resume. É o recorte por período da tela; a redução continua sendo a dos
     # campos acima, e as duas leituras saem do mesmo material.
     by_period: PeriodSeries
-    # O mesmo resumo por geração — o terceiro eixo da tela. Aqui a redução é a
+    # O mesmo resumo por coorte — o terceiro eixo da tela. Aqui a redução é a
     # mesma; o que muda é sobre quem ela corre.
     by_cohort: CohortSeries
 
 
 @dataclass(frozen=True)
 class ArmResult:
-    """As N execuções de um braço, na ordem das seeds."""
+    """As N observações de um braço, na ordem das seeds."""
 
     key: str
     mechanism: Mechanism
@@ -382,7 +406,7 @@ class ArmResult:
 
 @dataclass(frozen=True)
 class ComparisonResult:
-    """As N execuções de cada braço, pareadas pela seed.
+    """As N observações de cada braço, pareadas pela seed.
 
     Todas as listas têm o mesmo tamanho e a mesma ordem de seeds: o i-ésimo
     elemento de cada uma é a *mesma* população sob regras diferentes. Quem lê
@@ -395,7 +419,7 @@ class ComparisonResult:
     arms: list[ArmResult]
     # As duas distribuições de entrada do cenário, para a tela mostrar de onde
     # vieram os números. Não variam entre braços nem entre seeds — são do
-    # cenário, não da execução.
+    # cenário, não da observação.
     utility_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)
 
@@ -460,20 +484,20 @@ def weighted_states(pairs: list[tuple[Metrics, int]]) -> RequestStates:
 
 
 def cohort_series(result: SimulationResult) -> CohortSeries:
-    """Reduz a execução geração a geração.
+    """Reduz a observação coorte a coorte.
 
     É a mesma média ponderada de `summarize`, corrida sobre `by_cohort` em vez
     de `overall`. O recorte particiona a população, então nenhum aluno-período
-    é contado duas vezes nem fica de fora — e somar as gerações de um período
+    é contado duas vezes nem fica de fora — e somar as coortes de um período
     reproduz o agregado dele.
 
     A filtragem é a mesma do agregado, pelo mesmo motivo: instante sem métrica
-    não entra, e uma geração não tem métrica no período em que ingressou,
+    não entra, e uma coorte não tem métrica no período em que ingressou,
     porque ali ela é toda calouro e o calouro conta como gente, não como dado
     (ver `simulation.GroupSnapshot`).
 
     O tempo de formatura e os concluintes não saem dos instantes, e sim de
-    varrer os alunos: cada um pertence a uma geração só, pelo `entry_period`.
+    varrer os alunos: cada um pertence a uma coorte só, pelo `entry_period`.
     De lá sai também o tamanho do ingresso, que é o denominador da fração —
     e que conta **todo mundo** que entrou, inclusive quem nunca chegou a ser
     medido.
@@ -546,7 +570,7 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     """Reduz uma simulação inteira a um ponto por métrica.
 
     As três de período passam pela média ponderada pelos alunos medidos; o tempo
-    de formatura é da execução inteira; a saturação é uma média dessas por
+    de formatura é da observação inteira; a saturação é uma média dessas por
     rodada. O ponto não substitui o material de que saiu: `by_period` leva as
     mesmas métricas sem reduzir, e as duas leituras ficam conferíveis uma contra
     a outra.
@@ -636,7 +660,7 @@ def sample_distribution(config: SimulationConfig) -> list[float]:
     """O histograma de utilidades do cenário, sorteado à parte da simulação.
 
     Descreve a **entrada**, não o resultado: a mesma distribuição que a
-    simulação usa, numa amostra própria. Vem daqui, e não de uma execução,
+    simulação usa, numa amostra própria. Vem daqui, e não de uma observação,
     porque numa comparação há 3N matrizes, todas da mesma distribuição, sem uma
     que seja "a" certa. (Na execução única, ao contrário, o histograma sai da
     matriz que a simulação de fato usou.)
@@ -676,7 +700,7 @@ def arm_config(config: SimulationConfig, *, arm: Arm, seed: int) -> SimulationCo
     """O cenário como um braço o roda: as quatro escolhas do braço e a seed.
 
     É o **único** lugar em que um braço vira configuração, e é o que torna o
-    traço de uma execução conferível: a tela individual pede a mesma
+    traço de uma observação conferível: a tela individual pede a mesma
     `(braço, seed)` que o boxplot resumiu e recebe a simulação idêntica, porque
     a configuração passa por aqui dos dois lados.
     """
@@ -715,7 +739,7 @@ def run_comparison(
     horizonte, rodadas — vale igual em todos, que é o que torna a diferença
     atribuível ao modelo.
 
-    As execuções saem em paralelo por `ThreadPoolExecutor`, e não por processos:
+    As observações saem em paralelo por `ThreadPoolExecutor`, e não por processos:
     o tempo do leilão está quase todo dentro do CBC, que roda como processo
     externo e devolve a GIL enquanto se espera por ele. Threads também evitam
     reimportar numpy e pulp em cada worker, que custaria mais do que a
@@ -723,7 +747,7 @@ def run_comparison(
     de cada lista é a mesma população.
     """
     if not 1 <= runs <= MAX_RUNS:
-        raise ValueError(f"o número de execuções deve estar entre 1 e {MAX_RUNS}")
+        raise ValueError(f"o número de observações deve estar entre 1 e {MAX_RUNS}")
     seeds = list(range(1, runs + 1))
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:

@@ -55,9 +55,11 @@ from .equations import (
     NEUTRAL,
     Behavior,
     Signals,
+    admitted_set,
     concave_bids,
     decision_scores,
-    normalize_with_height_shift,
+    eligible_utility,
+    normalize_rows,
     preference_split,
 )
 from .equations.utility_histogram import BINS as DISTRIBUTION_BINS
@@ -172,11 +174,7 @@ def draw_utilities(
         stability=_stability_by_discipline(config),
         sigma=config.utility_sigma,
     ) + _attractiveness(config)
-    heights = config.heights()
-    normalized = normalize_with_height_shift(
-        np.maximum(np.exp(log), UNDERFLOW_GUARD),
-        np.array([heights[name] for name in names], dtype=float),
-    )
+    normalized = normalize_rows(np.maximum(np.exp(log), UNDERFLOW_GUARD))
     return {
         (student.id, period + 1): {
             name: float(normalized[a, period, j]) for j, name in enumerate(names)
@@ -210,10 +208,13 @@ def utility_matrix(
     A **ordem das chaves** é a da grade no cenário, e é carga: é dela que as
     duas mochilas tiram o desempate. Reordenar a saída muda resultado.
     """
-    return {
-        name: row[name]
-        for name in config.eligible_disciplines(student.approved(config.min_grade))
-    }
+    approved = student.approved(config.min_grade)
+    return eligible_utility(
+        row=row,
+        eligible=config.eligible_disciplines(approved),
+        approved=approved,
+        prerequisites=config.prerequisites_by_discipline(),
+    )
 
 
 def compute_bids(
@@ -223,21 +224,19 @@ def compute_bids(
     budget: int,
     behavior: Behavior = NEUTRAL,
     signals: Signals | None = None,
-    catalogue: int = 0,
 ) -> dict[str, int]:
     """c_{a,·}^(t,r): a estratégia do aluno no leilão.
 
-    `available` é B_a^(t,r) (eq. 15) e `budget` é C_a^(t,r). O score vem de
+    `available` é B_a^(t,r) (eq. 15) e `budget` é C_a^(t,r). A utilidade de
+    reserva corta o conjunto (`equations.admitted_set`), o score vem de
     `equations.decision_score` e a repartição, de `equations.concave_bids`.
     """
     return concave_bids(
         scores=decision_scores(
-            utilities=utilities,
+            utilities=admitted_set(utilities=utilities, reserve=behavior.alpha_u),
             behavior=behavior,
             signals=signals,
-            catalogue=catalogue,
         ),
         available=available,
         budget=budget,
-        reserve=behavior.reserve,
     )

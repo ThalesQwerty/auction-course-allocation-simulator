@@ -13,12 +13,15 @@ export function Sidebar({
   onNavigate,
   onDelete,
   onClear,
+  onLoadFile,
 }: {
   view: View;
   history: HistoryEntry[];
   onNavigate: (view: View) => void;
   onDelete: (id: string) => void;
   onClear: () => void;
+  /** Um resultado gravado em disco pela API, de volta para a lista. */
+  onLoadFile: (file: File) => void;
 }) {
   const key = (v: View) => (v.kind === "run" ? `run:${v.id}` : v.kind);
   const selected = (target: View) => key(view) === key(target);
@@ -67,7 +70,9 @@ export function Sidebar({
                   title={describeEntry(entry)}
                 >
                   {formatRunDate(entry.at)}
-                  {entry.kind === "comparison" && <em className="nav-tag">comparação</em>}
+                  <em className="nav-tag">
+                    {entry.kind === "evolution" ? "evolução" : "comparação"}
+                  </em>
                   <span>{describeEntry(entry)}</span>
                 </button>
                 <button
@@ -85,6 +90,20 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-footer">
+        <label className="nav-item file-item">
+          Carregar resultado
+          <input
+            type="file"
+            accept="application/json,.json"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onLoadFile(file);
+              // Zera para que carregar o mesmo arquivo duas vezes seguidas
+              // dispare o evento nas duas.
+              e.target.value = "";
+            }}
+          />
+        </label>
         <button className="nav-item danger" onClick={onClear} disabled={history.length === 0}>
           Limpar histórico
         </button>

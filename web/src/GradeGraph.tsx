@@ -34,7 +34,14 @@ const trait = (value: number | undefined, neutral: number) => {
 const totalHours = (list: DisciplineInput[]) =>
   list.reduce((sum, discipline) => sum + discipline.hours, 0);
 
-export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) {
+export function GradeGraph({
+  disciplines,
+  classSize,
+}: {
+  disciplines: DisciplineInput[];
+  /** Alunos por turma: a grade declara turmas, e as vagas saem daqui. */
+  classSize: number;
+}) {
   const periods = useMemo(() => curriculumPeriods(disciplines), [disciplines]);
   const required = useMemo(() => disciplines.filter((d) => !d.elective), [disciplines]);
   const electives = useMemo(() => disciplines.filter((d) => d.elective), [disciplines]);
@@ -68,16 +75,16 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
    * ele está confundido com o período), é no bloco das optativas que ele
    * precisa estar legível. */
   const electiveColumns = useMemo(() => {
-    const bySeats = new Map<number, DisciplineInput[]>();
+    const byClasses = new Map<number, DisciplineInput[]>();
     for (const discipline of electives) {
-      const group = bySeats.get(discipline.seats);
+      const group = byClasses.get(discipline.classes);
       if (group) group.push(discipline);
-      else bySeats.set(discipline.seats, [discipline]);
+      else byClasses.set(discipline.classes, [discipline]);
     }
-    return [...bySeats.entries()]
+    return [...byClasses.entries()]
       .sort(([a], [b]) => b - a)
-      .map(([seats, cards]) => ({ seats, cards }));
-  }, [electives]);
+      .map(([classes, cards]) => ({ seats: classes * classSize, cards }));
+  }, [electives, classSize]);
 
   const links = useMemo(() => {
     const incoming = new Map<string, string[]>();
@@ -200,7 +207,7 @@ export function GradeGraph({ disciplines }: { disciplines: DisciplineInput[] }) 
     >
       <h3>{discipline.name}</h3>
       <p>
-        {discipline.seats} vagas · {discipline.hours} h
+        {discipline.classes * classSize} vagas · {discipline.hours} h
         {discipline.entry && <em>entrada</em>}
       </p>
       <p className="grade-traits">

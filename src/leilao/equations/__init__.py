@@ -39,9 +39,10 @@ Decisão do aluno (Seção 7.2.4)
 Preferência e grade
 
     preference_split          √s·permanente + √(1−s)·sazonal      —
-    utility_row               deslocamento por altura + norma     eq. (41)
+    utility_row               normalização da linha         substitui 41
+    admitted_set              corte da utilidade de reserva       —
     eligible_set              não aprovada, liberada, X em aberto eq. (42)
-    reachable_utility         U_a = Σ_elegível u                  eq. (43)
+    eligible_utility          redistribui o inelegível   substitui 41 e 43
     curriculum_height         s_x, a cadeia à frente          substitui 38
     curriculum_period         o período induzido dos pré-req.     —
     curriculum_reach          quantas destrava, transitivamente   —
@@ -67,8 +68,8 @@ Disponibilidade e exclusão
 
 Sinais publicados
 
-    win_estimate              P̂(obter) = min(1, q/n)              —
-    pass_rate_estimate        P̂(aprovar) = aprovações/matrículas  —
+    supply_index              q/(q + n), neutro 1/2         substitui P̂(obter)
+    approval_index            (a + 1)/(m + 2), Laplace    substitui P̂(aprovar)
 
 Métricas de um recorte (Seção 7.3.3)
 
@@ -85,7 +86,13 @@ Métricas de um recorte (Seção 7.3.3)
     credits_per_seat          oferta de crédito / vagas           —
     mean_price                π̄ sobre as rodadas com vaga         —
 
-Agregação de uma execução (Seção 7.3)
+Algoritmo genético
+
+    fitness                   f_a = carga aprovada / idade        —
+    genome_grid               produto cartesiano dos níveis       —
+    genome_drift              desvio da média na janela           —
+
+Agregação de uma observação (Seção 7.3)
 
     weighted_mean             média ponderada pelos medidos       —
     time_to_graduate          períodos do ingresso ao diploma     —
@@ -95,11 +102,19 @@ Agregação de uma execução (Seção 7.3)
 Não implementadas, e por quê
 
     eq. (31)   t_a: o ingresso é escalonado por construção, em `population`
+    eq. (41)   a invariante de altura saiu: punha valor curricular dentro do
+               gosto. `eligible_utility` a substitui redistribuindo a utilidade
+               do inelegível sobre o que destrava
+    eq. (43)   U_a: a redistribuição conserva a massa, então o recorte elegível
+               soma 1 sempre — não há mais "utilidade ao alcance" menor que a
+               linha inteira
     eqs. (47)-(48)  grupos da grade: toda obrigatória pesa igual, não há o
                     que hierarquizar
 """
 from __future__ import annotations
 
+from .approval_index import approval_index
+from .admitted_set import admitted_set
 from .aptitude_shape import beta_shape
 from .available_goods import available_goods
 from .concave_bids import concave_bids
@@ -113,9 +128,13 @@ from .decision_score import NEUTRAL, Behavior, Signals, decision_scores
 from .demand_per_seat import demand_per_seat
 from .effective_load import effective_load
 from .eligible_set import eligible_set
+from .eligible_utility import eligible_utility
 from .exclusion_refund import exclusion_refund
 from .exclusion_rate import exclusion_rate
 from .final_preference import final_preference
+from .fitness import fitness
+from .genome_drift import genome_drift
+from .genome_grid import genome_grid
 from .grade_average import grade_average
 from .grade_for_attempt import APTITUDE_GUARD, grade_for_attempt
 from .grade_histogram import grade_histogram
@@ -130,11 +149,9 @@ from .mean_satisfaction import mean_satisfaction
 from .message_fidelity import message_fidelity
 from .next_budget import next_budget
 from .occupancy import occupancy
-from .pass_rate_estimate import pass_rate_estimate
 from .pearson_correlation import pearson
 from .period_return import period_return
 from .preference_split import preference_split
-from .reachable_utility import reachable_utility
 from .rectified_bias import rectify_bias
 from .remaining_budget import remaining_budget
 from .remaining_capacity import remaining_capacity
@@ -145,14 +162,14 @@ from .retained_set import retained_set
 from .satisfaction import satisfaction
 from .semestralization import semestralization
 from .serial_dictatorship import serial_dictatorship
+from .supply_index import supply_index
 from .stochastic_perturbation import stochastic_perturbations
 from .tie_break_factor import tie_break_factor
 from .time_to_graduate import time_to_graduate
 from .utility_histogram import utility_histogram
-from .utility_row import normalize_with_height_shift
+from .utility_row import normalize_rows
 from .utilization import utilization
 from .weighted_mean import weighted_mean
-from .win_estimate import win_estimate
 
 __all__ = [
     "APTITUDE_GUARD",
@@ -161,6 +178,8 @@ __all__ = [
     "RequestStates",
     "Signals",
     "available_goods",
+    "admitted_set",
+    "approval_index",
     "beta_shape",
     "concave_bids",
     "consumption",
@@ -173,9 +192,13 @@ __all__ = [
     "demand_per_seat",
     "effective_load",
     "eligible_set",
+    "eligible_utility",
     "exclusion_rate",
     "exclusion_refund",
     "final_preference",
+    "fitness",
+    "genome_drift",
+    "genome_grid",
     "grade_average",
     "grade_for_attempt",
     "grade_histogram",
@@ -189,13 +212,11 @@ __all__ = [
     "mean_satisfaction",
     "message_fidelity",
     "next_budget",
-    "normalize_with_height_shift",
+    "normalize_rows",
     "occupancy",
-    "pass_rate_estimate",
     "pearson",
     "period_return",
     "preference_split",
-    "reachable_utility",
     "rectify_bias",
     "remaining_budget",
     "remaining_capacity",
@@ -212,5 +233,5 @@ __all__ = [
     "utility_histogram",
     "utilization",
     "weighted_mean",
-    "win_estimate",
+    "supply_index",
 ]

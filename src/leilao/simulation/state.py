@@ -117,7 +117,7 @@ class PeriodState:
         O ingressante não dá lance. O sistema reparte o orçamento dele
         igualmente entre essas disciplinas e lança o gasto, ficando com o resto
         da divisão no saldo — é esse valor que o retorno de créditos (eq. 34)
-        tem para trabalhar. A validação do cenário garante que a geração cabe
+        tem para trabalhar. A validação do cenário garante que a coorte cabe
         na menor dessas ofertas e que a carga somada respeita W_a.
 
         A garantia vale só no ingresso: recursar uma dessas disciplinas é

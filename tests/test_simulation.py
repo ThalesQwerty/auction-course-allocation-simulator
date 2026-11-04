@@ -574,7 +574,10 @@ def test_entrants_get_every_entry_discipline_without_bidding():
             if r.won_round is not None and not r.excluded
         )
         assert record.satisfaction == pytest.approx(served)
-        assert 0 < record.satisfaction < 1
+        # Com a matriz de utilidade elegível a linha do calouro soma 1 sobre
+        # as disciplinas de entrada, e ele as recebe todas: ψ = 1 exato. ψ
+        # passou a ler "fração do que dava para querer e levar".
+        assert 0 < record.satisfaction <= 1
 
 
 def test_the_system_charges_the_entrant_an_equal_share_of_the_budget():

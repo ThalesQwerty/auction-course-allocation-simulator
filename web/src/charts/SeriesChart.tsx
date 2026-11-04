@@ -2,17 +2,17 @@
  *
  * É a outra leitura do mesmo material do boxplot, e a diferença está no eixo
  * horizontal. Lá ele é categórico: cada caixa é um modelo, e o que se lê é a
- * **distribuição** de uma média entre as execuções. Aqui ele é **ordenado** —
+ * **distribuição** de uma média entre as observações. Aqui ele é **ordenado** —
  * o período —, e o que se lê é a trajetória que aquela média resume. Por isso
  * a linha é lícita aqui e não seria sobre as seeds: entre o período 5 e o 6 há
  * caminho; entre a seed 5 e a 6 não há nada, e uma linha ali desenharia uma
  * tendência que é só a ordem do sorteio.
  *
- * **A linha é a mediana entre as execuções, e a faixa é o intervalo
+ * **A linha é a mediana entre as observações, e a faixa é o intervalo
  * interquartil.** A mediana, e não a média, porque é o número que as caixas e
  * as tabelas já usam — duas estatísticas para a mesma grandeza na mesma tela
  * obrigariam quem lê a reconciliá-las. A faixa não é enfeite: sem ela, linhas
- * lisas convidam a ler um vão de 0,01 como real quando as execuções se
+ * lisas convidam a ler um vão de 0,01 como real quando as observações se
  * espalham por 0,08 — e os quartis exatos ficam no tooltip.
  *
  * **A legenda alterna.** Com quatro braços sobrepostos, isolar dois é o que
@@ -49,13 +49,13 @@ export interface SeriesPoint {
 
 export interface SeriesGroup {
   label: string;
-  /** Uma amostra por execução. Cada uma traz os próprios `x`: as seeds não
+  /** Uma amostra por observação. Cada uma traz os próprios `x`: as seeds não
    * precisam cobrir o mesmo intervalo, e na cauda do horizonte de fato não
    * cobrem — quem esvaziou antes para de publicar período. */
   samples: SeriesPoint[][];
 }
 
-/** O que foi medido num ponto do eixo: os cinco números entre as execuções que
+/** O que foi medido num ponto do eixo: os cinco números entre as observações que
  * chegaram até ali. São os mesmos de `boxStats` de propósito — a linha é a
  * mediana de uma caixa que não se desenha, e as duas leituras da tela não
  * podem sair de estatísticas diferentes. */
@@ -93,7 +93,7 @@ export function SeriesChart({
   bounds?: [number, number];
   /** Marca o zero quando o sinal da métrica é o que se lê (λ). */
   zeroLine?: boolean;
-  /** Quantas execuções cada braço tem. Serve ao tooltip, para avisar quando o
+  /** Quantas observações cada braço tem. Serve ao tooltip, para avisar quando o
    * ponto foi medido sobre menos que todas — na cauda do horizonte parte das
    * seeds já esvaziou, e ali a amostra não é a mesma do começo do eixo. */
   runs: number;
@@ -105,7 +105,7 @@ export function SeriesChart({
 
   /** Memoizado porque dele saem a tabela e a régua: alternar a legenda não
    * muda `groups`, e sem isso cada clique recalcularia os quartis de todas as
-   * execuções. */
+   * observações. */
   const visible = useMemo(
     () => groups.filter((group) => !hidden[group.label]),
     [groups, hidden]
@@ -120,7 +120,7 @@ export function SeriesChart({
     return [...seen].sort((a, b) => a - b);
   }, [groups]);
 
-  /** Por braço e por ponto do eixo, o resumo entre as execuções. */
+  /** Por braço e por ponto do eixo, o resumo entre as observações. */
   const summaries = useMemo(() => {
     const table: Record<string, Map<number, Summary>> = {};
     groups.forEach((group) => {
@@ -274,7 +274,7 @@ const bandKey = (label: string) => `${label} (faixa)`;
  *
  * Em ordem decrescente de mediana, como no `SeriesTip` das outras séries — com
  * várias linhas no mesmo ponto, a ordem da legenda obrigaria a procurar. O `n`
- * só aparece quando o ponto foi medido sobre menos execuções que o total: é o
+ * só aparece quando o ponto foi medido sobre menos observações que o total: é o
  * aviso de que ali a amostra mudou. */
 function PeriodTip({
   active,

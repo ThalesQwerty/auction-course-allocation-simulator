@@ -1,4 +1,4 @@
-"""Como uma execução inteira vira um número por métrica.
+"""Como uma observação inteira vira um número por métrica.
 
     valor = Σ_t (métrica_t · alunos_t) / Σ_t alunos_t
 
