@@ -61,8 +61,8 @@ Simulador/
 │   ├── names.py          # 256 nomes x 256 sobrenomes para batizar os alunos
 │   ├── population.py     # Alunos e seu histórico acadêmico
 │   ├── behavior.py       # Sorteio da matriz de utilidades e o recorte dela
-│   ├── grading.py        # Sorteio da aptidão
-│   ├── availability.py   # Sorteio da disponibilidade, uma por período
+│   ├── grading.py        # Sorteio do desempenho base
+│   ├── availability.py   # Sorteio da disponibilidade (horas), uma por período
 │   ├── metrics.py        # O registro de métricas de um recorte
 │   ├── simulation/       # O laço multi-período — Seção 7.2
 │   ├── comparison.py     # N observações pareadas de cada braço — Seção 7.3
@@ -127,7 +127,7 @@ Para cada período letivo `t`:
    (mochila côncava), o leilão resolve o WDP por PLI (eqs. 22-25) e vagas, carga
    horária e orçamento são descontados (eqs. 13, 14, 27).
 4. Encerradas as rodadas, o aluno **exclui**: descarta disciplinas obtidas
-   até que a carga retida caiba na fração de `W_a` que a disponibilidade
+   até que a carga retida caiba nas horas que a disponibilidade
    daquele período lhe deu (`equations.retained_set`). A vaga descartada
    **não volta** para a oferta — a esta altura as alocações já se encerraram.
 5. Só então saem as notas do que ficou (eq. 33), o retorno de créditos
@@ -138,8 +138,8 @@ primeiro período — nada é sorteado dentro do loop, como exige a Seção 7.3:
 
 | Matriz | O que é | Onde |
 | --- | --- | --- |
-| `a` | aptidão de cada par (aluno, disciplina), persistente | `grading.draw_aptitudes` |
-| `δ^(t)` | disponibilidade de cada par (aluno, período) | `availability.draw_availability` |
+| `q` | quantil de desempenho de cada par (aluno, disciplina), persistente | `grading.draw_base_quantiles` |
+| `δ^(t)` | disponibilidade em horas de cada par (aluno, período) | `availability.draw_availability` |
 | `u^(t)` | utilidade de cada par (aluno, disciplina) em cada período | `behavior.draw_utilities` |
 | `alpha`, `epsilon` | ordem de desempate e perturbação | `simulation.setup` |
 
@@ -148,19 +148,50 @@ par de perfis. As coortes têm todas o mesmo tamanho, em períodos consecutivos,
 e os perfis se repartem igualmente entre as combinações
 (`population.generate_students`) — assim duas observações que só diferem na seed
 têm a mesma estrutura de entrada e os mesmos grupos, e a diferença entre elas
-não é quem entrou quando nem quem calhou de ser frágil. Da seed vêm os dois
-escalares que as Betas dos perfis produzem, não o grupo.
+não é quem entrou quando nem quem calhou de ser frágil. Da seed vêm os
+escalares que as distribuições dos perfis produzem, não o grupo.
 
-**A nota não é sorteada: é calculada da aptidão.** O único sorteio é o da
-aptidão `a` do par (aluno, disciplina), feito uma vez na inicialização a partir
-da Beta do **perfil de desempenho** do aluno. A nota de uma tentativa é
-`round(100·a^E)/10`, com `E = dificuldade / (u_rel^g_u · esforço)` e
-`esforço = 1 + g_t·(tentativa − 1)` — `equations.grade_for_attempt`. Com
-`E = 1` a nota *é* a aptidão × 10, o que lhe dá leitura direta.
+**A nota não é sorteada: é lida.** O único sorteio é o do **quantil** `q` do
+par (aluno, disciplina) — um uniforme em (0, 1), feito uma vez na
+inicialização. A posição é o traço; a distribuição é que se move.
 
-Duas consequências. A recursada rende pela **lei de potência da prática**:
-dificuldade 2 na segunda tentativa equivale a dificuldade 1 na primeira, com o
-ganho `retake_gain` em 1. E `Student.grades` guarda a **maior** nota já obtida
+A distribuição é uma **normal dividida censurada em [0, 10]**: dois desvios em
+torno de uma moda comum, à esquerda e à direita. O perfil a descreve pelas três
+grandezas que se leem — **nota mais provável, chance de tirar 0 e chance de
+tirar 10** — e `equations.grade_shape` converte isso nos três parâmetros de
+forma. A moda é a locação, e o número declarado é literalmente o pico da curva;
+a chance de zero fixa a cauda esquerda e a de dez fixa a direita. Como a moda
+entra direto, **toda trinca existe** — não há combinação a recusar, o que não
+valeria se o parâmetro fosse a média.
+
+A **média sai derivada**, e fica 1 a 2 pontos *abaixo* da moda: a cauda
+esquerda é longa (quem vai mal vai muito mal), e numa distribuição assim a
+média não coincide com o pico.
+
+A nota de uma tentativa é o quantil lido nessa distribuição, **arredondado em
+décimos e clipado em [0, 10]** — `equations.grade_for_attempt`. O latente é
+ilimitado; o que limita é o instrumento: a prova vale 10, então quem mereceria
+11 recebe 10. É essa censura que torna o 0 e o 10 alcançáveis, e com a
+frequência que o perfil declarou.
+
+A dificuldade e a tentativa transformam as duas chances por expoentes
+**recíprocos** (`equations.attempt_rates`):
+
+    chance de 0  = chance_base ^ (tentativa / dificuldade)
+    chance de 10 = chance_base ^ (dificuldade / tentativa)
+
+e a forma é refeita com a **moda do perfil mantida**. Segurar a moda, e não a
+média, é o que a mantém dentro da escala: com a média fixa ela sai de [0, 10]
+assim que a dificuldade passa de 2.
+
+Três consequências. A recursada rende pela **lei de potência da prática**:
+dificuldade 2 na segunda tentativa reproduz exatamente dificuldade 1 na
+primeira — e é por isso que não há botão de ganho por recursada, já que quem
+calibra isso é a dificuldade da disciplina, do outro lado da mesma razão. A
+**taxa de aprovação não é parâmetro**: `n_min` é regra de cenário, não
+propriedade do aluno, e se definisse o perfil mudar a linha de corte
+redefiniria a população em silêncio — ela sai calculada. E `Student.grades`
+guarda a **maior** nota já obtida
 — é ela que conta para o CR e para a aprovação —, enquanto o histórico por
 período guarda a nota **daquela** tentativa, que é o que a tela individual
 precisa mostrar.
@@ -551,8 +582,8 @@ sozinho.
 
   | Eixo | O que governa | Sorteio |
   | --- | --- | --- |
-  | desempenho | a Beta da aptidão, e por aí a frequência com que o aluno reprova | uma por par (aluno, disciplina), persistente |
-  | disponibilidade | a Beta da fração de `W_a` que ele de fato cursa, e por aí a frequência com que exclui | uma por par (aluno, período) |
+  | desempenho | a normal dividida da nota, e por aí a frequência com que o aluno reprova | uma por par (aluno, disciplina), persistente |
+  | disponibilidade | a log-normal das horas que ele tem para o período, e por aí a frequência com que exclui | uma por par (aluno, período) |
   | utilidades | o quanto o aluno diferencia as disciplinas | `utility_sigma`, uma linha por (aluno, período) |
 
   O perfil descreve o comportamento do aluno **fora do mecanismo** — se ele vai
@@ -585,15 +616,35 @@ sozinho.
   **Os perfis já existiram entre 03/10 e 08/10/2026** e foram removidos a
   pedido; voltaram em 31/10/2026 com outro recorte. Antes eram aptidão e
   **afinidade** (um expoente sobre `u`), com % da população configurável por
-  grupo; agora são aptidão e **disponibilidade**, com as fatias saindo da
-  contagem de grupos. O que se recupera é o mesmo: a heterogeneidade volta a ser
+  grupo; agora são **desempenho** e **disponibilidade**, com as fatias saindo
+  da contagem de grupos. O que se recupera é o mesmo: a heterogeneidade volta a ser
   *sistemática*, e com ela o recorte dos relatórios por grupo.
 
-- **Disponibilidade e exclusão**: a fração de `W_a` que o aluno vai de fato
-  cursar, sorteada da Beta do perfil dele **a cada período**. A aptidão é
+- **Disponibilidade e exclusão**: as horas que o aluno tem para o período,
+  sorteadas da log-normal do perfil dele **a cada período**. O desempenho é
   traço — quem é bom em cálculo continua bom —, mas o tempo disponível é
   circunstância: muda com o trabalho, a família, a saúde. O que é traço é a
-  *média* de onde ela sai, e essa é o perfil.
+  *forma* de onde ela sai, e essa é o perfil.
+
+  **Em horas, não em fração de `W_a`** (04/11/2026). O teto de carga é do
+  **sistema**, não do aluno: nada impede alguém de ter tempo para 400 h num
+  curso que oferece 360, e quem impede a matrícula é o alocador, que nunca
+  entrega mais que `W_a` durante as rodadas. O dado do aluno não precisa estar
+  alinhado a priori com a regra da instituição.
+
+  O perfil é descrito por **moda** (em horas) e **chance de alcançar a carga
+  máxima** — `equations.availability_shape` converte nos dois parâmetros
+  logarítmicos, em forma fechada. A log-normal dá suporte `(0, ∞)`: a
+  disponibilidade nunca fica negativa e **não tem máximo artificial**.
+
+  A única restrição é **moda < `W_a` − 0,5**. E há um custo a conhecer: "quase
+  sempre cheio" e "tipicamente perto de `W_a`" são pedidos incompatíveis nesta
+  família — forçar quase toda a massa acima do teto com a moda logo abaixo dele
+  exige um desvio logarítmico enorme, e a mediana vai para longe.
+
+  Como a moda é **absoluta**, os perfis padrão valem contra o `W_a` padrão
+  (360 h). Um cenário de teto menor precisa dos seus próprios perfis, e é
+  recusado se as modas não couberem.
 
   Encerradas as rodadas, o aluno descarta disciplinas obtidas até que a carga
   retida caiba em `round(δ · W_a)`. Quem decide o que fica é uma **mochila 0-1**
@@ -603,21 +654,26 @@ sozinho.
   0,13) e Física (60 h, 0,11), a heurística sacrifica as duas baratas para
   salvar a cara e retém 0,22; a mochila retém Cálculo + Física, 120 h e 0,24.
 
-  O arredondamento é para o **inteiro mais próximo**, e não para baixo: com
-  piso, `⌊δ·W_a⌋ = W_a` exigiria `δ ≥ 1`, que numa Beta tem probabilidade zero
-  — todo aluno que ganhasse a carga cheia excluiria alguma coisa, inclusive o
-  perfil feito para enchê-la.
+  O arredondamento é para o **inteiro mais próximo**, e não para baixo, porque
+  hora é inteira no modelo. **Não há teto**: a carga efetiva é `round(δ)` sem
+  clipe, e passar de `W_a` apenas significa não excluir nada.
 
-  A diferença entre os dois é de no máximo **uma hora**, e é exatamente ela que
-  decide: as somas de carga são inteiras, então o teto `⌈·⌉` admite um conjunto
-  que o `⌊·⌋` recusa por uma hora. Medido com `W_a = 30` e disciplinas de 2 h e
-  3 h, o teto alcança `W_a` em **80,5%** dos semestres do perfil *Alta
-  disponibilidade* com arredondamento, contra **0,0%** com piso —
-  e em todos eles o aluno retém a carga inteira. A escala importa na leitura: o
-  que torna o conserto visível é a carga da disciplina ser pequena perante
-  `W_a`. Num cenário de blocos de 90 h contra 360 h a mesma hora não compraria
-  nada, e a exclusão ganharia um piso que não é do mecanismo — vale refazer a
-  conta ao mexer em `W_a` ou na carga das disciplinas.
+  É também o limiar com que a chance declarada é calibrada: como `round(29,5)`
+  já é 30, a inversão mira `W_a − 0,5`, e sem isso o valor realizado sairia
+  alguns pontos acima do pedido.
+
+  A versão anterior media a disponibilidade como **fração** de `W_a`, e aí
+  alcançar a carga cheia exigia `δ ≈ 1` — evento de borda numa Beta. O perfil
+  feito para encher a carga a enchia em 0,03% dos semestres com `W_a = 360`. O
+  piso sumiu com o `round`; o teto artificial só sumiu quando a disponibilidade
+  deixou de ser fração.
+
+  A meia hora entre arredondar e truncar ainda decide casos, porque as somas de
+  carga são inteiras: um conjunto que cabe por meia hora é admitido. Mas deixou
+  de ser o que governa a frequência de carga cheia — essa agora é **declarada**
+  no perfil, e a calibragem do limiar garante que o declarado seja o
+  realizado. Medido no preset (`W_a = 30`), o perfil *Alta disponibilidade*
+  pede 50% e entrega 50,0%.
 
   Excluir **não** mexe no CR, **não** soma carga cursada e **não** incrementa a
   tentativa. A vaga **não volta** para a oferta: exclui-se depois de encerradas
@@ -814,7 +870,7 @@ sozinho.
 - **Evasão comportamental.** Há duas portas de saída — concluir e ser jubilado
   por decurso de prazo —, mas nenhuma delas é decisão do aluno. A exclusão é a
   primeira decisão de *desistir* que o modelo tem, mas é de uma disciplina e é
-  exógena: sai da Beta do perfil, não de um cálculo do aluno. A evasão do curso
+  exógena: sai da log-normal do perfil, não de um cálculo do aluno. A evasão do curso
   responde ao mecanismo, e é contra a linha de base por CR que ela precisaria
   ser medida — agora que ela existe, é comparação possível.
 - **O teste de invasão.** A evolução roda com a coorte inteira jogando, e a
@@ -1112,31 +1168,49 @@ A população do cenário padrão, nos dois eixos de perfil. **O nome carrega o 
 propósito: "Alto" e "Alta" nos dois lados fariam "alto-baixo" virar charada em
 legenda de gráfico, e com o eixo no rótulo a combinação se lê sozinha.
 
-| Perfil | média · concentração | O que ele produz |
+| Perfil de desempenho | moda · chance de 0 · chance de 10 | O que ele produz |
 | --- | --- | --- |
-| Alto desempenho | 0,80 · 25 | nota média 8,0 · aprova 99,9% |
-| Médio desempenho | 0,65 · 15 | nota média 6,5 · aprova 89,5% |
-| Baixo desempenho | 0,50 · 10 | nota média 5,0 · aprova **51,5%** |
-| Alta disponibilidade | 0,99 · 40 | teto mediano 30 h · carga cheia em 80,5% |
-| Média disponibilidade | ⅔ · 20 | teto mediano 20 h · carga cheia em 0,0% |
-| Baixa disponibilidade | ⅓ · 10 | teto mediano 10 h · carga cheia em 0,0% |
+| Alto desempenho | 9,0 · 0,05% · 3,0% | média 7,44 · aprova 90,3% |
+| Médio desempenho | 8,0 · 0,50% · 0,8% | média 6,40 · aprova 77,4% |
+| Baixo desempenho | 6,5 · 3,00% · 0,15% | média 4,96 · aprova **55,1%** |
 
-São 9 combinações, com ~11% da coorte em cada. A aprovação é em dificuldade 1
-e primeira tentativa, onde a nota **é** a aptidão × 10; a carga cheia é a
-fração dos semestres em que o teto alcança `W_a = 30`, medida sobre 40 mil
-sorteios.
+| Perfil de disponibilidade | moda · chance de encher | O que ele produz |
+| --- | --- | --- |
+| Alta disponibilidade | 28 h · 50% | teto mediano 29 h · enche de fato 50,0% |
+| Média disponibilidade | 20 h · 5% | teto mediano 21 h · enche de fato 5,1% |
+| Baixa disponibilidade | 10 h · 0,1% | teto mediano 11 h · enche de fato 0,1% |
 
-O **Baixo desempenho** fica exatamente em `n_min = 5`: a mediana do grupo
-encosta na linha de corte, e ele reprova em torno de metade das vezes. É a
-calibragem que dá à ordenação por CR o que ordenar — sem dispersão ninguém
-reprova, a recursada some do cenário e a eq. (57) não mede nada.
+São 9 combinações, com ~11% da coorte em cada. A aprovação é em dificuldade 1 e
+primeira tentativa, que é a situação que os três parâmetros descrevem, e é
+**derivada**, não editada; a carga cheia é a fração dos semestres em que o teto
+alcança `W_a = 30`, medida sobre 40 mil sorteios.
+
+A média fica bem abaixo da moda em todos os três, e isso não é desajuste: a
+cauda esquerda é longa — quem vai mal vai muito mal —, e numa distribuição
+assim o pico não é o centro de massa. É por isso que a moda é o parâmetro e a
+média é derivada: com a média presa, moda alta com poucos dezes não fecharia, e
+o formulário teria faixa a recusar.
+
+O **Baixo desempenho** está calibrado por essa média derivada: 4,96 encosta em
+`n_min = 5`, e ele reprova em torno de metade das vezes. É a calibragem
+que dá à ordenação por CR o que ordenar — sem dispersão ninguém reprova, a
+recursada some do cenário e a eq. (57) não mede nada.
+
+A troca da Beta pela normal dividida (04/11/2026) **recalibrou a aprovação para
+baixo** nos dois grupos de cima: o Alto saiu de 99,9% para 90,3% e o Médio de
+89,5% para 77,4%, enquanto o Baixo subiu de 51,5% para 55,1%. A causa é a cauda
+esquerda, que a Beta sobre (0, 1) não conseguia produzir sem derrubar a média
+junto.
 
 Ou monte o seu: a tela de configuração tem **Configurações gerais** (o N da
 comparação, o horizonte e o ritmo de ingresso, as rodadas e o Γ_min),
 **Utilidades**, **Notas** e **Disponibilidade**, cada uma destas ao lado da
 prévia da distribuição que seus parâmetros produzem. As duas últimas editam
-listas de **perfis**: cada linha é um grupo, com nome, média e concentração, e
-os botões criam e removem grupos. Não há campo de porcentagem — a repartição é
+listas de **perfis**, e as duas editam coisas diferentes porque as
+distribuições são de famílias diferentes: cada linha de **Notas** traz nome,
+nota mais provável e as duas chances de ponta; cada linha de
+**Disponibilidade** traz
+nome, média e concentração. Os botões criam e removem grupos. Não há campo de porcentagem — a repartição é
 igualitária. O rodapé de cada seção fala do **próprio** eixo: quantos grupos
 ele tem e que fatia da coorte cabe a cada um (com três, 33,3%), e só então
 quantas combinações isso dá com o outro eixo. A fatia da combinação não entra
@@ -1149,28 +1223,35 @@ Ao lado dos campos de **notas** e de **utilidades**, a tela desenha a
 distribuição que aqueles parâmetros produzem, recalculada a cada tecla
 (`web/src/distributions.ts`). São as mesmas dez faixas que a observação reporta,
 de modo que a prévia e o histograma do resultado se leem lado a lado. A das
-notas é quadratura sobre a Beta — exata, e por isso não treme enquanto se
-digita —, e traz a média e a aprovação ao pé.
+notas sai em forma fechada da acumulada da normal dividida — exata, e por isso
+não treme enquanto se digita —, e traz ao pé a nota mais provável, a aprovação
+e as **duas chances de ponta já transformadas** pelo recorte, que são o que
+aquela disciplina de fato produz.
+
+As duas pontas da curva **não** fecham no eixo, e é o ponto da distribuição: a
+nota 0 e a nota 10 carregam toda a massa que o latente põe fora da escala. São
+os dois átomos da censura, e aparecem tão altos quanto a chance que o perfil
+declarou.
 
 Ela desenha **um caso de cada vez**, escolhido nos campos abaixo do próprio
 gráfico: uma disciplina de uma dada dificuldade (decimal) numa dada tentativa
-(inteiro), com uma **utilidade relativa** (decimal: a fração de utilidade vezes
-o número de disciplinas, de modo que 1 é a indiferença). O padrão é dificuldade
-1, tentativa 1, utilidade relativa 1, que é onde a nota *é* a aptidão. Os campos
-ficam junto da curva de propósito: eles **são** a legenda do caso, e sem isso
-duas leituras diferentes do mesmo gráfico ficariam indistinguíveis. A utilidade
-só entra quando o **ganho por utilidade** é maior que zero, porque é só aí que
-ela move o gráfico: ela age como expoente dele, e em ganho 0 o fator vale 1.
-Como os três entram na fórmula pela razão
-`dificuldade/(u_rel^ganho_utilidade · tentativas)`, dificuldade 2 na segunda
-tentativa
-desenha exatamente o mesmo gráfico que dificuldade 1 na primeira — com ganho
-por recursada 1 —, e dificuldade 2 com `u_rel` 2 em ganho por utilidade 1
-também: o que serve de conferência da própria prévia. Em `t > 1` o gráfico é
-a nota que a **população inteira** tiraria naquela tentativa, e não a dos
-recursantes: quem recursa é quem foi mal, então a amostra real de uma segunda
-tentativa é a cauda de baixo da aptidão. A prévia responde "quanto a tentativa
-vale", não "como ficou a turma de repetentes". Ela
+(inteiro). O padrão é dificuldade 1, tentativa 1, que é a situação que os três
+parâmetros do perfil descrevem. Os campos ficam junto da curva de propósito:
+eles **são** a legenda do caso, e sem isso duas leituras diferentes do mesmo
+gráfico ficariam indistinguíveis.
+
+Como os dois entram nos expoentes pela razão `tentativa/dificuldade` (e pela
+sua recíproca), dificuldade 2 na segunda tentativa desenha exatamente o mesmo
+gráfico que dificuldade 1 na primeira — o que serve de conferência da própria
+prévia. A **utilidade saiu** da fórmula da nota em 04/11/2026: ela já governa o
+que o aluno pede e o que ele exclui, e deixá-la mexer também na nota era a
+única peça sem forma justificada e a única que fabricava vão entre os
+mecanismos por conta própria.
+
+Em `t > 1` o gráfico é a nota que a **população inteira** tiraria naquela
+tentativa, e não a dos recursantes: quem recursa é quem foi mal, então a
+amostra real de uma segunda tentativa é a cauda de baixo. A prévia responde
+"quanto a tentativa vale", não "como ficou a turma de repetentes". Ela
 sai **pintada pela nota mínima**, que por isso mora na seção de notas e não nas
 configurações gerais: faixa inteira acima dela em verde, inteira abaixo em
 vermelho, e em amarelo a faixa que `n_min` corta ao meio (com `n_min` = 5 não há

@@ -17,7 +17,7 @@ from .auction import AuctionInput, Bid, run_auction
 from .behavior import compute_bids
 from .config import Mechanism
 from .entities import Agent, Good
-from .equations import APTITUDE_GUARD, grade_for_attempt, stochastic_perturbations
+from .equations import grade_for_attempt, grade_shape, stochastic_perturbations
 from .ranking import allocate_by_ranking, request_set
 
 
@@ -235,39 +235,38 @@ def _grades(
     names: list[str],
     won: dict[str, set[str]],
     seed: int,
-    aptitude_alpha: float,
-    aptitude_beta: float,
+    mode_grade: float,
+    zero_rate: float,
+    max_rate: float,
 ) -> tuple[PlaygroundGrade, ...]:
     """As notas do que cada um levou.
 
-    O sandbox não guarda aptidão entre rodadas: sorteia uma por
+    O sandbox não guarda posição entre rodadas: sorteia um quantil por
     (aluno, disciplina) na hora, que é o bastante para a tela mostrar nota
-    plausível. A simulação de verdade persiste a aptidão, que é traço.
+    plausível. A simulação de verdade persiste o quantil, que é traço.
+
+    Todo mundo sai do mesmo perfil, em disciplina de dificuldade 1 e primeira
+    tentativa — o sandbox é uma rodada isolada, e não tem histórico de onde
+    tirar tentativa nem perfil por aluno.
     """
     rng = np.random.default_rng(seed)
+    mode, left_sd, right_sd = grade_shape(
+        mode_grade=mode_grade, zero_rate=zero_rate, max_rate=max_rate
+    )
     grades: list[PlaygroundGrade] = []
     for student in students:
         for name in names:
             if name not in won[student.id]:
                 continue
-            aptitude = float(
-                np.clip(
-                    rng.beta(aptitude_alpha, aptitude_beta),
-                    APTITUDE_GUARD,
-                    1.0 - APTITUDE_GUARD,
-                )
-            )
             grades.append(
                 PlaygroundGrade(
                     student_id=student.id,
                     discipline=name,
                     grade=grade_for_attempt(
-                        aptitude=aptitude,
-                        difficulty=1.0,
-                        relative_utility=1.0,
-                        attempt=1,
-                        utility_gain=0.0,
-                        retake_gain=1.0,
+                        quantile=float(rng.random()),
+                        mode=mode,
+                        left_sd=left_sd,
+                        right_sd=right_sd,
                     ),
                 )
             )
@@ -279,8 +278,9 @@ def run_playground(
     mechanism: Mechanism,
     rounds: int,
     seed: int,
-    aptitude_alpha: float = 4.0,
-    aptitude_beta: float = 2.0,
+    mode_grade: float = 8.0,
+    zero_rate: float = 0.005,
+    max_rate: float = 0.008,
     disciplines: list[PlaygroundDiscipline],
     students: list[PlaygroundStudent],
 ) -> PlaygroundResult:
@@ -357,7 +357,8 @@ def run_playground(
             names=names,
             won=table.won,
             seed=seed,
-            aptitude_alpha=aptitude_alpha,
-            aptitude_beta=aptitude_beta,
+            mode_grade=mode_grade,
+            zero_rate=zero_rate,
+            max_rate=max_rate,
         ),
     )

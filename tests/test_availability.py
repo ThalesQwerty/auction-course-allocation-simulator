@@ -9,24 +9,27 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from profiles import always_available
 from disciplines import disciplines_from_predecessors
 
 from leilao.availability import draw_availability
 from leilao.config import (
     DEFAULT_AVAILABILITY,
     DEFAULT_PERFORMANCE,
-    Profile,
+    AvailabilityProfile,
+    PerformanceProfile,
     SimulationConfig,
 )
 from leilao.equations import (
     RequestStates,
+    split_normal_mean,
     effective_load,
     exclusion_rate,
     exclusion_refund,
     request_states,
     retained_set,
 )
-from leilao.grading import draw_aptitudes
+from leilao.grading import GradeShapes, draw_base_quantiles, grade_for_attempt
 from leilao.population import Student, generate_students
 from leilao.simulation import run_simulation
 
@@ -57,25 +60,25 @@ def make_config(**overrides) -> SimulationConfig:
 
 
 def test_the_effective_load_rounds_to_the_nearest_hour():
-    assert effective_load(availability=1.0, max_hours=360) == 360
-    assert effective_load(availability=0.5, max_hours=360) == 180
-    assert effective_load(availability=0.0, max_hours=360) == 0
+    """A disponibilidade já vem em horas: a carga efetiva só arredonda."""
+    assert effective_load(availability=360.0) == 360
+    assert effective_load(availability=180.4) == 180
+    assert effective_load(availability=0.0) == 0
     # O round do Python desempata para o par, como no retorno de créditos.
-    assert effective_load(availability=0.9, max_hours=355) == 320  # 319,5
-    # Nunca passa de W_a: δ <= 1 e o arredondamento sobe no máximo meia hora.
-    assert effective_load(availability=0.9999, max_hours=360) == 360
+    assert effective_load(availability=319.5) == 320
 
 
-def test_a_full_load_is_reachable_without_demanding_an_exact_one():
-    """Com piso, `⌊δ·W_a⌋ = W_a` exigia `δ >= 1`, que numa Beta tem
-    probabilidade zero: todo aluno que ganhasse a carga cheia excluiria alguma
-    coisa, inclusive o perfil feito para enchê-la. O viés era estrutural."""
-    assert effective_load(availability=0.999, max_hours=360) == 360
+def test_the_effective_load_has_no_ceiling():
+    """O teto de carga é do **sistema**, não do aluno, e por isso a carga
+    efetiva não clipa em W_a. Quem tem tempo para mais do que o curso oferece
+    simplesmente não exclui nada — quem impede a matrícula é o alocador, que
+    nunca entrega mais que W_a durante as rodadas."""
+    assert effective_load(availability=500.0) == 500
 
 
-def test_the_effective_load_rejects_a_fraction_outside_the_unit_interval():
+def test_the_effective_load_rejects_a_negative_availability():
     with pytest.raises(ValueError):
-        effective_load(availability=1.2, max_hours=360)
+        effective_load(availability=-1.0)
 
 
 # --- a mochila do que ele leva ---------------------------------------------
@@ -275,9 +278,10 @@ def test_the_leftover_of_an_uneven_generation_rotates_between_generations():
     assert extras[0] != extras[1] != extras[2]
 
 
-def test_the_aptitude_follows_the_profile_of_each_student():
+def test_the_grade_follows_the_profile_of_each_student():
     """A heterogeneidade é sistemática: há grupos a separar, e não só
-    dispersão."""
+    dispersão. O quantil sorteado é o mesmo uniforme para todo mundo — quem
+    separa os grupos é a **distribuição** em que ele é lido."""
     config = make_config()
     students = [
         Student(
@@ -289,16 +293,25 @@ def test_the_aptitude_follows_the_profile_of_each_student():
         for group, profile in enumerate(DEFAULT_PERFORMANCE)
         for i in range(400)
     ]
-    aptitudes = draw_aptitudes(students, GRADE, config, np.random.default_rng(0))
+    quantiles = draw_base_quantiles(students, GRADE, config, np.random.default_rng(0))
+    shapes = GradeShapes()
 
     by_student = {s.id: s.performance for s in students}
     for profile in DEFAULT_PERFORMANCE:
+        mode, left_sd, right_sd = shapes.of(profile, 1.0, 1)
+        # A média é derivada da forma, não é o parâmetro: o perfil declara a
+        # moda, e a cauda esquerda longa puxa a média para baixo dela.
+        expected_mean = split_normal_mean(
+            mode=mode, left_sd=left_sd, right_sd=right_sd
+        )
         drawn = [
-            value
-            for (student_id, _), value in aptitudes.items()
+            grade_for_attempt(
+                quantile=value, mode=mode, left_sd=left_sd, right_sd=right_sd
+            )
+            for (student_id, _), value in quantiles.items()
             if by_student[student_id] is profile
         ]
-        assert abs(sum(drawn) / len(drawn) - profile.mean) < 0.02
+        assert abs(sum(drawn) / len(drawn) - expected_mean) < 0.1
 
 
 def test_the_summary_carries_both_profiles_of_the_student():
@@ -334,28 +347,41 @@ def test_the_scenario_rejects_profiles_that_would_not_describe_a_group():
     with pytest.raises(ValueError, match="únicos"):
         make_config(
             availability_profiles=(
-                Profile("igual", 0.8, 10.0),
-                Profile("igual", 0.6, 10.0),
+                AvailabilityProfile("igual", 200.0, 0.1),
+                AvailabilityProfile("igual", 150.0, 0.1),
             )
         )
-    with pytest.raises(ValueError, match="média"):
-        make_config(performance_profiles=(Profile("impossível", 1.0, 10.0),))
-    with pytest.raises(ValueError, match="concentração"):
-        make_config(performance_profiles=(Profile("plano", 0.5, 0.0),))
+    # A moda tem de caber abaixo de W_a: com o pico no teto não existe
+    # log-normal que ainda o alcance com a frequência pedida.
+    with pytest.raises(ValueError, match="abaixo da carga"):
+        make_config(availability_profiles=(AvailabilityProfile("no teto", 240.0, 0.1),))
+    with pytest.raises(ValueError, match="chance"):
+        make_config(availability_profiles=(AvailabilityProfile("certa", 200.0, 1.0),))
+    # No desempenho a moda sempre cabe; o que pode não caber são as chances.
+    with pytest.raises(ValueError, match="escala"):
+        make_config(
+            performance_profiles=(
+                PerformanceProfile("fora", mode_grade=10.0, zero_rate=0.01,
+                                   max_rate=0.01),
+            )
+        )
 
 
 # --- o sorteio -------------------------------------------------------------
 
 
 def test_availability_is_drawn_once_per_student_and_period():
-    """Ao contrário da aptidão, que é uma só para o curso inteiro: o tempo
-    disponível é circunstância, não traço. O que é traço é a média."""
+    """Ao contrário do desempenho, que é um só para o curso inteiro: o tempo
+    disponível é circunstância, não traço. O que é traço é a forma."""
     config = make_config()
     students = generate_students(config, np.random.default_rng(0))
     drawn = draw_availability(students, config, np.random.default_rng(0))
 
     assert len(drawn) == len(students) * config.periods
-    assert all(0.0 < value < 1.0 for value in drawn.values())
+    # Em horas, não em fração: a log-normal nunca desce a zero e não tem teto,
+    # de modo que passar de W_a é legítimo.
+    assert all(value > 0.0 for value in drawn.values())
+    assert any(value > config.max_hours for value in drawn.values())
     # Um aluno de disponibilidade reduzida varia entre os períodos — não é
     # um valor fixo repetido.
     reduced = next(s for s in students if s.availability.name.startswith("Baixa"))
@@ -444,9 +470,17 @@ def test_the_waste_is_the_gap_between_the_two_utilizations():
 def test_a_full_availability_scenario_never_excludes():
     """Com disponibilidade praticamente cheia a mecânica some, e o modelo
     volta a ser o de antes dela — o controle que separa o efeito da exclusão
-    de tudo o mais que mudou junto."""
+    de tudo o mais que mudou junto.
+
+    Note o que uma chance de encher tão alta custa à forma: com a moda logo
+    abaixo de W_a, exigir que 99,99% da massa fique **acima** dele força um
+    desvio logarítmico enorme, e a mediana vai para a casa dos milhões de
+    horas. É consistente, e para este controle é exatamente o que se quer —
+    mas mostra que "quase sempre cheio" e "tipicamente perto de W_a" são
+    pedidos incompatíveis nesta família.
+    """
     result = run_simulation(
-        make_config(availability_profiles=(Profile("cheia", 0.999, 4000.0),))
+        make_config(availability_profiles=always_available(240))
     )
     for history in result.histories:
         for record in history.periods:

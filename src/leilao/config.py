@@ -38,11 +38,12 @@ from typing import Literal
 
 from .equations import (
     Behavior,
-    beta_shape,
+    availability_shape,
     curriculum_heights,
     curriculum_periods,
     curriculum_reach,
     eligible_set,
+    grade_shape,
 )
 
 # Mecanismo de alocação. `credits` é o leilão por créditos proposto (Seção 7.1),
@@ -94,59 +95,163 @@ CreditMemory = Literal["none", "carry"]
 
 
 @dataclass(frozen=True)
-class Profile:
-    """Um grupo da população num dos dois eixos de perfil.
+class PerformanceProfile:
+    """Um grupo da população no eixo de desempenho.
 
-    A Beta entra por **média e concentração**, que é como se lê uma população,
-    e não pelos dois parâmetros de forma — a conversão está em
-    `equations.beta_shape`. Média maior é um grupo que vai melhor (reprova
-    menos) ou que tem mais tempo (exclui menos); concentração maior é um grupo
-    mais homogêneo em torno dela.
+    A nota sai de uma **normal dividida censurada** em [0, 10], e o grupo a
+    descreve pelas três grandezas que se leem — nota mais provável, chance de
+    tirar 0 e chance de tirar 10 —, não pelos três parâmetros de forma. A
+    conversão está em `equations.grade_shape`.
+
+    Cada uma governa uma parte: a moda é a locação, e o número digitado é
+    literalmente o pico da curva; a chance de zero fixa a cauda esquerda e a de
+    dez fixa a direita. As três valem para a **disciplina de dificuldade 1 na
+    primeira tentativa** — a dificuldade e a recursada transformam as duas
+    chances em `equations.attempt_rates`.
+
+    A **média sai derivada**, e fica tipicamente 1 a 2 pontos abaixo da moda,
+    porque a cauda esquerda é longa. A taxa de aprovação também é derivada:
+    `n_min` é regra de cenário, não propriedade do aluno, e se definisse o
+    perfil mudar a linha de corte redefiniria a população em silêncio.
+
+    Toda trinca existe — não há combinação a recusar. Parametrizar pela média,
+    ao contrário, deixaria casos inviáveis: com a moda presa dentro da escala,
+    média alta com poucos dezes não fecha.
 
     O nome é rótulo de relatório, e precisa ser único dentro do seu eixo — é
     por ele que o recorte por perfil separa os grupos.
     """
 
     name: str
-    mean: float
-    concentration: float
+    mode_grade: float
+    zero_rate: float
+    max_rate: float
 
     @property
-    def shape(self) -> tuple[float, float]:
-        """(forma₁, forma₂) da Beta — ver `equations.beta_shape`."""
-        return beta_shape(mean=self.mean, concentration=self.concentration)
+    def shape(self) -> tuple[float, float, float]:
+        """(moda, desvio esquerdo, desvio direito) — ver `equations.grade_shape`."""
+        return grade_shape(
+            mode_grade=self.mode_grade,
+            zero_rate=self.zero_rate,
+            max_rate=self.max_rate,
+        )
 
 
-# A calibragem dos dois eixos. Com dificuldade 1 e sem ganhos a nota **é** a
-# aptidão × 10, então a média do perfil de desempenho se lê direto como a nota
-# típica do grupo. O "baixo" fica exatamente em `n_min = 5`: a mediana daquele
-# grupo encosta na linha de corte, de modo que ele reprova em torno de metade
-# das vezes numa disciplina de dificuldade padrão.
+@dataclass(frozen=True)
+class AvailabilityProfile:
+    """Um grupo da população no eixo de disponibilidade.
+
+    A disponibilidade é a carga que o aluno tem para o período, **em horas**, e
+    sai de uma log-normal — suporte (0, ∞), de modo que ela nunca fica negativa
+    e **não tem máximo artificial**. O grupo a descreve pelas duas grandezas
+    que se leem: a **moda**, o pico da curva em horas, e a **chance de alcançar
+    a carga máxima**, que é a frequência com que ele não precisa excluir nada.
+    A conversão está em `equations.availability_shape`.
+
+    Passar de W_a é permitido e não é inconsistência: o teto de carga é do
+    sistema, e quem o aplica é o alocador. Quem tem tempo para mais do que o
+    curso oferece simplesmente não exclui nada.
+
+    A forma depende de **W_a**, que é do cenário e não do perfil — "quantas
+    vezes eu encho a carga" só significa algo contra uma carga concreta. Por
+    isso `shape` é método, e não propriedade: o perfil guarda o que é dele, e a
+    conversão recebe o resto na hora.
+
+    O nome é rótulo de relatório, e precisa ser único dentro do seu eixo — é
+    por ele que o recorte por perfil separa os grupos.
+    """
+
+    name: str
+    mode_hours: float
+    full_load_rate: float
+
+    def shape(self, max_hours: float) -> tuple[float, float]:
+        """(média logarítmica, desvio logarítmico) da log-normal."""
+        return availability_shape(
+            mode_hours=self.mode_hours,
+            full_load_rate=self.full_load_rate,
+            max_hours=max_hours,
+        )
+
+
+# A calibragem dos dois eixos. A nota mais provável do perfil de desempenho é o
+# pico da curva numa disciplina de dificuldade padrão, de primeira; a **média**
+# sai 1 a 2 pontos abaixo dela, porque a cauda esquerda é longa. O "baixo" fica
+# calibrado por essa média derivada: ela encosta em `n_min = 5` (4,96), de modo
+# que ele reprova em torno de metade das vezes.
+#
+# As chances de 0 e de 10 separam os grupos onde a média sozinha não separa:
+# o forte quase nunca zera e tira 10 em 3% das disciplinas; o fraco zera em 3%
+# e quase nunca tira 10. É a assimetria entre as duas caudas que dá ao CR o
+# que ordenar.
 #
 # O nome carrega o eixo de propósito. "Alto" e "Alta" nos dois lados fariam
 # "alto-baixo" virar charada em legenda de gráfico; com o eixo no rótulo, a
 # combinação se lê sozinha.
-DEFAULT_PERFORMANCE: tuple[Profile, ...] = (
-    Profile(name="Alto desempenho", mean=0.80, concentration=25.0),
-    Profile(name="Médio desempenho", mean=0.65, concentration=15.0),
-    Profile(name="Baixo desempenho", mean=0.50, concentration=10.0),
+DEFAULT_PERFORMANCE: tuple[PerformanceProfile, ...] = (
+    PerformanceProfile(
+        name="Alto desempenho", mode_grade=9.0, zero_rate=0.0005, max_rate=0.030
+    ),
+    PerformanceProfile(
+        name="Médio desempenho", mode_grade=8.0, zero_rate=0.0050, max_rate=0.008
+    ),
+    PerformanceProfile(
+        name="Baixo desempenho", mode_grade=6.5, zero_rate=0.0300, max_rate=0.0015
+    ),
 )
 
-# "Alta" concentra junto do teto e às vezes alcança W_a inteiro; "Baixa" é
-# larga e raramente passa de 0,8 de W_a.
-DEFAULT_AVAILABILITY: tuple[Profile, ...] = (
-    Profile(name="Alta disponibilidade", mean=0.95, concentration=50.0),
-    Profile(name="Média disponibilidade", mean=0.85, concentration=20.0),
-    Profile(name="Baixa disponibilidade", mean=0.60, concentration=10.0),
+# A chance de alcançar a carga máxima é o que separa os três de verdade:
+# "Alta" enche a carga em dois de cada cinco semestres, "Baixa" quase nunca — e
+# é essa chance, não a moda, que governa a frequência de exclusão.
+#
+# A moda é **absoluta**, em horas, e por isso o padrão é uma **função de W_a**
+# e não uma constante: um cenário de teto menor recusaria modas dimensionadas
+# para 360 h. Quem declara os próprios perfis os declara em horas, e aí a
+# responsabilidade de caber é de quem declarou.
+#
+# As frações (0,95, 0,85 e 0,60) são as médias que os três patamares tinham
+# quando a disponibilidade ainda era medida em fração de W_a. Elas entram como
+# **moda**, não como média — a log-normal é assimétrica, então os dois não
+# coincidem —, mas mantêm os patamares onde estavam.
+def default_availability(max_hours: float) -> tuple[AvailabilityProfile, ...]:
+    """Os três patamares de disponibilidade, dimensionados para um W_a."""
+    return (
+        AvailabilityProfile(
+            name="Alta disponibilidade",
+            mode_hours=round(max_hours * 0.95),
+            full_load_rate=0.40,
+        ),
+        AvailabilityProfile(
+            name="Média disponibilidade",
+            mode_hours=round(max_hours * 0.85),
+            full_load_rate=0.10,
+        ),
+        AvailabilityProfile(
+            name="Baixa disponibilidade",
+            mode_hours=round(max_hours * 0.60),
+            full_load_rate=0.005,
+        ),
+    )
+
+
+DEFAULT_MAX_HOURS = 360
+DEFAULT_AVAILABILITY: tuple[AvailabilityProfile, ...] = default_availability(
+    DEFAULT_MAX_HOURS
 )
 
 # O perfil de quem é construído **fora** de `generate_students` — um aluno de
-# teste, um cenário escrito à mão. Não descreve grupo nenhum: reproduz a
-# população sem perfis que havia antes, com a Beta(6,5, 3,5) única no
-# desempenho e disponibilidade praticamente cheia, de modo que construir um
-# aluno sem dizer o perfil dele não liga a exclusão sem querer.
-NEUTRAL_PERFORMANCE = Profile(name="—", mean=0.65, concentration=10.0)
-NEUTRAL_AVAILABILITY = Profile(name="—", mean=0.99, concentration=400.0)
+# teste, um cenário escrito à mão. Não descreve grupo nenhum: reproduz o grupo
+# médio no desempenho e disponibilidade praticamente cheia, de modo que
+# construir um aluno sem dizer o perfil dele não liga a exclusão sem querer.
+NEUTRAL_PERFORMANCE = PerformanceProfile(
+    name="—", mode_grade=8.0, zero_rate=0.0050, max_rate=0.008
+)
+# Praticamente nunca exclui, de modo que construir um aluno à mão não liga a
+# exclusão sem querer. A moda é relativa porque este perfil é usado fora de um
+# cenário, sem W_a a que se ancorar; quem o consome o reescala.
+NEUTRAL_AVAILABILITY = AvailabilityProfile(
+    name="—", mode_hours=round(DEFAULT_MAX_HOURS * 0.99), full_load_rate=0.999
+)
 
 
 @dataclass(frozen=True)
@@ -273,12 +378,14 @@ class SimulationConfig:
     max_residence: int | None = None
     # --- os dois eixos de perfil --------------------------------------------
     #
-    # **Desempenho**: a nota sai da aptidão elevada à demanda da disciplina —
-    # ver `grading`. A aptidão de cada par (aluno, disciplina) vem da Beta do
-    # perfil, sorteada uma vez e persistente: é traço, não sorte. A calibragem
-    # importa — sem dispersão de desempenho ninguém reprova, a recursada some
-    # do cenário e o CR vira ruído, de modo que a eq. (57) não mede nada.
-    performance_profiles: tuple[Profile, ...] = DEFAULT_PERFORMANCE
+    # **Desempenho**: a nota sai de uma normal dividida censurada em [0, 10] —
+    # ver `grading`. O que o aluno carrega por disciplina é o **quantil** dele
+    # naquela matéria, sorteado uma vez e persistente: é traço, não sorte. A
+    # dificuldade e a recursada movem a distribuição sob esse quantil. A
+    # calibragem importa — sem dispersão de desempenho ninguém reprova, a
+    # recursada some do cenário e o CR vira ruído, de modo que a eq. (57) não
+    # mede nada.
+    performance_profiles: tuple[PerformanceProfile, ...] = DEFAULT_PERFORMANCE
     # **Disponibilidade**: a fração de W_a que o aluno vai de fato cursar,
     # sorteada da Beta do perfil **a cada período** — ao contrário da aptidão,
     # que é uma só para o curso inteiro. Depois da última rodada ele descarta
@@ -290,15 +397,10 @@ class SimulationConfig:
     # A vaga excluída **não volta para a oferta** — exclui-se depois de
     # encerradas as alocações do período. É o que torna a exclusão socialmente
     # cara e dá sentido à penalidade do leilão.
-    availability_profiles: tuple[Profile, ...] = DEFAULT_AVAILABILITY
-    # **Ganho por utilidade**: o quanto a utilidade mexe no desempenho, como
-    # expoente sobre u_rel. **Padrão 0: desligado.** É a única peça da fórmula de nota sem forma
-    # justificada, e a única que mexe no resultado principal — em 1 ela
-    # fabrica sozinha ~40% de vão em aprovações a favor do lance. Em zero a
-    # função de nota é neutra entre os mecanismos, e qualquer vão em conclusões
-    # é do modelo, inteiro. Reportá-lo ao lado do resultado é o que
-    # transforma a suposição em número declarado.
-    utility_gain: float = 0.0
+    # Vazio quer dizer **derive de W_a** (`default_availability`): as modas
+    # são absolutas, e uma constante dimensionada para 360 h recusaria todo
+    # cenário de teto menor. Declarar explicitamente desliga a derivação.
+    availability_profiles: tuple[AvailabilityProfile, ...] = ()
     # **Genomas por coorte**, na ordem crescente de período de ingresso: cada
     # tupla traz o genótipo de cada aluno daquela coorte, por posição. Vazio
     # quer dizer que todo mundo carrega a linha de base, que é como a
@@ -310,16 +412,6 @@ class SimulationConfig:
     # troca só o miolo da rodada: os dois lados têm de receber a mesma
     # população com os mesmos genes.
     genomes: tuple[tuple[Behavior, ...], ...] = ()
-    # **Ganho por recursada**: quanta tentativa efetiva cada repetição
-    # acrescenta no denominador do expoente. Em 1 o denominador é a própria
-    # tentativa, e o expoente é a dificuldade dividida por ela — a lei de
-    # potência da prática; em 0,5 a recursada
-    # rende metade; em 0 ela não rende nada — e aí, com a nota determinística e
-    # sem jubilamento, quem reprova uma vez ocupa vaga até o fim do horizonte.
-    #
-    # Substituiu o choque log-normal por tentativa em 29/10/2026; o porquê está
-    # em `grading`.
-    retake_gain: float = 1.0
     # Quanto do gosto do aluno é **permanente**, de 0 a 1 — a fração da
     # variância que não é resorteada a cada período.
     #
@@ -358,7 +450,7 @@ class SimulationConfig:
     # a invariante.
     utility_sigma: float = 0.25
     # W_a — carga horária máxima por período, eq. (4). Igual para todos.
-    max_hours: int = 360
+    max_hours: int = DEFAULT_MAX_HOURS
     rounds: int = 1  # |R| — rodadas de alocação por período
     min_grade: float = 5.0  # n_min — nota mínima de aprovação
     # X — carga horária optativa exigida para concluir, somada entre as
@@ -393,6 +485,12 @@ class SimulationConfig:
         do anterior: os números soltos, a grade, a conclusão e a matrícula
         garantida.
         """
+        if not self.availability_profiles:
+            object.__setattr__(
+                self,
+                "availability_profiles",
+                default_availability(self.max_hours),
+            )
         self._check_horizon()
         self._check_population()
         self._check_curriculum()
@@ -441,20 +539,22 @@ class SimulationConfig:
                 raise ValueError(f"todo perfil de {eixo} precisa de um nome")
             if len(set(nomes)) != len(nomes):
                 raise ValueError(f"os nomes dos perfis de {eixo} devem ser únicos")
-            for perfil in perfis:
-                if not 0 < perfil.mean < 1:
-                    raise ValueError(
-                        f"a média do perfil '{perfil.name}' ({eixo}) deve estar "
-                        "em (0, 1)"
-                    )
-                if perfil.concentration <= 0:
-                    raise ValueError(
-                        f"a concentração do perfil '{perfil.name}' ({eixo}) deve ser > 0"
-                    )
-        if self.utility_gain < 0:
-            raise ValueError("o ganho por utilidade deve ser >= 0")
-        if self.retake_gain < 0:
-            raise ValueError("o ganho por recursada deve ser >= 0")
+        # Os números de cada eixo são de famílias diferentes: a nota é uma
+        # normal dividida censurada, a disponibilidade é uma Beta.
+        for perfil in self.performance_profiles:
+            try:
+                perfil.shape
+            except ValueError as erro:
+                raise ValueError(
+                    f"perfil de desempenho '{perfil.name}': {erro}"
+                ) from erro
+        for perfil in self.availability_profiles:
+            try:
+                perfil.shape(self.max_hours)
+            except ValueError as erro:
+                raise ValueError(
+                    f"perfil de disponibilidade '{perfil.name}': {erro}"
+                ) from erro
         if not 0.0 <= self.utility_stability <= 1.0:
             raise ValueError("a estabilidade da preferência deve estar em [0, 1]")
         if self.utility_sigma <= 0:

@@ -70,23 +70,42 @@ export const creditReturnLabel = (policy: CreditReturnPolicy): string =>
  * pré-requisitos é o que de fato distingue um aluno de outro aqui. */
 export const cohortLabel = (entryPeriod: number): string => `Coorte ${entryPeriod}`;
 
-/** Um grupo da população num dos dois eixos de perfil.
+/** Um grupo da população no eixo de **desempenho**.
  *
- * O perfil descreve o comportamento do aluno **fora do mecanismo**: se ele vai
- * bem na disciplina (desempenho) ou se a larga (disponibilidade). É traço
- * imutável, não evolui e o aluno não o conhece — o que age *dentro* do
- * mecanismo é a estratégia, e são coisas separadas de propósito.
+ * A nota sai de uma normal dividida censurada em [0, 10], descrita pelas três
+ * grandezas que se leem: nota mais provável, chance de tirar 0 e chance de
+ * tirar 10. A moda é a locação — o número digitado é o pico da curva —, a
+ * chance de zero fixa a cauda esquerda e a de dez fixa a direita. A média sai
+ * derivada, 1 a 2 pontos abaixo da moda.
  *
- * A Beta entra por **média e concentração**, que é como se lê uma população:
- * média maior é um grupo que reprova ou exclui menos; concentração maior é um
- * grupo mais homogêneo em torno dela.
+ * As três valem para a **disciplina de dificuldade 1 na primeira tentativa**.
+ *
+ * Espelha `api.schemas.PerformanceProfileIn`. */
+export interface PerformanceProfile {
+  /** Rótulo de relatório; precisa ser único dentro do seu eixo. */
+  name: string;
+  mode_grade: number; // em (0, 10)
+  zero_rate: number; // em (0, 1)
+  max_rate: number; // em (0, 1)
+}
+
+/** Um grupo da população no eixo de **disponibilidade**.
+ *
+ * A disponibilidade é a carga que o aluno tem para o período, **em horas**, e
+ * sai de uma log-normal — suporte (0, ∞), sem máximo artificial e nunca
+ * negativa. O grupo a descreve pela **moda** (o pico da curva, em horas) e
+ * pela **chance de alcançar a carga máxima**, que é a frequência com que ele
+ * não precisa excluir nada.
+ *
+ * Passar de W_a é legítimo: o teto de carga é do sistema, não do aluno, e quem
+ * o aplica é o alocador. A moda, essa sim, tem de ficar abaixo de W_a.
  *
  * Espelha `api.schemas.ProfileIn`. */
 export interface Profile {
   /** Rótulo de relatório; precisa ser único dentro do seu eixo. */
   name: string;
-  mean: number; // em (0, 1)
-  concentration: number; // > 0
+  mode_hours: number; // > 0, abaixo de W_a
+  full_load_rate: number; // em (0, 1)
 }
 
 export interface Scenario {
@@ -95,18 +114,19 @@ export interface Scenario {
    * cenário: a mesma grade sob 20 ou 40 por turma é o mesmo currículo com o
    * dobro de aperto. */
   class_size: number;
-  /** Perfis de **desempenho**: governam a Beta da aptidão, e por aí a
-   * frequência com que o aluno reprova. A nota sai da aptidão elevada à
-   * demanda da disciplina: `round(100 · a^(D/(u_rel^ganho · tentativas)))/10`.
-   * A aptidão é sorteada uma vez por par (aluno, disciplina) e persiste —
-   * traço, não sorte.
+  /** Perfis de **desempenho**: governam a normal dividida da nota, e por aí a
+   * frequência com que o aluno reprova. O que o aluno carrega por disciplina é
+   * o **quantil** dele naquela matéria, sorteado uma vez e persistente — traço,
+   * não sorte. A dificuldade e a tentativa movem a distribuição sob esse
+   * quantil, transformando as duas chances de ponta por expoentes recíprocos.
    *
-   * Com dificuldade 1 e sem ganhos a nota **é** a aptidão × 10, então a média
-   * do perfil se lê direto como a nota típica do grupo. */
-  performance_profiles: Profile[];
-  /** Perfis de **disponibilidade**: governam a Beta da fração de W_a que o
-   * aluno de fato cursa, sorteada **a cada período** — ao contrário da
-   * aptidão, que é uma só para o curso inteiro. O tempo disponível é
+   * O latente é ilimitado; o que limita é o instrumento. A nota é arredondada
+   * em décimos e clipada em [0, 10], e é essa censura que torna o 0 e o 10
+   * alcançáveis — com a frequência que o perfil declarou. */
+  performance_profiles: PerformanceProfile[];
+  /** Perfis de **disponibilidade**: governam a log-normal das horas que o
+   * aluno tem para o período, sorteada **a cada período** — ao contrário do
+   * quantil de desempenho, que é um só para o curso inteiro. O tempo disponível é
    * circunstância; o que é traço é a média de onde ela sai.
    *
    * Depois da última rodada o aluno descarta o que não couber nessa fração, e
@@ -114,20 +134,6 @@ export interface Scenario {
    * tentativa, não mexe no CR, e no leilão devolve metade do preço pago. A
    * vaga não volta para a oferta. */
   availability_profiles: Profile[];
-  /** **Ganho por utilidade**: o quanto a utilidade mexe no desempenho, como
-   * expoente sobre a **utilidade relativa** — a fração de utilidade vezes o
-   * número de disciplinas, de modo que 1 é a indiferença. **0 desliga**, e é o
-   * padrão: é a única peça da
-   * fórmula de nota sem forma justificada e a única que mexe no resultado
-   * principal, então ela é parâmetro reportado e não suposição silenciosa. */
-  utility_gain: number; // >= 0
-  /** **Ganho por recursada**: quanta tentativa efetiva cada repetição
-   * acrescenta no denominador do expoente. Em 1 o denominador é a própria
-   * tentativa e o expoente é a dificuldade dividida por ela; em 0 a recursada
-   * não rende nada, e aí quem reprova
-   * uma vez reprova sempre. Os dois ganhos dividem o mesmo lugar na fórmula,
-   * e é por isso que se leem juntos. */
-  retake_gain: number; // >= 0
   /** Quanto do gosto do aluno é permanente, de 0 a 1 — a fração da variância
    * que não é resorteada a cada período. 0 reproduz o modelo anterior; 1
    * congela a preferência. Ortogonal ao σ: a divisão preserva a dispersão de
@@ -803,8 +809,9 @@ export interface PlaygroundRequest {
   mechanism: Mechanism;
   rounds: number;
   seed: number;
-  aptitude_mean: number;
-  aptitude_concentration: number;
+  mode_grade: number;
+  zero_rate: number;
+  max_rate: number;
   disciplines: { name: string; seats: number; hours: number }[];
   students: {
     id: string;

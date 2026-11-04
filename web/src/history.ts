@@ -1,6 +1,6 @@
 import { withUnlocks } from "./curriculum";
 import { COMPARISON_ARMS, creditReturnLabel, horizonFor } from "./types";
-import type { Profile } from "./types";
+import type { PerformanceProfile, Profile } from "./types";
 import type {
   CompareRequest,
   CompareResponse,
@@ -38,8 +38,16 @@ export type HistoryEntry = ComparisonRun | EvolutionRun;
  * simulação. A **v3** (08/10/2026) quebrou de novo, e pelo mesmo motivo da v1:
  * os perfis de aluno saíram do modelo. Uma execução da v2 traz `by_aptitude`,
  * `by_affinity` e um cenário sem as duas normais que o substituíram, e não há
- * como converter — a tela leria `undefined` onde espera número. */
-const STORAGE_KEY = "leilao.historico.v4";
+ * como converter — a tela leria `undefined` onde espera número.
+ *
+ * A **v5** (04/11/2026) quebrou pelo mesmo motivo, e é o terceiro caso da
+ * mesma espécie: a nota deixou de sair de uma Beta sobre (0, 1) elevada a um
+ * expoente e passa a sair de uma normal dividida censurada em [0, 10]. O
+ * perfil de desempenho da v4 traz média e concentração de uma distribuição que
+ * não existe mais, e não há tradução — a família mudou, não a parametrização.
+ * Junto saíram o ganho por utilidade (a utilidade não mexe mais na nota) e o
+ * ganho por recursada (quem calibra isso é a dificuldade). */
+const STORAGE_KEY = "leilao.historico.v5";
 
 /** Teto de execuções guardadas: cada resultado carrega todas as séries e todos
  * os alunos, então o histórico é podado pelas mais antigas. */
@@ -68,55 +76,25 @@ export function newEvolution(
  * campos de hoje. Sem isto uma entrada antiga derruba a lista inteira — o
  * rótulo lê campos que não existem lá — ou reexecuta calada com outro cenário.
  *
- * **Perfis**: a população saía de uma Beta única, descrita por média e
- * concentração (e, antes disso, pelos dois parâmetros de forma). Hoje são dois
- * eixos de grupos. A tradução preserva o que a execução antiga de fato rodou:
- * a Beta que havia vira o **único** perfil de desempenho, e a disponibilidade
- * entra cheia — porque naquele modelo ninguém excluía. Reexecutar uma entrada
- * antiga reproduz o resultado antigo, que é o que a lista promete.
+ * **Disponibilidade**: é o único eixo que ainda tem tradução. Quando ela não
+ * está gravada, a execução é de um modelo em que ninguém excluía, e entra
+ * praticamente cheia — para que reexecutar reproduza o resultado antigo, que é
+ * o que a lista promete.
  *
- * **Ganhos**: o `interest_coupling` virou `utility_gain` sem mudar de
- * significado, e o `grade_noise` deu lugar ao `retake_gain`. Este último não é
- * tradução — o choque não vira coeficiente —, então a execução antiga recebe o
- * padrão 1 e passa a valer a dificuldade dividida pela tentativa, que é o que
- * o choque já fazia em média. */
+ * O eixo de desempenho não aparece aqui: a chave de armazenamento sobe quando
+ * ele muda de família, porque traduzir média de Beta em nota média seria
+ * inventar um cenário que ninguém rodou. */
 function migrateScenario<
   T extends {
-    performance_profiles: Profile[];
+    performance_profiles: PerformanceProfile[];
     availability_profiles: Profile[];
-    utility_gain: number;
-    retake_gain: number;
   }
 >(config: T): T {
-  const legacy = config as T & {
-    aptitude_mean?: number;
-    aptitude_concentration?: number;
-    aptitude_alpha?: number;
-    aptitude_beta?: number;
-    interest_coupling?: number;
-  };
   const migrated = { ...config };
-  if (!Array.isArray(config.performance_profiles)) {
-    // A Beta de antes, em qualquer das duas formas em que foi gravada.
-    const concentration =
-      legacy.aptitude_concentration ??
-      (legacy.aptitude_alpha ?? 4) + (legacy.aptitude_beta ?? 2);
-    const mean =
-      legacy.aptitude_mean ?? (legacy.aptitude_alpha ?? 4) / concentration;
-    migrated.performance_profiles = [{ name: "população", mean, concentration }];
-  }
   if (!Array.isArray(config.availability_profiles)) {
-    // Naquele modelo ninguém excluía: a disponibilidade entra praticamente
-    // cheia para que a execução antiga reproduza o resultado antigo.
     migrated.availability_profiles = [
-      { name: "cheia", mean: 0.999, concentration: 4000 },
+      { name: "cheia", mode_hours: 1, full_load_rate: 0.999 },
     ];
-  }
-  if (typeof config.utility_gain !== "number") {
-    migrated.utility_gain = legacy.interest_coupling ?? 0;
-  }
-  if (typeof config.retake_gain !== "number") {
-    migrated.retake_gain = 1;
   }
   return migrated;
 }
@@ -229,7 +207,7 @@ function describeScenario(
   // Os perfis entram pela contagem, não pelos parâmetros: o que distingue
   // duas execuções à primeira vista é quantos grupos a população tinha, e a
   // lista inteira não caberia num rótulo de uma linha.
-  const perfis = (axis: Profile[]) =>
+  const perfis = (axis: readonly { name: string }[]) =>
     `${axis.length} ${axis.length === 1 ? "perfil" : "perfis"}`;
   const populacao = [
     `desempenho: ${perfis(config.performance_profiles)}`,

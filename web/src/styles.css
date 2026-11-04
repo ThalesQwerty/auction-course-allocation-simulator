@@ -1442,9 +1442,14 @@ td.failed {
   margin-bottom: 12px;
   align-items: flex-start;
 }
+/* Flex, e não grid de colunas fixas: os dois eixos de perfil têm contagens
+   diferentes de campo — desempenho edita nota média e as duas chances de
+   ponta, disponibilidade edita média e concentração —, e uma grade escrita
+   para um deles esmaga o último campo do outro. Com `flex: 1 1 0` em todo
+   campo, cada lista reparte a largura entre os campos que de fato tem. */
 .profile-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) 20px;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: end;
   width: 100%;
@@ -1458,9 +1463,24 @@ td.failed {
   background: color-mix(in srgb, var(--muted) 8%, transparent);
 }
 .profile-row .field {
+  flex: 1 1 0;
   min-width: 0;
 }
+/* O rótulo numa linha só: quebrado em três, ele descola o campo do vizinho e
+   desalinha a linha inteira. */
+.profile-row .field label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A mensagem de validação ocupa a linha inteira, abaixo dos campos. */
+.profile-row .invalid-text {
+  flex: 1 0 100%;
+  font-size: 11px;
+  margin: 0;
+}
 .profile-remove {
+  flex: 0 0 20px;
   background: transparent;
   border: none;
   border-radius: 4px;

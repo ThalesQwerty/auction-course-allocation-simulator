@@ -8,20 +8,22 @@ o mesmo cenário mais o par `(braço, seed)` de uma das observações que ela ro
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..auction import AuctionResult
 from ..comparison import ARMS, MAX_RUNS
 from ..config import (
     DEFAULT_AVAILABILITY,
     DEFAULT_PERFORMANCE,
+    AvailabilityProfile,
     CreditMemory,
     CreditReturnPolicy,
     Mechanism,
-    Profile,
+    PerformanceProfile,
     Resolver,
     horizon_for_lifecycle,
 )
+from ..equations import grade_shape
 
 
 class AgentIn(BaseModel):
@@ -130,29 +132,108 @@ class DisciplineIn(BaseModel):
     )
 
 
-class ProfileIn(BaseModel):
-    """Um grupo da população num dos dois eixos de perfil.
+class PerformanceProfileIn(BaseModel):
+    """Um grupo da população no eixo de desempenho.
 
-    A Beta entra por **média e concentração**, que é como se lê uma população:
-    média maior é um grupo que reprova menos (desempenho) ou que exclui menos
-    (disponibilidade); concentração maior é um grupo mais homogêneo em torno
-    dela. `equations.beta_shape` converte no par de formas.
+    A nota sai de uma normal dividida censurada em [0, 10], descrita pelas três
+    grandezas que se leem: **nota média, chance de tirar 0 e chance de tirar
+    10**. A moda é a locação, e o número digitado é literalmente o pico da
+    curva; a chance de zero fixa a cauda esquerda e a de dez fixa a direita.
+    `equations.grade_shape` converte na trinca de forma.
+
+    As três valem para a **disciplina de dificuldade 1 na primeira tentativa**;
+    a dificuldade e a recursada transformam as duas chances.
+
+    A **média** e a **taxa de aprovação** saem derivadas. A média fica 1 a 2
+    pontos abaixo da moda, porque a cauda esquerda é longa; e `n_min` é regra
+    de cenário, não propriedade do aluno, de modo que a aprovação é resultado.
+
+    Toda trinca existe — não há combinação a recusar.
 
     O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
     """
 
     name: str = Field(min_length=1, max_length=40)
-    mean: float = Field(gt=0, lt=1, description="média da Beta, em (0, 1)")
-    concentration: float = Field(gt=0, description="concentração em torno da média")
+    mode_grade: float = Field(
+        gt=0, lt=10, description="nota mais provável do grupo, em (0, 10)"
+    )
+    zero_rate: float = Field(
+        gt=0, lt=1, description="chance de tirar 0, em (0, 1)"
+    )
+    max_rate: float = Field(gt=0, lt=1, description="chance de tirar 10, em (0, 1)")
+
+    @model_validator(mode="after")
+    def _shape_exists(self) -> "PerformanceProfileIn":
+        """As duas chances ainda podem não caber juntas; a moda sempre cabe."""
+        try:
+            grade_shape(
+                mode_grade=self.mode_grade,
+                zero_rate=self.zero_rate,
+                max_rate=self.max_rate,
+            )
+        except ValueError as exc:
+            raise ValueError(f"perfil {self.name!r}: {exc}") from exc
+        return self
 
     @classmethod
-    def of(cls, profile: Profile) -> "ProfileIn":
+    def of(cls, profile: PerformanceProfile) -> "PerformanceProfileIn":
         return cls(
-            name=profile.name, mean=profile.mean, concentration=profile.concentration
+            name=profile.name,
+            mode_grade=profile.mode_grade,
+            zero_rate=profile.zero_rate,
+            max_rate=profile.max_rate,
         )
 
-    def to_profile(self) -> Profile:
-        return Profile(name=self.name, mean=self.mean, concentration=self.concentration)
+    def to_profile(self) -> PerformanceProfile:
+        return PerformanceProfile(
+            name=self.name,
+            mode_grade=self.mode_grade,
+            zero_rate=self.zero_rate,
+            max_rate=self.max_rate,
+        )
+
+
+class ProfileIn(BaseModel):
+    """Um grupo da população no eixo de disponibilidade.
+
+    A disponibilidade é a carga que o aluno tem para o período, **em horas**, e
+    sai de uma log-normal — suporte (0, ∞), sem máximo artificial e nunca
+    negativa. O grupo a descreve pela **moda** (o pico da curva, em horas) e
+    pela **chance de alcançar a carga máxima**, que é a frequência com que ele
+    não precisa excluir nada. `equations.availability_shape` converte no par de
+    parâmetros logarítmicos.
+
+    Passar de W_a é permitido: o teto de carga é do sistema, e quem o aplica é
+    o alocador. A validação da moda contra W_a acontece no cenário, onde W_a
+    existe.
+
+    O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
+    """
+
+    name: str = Field(min_length=1, max_length=40)
+    mode_hours: float = Field(
+        gt=0, description="moda da disponibilidade, em horas; deve ficar abaixo de W_a"
+    )
+    full_load_rate: float = Field(
+        gt=0,
+        lt=1,
+        description="chance de alcançar a carga horária máxima, em (0, 1)",
+    )
+
+    @classmethod
+    def of(cls, profile: AvailabilityProfile) -> "ProfileIn":
+        return cls(
+            name=profile.name,
+            mode_hours=profile.mode_hours,
+            full_load_rate=profile.full_load_rate,
+        )
+
+    def to_profile(self) -> AvailabilityProfile:
+        return AvailabilityProfile(
+            name=self.name,
+            mode_hours=self.mode_hours,
+            full_load_rate=self.full_load_rate,
+        )
 
 
 class ScenarioIn(BaseModel):
@@ -177,27 +258,22 @@ class ScenarioIn(BaseModel):
     # entre as combinações é **igualitária**: com 3 em cada eixo são 9 pares e
     # ~11% da coorte em cada um. Não há porcentagem a enviar — o que define as
     # fatias é quantos perfis existem.
-    performance_profiles: list[ProfileIn] = Field(
-        default_factory=lambda: [ProfileIn.of(x) for x in DEFAULT_PERFORMANCE],
+    performance_profiles: list[PerformanceProfileIn] = Field(
+        default_factory=lambda: [
+            PerformanceProfileIn.of(x) for x in DEFAULT_PERFORMANCE
+        ],
         min_length=1,
-        description="perfis de desempenho: governam a Beta da aptidão",
+        description=(
+            "perfis de desempenho: governam a normal dividida da nota, por nota "
+            "média, chance de tirar 0 e chance de tirar 10"
+        ),
     )
     availability_profiles: list[ProfileIn] = Field(
         default_factory=lambda: [ProfileIn.of(x) for x in DEFAULT_AVAILABILITY],
         min_length=1,
         description=(
-            "perfis de disponibilidade: governam a Beta da fração de W_a que o "
-            "aluno de fato cursa, sorteada a cada período"
-        ),
-    )
-    utility_gain: float = Field(
-        default=0.0,
-        ge=0,
-        description=(
-            "ganho por utilidade: o quanto a utilidade mexe na nota, como "
-            "expoente sobre u_rel. 0 desliga e deixa a função de nota neutra "
-            "entre os mecanismos; é o controle a reportar ao lado de qualquer "
-            "resultado em conclusões."
+            "perfis de disponibilidade: governam a log-normal das horas que o "
+            "aluno tem para o período, sorteada a cada período"
         ),
     )
     utility_stability: float = Field(
@@ -208,15 +284,6 @@ class ScenarioIn(BaseModel):
             "quanto do gosto do aluno é permanente, de 0 a 1. 0 resorteia a "
             "preferência inteira a cada período; 1 congela. Ortogonal ao sigma: "
             "a divisão preserva a dispersão de cada período"
-        ),
-    )
-    retake_gain: float = Field(
-        default=1.0,
-        ge=0,
-        description=(
-            "ganho por recursada: quanta tentativa efetiva cada repetição "
-            "acrescenta no denominador do expoente. 1 recupera a dificuldade "
-            "dividida pela tentativa"
         ),
     )
     utility_sigma: float = Field(
@@ -860,8 +927,9 @@ class PlaygroundRequest(BaseModel):
     mechanism: Mechanism
     rounds: int = Field(ge=1, le=10)
     seed: int = 0
-    aptitude_mean: float = Field(default=0.65, gt=0, lt=1)
-    aptitude_concentration: float = Field(default=10.0, gt=0)
+    mode_grade: float = Field(default=8.0, gt=0, lt=10)
+    zero_rate: float = Field(default=0.005, gt=0, lt=1)
+    max_rate: float = Field(default=0.008, gt=0, lt=1)
     disciplines: list[PlaygroundDisciplineIn]
     students: list[PlaygroundStudentIn]
 

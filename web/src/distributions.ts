@@ -11,79 +11,118 @@
  */
 import {
   approvalShare,
-  betaShape,
+  attemptRates,
+  availabilityShape,
   densityCurve,
   gradeDensity,
-  gradeExponent,
+  gradeShape,
+  gradeSds,
   kernelSmooth,
+  lognormalDensity,
+  lognormalQuantile,
   relativeUtilitySample,
 } from "./equations";
 import type { Curve } from "./equations";
-import type { Profile, Scenario } from "./types";
+import type { PerformanceProfile, Profile, Scenario } from "./types";
 
 export type { Curve, DensityPoint } from "./equations";
 
 /** O caso que a prévia das notas desenha: uma disciplina de uma dada
  * dificuldade, numa dada tentativa. Não é parâmetro de cenário — é o recorte
- * que se
- * escolhe para olhar, e por isso vive na tela e não em `Scenario`. */
+ * que se escolhe para olhar, e por isso vive na tela e não em `Scenario`. */
 export interface GradeCase {
   difficulty: number;
   attempt: number;
-  /** A fração de utilidade vezes o número de disciplinas, de modo que 1 é o
-   * aluno indiferente e 2 é querer o dobro da média. Só morde quando o ganho
-   * por utilidade do cenário é maior que zero, porque é como expoente dele
-   * que ela entra. */
-  relativeUtility: number;
 }
+
+/** O que a prévia das notas tem a dizer de um perfil num dado recorte: a
+ * curva, a aprovação que ela implica e as duas chances de ponta já
+ * transformadas pela dificuldade e pela tentativa.
+ *
+ * As chances voltam porque **mudam com o recorte**: as do perfil valem para
+ * dificuldade 1 na primeira tentativa, e é a transformação que diz quanto
+ * aquela disciplina reprova de fato. `null` é a trinca que não existe. */
+export type GradePreview =
+  | (Curve & {
+      approval: number;
+      zeroRate: number;
+      maxRate: number;
+      mode: number;
+    })
+  | null;
 
 /** A curva das notas de uma disciplina de uma dada dificuldade, na tentativa
  * escolhida, sobre a escala inteira de 0 a 10.
  *
- * Curva para a forma, quadratura para o número: a **aprovação** não sai da
- * curva, porque a quadratura integra certo mesmo onde a densidade diverge na
- * ponta.
+ * A dificuldade e a tentativa transformam as duas chances de ponta, e a forma
+ * é refeita com a **moda do perfil mantida** — é a distribuição que se move
+ * sob o aluno, não o aluno sob ela.
  */
 export function gradeCurve(
   scenario: Scenario,
-  { difficulty, attempt, relativeUtility }: GradeCase,
-  profile: Profile
-): Curve & { approval: number } {
-  const [alpha, beta] = betaShape(profile.mean, profile.concentration);
-  const exponent = gradeExponent({
+  { difficulty, attempt }: GradeCase,
+  profile: PerformanceProfile
+): GradePreview {
+  const base = gradeShape(
+    profile.mode_grade,
+    profile.zero_rate,
+    profile.max_rate
+  );
+  if (!base) return null;
+  const [mode] = base;
+  const [zeroRate, maxRate] = attemptRates(
+    profile.zero_rate,
+    profile.max_rate,
     difficulty,
-    attempt,
-    relativeUtility,
-    utilityGain: scenario.utility_gain,
-    retakeGain: scenario.retake_gain,
-  });
-  const { xs, ys } = gradeDensity(alpha, beta, exponent);
+    attempt
+  );
+  const [leftSd, rightSd] = gradeSds(mode, zeroRate, maxRate);
+  const { xs, ys } = gradeDensity(mode, leftSd, rightSd);
   return {
     ...densityCurve(xs, ys),
-    approval: approvalShare(alpha, beta, exponent, scenario.min_grade),
+    approval: approvalShare(mode, leftSd, rightSd, scenario.min_grade),
+    zeroRate,
+    maxRate,
+    mode,
   };
 }
 
-/** A curva da **disponibilidade** de um perfil: a fração de W_a que o aluno
- * vai de fato cursar, em [0, 1].
+/** A curva da **disponibilidade** de um perfil: as horas que o aluno tem para
+ * o período.
  *
- * É a Beta do perfil sem transformação nenhuma — ao contrário da nota, que é a
- * aptidão elevada à demanda da disciplina. Por isso não há recorte a escolher
- * aqui: a curva é o próprio parâmetro.
+ * É a log-normal do perfil sem transformação nenhuma — ao contrário da nota,
+ * cuja distribuição se move com a dificuldade e a tentativa. Por isso não há
+ * recorte a escolher aqui: a curva é o próprio parâmetro.
  *
- * Reaproveita `gradeDensity` com expoente 1, que nesse caso devolve a Beta
- * crua sobre a escala de 0 a 10; o eixo volta a [0, 1] na saída. */
-export function availabilityCurve(profile: Profile, top = 1): Curve {
-  const [alpha, beta] = betaShape(profile.mean, profile.concentration);
-  const { xs, ys } = gradeDensity(alpha, beta, 1);
-  // `top` é a unidade do eixo: 1 desenha a fração de W_a, W_a desenha as horas
-  // que ela significa. A densidade acompanha a troca de escala — esticar o
-  // eixo divide a altura na mesma razão, senão a área deixa de ser 1.
-  const factor = top / 10;
-  return densityCurve(
-    xs.map((x) => x * factor),
-    ys.map((y) => y / factor)
+ * O eixo **passa de W_a** de propósito: a massa à direita da carga máxima é
+ * justamente a chance de alcançá-la, que é um dos dois parâmetros do perfil.
+ * Esconder essa parte faria a curva parecer truncada no teto, que é exatamente
+ * o que o modelo deixou de fazer.
+ *
+ * `null` é a combinação que não descreve curva nenhuma — na prática, a moda em
+ * cima ou acima de W_a.
+ */
+export function availabilityCurve(
+  profile: Profile,
+  maxHours: number
+): (Curve & { fullLoad: number; top: number }) | null {
+  const shape = availabilityShape(
+    profile.mode_hours,
+    profile.full_load_rate,
+    maxHours
   );
+  if (!shape) return null;
+  const [logMean, logSd] = shape;
+  // Sem máximo, o topo do eixo é escolha de quem desenha: o percentil 99,
+  // esticado até caber W_a com folga, para que a linha da carga máxima apareça
+  // sempre — mesmo nos perfis apertados, cuja cauda morre antes dela.
+  const top = Math.max(lognormalQuantile(0.99, logMean, logSd), maxHours * 1.1);
+  const { xs, ys } = lognormalDensity(logMean, logSd, top);
+  return {
+    ...densityCurve(xs, ys),
+    fullLoad: profile.full_load_rate,
+    top,
+  };
 }
 
 /** Quantos pontos a curva da utilidade leva para a tela. */

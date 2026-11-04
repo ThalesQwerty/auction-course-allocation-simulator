@@ -23,7 +23,6 @@ from ..auction import AuctionInput, Bid, run_auction
 from ..comparison import ARM_BY_KEY, arm_config, arms_from_keys, run_comparison
 from ..config import Discipline, SimulationConfig
 from ..entities import Agent, Good, MutualExclusion
-from ..grading import beta_shape
 from ..playground import PlaygroundDiscipline, PlaygroundStudent, run_playground
 from ..evolution import EvolutionConfig, GenomeLevels, run_evolution
 from ..simulation import run_simulation
@@ -122,8 +121,6 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
         availability_profiles=tuple(
             p.to_profile() for p in req.availability_profiles
         ),
-        utility_gain=req.utility_gain,
-        retake_gain=req.retake_gain,
         utility_stability=req.utility_stability,
         resolver=req.resolver,
         credit_memory=req.credit_memory,
@@ -302,16 +299,14 @@ def trace(req: TraceRequest) -> TraceResponse:
 
 @app.post("/playground", response_model=PlaygroundResponse)
 def playground(req: PlaygroundRequest) -> PlaygroundResponse:
-    aptitude_alpha, aptitude_beta = beta_shape(
-        mean=req.aptitude_mean, concentration=req.aptitude_concentration
-    )
     try:
         result = run_playground(
             mechanism=req.mechanism,
             rounds=req.rounds,
             seed=req.seed,
-            aptitude_alpha=aptitude_alpha,
-            aptitude_beta=aptitude_beta,
+            mode_grade=req.mode_grade,
+            zero_rate=req.zero_rate,
+            max_rate=req.max_rate,
             disciplines=[
                 PlaygroundDiscipline(d.name, d.seats, d.hours) for d in req.disciplines
             ],

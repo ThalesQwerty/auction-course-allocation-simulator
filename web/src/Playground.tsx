@@ -16,8 +16,9 @@ export interface PlaygroundDraft {
   rounds: number;
   seats: number;
   seed: number;
-  aptitudeMean: number;
-  aptitudeConcentration: number;
+  modeGrade: number;
+  zeroRate: number;
+  maxRate: number;
   selected: number;
   students: PlaygroundStudent[];
 }
@@ -28,11 +29,12 @@ export function createPlaygroundDraft(config: Scenario): PlaygroundDraft {
     rounds: 1,
     seats: 1,
     seed: 1,
-    // O playground é um leilão isolado, com uma Beta só: parte do primeiro
-    // perfil de desempenho do cenário, e dali o usuário mexe à vontade. Aqui
-    // não há população com grupos a separar.
-    aptitudeMean: config.performance_profiles[0]?.mean ?? 0.65,
-    aptitudeConcentration: config.performance_profiles[0]?.concentration ?? 10,
+    // O playground é um leilão isolado, com uma distribuição só: parte do
+    // primeiro perfil de desempenho do cenário, e dali o usuário mexe à
+    // vontade. Aqui não há população com grupos a separar.
+    modeGrade: config.performance_profiles[0]?.mode_grade ?? 8,
+    zeroRate: config.performance_profiles[0]?.zero_rate ?? 0.005,
+    maxRate: config.performance_profiles[0]?.max_rate ?? 0.008,
     selected: 0,
     students: [newStudent("voce", "Você", config)],
   };
@@ -109,8 +111,9 @@ export function Playground({
           mechanism: draft.mechanism,
           rounds: draft.rounds,
           seed: draft.seed,
-          aptitude_mean: draft.aptitudeMean,
-          aptitude_concentration: draft.aptitudeConcentration,
+          mode_grade: draft.modeGrade,
+          zero_rate: draft.zeroRate,
+          max_rate: draft.maxRate,
           disciplines: config.disciplines.map(({ name, hours }) => ({
             name,
             seats: draft.seats ?? 1,
@@ -175,25 +178,39 @@ export function Playground({
             />
           </div>
           <div className="field">
-            <label>Aptidão: média</label>
-            <input
-              type="number"
-              min={0.01}
-              max={0.99}
-              step={0.01}
-              value={draft.aptitudeMean}
-              onChange={(e) => setDraft({ ...draft, aptitudeMean: Number(e.target.value) })}
-            />
-          </div>
-          <div className="field">
-            <label>Aptidão: concentração</label>
+            <label>Nota mais provável</label>
             <input
               type="number"
               min={0.1}
-              step={0.5}
-              value={draft.aptitudeConcentration}
+              max={9.9}
+              step={0.1}
+              value={draft.modeGrade}
+              onChange={(e) => setDraft({ ...draft, modeGrade: Number(e.target.value) })}
+            />
+          </div>
+          <div className="field">
+            <label>Chance de 0 (%)</label>
+            <input
+              type="number"
+              min={0.01}
+              max={99}
+              step={0.01}
+              value={Math.round(draft.zeroRate * 1e6) / 1e4}
               onChange={(e) =>
-                setDraft({ ...draft, aptitudeConcentration: Number(e.target.value) })
+                setDraft({ ...draft, zeroRate: Number(e.target.value) / 100 })
+              }
+            />
+          </div>
+          <div className="field">
+            <label>Chance de 10 (%)</label>
+            <input
+              type="number"
+              min={0.01}
+              max={99}
+              step={0.01}
+              value={Math.round(draft.maxRate * 1e6) / 1e4}
+              onChange={(e) =>
+                setDraft({ ...draft, maxRate: Number(e.target.value) / 100 })
               }
             />
           </div>

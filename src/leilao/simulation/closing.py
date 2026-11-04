@@ -62,22 +62,22 @@ def _grade(
     student: Student,
     name: str,
     attempt: int,
-    period: int,
-    config: SimulationConfig,
     draws: Draws,
 ) -> float:
-    """A nota desta tentativa — ver `equations.grade_for_attempt`."""
+    """A nota desta tentativa — ver `equations.grade_for_attempt`.
+
+    A dificuldade e a tentativa escolhem a distribuição; o quantil do aluno
+    diz onde ele cai dentro dela. A utilidade não entra: ela já governa o que
+    ele pede e o que ele exclui.
+    """
+    mode, left_sd, right_sd = draws.grade_shapes.of(
+        student.performance, draws.difficulty[name], attempt
+    )
     return grade_for_attempt(
-        aptitude=draws.aptitudes[(student.id, name)],
-        difficulty=draws.difficulty[name],
-        # u_rel: a utilidade em múltiplos da indiferença. Sai da linha
-        # sorteada, não do recorte elegível — é a mesma grandeza em qualquer
-        # período, e é isso que a torna comparável.
-        relative_utility=draws.utility_rows[(student.id, period)][name]
-        * draws.catalogue,
-        attempt=attempt,
-        utility_gain=config.utility_gain,
-        retake_gain=config.retake_gain,
+        quantile=draws.base_quantiles[(student.id, name)],
+        mode=mode,
+        left_sd=left_sd,
+        right_sd=right_sd,
     )
 
 
@@ -98,12 +98,12 @@ def close_period(
 
     for student in active:
         allocated = state.won[student.id]
-        # A mochila do que ele leva: valor = utilidade, peso = carga, teto = a
-        # fração de W_a que a disponibilidade deste período lhe deu. O que
-        # sobra é excluído — ver `equations.retained_set`.
+        # A mochila do que ele leva: valor = utilidade, peso = carga, teto = as
+        # horas que a disponibilidade deste período lhe deu. O que sobra é
+        # excluído — ver `equations.retained_set`. O teto pode passar de W_a, e
+        # aí ele não exclui nada: o limite de carga é do alocador, não do aluno.
         load = effective_load(
-            availability=draws.availability[(student.id, period)],
-            max_hours=config.max_hours,
+            availability=draws.availability[(student.id, period)]
         )
         kept = retained_set(
             utilities=utilities[student.id],
@@ -141,12 +141,7 @@ def close_period(
             attempt = student.attempts.get(name, 0) + 1
             student.attempts[name] = attempt
             grade = _grade(
-                student=student,
-                name=name,
-                attempt=attempt,
-                period=period,
-                config=config,
-                draws=draws,
+                student=student, name=name, attempt=attempt, draws=draws
             )
             if attempt == 1:
                 closing.first_grades.append(grade)

@@ -1,25 +1,26 @@
 """A carga horária que o aluno vai de fato cursar no período.
 
-    Ŵ_a^(t) = round(δ_a^(t) · W_a)
+    Ŵ_a^(t) = round(δ_a^(t))
 
-**δ** (`availability`) é a disponibilidade: a fração de W_a que este aluno tem
-para este período, sorteada da Beta do perfil dele. Em 1 ele enche a carga; em
-0,5 cursa metade do teto.
+**δ** (`availability`) é a disponibilidade **em horas**, sorteada da log-normal
+do perfil do aluno. Não é fração de nada: é o tempo que ele tem para este
+período, na mesma unidade da carga das disciplinas.
 
-Arredonda-se para o **inteiro mais próximo**, e não para baixo. Com piso, a
-carga cheia ficava inalcançável *por construção*: `⌊δ·W_a⌋ = W_a` exige
-`δ ≥ 1`, que numa Beta tem probabilidade zero — de modo que todo aluno que
-ganhasse W_a inteiro sempre excluiria alguma coisa, inclusive o perfil feito
-para encher a carga. O erro que o arredondamento introduz é de meia hora, o que
-sobre W_a é ruído; o viés do piso era estrutural.
+Arredonda-se para o **inteiro mais próximo** porque hora é inteira no modelo.
+
+**Não há teto.** A disponibilidade pode passar de W_a, e isso não é
+inconsistência: o limite de carga é do **sistema**, e quem o aplica é o
+alocador, que nunca entrega mais que W_a durante as rodadas. O dado do aluno
+não precisa estar alinhado a priori com a regra da instituição — quem tem
+tempo para 400 h num curso que oferece 360 simplesmente não exclui nada.
+
+Foi justamente o alinhamento forçado que a versão anterior errava: com δ como
+fração de W_a, a carga cheia exigia `δ ≥ 1`, que numa distribuição sobre [0, 1]
+é evento de borda. O piso sumiu com o `round`, mas o teto artificial só sumiu
+quando a disponibilidade deixou de ser fração.
 
 O piso natural continua sendo 0 — nada impede que alguém largue o semestre
-inteiro — e o teto nunca passa de W_a, porque `δ ≤ 1` e o arredondamento sobe
-no máximo meia hora.
-
-O `round` do Python desempata para o par, como no retorno de créditos. Aqui
-quase não se aciona: o empate exato exigiria `δ·W_a` cair precisamente num
-meio, e δ vem de um sorteio contínuo.
+inteiro —, e a log-normal nunca desce abaixo dele.
 
 Não é o mesmo que W_a^(t,r), a carga que o alocador desconta a cada vaga: essa
 continua valendo durante as rodadas e vale o teto cheio. A carga efetiva só é
@@ -31,9 +32,7 @@ posteriores a ele.
 from __future__ import annotations
 
 
-def effective_load(*, availability: float, max_hours: int) -> int:
-    if not 0.0 <= availability <= 1.0:
-        raise ValueError("a disponibilidade deve estar em [0, 1]")
-    if max_hours < 0:
-        raise ValueError("a carga horária máxima deve ser >= 0")
-    return round(availability * max_hours)
+def effective_load(*, availability: float) -> int:
+    if availability < 0.0:
+        raise ValueError("a disponibilidade deve ser >= 0")
+    return round(availability)

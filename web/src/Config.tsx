@@ -2,10 +2,15 @@ import { useMemo, useState } from "react";
 import { DensityChart, STATUS } from "./charts";
 import { entryDisciplines } from "./curriculum";
 import { availabilityCurve, gradeCurve, utilityCurve } from "./distributions";
+import { fullLoadThreshold } from "./equations";
 import { PresetList } from "./PresetList";
 import { formatSavedDate, nameExists } from "./savedPresets";
 import type { SavedPreset } from "./savedPresets";
-import { ProfileList, axisShare } from "./ProfileList";
+import {
+  AvailabilityProfileList,
+  PerformanceProfileList,
+  axisShare,
+} from "./ProfileList";
 import { SaveScenario } from "./SaveScenario";
 import { COMPARISON_ARMS, GENES, MAX_COMPARISON_RUNS, gridSize } from "./types";
 import type { GenomeLevels, Scenario } from "./types";
@@ -75,11 +80,15 @@ export function Config({
   const entryTooLarge = config.students_per_period > smallestEntrySeats;
   const entryTooHeavy = entryHours > config.max_hours;
 
+  // Porcentagem com casas suficientes para 0,05% não virar 0%: as chances de
+  // ponta vivem entre centésimos de ponto e dezenas.
+  const percent = (share: number) =>
+    `${(share * 100).toLocaleString("pt-BR", { maximumSignificantDigits: 2 })}%`;
+
   // O recorte que cada prévia desenha. Nada disto é parâmetro de cenário: não
   // vai para a API, e por isso mora aqui e não em `Scenario`.
   const [difficulty, setDifficulty] = useState(1);
   const [attempt, setAttempt] = useState(1);
-  const [relativeUtility, setRelativeUtility] = useState(1);
   const [attractiveness, setAttractiveness] = useState(0);
   // Qual linha do editor a prévia ao lado desenha. Uma curva por vez, em vez
   // de todas sobrepostas: com cinco ou seis grupos aquilo vira emaranhado.
@@ -95,8 +104,8 @@ export function Config({
   // não barras: aqui não há dado contado, e sim a forma que os parâmetros
   // implicam.
   const grades = useMemo(
-    () => gradeCurve(config, { difficulty, attempt, relativeUtility }, performance),
-    [config, difficulty, attempt, relativeUtility, performance]
+    () => gradeCurve(config, { difficulty, attempt }, performance),
+    [config, difficulty, attempt, performance]
   );
   // Em horas, não em fração: o parâmetro é uma fração de W_a, mas quem lê a
   // curva quer saber quanta carga ela permite.
@@ -357,14 +366,12 @@ export function Config({
                 </p>
               )}
 
-              <ProfileList
+              <AvailabilityProfileList
                 profiles={config.availability_profiles}
                 onChange={(availability_profiles) => patch({ availability_profiles })}
                 selected={availabilityIndex}
                 onSelect={setAvailabilityIndex}
-                scale="hours"
                 top={config.max_hours}
-                newName="disponibilidade"
               />
             </div>
 
@@ -372,12 +379,35 @@ export function Config({
               <DensityChart
                 id="curva-disponibilidade"
                 title={`Disponibilidade — ${availability.name}`}
-                points={availabilities.points}
-                domain={[0, config.max_hours]}
-                // O motor arredonda — o teto do aluno é `round(δ · W_a)` —,
-                // então o tooltip dá a hora inteira que a simulação vai usar.
+                points={availabilities?.points ?? []}
+                /* O eixo **passa de W_a** de propósito: a massa à direita da
+                   carga máxima é justamente a chance de alcançá-la. Parar no
+                   teto faria a curva parecer truncada ali, que é exatamente o
+                   que o modelo deixou de fazer. */
+                domain={[0, availabilities?.top ?? config.max_hours]}
+                // O motor arredonda — a carga efetiva é `round(δ)` —, então o
+                // tooltip dá a hora inteira que a simulação vai usar.
                 format={(value) => `${Math.round(value)} h`}
-                footer={<>mais provável: {Math.round(availabilities.mode)} h</>}
+                split={{
+                  // A divisa é `W_a − 0,5`, e não W_a: a carga efetiva
+                  // arredonda, então 29,6 h já enche uma carga de 30 h. É o
+                  // limiar que a própria log-normal inverte, e é o que faz a
+                  // etiqueta concordar com a hora que o tooltip mostra.
+                  at: fullLoadThreshold(config.max_hours),
+                  below: STATUS.critical,
+                  above: STATUS.good,
+                  labels: ["pode excluir", "enche a carga"],
+                }}
+                footer={
+                  availabilities ? (
+                    <>
+                      mais provável: {Math.round(availabilities.mode)} h · enche
+                      a carga: {percent(availabilities.fullLoad)}
+                    </>
+                  ) : (
+                    <>a moda precisa ficar abaixo de W<sub>a</sub></>
+                  )
+                }
               />
             </div>
           </div>
@@ -388,37 +418,12 @@ export function Config({
           <h2>Notas</h2>
           <div className="config-split">
             <div>
-              <ProfileList
+              <PerformanceProfileList
                 profiles={config.performance_profiles}
                 onChange={(performance_profiles) => patch({ performance_profiles })}
                 selected={performanceIndex}
                 onSelect={setPerformanceIndex}
-                scale="grade"
-                newName="desempenho"
               />
-
-              <div className="field-row">
-                <div className="field">
-                  <label>Ganho por utilidade</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.25}
-                    value={config.utility_gain}
-                    onChange={(e) => patch({ utility_gain: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Ganho por tentativa</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.25}
-                    value={config.retake_gain}
-                    onChange={(e) => patch({ retake_gain: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
 
               <div className="field-row">
                 <div className="field">
@@ -441,16 +446,24 @@ export function Config({
               <DensityChart
                 id="curva-notas"
                 title={`Notas — ${performance.name}`}
-                points={grades.points}
+                points={grades?.points ?? []}
                 domain={[0, 10]}
+                /* As duas chances de ponta vão no rodapé, e não ao lado dos
+                   campos, porque **mudam com o recorte**: as do perfil valem
+                   para dificuldade 1 na primeira tentativa, e o que o rodapé
+                   mostra é o que aquela disciplina de fato produz. A aprovação
+                   também é derivada, não entrada. */
                 footer={
-                  <>
-                    mais provável: {grade(grades.mode)} · aprova: {" "}
-                    {(grades.approval * 100).toLocaleString("pt-BR", {
-                      maximumFractionDigits: 1,
-                    })}
-                    %
-                  </>
+                  grades ? (
+                    <>
+                      mais provável: {grade(grades.mode)} · aprova:{" "}
+                      {percent(grades.approval)} · tira 0:{" "}
+                      {percent(grades.zeroRate)} · tira 10:{" "}
+                      {percent(grades.maxRate)}
+                    </>
+                  ) : (
+                    <>nota média fora do alcance destas chances</>
+                  )
                 }
                 split={{
                   at: config.min_grade,
@@ -483,16 +496,6 @@ export function Config({
                         onChange={(e) =>
                           setAttempt(Math.max(1, Math.round(Number(e.target.value))))
                         }
-                      />
-                    </div>
-                    <div className="field">
-                      <label>Utilidade relativa</label>
-                      <input
-                        type="number"
-                        min={0.0001}
-                        step={0.1}
-                        value={relativeUtility}
-                        onChange={(e) => setRelativeUtility(Number(e.target.value))}
                       />
                     </div>
                   </div>

@@ -1,58 +1,42 @@
-"""A nota de uma tentativa — anteprojeto, eq. (33).
+"""A nota de uma tentativa — substitui a eq. (33) do anteprojeto.
 
-    n = round(100 · a^E) / 10
+    n = min(10, max(0, round(10 · latente) / 10))
+    latente = quantil do desempenho base na normal dividida da tentativa
 
-        E           = dificuldade / (u_rel^g_u · esforço)
-        esforço     = 1 + g_t · (tentativa − 1)
+O aluno carrega um **quantil** por disciplina: a posição dele naquela matéria,
+sorteada uma vez e permanente (ver `grading`). A disciplina e a tentativa
+determinam a distribuição; o quantil diz onde ele cai dentro dela. Trocar a
+dificuldade move a distribuição inteira e, com ela, a nota — sem mexer na
+posição relativa do aluno, que é o que faz o desempenho ser traço.
 
-- **a** é a aptidão do aluno naquela disciplina, em (0, 1), sorteada uma vez
-  e persistente. Com E = 1 a nota *é* a aptidão, o que lhe dá leitura direta:
-  "a nota que este aluno tiraria nesta disciplina, de dificuldade padrão, de
-  primeira".
-- A **dificuldade** entra em múltiplos da disciplina padrão.
-- **u_rel** é a utilidade da disciplina para o aluno em múltiplos da
-  indiferença (`u · |disciplinas|`), e **g_u** o ganho por utilidade.
-- A **tentativa** é a vez em que ele está cursando, e **g_t** o ganho por
-  recursada.
+O latente **não** é a nota: ele vive na reta inteira e pode sair da escala. As
+duas operações finais são o instrumento, não o aluno:
 
-Os dois ganhos dividem o denominador do expoente, e por isso se leem juntos:
-cada um diz quanto um fator desconta da demanda que a disciplina faz. Com os
-dois em 1 o expoente é a dificuldade dividida pela tentativa, de modo que
-**dificuldade 2 na segunda tentativa equivale a dificuldade 1 na primeira** —
-a lei de potência da prática.
+- **arredonda** em décimos, que é a resolução em que a nota existe;
+- **clipa** em [0, 10], porque a escala para aí. Quem mereceria 11 recebe 10.
 
-A forma de potência tem história generativa: se a disciplina são E unidades
-independentes e o aluno domina cada uma com probabilidade `a`, então `a^E` é a
-chance de dominar todas. De quebra ela respeita os limites por construção —
-`a^E` nunca sai de (0, 1) —, ao contrário da normal truncada, que empilhava
-massa nas pontas.
+É o clipe que torna o 10 alcançável. Uma distribuição contínua dá probabilidade
+desprezível ao último décimo da escala — a forma anterior (aptidão em (0,1)
+elevada à demanda) punha o 10 em 1,2 × 10⁻⁷ mesmo para o perfil mais forte,
+ou seja, nunca. Censurar na borda concentra ali toda a massa que o instrumento
+não consegue distinguir, e a chance de tirar 10 vira parâmetro declarado em
+vez de consequência escondida da forma. O mesmo vale para o 0, do outro lado.
 
-Arredonda-se com `round`, e não com `floor`: com `a < 1` e expoente positivo o
-produto nunca chega a 100, e truncando o teto da escala seria 9,9.
+A substituição também apagou a influência da utilidade sobre a nota: ela já
+governa o que o aluno pede e o que ele exclui.
 """
 from __future__ import annotations
 
-# Abaixo disto a aptidão produziria 0,0 ou 1,0 exatos e a nota degeneraria.
-# O gerador de Beta devolve as duas pontas para parâmetros pequenos.
-APTITUDE_GUARD = 1e-9
+from .split_normal_quantile import split_normal_quantile
+
+MIN_GRADE = 0.0
+MAX_GRADE = 10.0
 
 
 def grade_for_attempt(
-    *,
-    aptitude: float,
-    difficulty: float,
-    relative_utility: float,
-    attempt: int,
-    utility_gain: float,
-    retake_gain: float,
+    *, quantile: float, mode: float, left_sd: float, right_sd: float
 ) -> float:
-    if attempt < 1:
-        raise ValueError("attempt deve ser >= 1")
-    a = min(1.0 - APTITUDE_GUARD, max(APTITUDE_GUARD, aptitude))
-    utility = relative_utility**utility_gain if relative_utility > 0.0 else 1.0
-    if utility <= 0.0:
-        utility = 1.0
-    attempts = 1.0 + retake_gain * (attempt - 1)
-    if attempts <= 0.0:
-        raise ValueError("o ganho por recursada zerou as tentativas efetivas")
-    return round(100.0 * a ** (difficulty / (utility * attempts))) / 10.0
+    latent = split_normal_quantile(
+        quantile=quantile, mode=mode, left_sd=left_sd, right_sd=right_sd
+    )
+    return min(MAX_GRADE, max(MIN_GRADE, round(10.0 * latent) / 10.0))

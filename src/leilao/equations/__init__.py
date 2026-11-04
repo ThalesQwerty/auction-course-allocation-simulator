@@ -49,8 +49,12 @@ Preferência e grade
 
 Notas, créditos e saída (Seção 7.2.2)
 
-    aptitude_shape            forma da Beta a partir de média     —
-    grade_for_attempt         n = round(100·a^E)/10               eq. (33)
+    split_normal_cdf          F da normal dividida                —
+    split_normal_quantile     F⁻¹ da normal dividida              —
+    split_normal_mean         μ = m + √(2/π)·(d − e)              —
+    grade_shape               (moda, P₀, P₁₀) → forma       substitui 32
+    attempt_rates             P₀^(t/d) e P₁₀^(d/t)                —
+    grade_for_attempt         quantil → nota, censurada     substitui 33
     credit_return             γ = f_γ(preço, nota)                eq. (34)
     guaranteed_share          ⌊C / |entrada|⌋                     —
     period_return             Γ = Γ_min + Σγ                      eq. (35)
@@ -60,7 +64,9 @@ Notas, créditos e saída (Seção 7.2.2)
 
 Disponibilidade e exclusão
 
-    effective_load            Ŵ_a = round(δ · W_a)                —
+    availability_shape        (moda, chance de W_a) → log-normal   —
+    lognormal_cdf             F da log-normal                     —
+    effective_load            Ŵ_a = round(δ), sem teto            —
     retained_set              mochila 0-1 do que ele leva         —
     exclusion_refund          γ = paid // 2, só sob `ratio`       —
     exclusion_rate            ε = excluídas / obtidas             —
@@ -115,7 +121,8 @@ from __future__ import annotations
 
 from .approval_index import approval_index
 from .admitted_set import admitted_set
-from .aptitude_shape import beta_shape
+from .attempt_rates import attempt_rates
+from .availability_shape import availability_shape
 from .available_goods import available_goods
 from .concave_bids import concave_bids
 from .credit_consumption import consumption
@@ -136,8 +143,10 @@ from .fitness import fitness
 from .genome_drift import genome_drift
 from .genome_grid import genome_grid
 from .grade_average import grade_average
-from .grade_for_attempt import APTITUDE_GUARD, grade_for_attempt
+from .grade_for_attempt import MAX_GRADE, MIN_GRADE, grade_for_attempt
 from .grade_histogram import grade_histogram
+from .grade_shape import grade_shape, grade_sds
+from .lognormal_cdf import lognormal_cdf
 from .graduation import has_graduated
 from .greedy_allocation import greedy_allocation
 from .guaranteed_share import guaranteed_share
@@ -167,20 +176,25 @@ from .stochastic_perturbation import stochastic_perturbations
 from .tie_break_factor import tie_break_factor
 from .time_to_graduate import time_to_graduate
 from .utility_histogram import utility_histogram
+from .split_normal_cdf import split_normal_cdf
+from .split_normal_mean import split_normal_mean
+from .split_normal_quantile import split_normal_quantile
 from .utility_row import normalize_rows
 from .utilization import utilization
 from .weighted_mean import weighted_mean
 
 __all__ = [
-    "APTITUDE_GUARD",
+    "MAX_GRADE",
+    "MIN_GRADE",
     "Behavior",
     "NEUTRAL",
     "RequestStates",
     "Signals",
+    "attempt_rates",
     "available_goods",
     "admitted_set",
     "approval_index",
-    "beta_shape",
+    "availability_shape",
     "concave_bids",
     "consumption",
     "credit_return",
@@ -202,11 +216,17 @@ __all__ = [
     "grade_average",
     "grade_for_attempt",
     "grade_histogram",
+    "grade_sds",
+    "lognormal_cdf",
+    "grade_shape",
     "greedy_allocation",
     "guaranteed_share",
     "has_graduated",
     "jain_index",
     "market_prices",
+    "split_normal_cdf",
+    "split_normal_mean",
+    "split_normal_quantile",
     "mean_grade_average",
     "mean_price",
     "mean_satisfaction",

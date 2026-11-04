@@ -1,54 +1,44 @@
-/** A densidade da nota, em forma fechada.
+/** A densidade da nota, sobre a escala inteira de 0 a 10.
  *
- *     n = 10 · a^E   ⟹   a = (n/10)^(1/E)
- *     f_n(n) = f_a(a) · |da/dn| = f_a(a) · a / (10·E·(n/10))
+ * A nota é **discreta**: múltiplos de um décimo, que é a resolução em que o
+ * motor a entrega. Então o que a curva anda é a massa de cada décimo dividida
+ * pelo passo — uma densidade de verdade, que integra 1, e em que todo ponto do
+ * desenho é uma nota que a simulação pode de fato produzir.
  *
- * A nota é **monótona** na aptidão e nada mais é sorteado, então a densidade
- * sai por mudança de variável — nada de amostragem, nada de faixas, e a curva
- * é lisa por construção: ela não treme a cada tecla.
- *
- * As pontas fecham no eixo: a nota 0 e a nota 10 só ocorrem no limite, e é lá
- * que a densidade pode divergir.
+ * As pontas **não** fecham no eixo, e é o ponto da distribuição: a nota 0 e a
+ * nota 10 carregam toda a massa que o latente põe fora da escala, porque a
+ * escala para aí. São os dois átomos da censura, e aparecem como os dois picos
+ * das extremidades — tão altos quanto a chance que o perfil declarou.
  *
  * Em t > 1 o que sai é a nota que a **população inteira** tiraria naquela
  * tentativa, e não a dos recursantes: quem recursa é quem foi mal, então a
- * amostra real de uma segunda tentativa é a cauda de baixo da aptidão. Isto
- * responde "quanto a tentativa vale", não "como ficou a turma de repetentes".
+ * amostra real de uma segunda tentativa é a cauda de baixo. Isto responde
+ * "quanto a tentativa vale", não "como ficou a turma de repetentes".
  */
+import { splitNormalCdf } from "./splitNormalCdf";
 
-/** A curva anda de **um décimo**, que é a grade em que o motor entrega a nota
- * (`round(100 · a^E)/10`). Assim todo ponto do desenho é uma nota que a
- * simulação pode de fato produzir. */
 const POINTS = 101;
 const TOP = 10;
+const STEP = TOP / (POINTS - 1);
 
 export function gradeDensity(
-  alpha: number,
-  beta: number,
-  exponent: number
+  mode: number,
+  leftSd: number,
+  rightSd: number
 ): { xs: number[]; ys: number[] } {
-  const step = TOP / (POINTS - 1);
   const xs: number[] = [];
   const ys: number[] = [];
   for (let i = 0; i < POINTS; i++) {
-    const n = i * step;
-    xs.push(n);
-    const t = n / TOP;
-    if (t <= 0 || t >= 1) {
-      ys.push(0);
-      continue;
-    }
-    const a = Math.pow(t, 1 / exponent);
-    if (!(a > 0) || a >= 1) {
-      ys.push(0);
-      continue;
-    }
-    // Densidade da Beta vezes o jacobiano. A constante B(α, β) some na
-    // normalização numérica de quem consome a curva.
-    ys.push(
-      Math.exp((alpha - 1) * Math.log(a) + (beta - 1) * Math.log(1 - a)) *
-        (a / (TOP * exponent * t))
-    );
+    const grade = i * STEP;
+    // O décimo vai de meio passo abaixo a meio passo acima; nas pontas ele se
+    // estende ao infinito, que é a censura.
+    const low = i === 0 ? -Infinity : grade - STEP / 2;
+    const high = i === POINTS - 1 ? Infinity : grade + STEP / 2;
+    const mass =
+      (high === Infinity ? 1 : splitNormalCdf(high, mode, leftSd, rightSd)) -
+      (low === -Infinity ? 0 : splitNormalCdf(low, mode, leftSd, rightSd));
+    xs.push(grade);
+    ys.push(Math.max(0, mass) / STEP);
   }
   return { xs, ys };
 }

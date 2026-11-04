@@ -20,6 +20,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { niceScale } from "../equations";
 import type { DensityPoint } from "../equations";
 import { inkFor, soloColor, usePrefersDark } from "./theme";
 
@@ -38,6 +39,14 @@ const HEIGHT = 150;
 /** Casas decimais de uma régua: o menor número que ainda distingue marcas a
  * um décimo do intervalo. */
 const digitsFor = (span: number) => Math.max(0, Math.ceil(-Math.log10(span / 10)));
+
+/** Casas que o passo de uma régua pede: as marcas são múltiplos dele, então é
+ * o passo — e não o intervalo — que diz quantas casas separam uma marca da
+ * vizinha. */
+const decimalsOf = (step: number) => {
+  const digits = Math.max(0, Math.ceil(-Math.log10(step)));
+  return Number(step.toFixed(digits)) === step ? digits : digits + 1;
+};
 
 const fixed = (digits: number) => (value: number) =>
   value.toLocaleString("pt-BR", {
@@ -90,12 +99,13 @@ export function DensityChart({
   // mais: no eixo das notas as marcas são inteiras, e a nota não é.
   const exact = format ?? fixed(digits + 1);
 
-  // Topo da régua: o primeiro inteiro acima do pico. O piso é 1, de modo que
-  // uma curva baixa — a das notas, cujo pico é 0,21 — se leia como baixa, em
-  // vez de a régua se fechar em torno dela.
+  // Topo da régua: o passo legível imediatamente acima do pico. A régua se
+  // fecha em torno da curva, de modo que a altura só se compara dentro de um
+  // mesmo desenho — o absoluto da densidade está no tooltip. Sem curva, a
+  // régua de sempre, para o cartão vazio não ficar sem eixo.
   const tallest = points.reduce((max, point) => Math.max(max, point.y), 0);
-  const ceiling = Math.floor(tallest) + 1;
-  const heightDigits = ceiling >= 10 ? 0 : 2;
+  const ruler = niceScale(0, tallest || 1);
+  const heightDigits = decimalsOf(ruler.ticks[1] - ruler.ticks[0]);
 
   return (
     <figure className="chart-card">
@@ -138,8 +148,8 @@ export function DensityChart({
             stroke={ink.axis}
           />
           <YAxis
-            domain={[0, ceiling]}
-            ticks={[0, 0.25, 0.5, 0.75, 1].map((part) => part * ceiling)}
+            domain={[0, ruler.to]}
+            ticks={ruler.ticks}
             tick={{ fill: ink.muted, fontSize: 10 }}
             tickLine={false}
             stroke={ink.axis}

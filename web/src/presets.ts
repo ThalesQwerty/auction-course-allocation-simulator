@@ -10,28 +10,32 @@ import type { DisciplineInput, Scenario } from "./types";
  * `max_hours` não está aqui: é do cenário, porque é a soma de um período da
  * grade. */
 const POPULATION = {
-  // Com dificuldade 1 e sem ganhos a nota **é** a aptidão × 10, então a média
-  // se lê direto como a nota típica do grupo — e n_min = 5 põe a fronteira da
-  // reprovação em 0,5. Sem dispersão de desempenho ninguém reprova, a
-  // recursada some do cenário e o CR vira ruído.
-  performance_profiles: [
-    { name: "Alto desempenho", mean: 0.8, concentration: 25 },
-    { name: "Médio desempenho", mean: 0.65, concentration: 15 },
-    { name: "Baixo desempenho", mean: 0.5, concentration: 10 },
-  ],
-  // A fração de W_a que o aluno de fato cursa, resorteada a cada período. Os
-  // três patamares são W_a, dois terços e um terço — 30 h, 20 h e 10 h —, com
-  // a concentração caindo junto: quem cursa pouco é também quem varia mais de
-  // um semestre para o outro.
+  // A nota mais provável é o pico da curva numa disciplina de dificuldade
+  // padrão, de primeira. A **média** sai 1 a 2 pontos abaixo dela, porque a
+  // cauda esquerda é longa, e é por ela que o "baixo" está calibrado: moda 6,5
+  // dá média 4,96, que encosta em n_min = 5 — aquele grupo reprova em torno de
+  // metade das vezes. Sem dispersão de desempenho ninguém reprova, a recursada
+  // some do cenário e o CR vira ruído.
   //
-  // A alta fica em 0,99 e não em 1: a Beta não admite média 1 (um dos
-  // parâmetros de forma zeraria) e a API recusa. Com o arredondamento do teto
-  // ela aparece como 30 h na tela e entrega carga cheia em ~80% dos semestres,
-  // que é o que "sempre disponível" quer dizer aqui.
+  // As duas chances de ponta separam os grupos onde a moda sozinha não separa,
+  // e são o que torna 0 e 10 alcançáveis: o forte quase nunca zera e tira 10
+  // em 3% das disciplinas; o fraco zera em 3% e quase nunca tira 10.
+  performance_profiles: [
+    { name: "Alto desempenho", mode_grade: 9, zero_rate: 0.0005, max_rate: 0.03 },
+    { name: "Médio desempenho", mode_grade: 8, zero_rate: 0.005, max_rate: 0.008 },
+    { name: "Baixo desempenho", mode_grade: 6.5, zero_rate: 0.03, max_rate: 0.0015 },
+  ],
+  // As horas que o aluno tem para o período, resorteadas a cada semestre. As
+  // modas são W_a, dois terços e um terço — 28 h, 20 h e 10 h —, e o que de
+  // fato separa os três é a **chance de encher a carga**: a alta não exclui
+  // nada em metade dos semestres, a baixa quase nunca chega lá.
+  //
+  // A moda fica logo abaixo de W_a na alta, e não em cima: com o pico no teto
+  // não existe log-normal que ainda o alcance com a frequência pedida.
   availability_profiles: [
-    { name: "Alta disponibilidade", mean: 0.99, concentration: 40 },
-    { name: "Média disponibilidade", mean: 2 / 3, concentration: 20 },
-    { name: "Baixa disponibilidade", mean: 1 / 3, concentration: 10 },
+    { name: "Alta disponibilidade", mode_hours: 28, full_load_rate: 0.5 },
+    { name: "Média disponibilidade", mode_hours: 20, full_load_rate: 0.05 },
+    { name: "Baixa disponibilidade", mode_hours: 10, full_load_rate: 0.001 },
   ],
   // σ no pé da faixa: o aluno é quase indiferente entre as disciplinas de uma
   // mesma altura, e quem ordena a linha dele é sobretudo a invariante.
@@ -284,7 +288,6 @@ export const defaultScenario = (): Scenario => ({
   // orçamento que carrega entre períodos (eq. 36). A comparação os varia.
   resolver: "ilp",
   credit_memory: "carry",
-  utility_gain: 0,
   // Metade do gosto persiste, metade recomeça a cada período. Em 0 — o que o
   // modelo fazia antes de a estabilidade existir — a preferência que não
   // persiste desfaz a fila sozinha, e é o valor que mais protege o lado fraco
@@ -292,7 +295,6 @@ export const defaultScenario = (): Scenario => ({
   // exposta que resta: qualquer resultado em conclusões deve vir com este valor
   // declarado.
   utility_stability: 0.5,
-  retake_gain: 1,
   credit_return: "none",
   seed: 42,
   ...POPULATION,

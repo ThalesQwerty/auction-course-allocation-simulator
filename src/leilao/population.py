@@ -18,7 +18,8 @@ import numpy as np
 from .config import (
     NEUTRAL_AVAILABILITY,
     NEUTRAL_PERFORMANCE,
-    Profile,
+    AvailabilityProfile,
+    PerformanceProfile,
     SimulationConfig,
 )
 from .equations import NEUTRAL, Behavior, grade_average
@@ -47,8 +48,8 @@ class Student:
     # um aluno à mão não está escolhendo um grupo, e herdar "forte" por
     # omissão enviesaria o teste sem avisar. `generate_students` sempre define
     # os dois.
-    performance: Profile = NEUTRAL_PERFORMANCE
-    availability: Profile = NEUTRAL_AVAILABILITY
+    performance: PerformanceProfile = NEUTRAL_PERFORMANCE
+    availability: AvailabilityProfile = NEUTRAL_AVAILABILITY
     # n_{a,x}: a **maior** nota já obtida, que é a que conta para o CR e para
     # a aprovação. A nota de cada tentativa vive no histórico do período.
     grades: dict[str, float] = field(default_factory=dict)

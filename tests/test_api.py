@@ -123,10 +123,17 @@ COMPARE_SCENARIO = {
 POPULATION = {
     # Aptidão dura: média 0,4 (a Beta(2, 3) de antes), então reprova-se
     # bastante e há recursada o bastante para o teste da razão D/t ter amostra.
-    "aptitude_mean": 0.4,
-    "aptitude_concentration": 5,
+    "mode_grade": 4.0,
+    "zero_rate": 0.05,
+    "max_rate": 0.002,
     "utility_sigma": 1,
     "max_hours": 120,
+    # As modas da disponibilidade estão em horas, então os perfis padrão
+    # (dimensionados para W_a = 360) não cabem neste W_a.
+    "availability_profiles": [
+        {"name": "Alta", "mode_hours": 110.0, "full_load_rate": 0.4},
+        {"name": "Baixa", "mode_hours": 70.0, "full_load_rate": 0.01},
+    ],
 }
 
 def test_compare_returns_one_summary_per_seed_in_every_arm(client):
@@ -191,6 +198,12 @@ EVOLVE_SCENARIO = {
     "entry_periods": 2,
     "periods": 10,
     "max_hours": 120,
+    # As modas da disponibilidade estão em horas, então os perfis padrão
+    # (dimensionados para W_a = 360) não cabem neste W_a.
+    "availability_profiles": [
+        {"name": "Alta", "mode_hours": 110.0, "full_load_rate": 0.4},
+        {"name": "Baixa", "mode_hours": 70.0, "full_load_rate": 0.01},
+    ],
     "mechanism": "credits",
     "seed": 3,
     # Grade pequena: 2 x 2 x 2 x 2 = 16, o tamanho da coorte.

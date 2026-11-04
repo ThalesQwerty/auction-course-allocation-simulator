@@ -14,11 +14,18 @@
  * ------
  *
  * Prévia das notas
- *     betaShape          forma da Beta a partir de média e concentração
- *     gradeExponent      E = D / (u_rel^g_u · tentativas)
- *     gradeDensity       densidade da nota, por mudança de variável
- *     betaQuadrature     densidade da Beta num grid, para integrar
+ *     splitNormalCdf     F da normal dividida
+ *     splitNormalMean    μ = m + √(2/π)·(d − e)
+ *     gradeShape         (moda, P₀, P₁₀) → (moda, desvios)
+ *     attemptRates       P₀^(t/D) e P₁₀^(D/t)
+ *     gradeDensity       massa de cada décimo, com os dois átomos
  *     approvalShare      a fração que alcança n_min
+ *
+ * Prévia da disponibilidade
+ *     availabilityShape  (moda, chance de W_a) → log-normal
+ *     fullLoadThreshold  o limiar da carga cheia, W_a − 0,5
+ *     lognormalDensity   densidade da log-normal, em horas
+ *     lognormalQuantile  F⁻¹, para escolher o topo do eixo
  *
  * Prévia das utilidades
  *     mulberry32             gerador de semente fixa
@@ -38,21 +45,30 @@
  *     curriculumHeights  a altura na DAG de sucessores
  */
 export { approvalShare } from "./approvalShare";
-export { betaQuadrature } from "./betaQuadrature";
-export { betaShape } from "./betaShape";
+export { availabilityShape, fullLoadThreshold } from "./availabilityShape";
 export { boxStats } from "./boxStats";
 export type { BoxStats } from "./boxStats";
 export { CYCLIC, curriculumPeriods } from "./curriculumPeriods";
 export { HEIGHT_CYCLE, curriculumHeights } from "./curriculumHeights";
 export { densityCurve } from "./densityCurve";
 export type { Curve, DensityPoint } from "./densityCurve";
+export { attemptRates } from "./attemptRates";
 export { gradeDensity } from "./gradeDensity";
-export { gradeExponent } from "./gradeExponent";
+export {
+  MAX_THRESHOLD,
+  ZERO_THRESHOLD,
+  gradeSds,
+  gradeShape,
+} from "./gradeShape";
 export { induct } from "./induct";
 export { kernelSmooth } from "./kernelSmooth";
+export { lognormalDensity } from "./lognormalDensity";
+export { lognormalQuantile } from "./lognormalQuantile";
 export { mulberry32 } from "./mulberry32";
 export { niceScale } from "./niceScale";
 export { paddedScale } from "./paddedScale";
 export type { Scale } from "./paddedScale";
 export { quantile } from "./quantile";
 export { relativeUtilitySample } from "./relativeUtilitySample";
+export { splitNormalCdf } from "./splitNormalCdf";
+export { splitNormalMean } from "./splitNormalMean";

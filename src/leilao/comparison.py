@@ -117,7 +117,7 @@ from .equations import (
     weighted_mean,
 )
 from .equations import time_to_graduate as mean_span
-from .grading import draw_aptitudes
+from .grading import GradeShapes, draw_base_quantiles
 from .config import (
     CreditMemory,
     CreditReturnPolicy,
@@ -674,24 +674,26 @@ def sample_grade_distribution(config: SimulationConfig) -> list[float]:
     """O histograma de notas de primeira tentativa, pelo mesmo motivo e do mesmo
     jeito que `sample_distribution`.
 
-    A nota mostrada é a de **primeira tentativa, dificuldade 1 e sem ruído**:
-    `a^1`, ou seja, a própria aptidão. É o retrato da população que o cenário
-    descreve, antes de a disciplina e a sorte entrarem.
+    A nota mostrada é a de **primeira tentativa em disciplina de dificuldade
+    1**, que é a situação que os três parâmetros do perfil descrevem. É o
+    retrato da população que o cenário declara, antes de a grade entrar.
     """
     students = generate_students(config, np.random.default_rng(SAMPLE_SEED))
-    aptitudes = draw_aptitudes(
+    quantiles = draw_base_quantiles(
         students, config.disciplines, config, np.random.default_rng(SAMPLE_SEED)
     )
-    grades = [
-        grade_for_attempt(
-            aptitude=aptitude,
-            difficulty=1.0,
-            relative_utility=1.0,
-            attempt=1,
-            utility_gain=0.0,
-            retake_gain=1.0,
+    shapes = GradeShapes()
+    by_id = {student.id: student for student in students}
+
+    def grade(student_id: str, quantile: float) -> float:
+        mode, left_sd, right_sd = shapes.of(by_id[student_id].performance, 1.0, 1)
+        return grade_for_attempt(
+            quantile=quantile, mode=mode, left_sd=left_sd, right_sd=right_sd
         )
-        for aptitude in aptitudes.values()
+
+    grades = [
+        grade(student_id, quantile)
+        for (student_id, _), quantile in quantiles.items()
     ]
     return grade_histogram(grades)
 

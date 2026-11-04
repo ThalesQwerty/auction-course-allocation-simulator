@@ -1,28 +1,22 @@
 /** A fração da população que alcança a nota mínima.
  *
- *     P(n ≥ n_min) = P( a ≥ (n_min/10)^(1/E) )
+ *     P(n ≥ n_min) = P(latente ≥ n_min − 0,05)
  *
- * A nota é monótona na aptidão, então aprovar é ter aptidão acima de um
- * limiar — e a conta vira uma integral da Beta, feita pela quadratura.
+ * O limiar é meio décimo abaixo de `n_min` porque a nota é arredondada: quem
+ * tira 4,96 recebe 5,0 e aprova. Sai direto da acumulada — a normal dividida
+ * tem forma fechada, e não precisa da quadratura que a Beta pedia.
  *
- * Ela **não sai da curva** de `gradeDensity`: curva para a forma, quadratura
- * para o número. A quadratura integra certo mesmo quando a densidade diverge
- * na ponta, que é onde a curva erraria.
+ * A taxa de aprovação **não** é parâmetro do perfil, de propósito: `n_min` é
+ * regra de cenário, não propriedade do aluno. Ela é lida aqui, como resultado.
  */
-import { betaQuadrature } from "./betaQuadrature";
+import { splitNormalCdf } from "./splitNormalCdf";
 
 export function approvalShare(
-  alpha: number,
-  beta: number,
-  exponent: number,
+  mode: number,
+  leftSd: number,
+  rightSd: number,
   minGrade: number
 ): number {
-  const target = Math.min(1, Math.max(0, minGrade / 10));
-  if (target <= 0) return 1;
-  const floor = Math.pow(target, 1 / exponent);
-  let share = 0;
-  for (const { logA, weight } of betaQuadrature(alpha, beta)) {
-    if (Math.exp(logA) >= floor) share += weight;
-  }
-  return share;
+  if (minGrade <= 0) return 1;
+  return 1 - splitNormalCdf(minGrade - 0.05, mode, leftSd, rightSd);
 }

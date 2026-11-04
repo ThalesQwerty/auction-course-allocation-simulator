@@ -12,7 +12,7 @@ from leilao.behavior import (
     utility_matrix,
 )
 from leilao.config import Discipline, SimulationConfig
-from leilao.grading import grade_for_attempt
+from leilao.equations import attempt_rates
 from leilao.names import FIRST_NAMES, LAST_NAMES, sample_names
 from leilao.population import Student, generate_students
 
@@ -350,23 +350,25 @@ def test_bid_proportions_do_not_depend_on_the_utility_scale():
 
 
 def test_the_retake_lowers_the_demand_of_the_discipline():
-    """A recursada não soma incremento à nota: ela divide a demanda por `t`.
-    Com D = 1, a segunda tentativa é tão fácil quanto uma disciplina de
-    dificuldade 1/2 seria de primeira."""
-    def grade(attempt, difficulty=1.0):
-        return grade_for_attempt(
-            aptitude=0.5,
+    """A recursada entra nos mesmos dois expoentes que a dificuldade, do outro
+    lado da razão. Com D = 1, a segunda tentativa é tão fácil quanto uma
+    disciplina de dificuldade 1/2 seria de primeira — e é por isso que não há
+    botão de ganho por recursada: quem calibra isso é a dificuldade."""
+    def rates(attempt, difficulty=1.0):
+        return attempt_rates(
+            zero_rate=0.05,
+            max_rate=0.05,
             difficulty=difficulty,
-            relative_utility=1.0,
             attempt=attempt,
-            utility_gain=0.0,
-            retake_gain=1.0,
         )
 
-    assert grade(1) < grade(2) < grade(3)
-    assert grade(2) == grade(1, difficulty=0.5)
+    # Recursar derruba a chance de zerar e levanta a de tirar 10.
+    assert rates(1)[0] > rates(2)[0] > rates(3)[0]
+    assert rates(1)[1] < rates(2)[1] < rates(3)[1]
+    assert rates(2) == rates(1, difficulty=0.5)
     with pytest.raises(ValueError):
-        grade(0)
+        rates(0)
+
 
 def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
     """A linha inteira vale 1, e é essa invariante que `metrics.satisfaction`

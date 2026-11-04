@@ -18,7 +18,7 @@ import numpy as np
 from ..availability import draw_availability
 from ..behavior import draw_utilities
 from ..config import SimulationConfig
-from ..grading import draw_aptitudes
+from ..grading import GradeShapes, draw_base_quantiles
 from ..equations import stochastic_perturbations
 from ..population import Student, generate_students
 
@@ -32,8 +32,12 @@ class Draws:
     """
 
     students: list[Student]
-    # a_{a,x} — traço, não sorte: uma aptidão por par, persistente.
-    aptitudes: dict[tuple[str, str], float]
+    # q_{a,x} — traço, não sorte: uma posição por par, persistente. A nota
+    # sai de ler este quantil na distribuição da tentativa.
+    base_quantiles: dict[tuple[str, str], float]
+    # A forma da normal dividida por (perfil, dificuldade, tentativa). Cache
+    # de função pura, não estado: ver `grading.GradeShapes`.
+    grade_shapes: GradeShapes
     # δ_a^(t) — circunstância, não traço: uma por (aluno, período). O que é
     # traço é a média de onde ela sai, que é o perfil.
     availability: dict[tuple[str, int], float]
@@ -87,7 +91,7 @@ def _assign_genomes(
 def prepare(config: SimulationConfig) -> Draws:
     rng = np.random.default_rng(config.seed)
     students = _assign_genomes(generate_students(config, rng), config.genomes)
-    aptitudes = draw_aptitudes(students, config.disciplines, config, rng)
+    base_quantiles = draw_base_quantiles(students, config.disciplines, config, rng)
     availability = draw_availability(students, config, rng)
     utility_rows = draw_utilities(students, config, rng)
 
@@ -105,7 +109,8 @@ def prepare(config: SimulationConfig) -> Draws:
 
     return Draws(
         students=students,
-        aptitudes=aptitudes,
+        base_quantiles=base_quantiles,
+        grade_shapes=GradeShapes(),
         availability=availability,
         utility_rows=utility_rows,
         tie_break_order=tie_break_order,

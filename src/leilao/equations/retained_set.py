@@ -57,13 +57,19 @@ def retained_set(
     free = [name for name in ordered if hours[name] <= 0]
     items = [(name, utilities.get(name, 0.0), hours[name]) for name in ordered if hours[name] > 0]
 
+    # A capacidade da mochila nunca precisa passar da soma dos pesos: acima
+    # disso cabe tudo, e a resposta não muda. O corte importa porque a carga
+    # efetiva **não tem teto** — a disponibilidade é uma log-normal em horas —,
+    # e sem ele a tabela do DP acompanharia o sorteio até estourar a memória.
+    ceiling = min(load, sum(weight for _, _, weight in items))
+
     # dp[capacidade] = (utilidade acumulada, posições escolhidas). A tupla de
     # posições é o critério de desempate, e nunca a chave de ordenação.
-    dp: list[tuple[float, tuple[int, ...]]] = [(0.0, ()) for _ in range(load + 1)]
+    dp: list[tuple[float, tuple[int, ...]]] = [(0.0, ()) for _ in range(ceiling + 1)]
     for index, (_, utility, weight) in enumerate(items):
-        if weight > load:
+        if weight > ceiling:
             continue
-        for capacity in range(load, weight - 1, -1):
+        for capacity in range(ceiling, weight - 1, -1):
             value, chosen = dp[capacity - weight]
             candidate = (value + utility, chosen + (index,))
             current = dp[capacity]
@@ -72,6 +78,6 @@ def retained_set(
             ):
                 dp[capacity] = candidate
 
-    kept = {items[index][0] for index in dp[load][1]}
+    kept = {items[index][0] for index in dp[ceiling][1]}
     kept.update(free)
     return [name for name in ordered if name in kept]

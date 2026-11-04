@@ -577,7 +577,9 @@ def test_entrants_get_every_entry_discipline_without_bidding():
         # Com a matriz de utilidade elegível a linha do calouro soma 1 sobre
         # as disciplinas de entrada, e ele as recebe todas: ψ = 1 exato. ψ
         # passou a ler "fração do que dava para querer e levar".
-        assert 0 < record.satisfaction <= 1
+        # A tolerância é de soma em ponto flutuante: a linha normalizada
+        # fecha em 1, mas somá-la de volta pode passar por um ulp.
+        assert 0 < record.satisfaction <= 1 + 1e-9
 
 
 def test_the_system_charges_the_entrant_an_equal_share_of_the_budget():

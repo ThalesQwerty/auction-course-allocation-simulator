@@ -111,13 +111,13 @@ def test_the_genome_changes_the_outcome():
 
 def test_turning_on_the_genome_does_not_move_the_scenario_draws():
     """Seção 7.3: nenhum sorteio dentro do laço, e o sorteio da evolução sai
-    de um fluxo próprio. Ligar os genes não pode deslocar as utilidades nem as
-    aptidões de ninguém."""
+    de um fluxo próprio. Ligar os genes não pode deslocar as utilidades nem os
+    quantis de desempenho de ninguém."""
     plain = prepare(make_config())
     with_genes = prepare(make_config(genomes=((Behavior(beta_u=2.0),) * 16,) * 2))
 
     assert plain.utility_rows == with_genes.utility_rows
-    assert plain.aptitudes == with_genes.aptitudes
+    assert plain.base_quantiles == with_genes.base_quantiles
     assert plain.availability == with_genes.availability
 
 

@@ -17,8 +17,14 @@ from leilao.behavior import (
     utility_matrix,
 )
 from disciplines import disciplines_from_predecessors
-from leilao.config import Discipline, SimulationConfig
-from leilao.grading import draw_aptitudes, grade_for_attempt
+from leilao.config import DEFAULT_PERFORMANCE, Discipline, SimulationConfig
+from leilao.equations import (
+    attempt_rates,
+    grade_shape,
+    split_normal_cdf,
+    split_normal_mean,
+)
+from leilao.grading import GradeShapes, draw_base_quantiles, grade_for_attempt
 from leilao.population import Student, generate_students
 from leilao.simulation import run_simulation
 
@@ -56,111 +62,130 @@ def _grade_config(disciplines, **overrides):
     )
 
 
-def test_aptitude_is_drawn_once_per_pair_and_persists():
-    """A aptidão é **traço**: um sorteio por (aluno, disciplina), sem dimensão
-    de período — e, desde que o choque por tentativa saiu, o único sorteio que
-    a nota usa."""
+def test_the_base_quantile_is_drawn_once_per_pair_and_persists():
+    """O desempenho base é **traço**: um quantil por (aluno, disciplina), sem
+    dimensão de período — e é o único sorteio que a nota usa. Guardar a posição,
+    e não a nota, é o que deixa a dificuldade mover a distribuição sob o aluno
+    sem mexer em quem ele é."""
     disciplines = [Discipline(f"D{i}", seats=50, hours=60, entry=True) for i in range(1, 41)]
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(120)]
     config = _grade_config(disciplines, periods=3)
 
-    aptitudes = draw_aptitudes(students, disciplines, config, np.random.default_rng(0))
-    assert len(aptitudes) == 120 * 40
-    assert all(0.0 < a < 1.0 for a in aptitudes.values())
-    # Beta(6,5, 3,5) tem média 0,65.
-    assert abs(sum(aptitudes.values()) / len(aptitudes) - 0.65) < 0.01
+    quantiles = draw_base_quantiles(students, disciplines, config, np.random.default_rng(0))
+    assert len(quantiles) == 120 * 40
+    assert all(0.0 <= q <= 1.0 for q in quantiles.values())
+    # Uniforme em (0, 1): a média é 1/2.
+    assert abs(sum(quantiles.values()) / len(quantiles) - 0.5) < 0.01
 
 
-def test_the_grade_is_the_aptitude_when_the_demand_is_standard():
-    """Com dificuldade 1, primeira tentativa e sem ganho por utilidade, o
-    expoente é 1 e a nota **é** a aptidão. É o que lhe dá leitura direta — e
-    vale para *toda* primeira tentativa, porque não há mais choque caindo
-    sobre ela."""
-    for aptitude in (0.2, 0.55, 0.86, 0.99):
-        assert grade_for_attempt(
-            aptitude=aptitude,
-            difficulty=1.0,
-            relative_utility=1.0,
-            attempt=1,
-            utility_gain=0.0,
-            retake_gain=1.0,
-        ) == round(100 * aptitude) / 10
-
-
-def test_difficulty_and_attempt_enter_as_a_ratio():
-    """Com ganho por recursada 1, D e t entram como D/t: dificuldade 2 na
-    **segunda** tentativa equivale a dificuldade 1 na primeira. É o que faz a
-    dificuldade se ler em tentativas."""
-    def grade(difficulty, attempt):
-        return grade_for_attempt(
-            aptitude=0.7,
-            difficulty=difficulty,
-            relative_utility=1.0,
-            attempt=attempt,
-            utility_gain=0.0,
-            retake_gain=1.0,
+def test_the_profile_gives_back_exactly_the_three_quantities_asked():
+    """A conversão é exata: o perfil é editado em nota mais provável, chance de
+    0 e chance de 10, e é isso que a distribuição entrega. É o que torna o
+    parâmetro legível — e o que faz a chance de tirar 10 ser declarada, em vez
+    de consequência escondida da forma."""
+    for mode_grade, zero_rate, max_rate in (
+        (9.0, 0.0005, 0.030),
+        (8.0, 0.0050, 0.008),
+        (6.5, 0.0300, 0.0015),
+    ):
+        mode, left_sd, right_sd = grade_shape(
+            mode_grade=mode_grade, zero_rate=zero_rate, max_rate=max_rate
         )
+        shape = {"mode": mode, "left_sd": left_sd, "right_sd": right_sd}
+        # A moda entra direto: o número digitado é o pico da curva.
+        assert mode == mode_grade
+        # Os limiares são os da nota arredondada, não os da escala.
+        assert abs(split_normal_cdf(value=0.05, **shape) - zero_rate) < 1e-12
+        assert abs(1.0 - split_normal_cdf(value=9.95, **shape) - max_rate) < 1e-12
 
-    assert grade(1.0, 1) == grade(2.0, 2) == grade(3.0, 3)
-    # E não é "dificuldade 2 ≡ dificuldade 1 na segunda tentativa".
-    assert grade(2.0, 1) != grade(1.0, 2)
-    # Mais difícil derruba; recursar levanta.
-    assert grade(2.0, 1) < grade(1.0, 1) < grade(1.0, 2)
 
-
-def test_the_utility_gain_is_off_by_default():
-    """Com ganho por utilidade 0 a utilidade some da fórmula — é o controle que
-    deixa a função de nota neutra entre os mecanismos."""
-    def grade(u_rel, gain):
-        return grade_for_attempt(
-            aptitude=0.7,
-            difficulty=1.0,
-            relative_utility=u_rel,
-            attempt=1,
-            utility_gain=gain,
-            retake_gain=1.0,
+def test_the_mean_is_derived_and_sits_below_the_mode():
+    """A média não é parâmetro: ela sai da forma, e fica **abaixo** da moda
+    porque a cauda esquerda é longa. É o que permite parametrizar pela moda sem
+    faixa inviável — com a média presa, moda alta com poucos dezes não fecharia.
+    """
+    for mode_grade, zero_rate, max_rate in (
+        (9.0, 0.0005, 0.030),
+        (8.0, 0.0050, 0.008),
+        (6.5, 0.0300, 0.0015),
+    ):
+        mode, left_sd, right_sd = grade_shape(
+            mode_grade=mode_grade, zero_rate=zero_rate, max_rate=max_rate
         )
-
-    assert grade(0.1, 0.0) == grade(1.0, 0.0) == grade(5.0, 0.0)
-    # Ligado, querer mais rende mais, e querer pouco é quase reprovação certa.
-    assert grade(0.3, 1.0) < grade(1.0, 1.0) < grade(3.0, 1.0)
-
-
-def test_the_retake_gain_says_what_a_repetition_is_worth():
-    """O ganho por recursada é quanta tentativa efetiva cada repetição
-    acrescenta. Em 1 o denominador é o próprio t; em 0 a repetição não rende
-    nada e a nota não se move — que é o extremo em que o aluno fica preso."""
-    def grade(attempt, gain):
-        return grade_for_attempt(
-            aptitude=0.6,
-            difficulty=1.0,
-            relative_utility=1.0,
-            attempt=attempt,
-            utility_gain=0.0,
-            retake_gain=gain,
-        )
-
-    # Ganho 1: a segunda tentativa divide o expoente por 2, como o D/t.
-    assert grade(2, 1.0) == round(100 * 0.6**0.5) / 10
-    # Meio ganho fica entre não recursar e recursar inteiro.
-    assert grade(1, 0.5) < grade(2, 0.5) < grade(2, 1.0)
-    # Ganho 0: recursar não move a nota, e o aluno reprovado reprova sempre.
-    assert grade(1, 0.0) == grade(2, 0.0) == grade(9, 0.0)
+        mean = split_normal_mean(mode=mode, left_sd=left_sd, right_sd=right_sd)
+        assert mean < mode_grade
+        assert 1.0 < mode_grade - mean < 2.0
 
 
-def test_the_grade_stays_on_the_scale_and_reaches_the_top():
-    """Limitada por construção, sem truncagem: `a^E` nunca sai de (0, 1). E o
-    arredondamento é `round`, não `floor` — com `floor` o teto seria 9,9."""
+def test_every_mode_inside_the_scale_resolves():
+    """Toda trinca existe: a moda é a locação, então qualquer valor dentro da
+    escala tem forma. Só as duas chances podem não caber juntas."""
+    for mode_grade in (0.5, 2.0, 5.0, 8.0, 9.5):
+        grade_shape(mode_grade=mode_grade, zero_rate=0.01, max_rate=0.01)
+
+    with pytest.raises(ValueError, match="escala"):
+        grade_shape(mode_grade=10.0, zero_rate=0.01, max_rate=0.01)
+    with pytest.raises(ValueError, match="somam"):
+        grade_shape(mode_grade=5.0, zero_rate=0.6, max_rate=0.5)
+
+
+def test_difficulty_and_attempt_enter_as_reciprocal_exponents():
+    """As duas chances sobem e descem por expoentes recíprocos, e daí sai a lei
+    de potência da prática: **dificuldade 2 na segunda tentativa reproduz
+    dificuldade 1 na primeira**, exatamente."""
+    base = {"zero_rate": 0.005, "max_rate": 0.008}
+
+    assert attempt_rates(**base, difficulty=1.0, attempt=1) == attempt_rates(
+        **base, difficulty=2.0, attempt=2
+    )
+    assert attempt_rates(**base, difficulty=3.0, attempt=2) == attempt_rates(
+        **base, difficulty=1.5, attempt=1
+    )
+
+    # Mais difícil: zera mais, tira 10 menos. Recursar faz o contrário.
+    harder_zero, harder_max = attempt_rates(**base, difficulty=2.0, attempt=1)
+    again_zero, again_max = attempt_rates(**base, difficulty=1.0, attempt=2)
+    assert harder_zero > base["zero_rate"] > again_zero
+    assert harder_max < base["max_rate"] < again_max
+
+
+def test_the_transformation_holds_the_mode_not_the_mean():
+    """A dificuldade move a distribuição segurando a **moda**. Se segurasse a
+    média, a moda sairia de [0, 10] assim que a dificuldade passasse de 2 — e
+    deixaria de existir nota que a realizasse. Segurando a moda, a média cai
+    com a dificuldade, que é o comportamento que se quer."""
+    shapes = GradeShapes()
+    profile = DEFAULT_PERFORMANCE[1]
+    base_mode = shapes.mode(profile)
+
+    means = []
+    for difficulty in (0.5, 1.0, 1.5, 2.0, 3.0):
+        mode, left_sd, right_sd = shapes.of(profile, difficulty, 1)
+        assert mode == base_mode
+        assert 0.0 <= mode <= 10.0
+        means.append(split_normal_mean(mode=mode, left_sd=left_sd, right_sd=right_sd))
+
+    assert means == sorted(means, reverse=True)
+
+
+def test_the_grade_stays_on_the_scale_and_reaches_both_ends():
+    """O latente é ilimitado; o que limita é o instrumento. Arredondar em
+    décimos e clipar em [0, 10] é o que torna 0 e 10 **alcançáveis** — e com a
+    frequência que o perfil declarou, não com a de uma cauda contínua, que é a
+    ordem de 10⁻⁷ e nunca sai."""
+    mode, left_sd, right_sd = grade_shape(
+        mode_grade=8.0, zero_rate=0.0050, max_rate=0.008
+    )
+    shape = {"mode": mode, "left_sd": left_sd, "right_sd": right_sd}
     grades = [
-        grade_for_attempt(
-            aptitude=a, difficulty=d, relative_utility=1.0, attempt=1,
-            utility_gain=0.0, retake_gain=1.0,
-        )
-        for a in (0.01, 0.3, 0.7, 0.999)
-        for d in (0.5, 1.0, 4.0)
+        grade_for_attempt(quantile=q / 20_000, **shape) for q in range(1, 20_000)
     ]
     assert all(0.0 <= g <= 10.0 for g in grades)
+    assert min(grades) == 0.0
     assert max(grades) == 10.0
+    # E a frequência bate com o que o perfil pediu.
+    assert abs(sum(g >= 10.0 for g in grades) / len(grades) - 0.008) < 0.002
+    assert abs(sum(g <= 0.0 for g in grades) / len(grades) - 0.0050) < 0.002
 
 
 # --- a matriz de utilidades ------------------------------------------------
@@ -561,3 +586,46 @@ def test_negative_attractiveness_is_a_discipline_below_the_average():
     rows = _rows_for(_pair(-3.0))
     assert all(row["X"] > 0 for row in rows.values())
     assert all(row["X"] < row["Y"] for row in rows.values())
+
+
+def test_the_performance_profile_does_not_move_anyone_elses_draw():
+    """Seção 7.3: a seed define **todos** os sorteios, e mexer num parâmetro
+    não pode deslocar o fluxo do gerador para os outros.
+
+    A Beta da aptidão não garantia isso: ela é gerada por rejeição e consome um
+    número **variável** de uniformes por amostra, de modo que recalibrar um
+    perfil mudava a posição do fluxo e, com ela, o sorteio de todo mundo que
+    vinha depois. O quantil consome exatamente um valor por célula, e por isso
+    o desenho da matriz não depende de perfil nenhum.
+    """
+    disciplines = [Discipline(f"D{i}", seats=50, hours=60, entry=True) for i in range(1, 6)]
+    students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(50)]
+    config = _grade_config(disciplines, periods=2)
+
+    first = draw_base_quantiles(students, disciplines, config, np.random.default_rng(0))
+    harder = [
+        Student(id=s.id, name=s.name, credits=10,
+                performance=DEFAULT_PERFORMANCE[0])
+        for s in students
+    ]
+    second = draw_base_quantiles(harder, disciplines, config, np.random.default_rng(0))
+
+    assert first == second
+
+
+def test_the_same_seed_gives_the_same_grades():
+    """Determinismo de ponta a ponta: a mesma seed devolve a mesma simulação,
+    nota por nota. Nada é sorteado dentro do laço."""
+    config = make_config(seed=11)
+    first, second = run_simulation(config), run_simulation(make_config(seed=11))
+
+    def grades(result):
+        return [
+            (summary.id, period.period, record.discipline, record.grade)
+            for summary, history in zip(result.students, result.histories)
+            for period in history.periods
+            for record in period.requests
+        ]
+
+    assert grades(first) == grades(second)
+    assert grades(first) != grades(run_simulation(make_config(seed=12)))
