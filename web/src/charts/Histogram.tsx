@@ -40,7 +40,7 @@ const SERIES = "fração";
  * todas as divisas **distintas**.
  *
  * Em [0, 10] isso dá zero; em [0, 1], uma; num eixo que vai até 0,043 — a
- * fração de utilidade de uma grade de 60 disciplinas — dá três, que é o que
+ * fração de interesse de uma grade de 60 disciplinas — dá três, que é o que
  * impede a régua de sair "0 0 0 0". Arredondar o rótulo é normal numa régua;
  * repetir dois rótulos diferentes não é. */
 function digitsFor(edges: number[]): number {
@@ -65,8 +65,8 @@ export function Histogram({
   /** Uma fração por faixa, em ordem, somando 1. */
   fractions: number[];
   format?: (value: number) => string;
-  /** O intervalo que as faixas cobrem, para rotular as divisas. Utilidade
-   * reescalada por linha vai de 0 a 1; nota vai de 0 a 10. */
+  /** O intervalo que as faixas cobrem, para rotular as divisas. Interesse
+   * reescalado por linha vai de 0 a 1; nota vai de 0 a 10. */
   domain?: [number, number];
   /** Uma cor por faixa, quando a cor diz um **estado** e não a identidade da
    * série. Ausente, todas saem na matiz única. */

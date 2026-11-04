@@ -1,19 +1,19 @@
-"""A redistribuição da utilidade do que o aluno não pode cursar agora."""
+"""A utilidade: o interesse redistribuído sobre o que o aluno pode cursar agora."""
 from __future__ import annotations
 
 import pytest
 
-from leilao.equations import approval_index, eligible_utility, fitness, supply_index
+from leilao.equations import approval_index, fitness, supply_index, utility
 
 # Cadeia linear: C depende de B, que depende de A.
 CHAIN = {"A": (), "B": ("A",), "C": ("B",)}
 
 
 def test_a_massa_total_se_conserva():
-    row = {"A": 0.2, "B": 0.3, "C": 0.5}
+    interest = {"A": 0.2, "B": 0.3, "C": 0.5}
 
-    result = eligible_utility(
-        row=row, eligible=["A"], approved=set(), prerequisites=CHAIN
+    result = utility(
+        interest=interest, eligible=["A"], approved=set(), prerequisites=CHAIN
     )
 
     assert result == {"A": pytest.approx(1.0)}
@@ -22,10 +22,10 @@ def test_a_massa_total_se_conserva():
 def test_a_cadeia_inteira_desce_ate_a_porteira():
     """Nenhuma órfã: C não tem pré-requisito elegível *direto*, e mesmo assim
     encontra A subindo a cadeia. É o que a cascata fazia em vários passos."""
-    row = {"A": 0.1, "B": 0.4, "C": 0.5}
+    interest = {"A": 0.1, "B": 0.4, "C": 0.5}
 
-    result = eligible_utility(
-        row=row, eligible=["A"], approved=set(), prerequisites=CHAIN
+    result = utility(
+        interest=interest, eligible=["A"], approved=set(), prerequisites=CHAIN
     )
 
     assert result["A"] == pytest.approx(1.0)
@@ -33,25 +33,25 @@ def test_a_cadeia_inteira_desce_ate_a_porteira():
 
 def test_pre_requisito_ja_aprovado_nao_recebe():
     """Se C exige A e B e o aluno já passou em A, C trava só por B. Mandar
-    utilidade para A gastaria o sinal onde ele não tem efeito."""
+    interesse para A gastaria o sinal onde ele não tem efeito."""
     prerequisites = {"A": (), "B": (), "C": ("A", "B")}
-    row = {"A": 0.1, "B": 0.3, "C": 0.6}
+    interest = {"A": 0.1, "B": 0.3, "C": 0.6}
 
-    result = eligible_utility(
-        row=row, eligible=["B"], approved={"A"}, prerequisites=prerequisites
+    result = utility(
+        interest=interest, eligible=["B"], approved={"A"}, prerequisites=prerequisites
     )
 
-    # B fica com a própria utilidade, mais a de C inteira (é a única que
-    # trava), mais a de A, que já saiu da grade.
+    # B fica com o próprio interesse, mais o de C inteiro (é a única que
+    # trava), mais o de A, que já saiu da grade.
     assert result == {"B": pytest.approx(1.0)}
 
 
 def test_ja_aprovada_divide_entre_todas_as_elegiveis():
     prerequisites = {"A": (), "B": (), "C": ()}
-    row = {"A": 0.4, "B": 0.2, "C": 0.4}
+    interest = {"A": 0.4, "B": 0.2, "C": 0.4}
 
-    result = eligible_utility(
-        row=row, eligible=["B", "C"], approved={"A"}, prerequisites=prerequisites
+    result = utility(
+        interest=interest, eligible=["B", "C"], approved={"A"}, prerequisites=prerequisites
     )
 
     assert result["B"] == pytest.approx(0.2 + 0.2)
@@ -67,10 +67,10 @@ def test_divide_igual_entre_os_ancestrais_elegiveis_da_cadeia():
         "B1": ("A1",), "B2": ("A2", "A3", "A4"),
         "C": ("B1", "B2"),
     }
-    row = {"A1": 0.0, "A2": 0.0, "A3": 0.0, "A4": 0.0, "B1": 0.0, "B2": 0.0, "C": 1.0}
+    interest = {"A1": 0.0, "A2": 0.0, "A3": 0.0, "A4": 0.0, "B1": 0.0, "B2": 0.0, "C": 1.0}
 
-    result = eligible_utility(
-        row=row,
+    result = utility(
+        interest=interest,
         eligible=["A1", "A2", "A3", "A4"],
         approved=set(),
         prerequisites=prerequisites,
@@ -83,20 +83,20 @@ def test_a_ordem_das_chaves_e_a_da_grade():
     """É dela que as duas mochilas tiram o desempate: reordenar muda
     resultado."""
     prerequisites = {"A": (), "B": (), "C": ()}
-    row = {"A": 0.3, "B": 0.3, "C": 0.4}
+    interest = {"A": 0.3, "B": 0.3, "C": 0.4}
 
-    result = eligible_utility(
-        row=row, eligible=["C", "A"], approved={"B"}, prerequisites=prerequisites
+    result = utility(
+        interest=interest, eligible=["C", "A"], approved={"B"}, prerequisites=prerequisites
     )
 
     assert list(result) == ["C", "A"]
 
 
 def test_sem_elegivel_nao_ha_para_onde_redistribuir():
-    row = {"A": 1.0}
+    interest = {"A": 1.0}
 
-    assert eligible_utility(
-        row=row, eligible=[], approved={"A"}, prerequisites={"A": ()}
+    assert utility(
+        interest=interest, eligible=[], approved={"A"}, prerequisites={"A": ()}
     ) == {}
 
 

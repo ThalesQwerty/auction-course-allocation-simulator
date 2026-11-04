@@ -114,10 +114,10 @@ class DisciplineIn(BaseModel):
     attractiveness: float = Field(
         default=0.0,
         description=(
-            "A_x — atratividade, a média do expoente da log-normal da utilidade: 0 é "
-            "a disciplina média, negativo gravita abaixo dela e positivo acima, e em "
+            "A_x — atratividade, o quanto a média do expoente da log-normal do "
+            "interesse se desloca de `interest_mean`: 0 é a disciplina média, negativo gravita abaixo dela e positivo acima, e em "
             "múltiplos da média o fator é e^A. É a parte do gosto comum a toda a "
-            "população, enquanto `utility_sigma` é a privada de cada aluno — mesma "
+            "população, enquanto `interest_sigma` é a privada de cada aluno — mesma "
             "unidade, e a razão entre as duas é a correlação de preferência entre "
             "alunos. Ordena dentro de uma mesma altura da grade, não entre alturas."
         ),
@@ -276,25 +276,35 @@ class ScenarioIn(BaseModel):
             "aluno tem para o período, sorteada a cada período"
         ),
     )
-    utility_stability: float = Field(
+    interest_stability: float = Field(
         default=0.5,
         ge=0,
         le=1,
         description=(
-            "quanto do gosto do aluno é permanente, de 0 a 1. 0 resorteia a "
-            "preferência inteira a cada período; 1 congela. Ortogonal ao sigma: "
+            "quanto do interesse do aluno é permanente, de 0 a 1. 0 resorteia o "
+            "interesse inteiro a cada período; 1 congela. Ortogonal ao sigma: "
             "a divisão preserva a dispersão de cada período"
         ),
     )
-    utility_sigma: float = Field(
-        default=0.25,
+    interest_mean: float = Field(
+        default=1.0,
+        allow_inf_nan=False,
+        description=(
+            "μ — média do logaritmo da log-normal de onde sai o interesse. Não "
+            "mexe em alocação nenhuma: multiplica a linha por e^μ, e a "
+            "normalização desfaz o fator. Existe para a prévia da log-normal "
+            "fonte se ler em escala confortável. A atratividade soma-se a ela."
+        ),
+    )
+    interest_sigma: float = Field(
+        default=1.0,
         gt=0,
         description=(
-            "desvio da log-normal de onde saem os valores preliminares da matriz de "
-            "utilidades. Controla o quanto o aluno diferencia as disciplinas: "
-            "**grande concentra** (quer uma ou duas e despreza o resto), pequeno "
-            "achata. A média do logaritmo é fixa em 0 porque some na normalização. "
-            "A faixa útil cabe entre ~0,25 e ~3."
+            "σ — desvio do logaritmo da log-normal de onde sai o interesse — o "
+            "sorteio que, normalizado sobre a grade e visto pelo histórico do "
+            "aluno, vira a utilidade. Controla o quanto o aluno diferencia as "
+            "disciplinas: **grande concentra** (quer uma ou duas e despreza o "
+            "resto), pequeno achata. A faixa útil cabe entre ~0,25 e ~3."
         ),
     )
     max_hours: int = Field(
@@ -406,7 +416,7 @@ class GenomeLevelsIn(BaseModel):
     5 · 3 · 3 · 4 = 180.
 
     Os níveis de `alpha_u` são o fundo de [0, 1] de propósito. Como as
-    utilidades elegíveis somam 1, no máximo `⌊1/α_u⌋` disciplinas passam do
+    utilidades somam 1, no máximo `⌊1/α_u⌋` disciplinas passam do
     corte, e a maior participação de uma linha de n disciplinas vale em média
     `H_n/n` — cerca de 0,31 com n = 9. Níveis redondos como ⅔ e 1 não seriam
     estratégias, seriam desligamentos.

@@ -12,8 +12,8 @@ import pytest
 from leilao.behavior import (
     DISTRIBUTION_BINS,
     UNDERFLOW_GUARD,
-    draw_utilities,
-    utility_distribution,
+    draw_interest,
+    interest_distribution,
     utility_matrix,
 )
 from disciplines import disciplines_from_predecessors
@@ -188,7 +188,7 @@ def test_the_grade_stays_on_the_scale_and_reaches_both_ends():
     assert abs(sum(g <= 0.0 for g in grades) / len(grades) - 0.0050) < 0.002
 
 
-# --- a matriz de utilidades ------------------------------------------------
+# --- o interesse e a utilidade --------------------------------------------
 
 
 def test_the_drawn_row_sums_to_one_over_the_whole_grade():
@@ -196,7 +196,7 @@ def test_the_drawn_row_sums_to_one_over_the_whole_grade():
     sobre a grade inteira — antes de qualquer recorte por elegibilidade."""
     config = make_config()
     students = generate_students(config, np.random.default_rng(3))
-    rows = draw_utilities(students, config, np.random.default_rng(3))
+    rows = draw_interest(students, config, np.random.default_rng(3))
 
     # Uma linha por (aluno, período).
     assert set(rows) == {
@@ -228,16 +228,16 @@ def test_a_wider_sigma_makes_the_student_differentiate_more():
     students = generate_students(make_config(**flat_kw), np.random.default_rng(2))
 
     def spread(sigma: float) -> float:
-        config = make_config(**flat_kw, utility_sigma=sigma)
-        rows = draw_utilities(students, config, np.random.default_rng(2))
+        config = make_config(**flat_kw, interest_sigma=sigma)
+        rows = draw_interest(students, config, np.random.default_rng(2))
         ratios = [max(row.values()) / min(row.values()) for row in rows.values()]
         return sum(ratios) / len(ratios)
 
     assert spread(0.25) < spread(1.0) < spread(3.0)
     # Sigma minúsculo é indiferença: a linha converge para 1/|B|.
-    flat = draw_utilities(
+    flat = draw_interest(
         students,
-        make_config(**flat_kw, utility_sigma=1e-4),
+        make_config(**flat_kw, interest_sigma=1e-4),
         np.random.default_rng(2),
     )
     assert all(
@@ -247,6 +247,25 @@ def test_a_wider_sigma_makes_the_student_differentiate_more():
     )
 
 
+def test_the_mean_is_only_scale():
+    """μ multiplica a linha inteira por e^μ, e a normalização desfaz o fator:
+    o interesse normalizado é o mesmo para qualquer μ. Ele existe para a
+    prévia da interface, e se um dia passar a mexer na alocação, é bug."""
+    config = make_config()
+    students = generate_students(config, np.random.default_rng(14))
+
+    def rows(mean: float) -> dict:
+        at = make_config(interest_mean=mean)
+        return draw_interest(students, at, np.random.default_rng(14))
+
+    reference = rows(0.0)
+    for mean in (-3.0, 1.0, 5.0):
+        shifted = rows(mean)
+        assert shifted.keys() == reference.keys()
+        for key, row in shifted.items():
+            assert row == pytest.approx(reference[key], rel=1e-12)
+
+
 def test_the_draw_is_always_positive():
     """A log-normal só chegaria a zero com expoente abaixo de -745, o que não
     acontece em sigma nenhum que faça sentido — mas a invariante importa: zero
@@ -254,9 +273,9 @@ def test_the_draw_is_always_positive():
     utilidade nula tiraria a disciplina do conjunto de escolha e o aluno nunca a
     cursaria, nem quando fosse a única disponível."""
     for sigma in (0.1, 1.0, 10.0):
-        config = make_config(utility_sigma=sigma)
+        config = make_config(interest_sigma=sigma)
         students = generate_students(config, np.random.default_rng(11))
-        rows = draw_utilities(students, config, np.random.default_rng(11))
+        rows = draw_interest(students, config, np.random.default_rng(11))
         assert rows
         for row in rows.values():
             assert min(row.values()) > 0
@@ -267,9 +286,9 @@ def test_the_guard_never_fires_in_practice():
     """A guarda é insurance, não mecanismo: em sigma nenhum razoável ela encosta
     no sorteio. (A Gamma que havia antes precisava dela de verdade, e por isso a
     faixa de parâmetro utilizável era limitada.)"""
-    config = make_config(utility_sigma=3.0)
+    config = make_config(interest_sigma=3.0)
     students = generate_students(config, np.random.default_rng(12))
-    for row in draw_utilities(students, config, np.random.default_rng(12)).values():
+    for row in draw_interest(students, config, np.random.default_rng(12)).values():
         assert all(value > UNDERFLOW_GUARD for value in row.values())
 
 
@@ -287,11 +306,11 @@ def test_the_distribution_histogram_describes_one_students_row():
         Discipline("D", seats=20, hours=60, entry=True),
     ]
     flat_kw = dict(disciplines=flat_grade, max_hours=240)
-    config = make_config(**flat_kw, utility_sigma=1.0)
+    config = make_config(**flat_kw, interest_sigma=1.0)
     students = generate_students(config, np.random.default_rng(13))
-    rows = draw_utilities(students, config, np.random.default_rng(13))
+    rows = draw_interest(students, config, np.random.default_rng(13))
 
-    fractions = utility_distribution(rows)
+    fractions = interest_distribution(rows)
     assert len(fractions) == DISTRIBUTION_BINS
     assert sum(fractions) == pytest.approx(1.0)
     assert all(value >= 0 for value in fractions)
@@ -301,9 +320,9 @@ def test_the_distribution_histogram_describes_one_students_row():
     # Sigma maior concentra: mais massa na primeira faixa, porque o máximo da
     # linha se afasta do resto.
     def first_bin(sigma: float) -> float:
-        at = make_config(**flat_kw, utility_sigma=sigma)
-        return utility_distribution(
-            draw_utilities(generate_students(at, np.random.default_rng(13)), at, np.random.default_rng(13))
+        at = make_config(**flat_kw, interest_sigma=sigma)
+        return interest_distribution(
+            draw_interest(generate_students(at, np.random.default_rng(13)), at, np.random.default_rng(13))
         )[0]
 
     assert first_bin(0.25) < first_bin(1.0) < first_bin(3.0)
@@ -315,34 +334,34 @@ def test_only_the_zeros_change_between_periods():
     de quem está."""
     config = make_config()
     students = generate_students(config, np.random.default_rng(4))
-    row = draw_utilities(students, config, np.random.default_rng(4))[(students[0].id, 1)]
+    row = draw_interest(students, config, np.random.default_rng(4))[(students[0].id, 1)]
 
     novice = Student(id="x", name="X", credits=10)
     veteran = Student(id="x", name="X", credits=10, grades={"D1": 9.0})
-    first = utility_matrix(row=row, student=novice, config=config)
-    second = utility_matrix(row=row, student=veteran, config=config)
+    first = utility_matrix(interest=row, student=novice, config=config)
+    second = utility_matrix(interest=row, student=veteran, config=config)
 
     # D1 sai (aprovada) e D3 entra (pré-requisito cumprido); D4 continua fora,
     # porque depende de D2.
     assert set(first) == {"D1", "D2"}
     assert set(second) == {"D2", "D3"}
-    # A linha sorteada é a mesma nos dois recortes — o que muda é para onde a
-    # utilidade do inelegível desce, e isso é função do conjunto elegível.
+    # O interesse é o mesmo nas duas utilidades — o que muda é para onde o
+    # interesse do inelegível desce, e isso é função do conjunto elegível.
     assert sum(first.values()) == pytest.approx(sum(second.values()))
     assert first["D2"] >= row["D2"] and second["D2"] >= row["D2"]
 
 
 def test_the_eligible_sum_is_always_one():
-    """A redistribuição conserva a massa da linha, então o recorte elegível
+    """A redistribuição conserva a massa do interesse, então a utilidade
     soma 1 em qualquer estágio — substitui o U_a^(t) da eq. (43), que era
     menor que 1 sempre que algo estava fora do alcance."""
     config = make_config()
     students = generate_students(config, np.random.default_rng(6))
-    row = draw_utilities(students, config, np.random.default_rng(6))[(students[0].id, 1)]
+    row = draw_interest(students, config, np.random.default_rng(6))[(students[0].id, 1)]
 
     novice = Student(id="x", name="X", credits=10)
-    partial = sum(utility_matrix(row=row, student=novice, config=config).values())
-    # A redistribuição conserva a massa: o recorte elegível soma 1 em qualquer
+    partial = sum(utility_matrix(interest=row, student=novice, config=config).values())
+    # A redistribuição conserva a massa: a utilidade soma 1 em qualquer
     # estágio do aluno, e é isso que põe `alpha_u` na mesma unidade.
     assert partial == pytest.approx(1.0)
 
@@ -352,10 +371,10 @@ def test_the_eligible_sum_is_always_one():
         students_per_period=8,
         max_hours=WORKLOAD,
     )
-    flat_row = draw_utilities(
+    flat_row = draw_interest(
         generate_students(flat, np.random.default_rng(6)), flat, np.random.default_rng(6)
     )[("a00000", 1)]
-    whole = utility_matrix(row=flat_row, student=Student("x", "X", 10), config=flat)
+    whole = utility_matrix(interest=flat_row, student=Student("x", "X", 10), config=flat)
     assert sum(whole.values()) == pytest.approx(1.0)
 
 
@@ -438,11 +457,11 @@ def _rows(stability, periods=8, **overrides):
         disciplines=disciplines,
         periods=periods,
         max_hours=20 * 60,
-        utility_stability=stability,
+        interest_stability=stability,
         **overrides,
     )
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(400)]
-    return config, draw_utilities(students, config, np.random.default_rng(3))
+    return config, draw_interest(students, config, np.random.default_rng(3))
 
 
 def test_stability_does_not_touch_the_dispersion_of_a_period():
@@ -501,10 +520,10 @@ def test_a_discipline_can_carry_its_own_stability():
         disciplines=disciplines,
         periods=4,
         max_hours=20 * 60,
-        utility_stability=0.0,
+        interest_stability=0.0,
     )
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(400)]
-    rows = draw_utilities(students, config, np.random.default_rng(7))
+    rows = draw_interest(students, config, np.random.default_rng(7))
     ids = sorted({sid for sid, _ in rows})
 
     def lag_correlation(prefix: str) -> float:
@@ -530,7 +549,7 @@ def _rows_for(disciplines, **overrides):
         **overrides,
     )
     rng = np.random.default_rng(config.seed)
-    return draw_utilities(generate_students(config, rng), config, rng)
+    return draw_interest(generate_students(config, rng), config, rng)
 
 
 def _pair(attractiveness):
@@ -582,8 +601,11 @@ def test_negative_attractiveness_is_a_discipline_below_the_average():
     """O eixo é ℝ inteiro: a atratividade é a média de um expoente, não um
     multiplicador, então negativo não é valor inválido — é a disciplina que a
     população quer menos que a média, e a linha continua estritamente
-    positiva porque e^A nunca chega a zero."""
-    rows = _rows_for(_pair(-3.0))
+    positiva porque e^A nunca chega a zero.
+
+    σ fica em 0,25: o que se testa é o sinal de A, e com σ = 1 a distância de
+    3 no log ainda perde para o ruído em ~2% das linhas."""
+    rows = _rows_for(_pair(-3.0), interest_sigma=0.25)
     assert all(row["X"] > 0 for row in rows.values())
     assert all(row["X"] < row["Y"] for row in rows.values())
 

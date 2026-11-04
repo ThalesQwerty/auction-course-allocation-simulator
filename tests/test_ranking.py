@@ -274,7 +274,7 @@ def test_the_comparison_ignores_the_scenario_seed():
     first = run_comparison(make_config(seed=1), runs=2)
     second = run_comparison(make_config(seed=999), runs=2)
     assert first == second
-    assert first.utility_distribution and first.grade_distribution
+    assert first.interest_distribution and first.grade_distribution
 
 
 def test_the_comparison_carries_both_scenario_distributions():
@@ -282,15 +282,15 @@ def test_the_comparison_carries_both_scenario_distributions():
     de onde vieram os números. Somam 1, e as notas têm uma faixa a mais que as
     utilidades porque a escala delas é [0, 10]."""
     result = run_comparison(make_config(), runs=2)
-    assert len(result.utility_distribution) == DISTRIBUTION_BINS
+    assert len(result.interest_distribution) == DISTRIBUTION_BINS
     assert len(result.grade_distribution) == GRADE_BINS
-    assert sum(result.utility_distribution) == pytest.approx(1.0)
+    assert sum(result.interest_distribution) == pytest.approx(1.0)
     assert sum(result.grade_distribution) == pytest.approx(1.0)
 
     # A das notas não depende de sigma; a das utilidades sim.
-    wider = run_comparison(make_config(utility_sigma=3.0), runs=2)
+    wider = run_comparison(make_config(interest_sigma=3.0), runs=2)
     assert wider.grade_distribution == result.grade_distribution
-    assert wider.utility_distribution != result.utility_distribution
+    assert wider.interest_distribution != result.interest_distribution
 
 
 def test_the_comparison_rejects_a_run_count_out_of_range():

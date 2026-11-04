@@ -23,7 +23,7 @@ vale para a geração 1 e só para ela; das demais sai trajetória, não desenho
 OS NÍVEIS DE α_u SÃO O FUNDO DE [0, 1]
 ---------------------------------------
 
-Como as utilidades elegíveis de uma linha somam 1, `α_u` carrega um teto
+Como as utilidades de uma linha somam 1, `α_u` carrega um teto
 embutido: no máximo `⌊1/α_u⌋` disciplinas passam do corte. E o que decide se
 *alguma* passa é a maior participação da linha — numa divisão aleatória de 1
 em n partes, a maior vale em média `H_n/n`, cerca de 0,31 para n = 9.

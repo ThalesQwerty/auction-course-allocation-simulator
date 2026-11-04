@@ -1,7 +1,7 @@
 """Configuração de um cenário de simulação (Seção 7.2 do anteprojeto).
 
 O usuário descreve o cenário em dois blocos — parâmetros gerais e disciplinas —
-e a simulação deriva o resto (alunos, nomes, matriz de utilidades, notas)
+e a simulação deriva o resto (alunos, nomes, interesse, notas)
 aleatoriamente a partir da `seed`.
 
 **Os perfis de aluno descrevem o comportamento fora do mecanismo.** São dois
@@ -14,7 +14,7 @@ das Betas dos grupos que lhe couberam.
 O perfil é **traço imutável**: não evolui, não responde a sinal, não entra no
 genoma e o aluno não o conhece. Ele age *depois* da vaga — se o aluno vai bem
 na disciplina ou se a larga. A estratégia (`equations.decision_score`) age
-*dentro* do mecanismo, ao pedir. Não há eixo de perfil para utilidade: o β do
+*dentro* do mecanismo, ao pedir. Não há eixo de perfil para interesse: o β do
 score já é o parâmetro de o quanto o aluno diferencia as disciplinas, e dois
 botões para a mesma coisa tornariam qualquer resultado ambíguo de ler.
 
@@ -33,6 +33,7 @@ aresta inversa: quem ninguém desbloqueia é 1º período.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -295,10 +296,10 @@ class Discipline:
     # vez de girar, e é essa sincronia (e não a persistência em si) que trava a
     # fila. Por aluno ou por célula o efeito se dilui.
     stability: float | None = None
-    # A_x — a **atratividade**, que é a **média do expoente** da log-normal da
-    # utilidade preliminar: em 0 o valor gravita em torno de 1, negativo o puxa
-    # para dentro de (0, 1) e positivo o leva acima de 1. Em múltiplos da
-    # disciplina média o fator é e^A, de modo que A = 1 é ≈ 2,72×.
+    # A_x — a **atratividade**, o quanto a **média do expoente** da log-normal
+    # do interesse se desloca de μ (`interest_mean`): em 0 a disciplina é a
+    # média, negativo a puxa para baixo e positivo a leva acima. Em múltiplos
+    # da disciplina média o fator é e^A, de modo que A = 1 é ≈ 2,72×.
     #
     # É a componente do gosto **comum a toda a população**, enquanto sigma é a
     # privada de cada aluno, e as duas estão na mesma unidade — por isso A/σ se
@@ -431,24 +432,30 @@ class SimulationConfig:
     # preferência que não persiste desfaz a fila sozinha —, então ele continua
     # sendo o contraste a rodar. Como esta é a hipótese mais exposta que
     # resta, qualquer resultado em conclusões deve vir com o valor declarado.
-    utility_stability: float = 0.5
-    # **Utilidades** (u, eqs. 41-43): o desvio da log-normal de onde saem os
-    # valores preliminares, antes da normalização de `behavior.draw_utilities`.
-    # É o único parâmetro: a média do logaritmo é fixa em 0 porque some na
-    # normalização (deslocá-la multiplica a linha inteira por uma constante).
+    interest_stability: float = 0.5
+    # **Interesse** (u, eq. 41): a média (μ) e o desvio (σ) do logaritmo da
+    # log-normal de onde ele sai, antes da normalização de
+    # `behavior.draw_interest`. A utilidade não tem parâmetro próprio: é o
+    # interesse visto pelo histórico do aluno.
     #
-    # sigma diz o quanto o aluno diferencia uma disciplina da outra — **grande
+    # **μ não mexe em alocação nenhuma.** Somá-lo ao log multiplica a linha
+    # inteira por e^μ, e a normalização desfaz o fator: o interesse
+    # normalizado, a utilidade, o lance e o histograma saem idênticos para
+    # qualquer μ. Ele existe para a **prévia** da interface, que desenha a
+    # log-normal fonte antes de normalizar — em μ = 0 a massa se espreme entre
+    # 0 e 1 e a curva não se lê. A atratividade A_x de cada disciplina soma-se
+    # a ele: a média do log de x é μ + A_x.
+    #
+    # σ diz o quanto o aluno diferencia uma disciplina da outra — **grande
     # concentra, pequeno achata**, ao contrário da forma da Gamma que havia
-    # antes. O coeficiente de variação é sqrt(exp(sigma^2) - 1), que cresce
+    # antes. O coeficiente de variação é sqrt(exp(σ²) − 1), que cresce
     # depressa: a faixa útil inteira cabe entre ~0,25 e ~3.
     #
-    # Depois do sorteio, `draw_utilities` impõe a invariante de altura:
-    # s_x > s_y ⇒ u_x > u_y. O sigma continua mandando *dentro* da mesma altura.
-    #
-    # **Padrão 0,25**, o pé da faixa: o aluno é quase indiferente entre as
-    # disciplinas de uma mesma altura, e quem ordena a linha dele é sobretudo
-    # a invariante.
-    utility_sigma: float = 0.25
+    # **Padrões μ = 1 e σ = 1**: a moda da fonte cai em e^{μ−σ²} = 1, e o
+    # coeficiente de variação fica em ~1,3 — o aluno distingue as disciplinas
+    # sem desprezar quase todas.
+    interest_mean: float = 1.0
+    interest_sigma: float = 1.0
     # W_a — carga horária máxima por período, eq. (4). Igual para todos.
     max_hours: int = DEFAULT_MAX_HOURS
     rounds: int = 1  # |R| — rodadas de alocação por período
@@ -555,10 +562,12 @@ class SimulationConfig:
                 raise ValueError(
                     f"perfil de disponibilidade '{perfil.name}': {erro}"
                 ) from erro
-        if not 0.0 <= self.utility_stability <= 1.0:
-            raise ValueError("a estabilidade da preferência deve estar em [0, 1]")
-        if self.utility_sigma <= 0:
-            raise ValueError("desvio da utilidade (sigma) deve ser > 0")
+        if not 0.0 <= self.interest_stability <= 1.0:
+            raise ValueError("a estabilidade do interesse deve estar em [0, 1]")
+        if self.interest_sigma <= 0:
+            raise ValueError("desvio do interesse (sigma) deve ser > 0")
+        if not math.isfinite(self.interest_mean):
+            raise ValueError("a média do interesse deve ser um número finito")
 
     def _check_curriculum(self) -> None:
         names = [d.name for d in self.disciplines]

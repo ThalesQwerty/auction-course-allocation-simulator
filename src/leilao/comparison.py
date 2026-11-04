@@ -8,7 +8,7 @@ existe para fazer as duas valerem de uma vez:
    parâmetros iniciais, tais como alunos, cursos, períodos, disciplinas,
    utilidades, notas, entre outros." Como tudo isso é derivado da seed, basta
    rodar o mesmo cenário com a mesma seed nos dois mecanismos — é literalmente
-   a mesma população, a mesma matriz de utilidades e a mesma matriz de notas
+   a mesma população, o mesmo interesse e a mesma matriz de notas
    encontrando regras de alocação diferentes.
 2. **Múltiplas configurações de entrada.** "Serão testadas múltiplas
    configurações de entrada diferentes para cada comparação, e o resultado
@@ -108,12 +108,12 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .behavior import draw_utilities
+from .behavior import draw_interest
 from .equations import (
     RequestStates,
     grade_for_attempt,
     grade_histogram,
-    utility_histogram,
+    interest_histogram,
     weighted_mean,
 )
 from .equations import time_to_graduate as mean_span
@@ -420,7 +420,7 @@ class ComparisonResult:
     # As duas distribuições de entrada do cenário, para a tela mostrar de onde
     # vieram os números. Não variam entre braços nem entre seeds — são do
     # cenário, não da observação.
-    utility_distribution: list[float] = field(default_factory=list)
+    interest_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)
 
 
@@ -656,8 +656,8 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
 SAMPLE_SEED = 1
 
 
-def sample_distribution(config: SimulationConfig) -> list[float]:
-    """O histograma de utilidades do cenário, sorteado à parte da simulação.
+def sample_interest_distribution(config: SimulationConfig) -> list[float]:
+    """O histograma de interesse do cenário, sorteado à parte da simulação.
 
     Descreve a **entrada**, não o resultado: a mesma distribuição que a
     simulação usa, numa amostra própria. Vem daqui, e não de uma observação,
@@ -666,13 +666,13 @@ def sample_distribution(config: SimulationConfig) -> list[float]:
     matriz que a simulação de fato usou.)
     """
     students = generate_students(config, np.random.default_rng(SAMPLE_SEED))
-    rows = draw_utilities(students, config, np.random.default_rng(SAMPLE_SEED))
-    return utility_histogram(rows.values())
+    rows = draw_interest(students, config, np.random.default_rng(SAMPLE_SEED))
+    return interest_histogram(rows.values())
 
 
 def sample_grade_distribution(config: SimulationConfig) -> list[float]:
     """O histograma de notas de primeira tentativa, pelo mesmo motivo e do mesmo
-    jeito que `sample_distribution`.
+    jeito que `sample_interest_distribution`.
 
     A nota mostrada é a de **primeira tentativa em disciplina de dificuldade
     1**, que é a situação que os três parâmetros do perfil descrevem. É o
@@ -758,7 +758,7 @@ def run_comparison(
         ]
     return ComparisonResult(
         runs=runs,
-        utility_distribution=sample_distribution(config),
+        interest_distribution=sample_interest_distribution(config),
         grade_distribution=sample_grade_distribution(config),
         arms=[
             ArmResult(

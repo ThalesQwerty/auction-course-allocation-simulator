@@ -2,7 +2,7 @@
 
 A Seção 7.3 exige que nada seja sorteado dentro do laço, e este módulo é onde
 essa exigência se cumpre. Depois daqui o gerador não é mais tocado: a
-população, a aptidão, as utilidades, a ordem de desempate e as perturbações
+população, a aptidão, o interesse, a ordem de desempate e as perturbações
 já existem inteiras.
 
 O motivo é comparabilidade. Com o sorteio dentro do laço, mexer numa vaga
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..availability import draw_availability
-from ..behavior import draw_utilities
+from ..behavior import draw_interest
 from ..config import SimulationConfig
 from ..grading import GradeShapes, draw_base_quantiles
 from ..equations import stochastic_perturbations
@@ -41,8 +41,10 @@ class Draws:
     # δ_a^(t) — circunstância, não traço: uma por (aluno, período). O que é
     # traço é a média de onde ela sai, que é o perfil.
     availability: dict[tuple[str, int], float]
-    # u^(t) inteira: uma linha por (aluno, período), sobre a grade.
-    utility_rows: dict[tuple[str, int], dict[str, float]]
+    # O interesse u^(t): uma linha por (aluno, período), sobre a grade inteira.
+    # Não é o que o aluno decide — a utilidade sai daqui a cada período, pelo
+    # histórico dele (`behavior.utility_matrix`). Fora isso, só relatório lê.
+    interest_rows: dict[tuple[str, int], dict[str, float]]
     # α: uma ordem de desempate por disciplina, fixa para a simulação inteira,
     # como exige a Seção 7.1.2.
     tie_break_order: dict[str, list[str]]
@@ -93,7 +95,7 @@ def prepare(config: SimulationConfig) -> Draws:
     students = _assign_genomes(generate_students(config, rng), config.genomes)
     base_quantiles = draw_base_quantiles(students, config.disciplines, config, rng)
     availability = draw_availability(students, config, rng)
-    utility_rows = draw_utilities(students, config, rng)
+    interest_rows = draw_interest(students, config, rng)
 
     student_ids = [s.id for s in students]
     tie_break_order = {
@@ -112,7 +114,7 @@ def prepare(config: SimulationConfig) -> Draws:
         base_quantiles=base_quantiles,
         grade_shapes=GradeShapes(),
         availability=availability,
-        utility_rows=utility_rows,
+        interest_rows=interest_rows,
         tie_break_order=tie_break_order,
         epsilon=epsilon,
         hours=config.hours_by_discipline(),

@@ -8,7 +8,7 @@ from leilao.behavior import (
     Signals,
     compute_bids,
     decision_scores,
-    draw_utilities,
+    draw_interest,
     utility_matrix,
 )
 from leilao.config import Discipline, SimulationConfig
@@ -120,12 +120,12 @@ def test_unknown_successor_is_rejected():
 
 
 def test_the_drawn_row_is_taste_alone_and_sums_to_one():
-    """A invariante de altura saiu: a posição na grade **não** ordena mais a
-    utilidade. O valor curricular entra depois, na redistribuição de
-    `eligible_utility`, e não dentro do gosto."""
+    """A invariante de altura saiu: a posição na grade **não** ordena mais o
+    interesse. O valor curricular entra depois, quando `utility` converte o
+    interesse em utilidade, e não dentro do gosto."""
     config = make_config(periods=4)
     students = [student(id=f"a{i}") for i in range(5)]
-    rows = draw_utilities(students, config, np.random.default_rng(0))
+    rows = draw_interest(students, config, np.random.default_rng(0))
     heights = config.heights()
 
     assert all(sum(row.values()) == pytest.approx(1.0) for row in rows.values())
@@ -144,9 +144,9 @@ def test_utility_matrix_covers_only_the_eligible_disciplines():
     bloqueada por pré-requisito vale zero tanto quanto a já aprovada."""
     config = make_config(periods=20)
     novice = student()
-    row = draw_utilities([novice], config, np.random.default_rng(3))[("a1", 1)]
+    row = draw_interest([novice], config, np.random.default_rng(3))[("a1", 1)]
 
-    utilities = utility_matrix(row=row, student=novice, config=config)
+    utilities = utility_matrix(interest=row, student=novice, config=config)
     # Quem não aprovou nada só alcança o 1º período da grade.
     assert set(utilities) == {"D1", "D2", "D3"}
     assert len(set(utilities.values())) == len(utilities)
@@ -159,10 +159,10 @@ def test_utility_matrix_covers_only_the_eligible_disciplines():
 
 def test_approving_a_prerequisite_unlocks_the_next_discipline():
     config = make_config()
-    row = draw_utilities([student()], config, np.random.default_rng(1))[("a1", 1)]
+    row = draw_interest([student()], config, np.random.default_rng(1))[("a1", 1)]
 
-    before = utility_matrix(row=row, student=student(), config=config)
-    after = utility_matrix(row=row, student=student(grades={"D1": 8.0}), config=config)
+    before = utility_matrix(interest=row, student=student(), config=config)
+    after = utility_matrix(interest=row, student=student(grades={"D1": 8.0}), config=config)
     # D1 sai (aprovada) e D4 entra (pré-requisito cumprido); D6 continua fora,
     # porque depende de D4.
     assert set(before) == {"D1", "D2", "D3"}
@@ -172,20 +172,20 @@ def test_approving_a_prerequisite_unlocks_the_next_discipline():
 def test_a_failed_prerequisite_does_not_unlock_anything():
     """Cursar não basta: a eq. (42) exige aprovação — n_{a,x} >= n_min."""
     config = make_config()
-    row = draw_utilities([student()], config, np.random.default_rng(7))[("a1", 1)]
+    row = draw_interest([student()], config, np.random.default_rng(7))[("a1", 1)]
     failed = student(grades={"D1": 4.9}, attempts={"D1": 1})
-    assert set(utility_matrix(row=row, student=failed, config=config)) == {"D1", "D2", "D3"}
+    assert set(utility_matrix(interest=row, student=failed, config=config)) == {"D1", "D2", "D3"}
 
 
 def test_utility_matrix_is_a_pure_function_of_the_row():
     """A matriz é parâmetro de entrada: a mesma linha e o mesmo estado do aluno
     têm de dar sempre a mesma utilidade, chamados em qualquer ordem."""
     config = make_config()
-    row = draw_utilities([student()], config, np.random.default_rng(5))[("a1", 1)]
+    row = draw_interest([student()], config, np.random.default_rng(5))[("a1", 1)]
 
-    first = utility_matrix(row=row, student=student(), config=config)
-    utility_matrix(row=row, student=student(id="a2", grades={"D2": 9.0}), config=config)
-    assert utility_matrix(row=row, student=student(), config=config) == first
+    first = utility_matrix(interest=row, student=student(), config=config)
+    utility_matrix(interest=row, student=student(id="a2", grades={"D2": 9.0}), config=config)
+    assert utility_matrix(interest=row, student=student(), config=config) == first
 
 
 def test_approving_a_discipline_spreads_its_utility_over_what_is_left():
@@ -193,11 +193,11 @@ def test_approving_a_discipline_spreads_its_utility_over_what_is_left():
     igualmente entre as elegíveis** — é o que impede o veterano de ficar com
     pouca massa e perder todo leilão. A massa total não se mexe."""
     config = make_config()
-    row = draw_utilities([student()], config, np.random.default_rng(9))[("a1", 1)]
+    row = draw_interest([student()], config, np.random.default_rng(9))[("a1", 1)]
 
-    before = utility_matrix(row=row, student=student(), config=config)
+    before = utility_matrix(interest=row, student=student(), config=config)
     # D3 aprovada: D1 e D2 continuam elegíveis, e D5 não entra (falta D2).
-    after = utility_matrix(row=row, student=student(grades={"D3": 8.0}), config=config)
+    after = utility_matrix(interest=row, student=student(grades={"D3": 8.0}), config=config)
     assert "D3" in before and "D3" not in after
     assert sum(after.values()) == pytest.approx(sum(before.values()))
     # D1 recebe exatamente metade de D3, que é a divisão igual entre as duas
@@ -209,9 +209,9 @@ def test_an_empty_eligible_set_gives_no_utility():
     """Quem aprovou a grade inteira não quer mais nada — e, por isso, já se
     formou antes de chegar a um leilão."""
     config = make_config()
-    row = draw_utilities([student()], config, np.random.default_rng(2))[("a1", 1)]
+    row = draw_interest([student()], config, np.random.default_rng(2))[("a1", 1)]
     done = student(grades={name: 9.0 for name in ("D1", "D2", "D3", "D4", "D5", "D6")})
-    assert utility_matrix(row=row, student=done, config=config) == {}
+    assert utility_matrix(interest=row, student=done, config=config) == {}
 
 
 def _harmonic_value(bids: dict[str, int], utilities: dict[str, float]) -> float:
@@ -378,7 +378,7 @@ def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
     config = make_config()
     rng = np.random.default_rng(config.seed)
     students = generate_students(config, rng)
-    rows = draw_utilities(students, config, rng)
+    rows = draw_interest(students, config, rng)
     assert rows, "nenhuma linha sorteada"
     for row in rows.values():
         assert set(row) == {d.name for d in config.disciplines}
@@ -441,7 +441,7 @@ def test_the_utility_gene_concentrates_and_inverts():
 
 
 def test_the_reserve_gene_cuts_the_choice_set():
-    """`alpha_u` está na mesma unidade da utilidade elegível: com elegíveis
+    """`alpha_u` está na mesma unidade da utilidade: com elegíveis
     valendo 0,6 e 0,4 e reserva 0,5, só a primeira entra. O orçamento
     continua indo inteiro para o que foi admitido."""
     utilities = {"D1": 0.6, "D2": 0.4}

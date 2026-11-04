@@ -36,13 +36,23 @@ Decisão do aluno (Seção 7.2.4)
     request_set               D_a^(t,r), tudo em ordem            eq. (50)
     serial_dictatorship       ditadura serial por CR              7.3.1
 
-Preferência e grade
+Interesse, utilidade e grade
+
+    **Interesse** é o sorteio normalizado: soma 1 sobre a grade inteira e não
+    depende do histórico — parâmetro de entrada, tirado da seed. **Utilidade**
+    é o interesse com o inelegível zerado e redistribuído: soma 1 sobre o
+    elegível e depende do histórico — derivada a cada período. A decisão do
+    aluno e ψ leem só utilidade; o interesse cru só aparece em relatório.
+
+    O u_{a,x} do anteprojeto, como sai do sorteio da eq. (41), é o
+    **interesse** daqui; com os zeros da eq. (42) e a redistribuição, ele vira
+    a utilidade ũ.
 
     preference_split          √s·permanente + √(1−s)·sazonal      —
-    utility_row               normalização da linha         substitui 41
-    admitted_set              corte da utilidade de reserva       —
+    interest_row              normalização do interesse     substitui 41
     eligible_set              não aprovada, liberada, X em aberto eq. (42)
-    eligible_utility          redistribui o inelegível   substitui 41 e 43
+    utility                   interesse → utilidade      substitui 41 e 43
+    admitted_set              corte da utilidade de reserva       —
     curriculum_height         s_x, a cadeia à frente          substitui 38
     curriculum_period         o período induzido dos pré-req.     —
     curriculum_reach          quantas destrava, transitivamente   —
@@ -103,17 +113,17 @@ Agregação de uma observação (Seção 7.3)
     weighted_mean             média ponderada pelos medidos       —
     time_to_graduate          períodos do ingresso ao diploma     —
     grade_histogram           faixas de [0, 10]                   —
-    utility_histogram         faixas da linha, escala por linha   —
+    interest_histogram        faixas da linha, escala por linha   —
 
 Não implementadas, e por quê
 
     eq. (31)   t_a: o ingresso é escalonado por construção, em `population`
     eq. (41)   a invariante de altura saiu: punha valor curricular dentro do
-               gosto. `eligible_utility` a substitui redistribuindo a utilidade
+               gosto. `utility` a substitui redistribuindo o interesse
                do inelegível sobre o que destrava
-    eq. (43)   U_a: a redistribuição conserva a massa, então o recorte elegível
-               soma 1 sempre — não há mais "utilidade ao alcance" menor que a
-               linha inteira
+    eq. (43)   U_a: a redistribuição conserva a massa, então a utilidade soma
+               1 sempre — não há mais "utilidade ao alcance" menor que o
+               interesse inteiro
     eqs. (47)-(48)  grupos da grade: toda obrigatória pesa igual, não há o
                     que hierarquizar
 """
@@ -135,7 +145,6 @@ from .decision_score import NEUTRAL, Behavior, Signals, decision_scores
 from .demand_per_seat import demand_per_seat
 from .effective_load import effective_load
 from .eligible_set import eligible_set
-from .eligible_utility import eligible_utility
 from .exclusion_refund import exclusion_refund
 from .exclusion_rate import exclusion_rate
 from .final_preference import final_preference
@@ -150,6 +159,8 @@ from .lognormal_cdf import lognormal_cdf
 from .graduation import has_graduated
 from .greedy_allocation import greedy_allocation
 from .guaranteed_share import guaranteed_share
+from .interest_histogram import interest_histogram
+from .interest_row import normalize_rows
 from .jain_index import jain_index
 from .market_price import market_prices
 from .mean_grade_average import mean_grade_average
@@ -175,11 +186,10 @@ from .supply_index import supply_index
 from .stochastic_perturbation import stochastic_perturbations
 from .tie_break_factor import tie_break_factor
 from .time_to_graduate import time_to_graduate
-from .utility_histogram import utility_histogram
 from .split_normal_cdf import split_normal_cdf
 from .split_normal_mean import split_normal_mean
 from .split_normal_quantile import split_normal_quantile
-from .utility_row import normalize_rows
+from .utility import utility
 from .utilization import utilization
 from .weighted_mean import weighted_mean
 
@@ -206,7 +216,6 @@ __all__ = [
     "demand_per_seat",
     "effective_load",
     "eligible_set",
-    "eligible_utility",
     "exclusion_rate",
     "exclusion_refund",
     "final_preference",
@@ -222,6 +231,7 @@ __all__ = [
     "greedy_allocation",
     "guaranteed_share",
     "has_graduated",
+    "interest_histogram",
     "jain_index",
     "market_prices",
     "split_normal_cdf",
@@ -250,7 +260,7 @@ __all__ = [
     "stochastic_perturbations",
     "tie_break_factor",
     "time_to_graduate",
-    "utility_histogram",
+    "utility",
     "utilization",
     "weighted_mean",
     "supply_index",

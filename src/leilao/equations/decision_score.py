@@ -1,4 +1,4 @@
-"""O score com que o aluno decide, em cima da linha de utilidades elegíveis.
+"""O score com que o aluno decide, em cima da utilidade dele.
 
     score_x = ũ_x^β_u · oferta_x^β_v · aprovação_x^β_n
 
@@ -13,8 +13,9 @@ primeira coorte estima.
 OS TRÊS EXPOENTES
 -----------------
 
-- **ũ** é a utilidade elegível (`equations.eligible_utility`): a participação
-  da disciplina no que o aluno ainda quer, somando 1 na linha.
+- **ũ** é a utilidade (`equations.utility`): a participação da
+  disciplina no que o aluno ainda quer, somando 1 sobre o elegível. Nunca o
+  interesse cru — a decisão só vê o que o histórico deixou de pé.
 - **oferta** e **aprovação** são os sinais que a universidade publicou no
   período anterior (`equations.supply_index`, `equations.approval_index`),
   ambos em (0, 1) com 1/2 como ausência de informação.
@@ -52,7 +53,7 @@ as duas mochilas tiram o desempate.
 
 Substitui o score anterior, que era `u_rel^β · avanço^ρ`. O composto `avanço`
 (chance de obter × chance de aprovar × carga × alcance transitivo) foi
-desmontado: o alcance migrou para a matriz de utilidade elegível, as duas
+desmontado: o alcance migrou para a utilidade (a redistribuição), as duas
 chances viraram índices explícitos com um gene cada, e a carga foi
 descartada — ela respondia por 1,8% da variância intralinha e não pagava um
 gene.
@@ -90,7 +91,7 @@ class Behavior:
     # Viés de aprovação: positivo busca disciplina que aprova mais.
     beta_n: float = 0.0
     # Utilidade de reserva: a participação mínima para a disciplina entrar no
-    # pedido. Na mesma unidade da utilidade elegível — ver `admitted_set`.
+    # pedido. Na mesma unidade da utilidade — ver `admitted_set`.
     alpha_u: float = 0.0
 
 

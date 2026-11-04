@@ -128,10 +128,11 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         <em>Beta da aptidão</em> dá, para cada par (aluno, disciplina), o quanto aquele aluno
         rende naquela disciplina — traço persistente, sorteado uma vez —, e a nota é essa aptidão
         elevada à demanda que a disciplina faz (eq. 33). Sem dispersão de desempenho o CR vira
-        ruído e a eq. (57) não mede nada. A <em>log-normal das utilidades</em> tem
-        um parâmetro só, o desvio <em>σ</em>, e é ele que diz o quanto o aluno diferencia uma
-        disciplina da outra: <em>σ</em> grande concentra a preferência e <em>σ</em> pequeno a
-        achata. Diferenciar preferência é justamente a informação
+        ruído e a eq. (57) não mede nada. A <em>log-normal do interesse</em> tem
+        média <em>μ</em> e desvio <em>σ</em>, mas só o desvio chega à alocação — a média some
+        quando a linha é normalizada, e serve para a prévia se ler. É <em>σ</em> que diz o
+        quanto o aluno diferencia uma disciplina da outra: grande concentra a preferência e
+        pequeno a achata. Diferenciar preferência é justamente a informação
         que o leilão diz captar e a ordenação por CR não vê.
       </p>
       <p>
@@ -153,18 +154,19 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           vagas saem do estoque antes de o leilão abrir.
         </li>
         <li>
-          Cada aluno ativo lê sua linha da matriz de utilidades — já sorteada na inicialização —
-          sobre o seu conjunto elegível: as disciplinas que ainda não aprovou e cujos
-          predecessores já cumpriu (eqs. 41–43). Fora dele a utilidade é zero. A linha é
-          sorteada de novo a cada período — o que ele quis no semestre passado não determina o que
-          quer neste — e não é renormalizada, então a soma do que está ao alcance dele é o
-          U<sub>a</sub><sup>(t)</sup> da eq. (43). Não há poupança: saldo de créditos e carga
-          horária não passam de um período para o outro.
+          Cada aluno ativo converte sua linha de <strong>interesse</strong> — já sorteada na
+          inicialização — em <strong>utilidade</strong>, sobre o seu conjunto elegível: as
+          disciplinas que ainda não aprovou e cujos predecessores já cumpriu (eqs. 41–43). Fora
+          dele a utilidade é zero, e o interesse do que ficou de fora desce para o que ele pode
+          cursar, de modo que a utilidade soma 1. O interesse é sorteado de novo a cada período —
+          o que ele quis no semestre passado não determina o que quer neste —, e a utilidade
+          muda também com o histórico. Não há poupança: saldo de créditos e carga horária não
+          passam de um período para o outro.
         </li>
         <li>
-          Em cada rodada, os lances saem deterministicamente das utilidades: o aluno resolve uma
-          mochila côncava em que cada crédito pesa 1 e o N-ésimo crédito posto numa disciplina
-          vale u<sub>a,x</sub>/N. Depois o leilão resolve o WDP e vagas, carga horária e orçamento
+          Em cada rodada, os lances saem deterministicamente das utilidades — nunca do interesse
+          cru: o aluno resolve uma mochila côncava em que cada crédito pesa 1 e o N-ésimo crédito
+          posto numa disciplina vale ũ<sub>a,x</sub>/N. Depois o leilão resolve o WDP e vagas, carga horária e orçamento
           são descontados (eqs. 13, 14, 27).
           Empates são resolvidos pela regra de desempate, viés administrativo e perturbação da
           Seção 7.1.2.
@@ -213,12 +215,12 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         <div>
           <dt>Eficiência de alocação (ψ̄) — eq. (53)</dt>
           <dd>
-            Satisfação média dos alunos que disputaram: a soma das utilidades atendidas. A linha
-            de utilidades é normalizada sobre a grade, então o denominador vale 1 e ψ é a fração
-            do desejo <em>total</em> do aluno que foi servida — e não a do que estava ao alcance
-            dele. ψ = 1 exigiria cursar a grade inteira num período, então a escala é baixa de
-            propósito, e igual para todos: o denominador não se move de aluno para aluno nem de
-            período para período. É a medida principal da hipótese.
+            Satisfação média dos alunos que disputaram: a soma das utilidades atendidas. O
+            interesse é normalizado sobre a grade e a redistribuição conserva a massa, então a
+            utilidade de cada aluno soma 1, o denominador vale 1 e ψ é a fração do desejo dele que
+            foi servida. ψ = 1 é levar tudo o que era elegível, e a escala é igual para todos: o
+            denominador não se move de aluno para aluno nem de período para período. É a medida
+            principal da hipótese.
           </dd>
         </div>
         <div>
@@ -347,18 +349,21 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           aprovar em cada uma delas, e é essa substituibilidade que dá ao aluno o que escolher.
         </li>
         <li>
-          <strong>Utilidades (u):</strong> um valor por par (aluno, disciplina, período), tirado
-          de uma log-normal de desvio <em>σ</em> e dividido pelo
-          somatório do conjunto elegível — a soma dá 1. O anteprojeto não fixa a distribuição nem
-          o valor de U<sub>a</sub>; aqui ele é 1 para todo aluno, porque nada de saldo passa de um
-          período para o outro e poupar seria só perder.
+          <strong>Interesse e utilidade (u):</strong> o u do anteprojeto se parte em dois. O{" "}
+          <strong>interesse</strong> é um valor por (aluno, disciplina, período), tirado de uma
+          log-normal de desvio <em>σ</em> e normalizado sobre a grade inteira — não depende do
+          histórico. A <strong>utilidade</strong> é esse interesse com as disciplinas inelegíveis
+          zeradas e o interesse delas redistribuído sobre as elegíveis — soma 1, depende do
+          histórico, e é só ela que o aluno usa para decidir. O anteprojeto não fixa a distribuição
+          nem o valor de U<sub>a</sub>; aqui ele é 1 para todo aluno, porque nada de saldo passa
+          de um período para o outro e poupar seria só perder.
         </li>
         <li>
           <strong>Ordem de desempate entre disciplinas:</strong> quando duas valem o mesmo para um
           aluno, ganha a <strong>listada primeiro</strong> — a ordem em que a grade aparece nesta
           interface, que é a ordem em que as disciplinas foram acrescentadas. É global: a mesma
           para todo aluno, período e rodada, e vale tanto no lance quanto no pedido por CR. Com
-          utilidade sorteada o empate tem probabilidade zero; a regra existe para que um cenário
+          interesse sorteado o empate tem probabilidade zero; a regra existe para que um cenário
           escrito à mão dê sempre o mesmo resultado. Não se confunde com o desempate do leilão
           (eq. 20), que é <em>entre alunos</em>.
         </li>

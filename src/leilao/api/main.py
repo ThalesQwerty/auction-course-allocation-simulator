@@ -121,10 +121,11 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
         availability_profiles=tuple(
             p.to_profile() for p in req.availability_profiles
         ),
-        utility_stability=req.utility_stability,
+        interest_stability=req.interest_stability,
         resolver=req.resolver,
         credit_memory=req.credit_memory,
-        utility_sigma=req.utility_sigma,
+        interest_mean=req.interest_mean,
+        interest_sigma=req.interest_sigma,
         max_hours=req.max_hours,
         periods=req.periods,
         entry_periods=req.entry_periods,
@@ -168,7 +169,7 @@ def compare(req: CompareRequest) -> CompareResponse:
 
     response = CompareResponse(
         runs=result.runs,
-        utility_distribution=result.utility_distribution,
+        interest_distribution=result.interest_distribution,
         grade_distribution=result.grade_distribution,
         arms=[
             ArmResultOut(

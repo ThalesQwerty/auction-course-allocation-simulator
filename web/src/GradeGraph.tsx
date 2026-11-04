@@ -17,7 +17,7 @@ const formatHours = (hours: number) => hours.toLocaleString("pt-BR");
 
 /** Dificuldade e atratividade do cartão. **Cada uma tem o seu neutro**, e por
  * isso ele é argumento: a dificuldade se lê em múltiplos da disciplina média,
- * onde o neutro é 1, e a atratividade é deslocamento do expoente da utilidade,
+ * onde o neutro é 1, e a atratividade é deslocamento do expoente do interesse,
  * onde o neutro é 0. É o neutro que não merece destaque — o que a vista
  * precisa achar numa grade de dezenas de cartões é quem foge dele. Daí o peso
  * só acima e o recuo abaixo: a escala é a mesma, a ênfase é que é

@@ -21,8 +21,8 @@ congela inteira em vez de girar; por aluno ou por célula o efeito se dilui.
 
 Recebe dois arrays já sorteados da normal padrão — `permanent` com forma
 (alunos, 1, disciplinas) e `seasonal` com (alunos, períodos, disciplinas) — e
-devolve o **logaritmo** do valor preliminar. Exponenciá-lo é o passo seguinte,
-em `behavior.draw_utilities`.
+devolve o **logaritmo** do interesse, antes de normalizado. Exponenciá-lo é o
+passo seguinte, em `behavior.draw_interest`.
 """
 from __future__ import annotations
 

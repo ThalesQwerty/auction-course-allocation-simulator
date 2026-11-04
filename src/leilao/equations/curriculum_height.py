@@ -4,10 +4,9 @@
     s_x = 1 + max_{y ∈ unlocks(x)} s_y   caso contrário
 
 O comprimento da cadeia mais longa **à frente** da disciplina: quanto curso
-ainda depende dela. É o que entra na invariante de preferência de
-`utility_row` — `s_x > s_y ⇒ u_x > u_y` —, de modo que a disciplina que
-destrava mais curso vale sempre mais que a terminal, qualquer que tenha sido o
-sorteio.
+ainda depende dela. Era o que entrava na invariante de preferência da eq. (41)
+— `s_x > s_y ⇒ u_x > u_y` —, que saiu: hoje a porteira vale mais porque
+herda o interesse do que destrava (`equations.utility`).
 
 Não se confunde com o **alcance** (`curriculum_reach`), que conta *quantas*
 disciplinas ficam destravadas: uma pode ter altura 1 e alcance 10 se destrava

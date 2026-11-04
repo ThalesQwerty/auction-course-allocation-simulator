@@ -10,11 +10,11 @@ vendedor — é o lado do agente.
 A COMPARAÇÃO É DIRETA
 ---------------------
 
-`α_u` está na **mesma unidade** da utilidade elegível, que soma 1 na linha.
+`α_u` está na **mesma unidade** da utilidade, que soma 1 sobre o elegível.
 Com duas elegíveis valendo 0,6 e 0,4 e `α_u = 0,5`, o aluno pede só a
 primeira. Sem normalizar por nada, sem denominador escondido — é isso que
 torna o gene legível e portátil entre cenários, onde a reserva em unidades de
-utilidade bruta variava 350× entre linhas da mesma observação.
+interesse cru variava 350× entre linhas da mesma observação.
 
 Como as participações somam 1, no máximo `⌊1/α_u⌋` disciplinas passam do
 corte: o gene é, na prática, um **teto de amplitude** do pedido. E o que

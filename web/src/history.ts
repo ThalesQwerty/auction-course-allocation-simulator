@@ -72,12 +72,49 @@ export function newEvolution(
   return { kind: "evolution", ...stamp(), config, result };
 }
 
+/** Os nomes de antes de 04/11/2026, quando "utilidade" se partiu em duas
+ * palavras: **interesse** é o sorteio normalizado, que σ e a estabilidade
+ * governam e que o histograma retrata; **utilidade** é ele visto pelo
+ * histórico do aluno. Os valores não mudaram — só a chave —, então a tradução
+ * é exata. Se o nome novo já estiver lá, ele vence. */
+const INTEREST_RENAMES = [
+  ["utility_sigma", "interest_sigma"],
+  ["utility_stability", "interest_stability"],
+  ["utility_distribution", "interest_distribution"],
+] as const;
+
+/** Troca as chaves antigas pelas de `INTEREST_RENAMES`. Serve tanto ao cenário
+ * quanto ao resultado de uma comparação, e aos cenários salvos — que guardam
+ * os mesmos campos e passam pela mesma troca. */
+export function withInterestNames<T extends object>(record: T): T {
+  const migrated = { ...record } as Record<string, unknown>;
+  for (const [old, current] of INTEREST_RENAMES) {
+    if (!(old in migrated)) continue;
+    if (migrated[current] === undefined) migrated[current] = migrated[old];
+    delete migrated[old];
+  }
+  return migrated as T;
+}
+
+/** Os campos de interesse de um **cenário** gravado antes de 04/11/2026: as
+ * chaves novas (`withInterestNames`) e o μ, que não existia. Ele era fixo em
+ * 0, e é isso que entra — a tradução fiel do que rodou. Qualquer outro valor
+ * daria o mesmo resultado, porque μ some na normalização; só a prévia mudaria. */
+export function migrateInterest<T extends object>(config: T): T {
+  const migrated = withInterestNames(config) as Record<string, unknown>;
+  if (typeof migrated.interest_mean !== "number") migrated.interest_mean = 0;
+  return migrated as T;
+}
+
 /** O cenário de uma execução gravada antes de 31/10/2026, traduzido para os
  * campos de hoje. Sem isto uma entrada antiga derruba a lista inteira — o
  * rótulo lê campos que não existem lá — ou reexecuta calada com outro cenário.
  *
- * **Disponibilidade**: é o único eixo que ainda tem tradução. Quando ela não
- * está gravada, a execução é de um modelo em que ninguém excluía, e entra
+ * **Interesse**: `utility_sigma` e `utility_stability` viraram `interest_*`,
+ * e o μ ausente entra como 0 (`migrateInterest`). Sem a troca, reexecutar
+ * mandaria o cenário sem os dois e a API cairia calada nos padrões.
+ *
+ * **Disponibilidade**: quando ela não está gravada, a execução é de um modelo em que ninguém excluía, e entra
  * praticamente cheia — para que reexecutar reproduza o resultado antigo, que é
  * o que a lista promete.
  *
@@ -90,7 +127,7 @@ function migrateScenario<
     availability_profiles: Profile[];
   }
 >(config: T): T {
-  const migrated = { ...config };
+  const migrated = migrateInterest(config);
   if (!Array.isArray(config.availability_profiles)) {
     migrated.availability_profiles = [
       { name: "cheia", mode_hours: 1, full_load_rate: 0.999 },
@@ -115,6 +152,7 @@ export function loadHistory(): HistoryEntry[] {
           ...entry.config,
           disciplines: withUnlocks(entry.config.disciplines ?? []),
         }),
+        result: withInterestNames(entry.result),
       }) as T;
     return (parsed as HistoryEntry[]).map(migrate);
   } catch {
@@ -169,6 +207,7 @@ export function entryFromFile(text: string): HistoryEntry {
       ...parsed.config,
       disciplines: withUnlocks(parsed.config.disciplines ?? []),
     }),
+    result: withInterestNames(parsed.result),
   } as HistoryEntry;
 }
 
@@ -212,7 +251,7 @@ function describeScenario(
   const populacao = [
     `desempenho: ${perfis(config.performance_profiles)}`,
     `disponibilidade: ${perfis(config.availability_profiles)}`,
-    `u σ ${config.utility_sigma.toLocaleString("pt-BR")}`,
+    `interesse σ ${config.interest_sigma.toLocaleString("pt-BR")}`,
   ];
   return (
     `${horizonte} × ${rodadas} · ${disciplines.length} disciplinas · ${students} alunos` +

@@ -5,7 +5,7 @@
  * (a densidade em forma fechada, a leitura estatística de uma amostra) e não
  * precisa das que ele faz (a alocação em si).
  *
- * O que **é** duplicado — a forma da Beta, a amostra de utilidade, as duas
+ * O que **é** duplicado — a forma da Beta, as duas
  * induções sobre a grade — é duplicado de propósito: a prévia desenha a
  * distribuição que os parâmetros produzem **antes** de existir execução a
  * quem perguntar. Quando a conta muda no motor, muda aqui também.
@@ -24,13 +24,12 @@
  * Prévia da disponibilidade
  *     availabilityShape  (moda, chance de W_a) → log-normal
  *     fullLoadThreshold  o limiar da carga cheia, W_a − 0,5
- *     lognormalDensity   densidade da log-normal, em horas
+ *     lognormalDensity   densidade da log-normal num grid
  *     lognormalQuantile  F⁻¹, para escolher o topo do eixo
  *
- * Prévia das utilidades
- *     mulberry32             gerador de semente fixa
- *     relativeUtilitySample  log-normal normalizada, em múltiplos da indiferença
- *     kernelSmooth           núcleo gaussiano com reflexão nas bordas
+ * Prévia do interesse
+ *     lognormalDensity e lognormalQuantile, os mesmos: a prévia desenha a
+ *     log-normal fonte, antes da normalização, em forma fechada
  *
  * Leitura de uma curva ou de uma amostra
  *     densityCurve       área 1, acumulada e moda
@@ -61,14 +60,11 @@ export {
   gradeShape,
 } from "./gradeShape";
 export { induct } from "./induct";
-export { kernelSmooth } from "./kernelSmooth";
 export { lognormalDensity } from "./lognormalDensity";
 export { lognormalQuantile } from "./lognormalQuantile";
-export { mulberry32 } from "./mulberry32";
 export { niceScale } from "./niceScale";
 export { paddedScale } from "./paddedScale";
 export type { Scale } from "./paddedScale";
 export { quantile } from "./quantile";
-export { relativeUtilitySample } from "./relativeUtilitySample";
 export { splitNormalCdf } from "./splitNormalCdf";
 export { splitNormalMean } from "./splitNormalMean";

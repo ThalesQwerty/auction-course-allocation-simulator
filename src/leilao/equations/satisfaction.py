@@ -3,9 +3,11 @@
     ψ_a = Σ_{x ∈ B} u_{a,x} · z_{a,x}
 
 A fração do **desejo total** do aluno naquele período que foi atendida. O
-denominador da eq. (51) é a linha inteira da matriz de utilidades, e ela vale
-1 por construção (`utility_row` normaliza sobre a grade), então a divisão some
-e ψ é a soma simples das utilidades atendidas.
+denominador da eq. (51) é a utilidade inteira do aluno, e ela vale 1 por
+construção — o interesse é normalizado sobre a grade (`interest_row`) e a
+redistribuição o conserva (`utility`) —, então a divisão some e ψ é a soma
+simples das utilidades atendidas. É utilidade, e não interesse, porque
+disciplina que o aluno não podia cursar não é desejo atendível.
 
 **O denominador mudou**, e vale saber qual leitura você está olhando. Antes
 era `U_a` — a soma só sobre o conjunto elegível (eq. 43) —, e ψ media "do que

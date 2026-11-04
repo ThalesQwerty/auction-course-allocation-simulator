@@ -16,10 +16,10 @@ export interface DisciplineInput {
    * pré-requisito não faz a disciplina ser de entrada — a optativa também não
    * tem e fica fora da garantia. */
   entry: boolean;
-  /** A_x — atratividade, a **média do expoente** da log-normal da utilidade:
-   * 0 é a disciplina média, negativo gravita abaixo dela e positivo acima, e
+  /** A_x — atratividade, o quanto a **média do expoente** da log-normal do
+   * interesse se desloca de μ (`interest_mean`): 0 é a disciplina média, negativo gravita abaixo dela e positivo acima, e
    * em múltiplos da média o fator é e^A. É a parte do gosto **comum a toda a
-   * população**, enquanto `utility_sigma` é a privada de cada aluno — mesma
+   * população**, enquanto `interest_sigma` é a privada de cada aluno — mesma
    * unidade, e a razão entre as duas é a correlação de preferência entre
    * alunos. Ordena dentro de uma mesma altura da grade, nunca entre alturas —
    * a invariante de altura é maior que qualquer A. Opcional: ausente é 0. */
@@ -134,17 +134,23 @@ export interface Scenario {
    * tentativa, não mexe no CR, e no leilão devolve metade do preço pago. A
    * vaga não volta para a oferta. */
   availability_profiles: Profile[];
-  /** Quanto do gosto do aluno é permanente, de 0 a 1 — a fração da variância
-   * que não é resorteada a cada período. 0 reproduz o modelo anterior; 1
-   * congela a preferência. Ortogonal ao σ: a divisão preserva a dispersão de
+  /** Quanto do interesse do aluno é permanente, de 0 a 1 — a fração da
+   * variância que não é resorteada a cada período. 0 reproduz o modelo
+   * anterior; 1 congela o interesse. Ortogonal ao σ: a divisão preserva a dispersão de
    * cada período, e o que isto controla é só a correlação entre semestres. */
-  utility_stability: number;
-  /** Desvio da log-normal de onde saem os valores preliminares das utilidades.
-   * Controla o quanto o aluno diferencia as disciplinas: sigma **grande**
-   * concentra (quer uma ou duas e despreza o resto), **pequeno** achata. A
-   * média do logaritmo é fixa em 0 porque some na normalização. A faixa útil
-   * cabe entre ~0,25 e ~3. */
-  utility_sigma: number; // > 0
+  interest_stability: number;
+  /** μ — média do logaritmo da log-normal de onde sai o **interesse**. Não
+   * mexe em alocação nenhuma: soma-se ao log de toda a linha, o que a
+   * multiplica por e^μ, e a normalização desfaz o fator. Existe para a prévia
+   * da log-normal fonte, que em μ = 0 se espreme entre 0 e 1. A atratividade
+   * A_x de cada disciplina soma-se a ele. */
+  interest_mean: number;
+  /** σ — desvio do logaritmo da log-normal de onde sai o **interesse** — o
+   * sorteio que, normalizado sobre a grade e visto pelo histórico do aluno,
+   * vira a **utilidade**. Controla o quanto o aluno diferencia as
+   * disciplinas: sigma **grande** concentra (quer uma ou duas e despreza o
+   * resto), **pequeno** achata. A faixa útil cabe entre ~0,25 e ~3. */
+  interest_sigma: number; // > 0
   /** W_a — carga horária máxima por período, eq. (4). Igual para todos. */
   max_hours: number;
   /** Em quantos períodos entra coorte nova, contados do primeiro. Depois do
@@ -501,8 +507,9 @@ export interface CompareResponse {
   runs: number;
   arms: ArmResult[];
   /** As duas distribuições de entrada do cenário. Não variam entre braços nem
-   * entre seeds — são do cenário, não da observação. */
-  utility_distribution?: number[];
+   * entre seeds — são do cenário, não da observação. A primeira é do
+   * interesse, não da utilidade: é o que σ governa. */
+  interest_distribution?: number[];
   grade_distribution?: number[];
 }
 
@@ -726,7 +733,7 @@ export const GUARANTEED_ROUND = 0;
  * B_a^(t,r): sem vaga, sem carga horária ou sem orçamento). */
 export interface RequestRecord {
   discipline: string;
-  utility: number; // u_{a,x}^(t) — eq. (41)
+  utility: number; // ũ_{a,x}^(t) — a utilidade, não o interesse
   bids: number[]; // créditos apostados em cada rodada
   /** Rodada em que obteve a vaga; `null` = recusada. `GUARANTEED_ROUND` (0) é a
    * matrícula garantida do ingressante. */

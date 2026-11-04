@@ -26,7 +26,7 @@ diferença entre eles é atribuível ao mecanismo.
 from __future__ import annotations
 
 from ..config import SimulationConfig
-from ..equations import Signals, grade_histogram, utility_histogram
+from ..equations import Signals, grade_histogram, interest_histogram
 from ..equations._mean import mean
 from .period import run_period
 from .reports import (
@@ -134,6 +134,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         ],
         disciplines=[d.name for d in config.disciplines],
         curriculum_periods=draws.curriculum,
-        utility_distribution=utility_histogram(draws.utility_rows.values()),
+        interest_distribution=interest_histogram(draws.interest_rows.values()),
         grade_distribution=grade_histogram(first_grades),
     )

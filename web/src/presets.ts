@@ -1,7 +1,7 @@
 import type { SavedPreset } from "./savedPresets";
 import type { DisciplineInput, Scenario } from "./types";
 
-/** A população: os dois eixos de perfil mais o sigma das utilidades.
+/** A população: os dois eixos de perfil mais o sigma do interesse.
  *
  * A repartição entre as combinações é **igualitária** — com 3 perfis em cada
  * eixo são 9 pares e ~11% da coorte em cada um —, de modo que o que o cenário
@@ -37,9 +37,11 @@ const POPULATION = {
     { name: "Média disponibilidade", mode_hours: 20, full_load_rate: 0.05 },
     { name: "Baixa disponibilidade", mode_hours: 10, full_load_rate: 0.001 },
   ],
-  // σ no pé da faixa: o aluno é quase indiferente entre as disciplinas de uma
-  // mesma altura, e quem ordena a linha dele é sobretudo a invariante.
-  utility_sigma: 0.25,
+  // μ = 1 põe a moda da fonte em e^{μ−σ²} = 1, e a prévia se lê; ele não mexe
+  // em alocação, porque some na normalização. σ = 1 dá coeficiente de variação
+  // ~1,3: o aluno distingue as disciplinas sem desprezar quase todas.
+  interest_mean: 1,
+  interest_sigma: 1,
 };
 
 // ---------------------------------------------------------------------------
@@ -294,7 +296,7 @@ export const defaultScenario = (): Scenario => ({
   // da tese, então ele continua sendo o contraste a rodar. É a hipótese mais
   // exposta que resta: qualquer resultado em conclusões deve vir com este valor
   // declarado.
-  utility_stability: 0.5,
+  interest_stability: 0.5,
   credit_return: "none",
   seed: 42,
   ...POPULATION,

@@ -377,11 +377,11 @@ export function Comparison({
         domain={[0, 10]}
       />
     ) : null,
-    result.utility_distribution?.length ? (
+    result.interest_distribution?.length ? (
       <Histogram
-        key="utilidades"
-        title="Utilidades"
-        fractions={result.utility_distribution}
+        key="interesse"
+        title="Interesse"
+        fractions={result.interest_distribution}
       />
     ) : null,
   ].filter(Boolean);

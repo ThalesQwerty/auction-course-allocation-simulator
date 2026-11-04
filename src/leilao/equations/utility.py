@@ -1,22 +1,58 @@
-"""A utilidade redistribuída sobre o que o aluno pode cursar agora.
+"""A utilidade: o interesse do aluno sobre o que ele pode cursar agora.
 
-    ũ_x = u_x + Σ_{y bloqueada} u_y / |alvos(y)|,     x elegível
+    ũ_x = u_x + Σ_{y inelegível} u_y / |alvos(y)|,     x elegível
 
     alvos(y) = ancestrais elegíveis de y, se y trava por pré-requisito
              = todas as elegíveis,        se y já saiu da grade do aluno
 
+    u = interesse  (o sorteio normalizado — `behavior.draw_interest`)
+    ũ = utilidade  (o que esta função devolve)
+
+INTERESSE E UTILIDADE
+---------------------
+
+São duas palavras para dois objetos, e a fronteira entre eles é o
+**histórico do aluno**. O **interesse** é o quanto ele quer cada disciplina:
+sorteado por (aluno, período, disciplina) na inicialização, a partir da seed,
+normalizado sobre a grade inteira e nunca mais tocado — parâmetro de entrada,
+como a aptidão. A **utilidade** é esse interesse filtrado pelo que ele já
+aprovou e pelo que isso destravou, recalculada a cada período — derivada em
+tempo de execução.
+
+Os zeros da eq. (42) não são máscara: são a **definição** da utilidade. Uma
+disciplina que o aluno está proibido de cursar não tem utilidade para ele
+naquele período, por construção, e o interesse dela vai para o que ele pode
+cursar. Daí uma assimetria: o interesse se move por um motivo só (o gosto
+derivou no semestre, por `interest_stability`); a utilidade, por dois, porque
+o estado do aluno também mudou.
+
+**A decisão vê utilidade, nunca interesse.** O lance, o pedido, a reserva e
+ψ leem a saída daqui. O interesse cru só é lido como relatório (o histograma
+de `equations.interest_histogram`).
+
+A LINHA FICA NA ELEGIBILIDADE, NÃO NA DISPONIBILIDADE
+-----------------------------------------------------
+
+Travada por pré-requisito ou fora da grade do aluno: utilidade **zero**, e o
+interesse é redistribuído. Sem vaga, sem carga, já conquistada na rodada:
+utilidade **inalterada**, e nada se move. O segundo grupo é o filtro de
+`available_goods` (eq. 15), que diz o que se pode pedir *nesta rodada* — não
+é afirmação sobre valor: o aluno continua querendo a disciplina que lotou.
+Zerar utilidade dentro daquele filtro quebraria a conservação de massa abaixo
+sem erro nenhum, e ψ sairia errado.
+
 Substitui a invariante de altura da eq. (41). Lá a utilidade era ordenada
 pela posição na grade, de modo que a disciplina-porteira valia mais por
-imposição. Aqui ela vale mais porque **acumulou o valor de tudo que
+imposição. Aqui ela vale mais porque **acumulou o interesse de tudo que
 destrava** — quem não quer nada à frente não é empurrado para lá, e o gosto
 volta a ser gosto.
 
 OS DOIS CASOS
 -------------
 
-**Travada por pré-requisito.** A utilidade desce para as elegíveis que estão
+**Travada por pré-requisito.** O interesse desce para as elegíveis que estão
 na cadeia de pré-requisitos dela — as que, aprovadas, abrem caminho até ela.
-Pré-requisito já aprovado não entra: não trava nada, e mandar utilidade para
+Pré-requisito já aprovado não entra: não trava nada, e mandar interesse para
 lá gastaria o sinal onde ele não tem efeito.
 
 **Fora da grade do aluno.** Já aprovada, ou optativa que a cota dispensou:
@@ -35,7 +71,9 @@ contra 1/6 aos outros; distribuindo no destino, 1/4 para cada.
 
 Como os pré-requisitos são **conjuntivos** — precisa de todos —, os quatro
 são igualmente necessários para chegar em C, e o peso da cascata reflete
-posição na árvore, não necessidade.
+posição na árvore, não necessidade. E, como cada inelegível reparte o
+**próprio interesse**, e não um acumulado, não há ordem de processamento a
+resolver.
 
 NÃO EXISTE ÓRFÃ
 ---------------
@@ -47,10 +85,9 @@ destino nunca é vazio e a massa total se conserva sem regra de exceção. A
 cláusula de guarda existe só para o caso degenerado de a cadeia terminar
 numa disciplina que saiu da grade por outro motivo.
 
-**A linha resultante soma o que a linha inteira somava** — 1, depois da
-normalização do sorteio. É isso que põe `alpha_u` na mesma unidade da
-utilidade: o aluno compara participações, e `alpha_u` é um valor nessa mesma
-escala.
+**A utilidade soma o que o interesse somava** — 1, depois da normalização do
+sorteio. É isso que põe `alpha_u` na mesma unidade da utilidade: o aluno
+compara participações, e `alpha_u` é um valor nessa mesma escala.
 
 A **ordem das chaves** é a de `eligible`, que é a ordem da grade, e é carga:
 é dela que as duas mochilas tiram o desempate.
@@ -62,9 +99,9 @@ from __future__ import annotations
 from collections.abc import Sequence, Set
 
 
-def eligible_utility(
+def utility(
     *,
-    row: dict[str, float],
+    interest: dict[str, float],
     eligible: Sequence[str],
     approved: Set[str],
     prerequisites: dict[str, tuple[str, ...]],
@@ -74,7 +111,7 @@ def eligible_utility(
         return {}
 
     open_now = set(chosen)
-    redistributed = {name: row.get(name, 0.0) for name in chosen}
+    result = {name: interest.get(name, 0.0) for name in chosen}
     unlocking: dict[str, frozenset[str]] = {}
 
     def unlockers(name: str) -> frozenset[str]:
@@ -96,13 +133,13 @@ def eligible_utility(
         unlocking[name] = frozenset(found)
         return unlocking[name]
 
-    for name, utility in row.items():
-        if name in open_now or utility <= 0.0:
+    for name, value in interest.items():
+        if name in open_now or value <= 0.0:
             continue
         missing = any(p not in approved for p in prerequisites.get(name, ()))
         targets = sorted(unlockers(name)) if missing else []
-        share = utility / len(targets or chosen)
+        share = value / len(targets or chosen)
         for target in targets or chosen:
-            redistributed[target] += share
+            result[target] += share
 
-    return redistributed
+    return result

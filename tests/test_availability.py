@@ -390,7 +390,7 @@ def test_availability_is_drawn_once_per_student_and_period():
 
 
 def test_tripling_the_seats_moves_no_availability_draw():
-    """A mesma invariante que a matriz de utilidades tem: nada é sorteado
+    """A mesma invariante que o interesse tem: nada é sorteado
     dentro do laço, senão mexer numa vaga mudaria o comportamento de todo
     mundo e a diferença entre dois cenários deixaria de ser do mecanismo."""
     import dataclasses

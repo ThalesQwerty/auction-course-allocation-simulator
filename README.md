@@ -8,7 +8,7 @@ matrícula universitária"* (UFBA, 2026).
 
 Simula a matrícula de uma universidade inteira ao longo de vários períodos
 letivos: o usuário configura a grade de disciplinas e a população, e a
-simulação gera os alunos (nome, utilidades, notas) a partir de uma seed, roda
+simulação gera os alunos (nome, interesse, notas) a partir de uma seed, roda
 as rodadas de alocação de cada período e devolve as métricas de eficiência,
 equidade e correlação da Seção 7.3.
 
@@ -60,7 +60,7 @@ Simulador/
 │   ├── config.py         # Cenário: geral, grade, pré-requisitos e as duas distribuições
 │   ├── names.py          # 256 nomes x 256 sobrenomes para batizar os alunos
 │   ├── population.py     # Alunos e seu histórico acadêmico
-│   ├── behavior.py       # Sorteio da matriz de utilidades e o recorte dela
+│   ├── behavior.py       # Sorteio do interesse e a utilidade que sai dele
 │   ├── grading.py        # Sorteio do desempenho base
 │   ├── availability.py   # Sorteio da disponibilidade (horas), uma por período
 │   ├── metrics.py        # O registro de métricas de um recorte
@@ -118,11 +118,12 @@ Para cada período letivo `t`:
 
 1. Quem ingressa em `t` recebe **vaga garantida** em todas as disciplinas de
    1º período, e essas vagas saem do estoque antes de o leilão abrir.
-2. Cada aluno ativo lê sua linha da matriz de utilidades `u^(t)` — já sorteada
-   na inicialização — sobre o seu **conjunto elegível**: as disciplinas que
-   ainda não aprovou e cujos pré-requisitos já cumpriu (eqs. 41-43). Fora dele a
-   utilidade é zero. Fora isso a linha dele não muda: ela é sorteada uma vez só,
-   para a simulação inteira.
+2. Cada aluno ativo converte sua linha de **interesse** `u^(t)` — já sorteada
+   na inicialização — em **utilidade** `ũ^(t)` sobre o seu **conjunto
+   elegível**: as disciplinas que ainda não aprovou e cujos pré-requisitos já
+   cumpriu (eqs. 41-43). Fora dele a utilidade é zero, e o interesse do que
+   ficou de fora é redistribuído sobre o que ele pode cursar. O interesse não
+   muda dentro do laço: é sorteado uma vez só, para a simulação inteira.
 3. Para cada rodada `r`, os lances saem deterministicamente das utilidades
    (mochila côncava), o leilão resolve o WDP por PLI (eqs. 22-25) e vagas, carga
    horária e orçamento são descontados (eqs. 13, 14, 27).
@@ -140,7 +141,7 @@ primeiro período — nada é sorteado dentro do loop, como exige a Seção 7.3:
 | --- | --- | --- |
 | `q` | quantil de desempenho de cada par (aluno, disciplina), persistente | `grading.draw_base_quantiles` |
 | `δ^(t)` | disponibilidade em horas de cada par (aluno, período) | `availability.draw_availability` |
-| `u^(t)` | utilidade de cada par (aluno, disciplina) em cada período | `behavior.draw_utilities` |
+| `u^(t)` | interesse de cada par (aluno, disciplina) em cada período | `behavior.draw_interest` |
 | `alpha`, `epsilon` | ordem de desempate e perturbação | `simulation.setup` |
 
 Duas coisas **não** vêm da seed, de propósito: o período de ingresso `t_a` e o
@@ -201,11 +202,43 @@ ela não entra no histograma, nem no CR, nem na média de notas — e não gasta
 tentativa. Quem exclui e refaz no semestre seguinte volta como primeira
 tentativa, sem o ganho de recursada.
 
-A matriz de utilidades é sorteada como **uma linha por (aluno, período)**, em
-dois passos:
+### Interesse e utilidade
 
-1. Um **valor preliminar** por par (aluno, disciplina), tirado de uma
-   **log-normal** de média logarítmica 0 e desvio `utility_sigma`.
+São duas palavras para dois objetos, e a fronteira entre eles é o **histórico
+do aluno**:
+
+| | O que é | Soma | Depende do histórico | Quando |
+| --- | --- | --- | --- | --- |
+| **interesse** `u` | o sorteio normalizado: o quanto o aluno quer cada disciplina | 1 sobre a grade inteira | não | sorteado na inicialização, nunca mais tocado |
+| **utilidade** `ũ` | o interesse com o inelegível zerado e redistribuído | 1 sobre o elegível | sim | recalculada a cada período |
+
+O `u_{a,x}` do anteprojeto, como sai do sorteio da eq. (41), é o **interesse**
+daqui. Os zeros da eq. (42) não são máscara: são a **definição** da utilidade —
+uma disciplina que o aluno está proibido de cursar não tem utilidade para ele
+naquele período. O interesse se move por um motivo só (o gosto derivou no
+semestre, por `interest_stability`); a utilidade, por dois, porque o estado do
+aluno também mudou.
+
+**A decisão vê utilidade, nunca interesse.** Lance, pedido, reserva, ψ e as
+escassezes leem a saída de `utility_matrix`, o único ponto onde um vira o outro.
+O interesse cru só aparece em relatório — o histograma do cenário.
+
+A linha fica na **elegibilidade**, não na disponibilidade:
+
+| Não pode cursar porque… | Utilidade | O interesse vai para… |
+| --- | --- | --- |
+| travada por pré-requisito | zero | os ancestrais elegíveis |
+| fora da grade dele (aprovada, ou optativa dispensada pela cota) | zero | igualmente para todas as elegíveis |
+| sem vaga, carga não cabe, já conquistada na rodada | inalterada | lugar nenhum |
+
+A terceira linha é o `available_goods` (eq. 15): filtro do que se pode pedir
+*nesta rodada*, não afirmação sobre valor — o aluno continua querendo a
+disciplina que lotou.
+
+O interesse é sorteado como **uma linha por (aluno, período)**, em dois passos:
+
+1. Um valor por par (aluno, disciplina), tirado de uma **log-normal** de média
+   logarítmica `interest_mean + A_x` e desvio `interest_sigma`.
 2. **Divisão pelo somatório**, que faz a linha valer 1 sobre a grade inteira.
 
 A log-normal é o que se obtém quando a grandeza é **produto** de muitos fatores
@@ -213,35 +246,44 @@ independentes — e é assim que se forma o quanto alguém quer uma disciplina:
 interesse no tema vezes afinidade com a área vezes horário vezes dificuldade
 percebida. É uma afirmação sobre alunos, e não sobre a ignorância de quem modela.
 
-`sigma` é o único parâmetro, e **grande concentra, pequeno achata**:
+`sigma` é o único parâmetro que chega à alocação, e **grande concentra,
+pequeno achata**:
 
 - o coeficiente de variação é `sqrt(exp(σ²) − 1)`, que cresce depressa, de modo
   que a faixa útil inteira cabe entre ~0,25 (aluno quase indiferente) e ~3 (quer
   uma disciplina e despreza o resto) — em passos **lineares**;
-- a média do logaritmo não é configurável porque some: deslocá-la multiplica a
-  linha por uma constante, e a constante morre na normalização;
-- a moda do sorteio cru é `exp(−σ²)`, **sempre positiva** — não há limiar de
-  sigma a respeitar para que a utilidade mais provável de uma disciplina não
-  seja zero.
+- a média do logaritmo (`interest_mean`, μ) é configurável, mas **some**:
+  deslocá-la multiplica a linha por `e^μ`, e a constante morre na normalização.
+  Ela existe para a prévia da interface, que desenha a log-normal fonte antes
+  de normalizar — em μ = 0 a massa se espreme entre 0 e 1 e a forma não se lê.
+  Há um teste (`test_the_mean_is_only_scale`) que garante que ela não mexe em
+  nada;
+- a moda do sorteio cru é `exp(μ + A_x − σ²)`, **sempre positiva** — não há
+  limiar de sigma a respeitar para que o interesse mais provável de uma
+  disciplina não seja zero.
+
+Os padrões são **μ = 1 e σ = 1**: a moda da fonte cai em 1 e o coeficiente de
+variação fica em ~1,3.
 
 **A normalização deixou de ser dispensável.** Ela já mantinha o número legível
 no relatório — 0,11 é "11% do que o aluno quer", 1,94 não é nada —, e agora
-carrega o modelo: como a redistribuição da matriz elegível conserva a massa da
-linha, **o recorte elegível também soma 1**, e é isso que põe a utilidade de
-reserva `alpha_u` na mesma unidade da utilidade. O aluno compara participações,
+carrega o modelo: como a redistribuição conserva a massa do interesse, **a
+utilidade também soma 1**, e é isso que põe a utilidade de reserva `alpha_u`
+na mesma unidade da utilidade. O aluno compara participações,
 e a reserva é um valor nessa mesma escala.
 
 **A invariante de altura da eq. (41) saiu.** Ela impunha `s_x > s_y ⇒ u_x > u_y`:
 a disciplina que destrava uma cadeia mais longa valia sempre mais que a terminal,
 qualquer que tivesse sido o sorteio. Isso punha valor curricular dentro do que
-deveria ser gosto, e a correlação resultante entre utilidade e posição na grade
+deveria ser gosto, e a correlação resultante entre interesse e posição na grade
 tornava indistinguíveis dois genes que precisavam ser eixos separados. No lugar
-dela entrou a **matriz de utilidade elegível**.
+dela entrou a **redistribuição** que converte interesse em utilidade.
 
-### Matriz de utilidade elegível
+### Do interesse à utilidade
 
-A cada período, a linha sorteada é transformada no que o aluno pode de fato
-pedir. A utilidade do que ele **não** pode cursar agora é redistribuída:
+A cada período, o interesse é convertido no que o aluno pode de fato pedir
+(`equations.utility`). O interesse do que ele **não** pode cursar agora é
+redistribuído:
 
 - **travada por pré-requisito** — divide igualmente entre as elegíveis que estão
   na cadeia de pré-requisitos dela, isto é, as que a destravam. Pré-requisito já
@@ -249,13 +291,13 @@ pedir. A utilidade do que ele **não** pode cursar agora é redistribuída:
 - **fora da grade dele** (já aprovada, ou optativa que a cota dispensou) — divide
   igualmente entre todas as elegíveis.
 
-A cadeia é percorrida até o fim e a utilidade é distribuída **só no destino**,
+A cadeia é percorrida até o fim e o interesse é distribuído **só no destino**,
 nunca ao longo do caminho. Não existe órfã: se uma disciplina está travada,
 subindo a cadeia ou se chega a uma sem pré-requisito faltante — elegível por
 definição — ou o grafo tem ciclo, e ele é acíclico por construção.
 
 A porteira continua valendo mais que a terminal, mas agora **porque acumulou o
-valor de tudo que destrava**, e não porque uma desigualdade o impôs. Quem não
+interesse de tudo que destrava**, e não porque uma desigualdade o impôs. Quem não
 quer nada à frente não é empurrado para lá.
 
 Uma consequência visível: `psi` passou a ler "fração do que dava para querer e
@@ -263,8 +305,8 @@ levar". O calouro que recebe a matrícula garantida inteira marca exatamente 1.
 
 Há uma **guarda contra underflow** (`behavior.UNDERFLOW_GUARD`) que não é
 parâmetro de modelagem: utilidade zero é o que marca o *inelegível*, filtrado por
-`utilidade > 0` nas duas mochilas, e um zero tiraria a disciplina do conjunto de
-escolha. Com a log-normal ela nunca dispara — só chegaria a zero com expoente
+`utilidade > 0` nas duas mochilas, e um interesse zero viraria utilidade zero e
+tiraria a disciplina do conjunto de escolha. Com a log-normal ela nunca dispara — só chegaria a zero com expoente
 abaixo de −745 —, e fica como invariante.
 
 **Esta é a terceira distribuição do projeto**, e as duas anteriores caíram por
@@ -281,17 +323,12 @@ com uma preferência fixa, perder uma vaga disputada condenava o aluno a querer 
 mesma disciplina com a mesma intensidade até consegui-la, e a fila se acumulava;
 agora a disputa recomeça com preferências novas.
 
-Sobre a linha do período agem os zeros da eq. (42). `utility_matrix` recorta ao
-conjunto elegível e **não renormaliza**: os valores que sobram são os mesmos da
-linha sorteada, e a soma deles é o `U_a^(t)` da eq. (43) — menor que 1 sempre
-que algo estiver fora do alcance do aluno.
-
-Isso não muda alocação nenhuma, e vale saber por quê: as duas mochilas do aluno
-comparam só **razões** entre utilidades, e a satisfação da eq. (51) divide pela
-soma do elegível. Multiplicar a linha por uma constante não muda lance, pedido
-nem `psi`. O `U_a` existe como leitura — quanto do que o aluno quer está ao
-alcance dele agora —, não como alavanca. E `psi = 1` continua atingível, que é o
-que o ingressante com matrícula garantida obtém.
+Sobre o interesse do período agem os zeros da eq. (42), e `utility_matrix`
+devolve só o conjunto elegível, já com a redistribuição. Como ela conserva a
+massa, a utilidade soma 1 em qualquer estágio do aluno: o `U_a^(t)` da eq. (43)
+deixou de ser leitura — não há "utilidade ao alcance" menor que o interesse
+inteiro. E `psi = 1` é atingível, que é o que o ingressante com matrícula
+garantida obtém.
 
 Sobre poupar: não há. A eq. (42) prevê um `U_a` que é a fração do que o aluno
 tem em mãos que ele se dispõe a comprometer, mas nem crédito nem carga horária
@@ -301,13 +338,13 @@ aluno gasta todo o orçamento no leilão e pede até o `W_a` cheio na linha de b
 Isso importa para comparar cenários. Com o sorteio dentro do loop, mexer numa
 vaga deslocava o fluxo do gerador e mudava as utilidades de todo mundo, de modo
 que a diferença entre dois cenários não era atribuível ao mecanismo. Agora dois
-cenários com a mesma seed compartilham a matriz inteira — há um teste
+cenários com a mesma seed compartilham o interesse inteiro — há um teste
 (`test_utilities_come_from_the_seed_not_from_the_simulation_path`) que triplica
-as vagas e confirma que nenhuma utilidade se mexe.
+as vagas e confirma que a utilidade só muda onde o conjunto elegível mudou.
 
 ### Os dois mecanismos
 
-O cenário, a população, as utilidades, as notas, os pré-requisitos, a matrícula
+O cenário, a população, o interesse, as notas, os pré-requisitos, a matrícula
 garantida do ingressante, a conclusão do curso e as métricas são **os mesmos**
 nos dois. O que `mechanism` troca é só o miolo da rodada — e é por isso que a
 diferença entre eles se lê como efeito do mecanismo.
@@ -418,8 +455,8 @@ seed: aqui eles são eixos do experimento, e cada braço impõe o seu.
 
 As duas condições da Seção 7.3 saem daí:
 
-1. **Mesma inicialização em todos os braços.** A seed gera a população, as
-   utilidades e as notas, então rodar a mesma seed nos três é literalmente a
+1. **Mesma inicialização em todos os braços.** A seed gera a população, o
+   interesse e as notas, então rodar a mesma seed nos três é literalmente a
    mesma gente encontrando regras diferentes. As listas da resposta são
    **pareadas**: o i-ésimo elemento de cada uma é a mesma população.
 2. **Múltiplas configurações de entrada.** As N seeds são essas configurações.
@@ -494,11 +531,12 @@ painel com os dois braços dentro, de modo que a diferença se lê *dentro* do
 painel. A escala é própria de cada um porque "não elegível" gira numa ordem de
 grandeza e "excluída" em outra.
 
-A comparação traz também o **histograma da matriz de utilidades** do cenário —
+A comparação traz também o **histograma do interesse** do cenário —
 o gráfico da causa ao lado do da consequência. Ele mostra como a preferência de
 um aluno se reparte entre as disciplinas: cada linha (aluno, período) é
 reescalada ao **próprio** mínimo e máximo e dividida em 9 faixas de mesma
-largura, e a altura é a fração de utilidades em cada faixa. A escala é por
+largura, e a altura é a fração de valores em cada faixa. É o interesse, e não
+a utilidade, porque é ele que σ e a atratividade governam. A escala é por
 linha, e não do menor ao maior valor da matriz inteira, porque global degenera —
 um único extremo define o intervalo e, de `σ = 1` em diante, 94% dos valores
 caem na primeira faixa, de modo que todos os gráficos sairiam iguais.
@@ -562,7 +600,7 @@ sozinho.
   e dicionário em Python preserva a ordem de inserção; por isso as duas mochilas
   leem o posto de `utilities`, nunca de `available`, que é só um filtro.
 
-  Com utilidade sorteada o empate tem probabilidade zero, então a regra quase
+  Com interesse sorteado o empate tem probabilidade zero, então a regra quase
   nunca é acionada. Ela existe para que um cenário escrito à mão — uma grade
   simétrica, um teste — não dependa da ordem de iteração para dar sempre o mesmo
   resultado, que é a mesma exigência de determinismo da Seção 7.3 que mantém os
@@ -578,13 +616,13 @@ sozinho.
   as duas validações do ritmo de entrada: a coorte não pode passar da menor
   oferta entre as disciplinas de 1º período, nem a carga somada delas pode
   passar do `W_a` — a matrícula garantida não escolhe quem a recebe.
-- **Os dois eixos de perfil**, mais o sigma das utilidades:
+- **Os dois eixos de perfil**, mais o sigma do interesse:
 
   | Eixo | O que governa | Sorteio |
   | --- | --- | --- |
   | desempenho | a normal dividida da nota, e por aí a frequência com que o aluno reprova | uma por par (aluno, disciplina), persistente |
   | disponibilidade | a log-normal das horas que ele tem para o período, e por aí a frequência com que exclui | uma por par (aluno, período) |
-  | utilidades | o quanto o aluno diferencia as disciplinas | `utility_sigma`, uma linha por (aluno, período) |
+  | interesse | o quanto o aluno diferencia as disciplinas | `interest_sigma`, uma linha por (aluno, período) |
 
   O perfil descreve o comportamento do aluno **fora do mecanismo** — se ele vai
   bem na disciplina ou se a larga. É **traço imutável**: não evolui, não
@@ -592,7 +630,7 @@ sozinho.
   (`equations.decision_score`) age *dentro* do mecanismo, ao pedir, e são
   coisas separadas de propósito.
 
-  Não há eixo de perfil para **utilidade**: o β do score já é o parâmetro de o
+  Não há eixo de perfil para **interesse**: o β do score já é o parâmetro de o
   quanto o aluno diferencia as disciplinas, e dois botões para a mesma coisa
   tornariam qualquer resultado ambíguo de ler.
 
@@ -605,7 +643,7 @@ sozinho.
 
   A dispersão de **desempenho** existe porque sem ela ninguém reprova, a
   recursada some do cenário e o CR vira ruído — a eq. (57) não mediria nada. A
-  de **utilidade** existe porque diferenciar preferência é **exatamente** a
+  de **interesse** existe porque diferenciar preferência é **exatamente** a
   informação que o leilão diz captar e a ordenação por CR não vê. Nenhuma está
   no anteprojeto.
 
@@ -807,8 +845,8 @@ sozinho.
   horizonte deixa de ser escolha — `|T| = entry_periods + max_residence − 1` é
   quando a última coorte sai e a universidade fica vazia.
 - **Atratividade** (`A_x`): a parte do gosto **comum a toda a população**,
-  contra o `utility_sigma`, que é a privada de cada aluno. É a **média do
-  expoente** da log-normal da utilidade: em 0 o valor gravita em torno de 1,
+  contra o `interest_sigma`, que é a privada de cada aluno. É a **média do
+  expoente** da log-normal do interesse: em 0 o valor gravita em torno de 1,
   negativo o puxa para dentro de (0, 1) e positivo o leva acima — em múltiplos
   da disciplina média o fator é `e^A`, de modo que `A = 1` é ≈ 2,72×. Por
   estar na mesma unidade de sigma, `A/σ` se lê direto como a correlação de
@@ -816,13 +854,14 @@ sozinho.
   inteira: uma optativa muito atraente **passa à frente** de uma obrigatória no
   sorteio, e o que a faz valer menos na decisão é a redistribuição, não uma
   desigualdade sobre o gosto.
-- **Utilidades**: um valor por par (aluno, disciplina, período), tirado de uma
-  log-normal de média `A_x` e desvio `utility_sigma`, dividido pelo somatório
-  da linha — uma
-  linha por (aluno, período). O anteprojeto não fixa a distribuição nem
-  o valor de `U_a`; aqui `U_a^(t)` é a soma do que está ao alcance do aluno
-  naquele período, e ele gasta tudo o que tem, porque não há transferência de
-  saldo entre períodos que justificasse poupar.
+- **Interesse e utilidade**: o interesse é um valor por par (aluno,
+  disciplina, período), tirado de uma log-normal de média `A_x` e desvio
+  `interest_sigma`, dividido pelo somatório da linha — uma linha por (aluno,
+  período). A utilidade é ele visto pelo histórico do aluno: inelegível
+  zerado, interesse redistribuído sobre o elegível. O anteprojeto não fixa a
+  distribuição nem o valor de `U_a`; aqui `U_a^(t)` é 1 para todo aluno, e ele
+  gasta tudo o que tem, porque não há transferência de saldo entre períodos que
+  justificasse poupar.
 - **Oferta em turmas** (`q_x`): a grade declara **quantas turmas** cada
   disciplina abre, e o cenário diz **quantos cabem em cada uma**
   (`class_size`, padrão 25). As vagas são o produto. A separação é o que torna
@@ -1204,7 +1243,7 @@ junto.
 
 Ou monte o seu: a tela de configuração tem **Configurações gerais** (o N da
 comparação, o horizonte e o ritmo de ingresso, as rodadas e o Γ_min),
-**Utilidades**, **Notas** e **Disponibilidade**, cada uma destas ao lado da
+**Interesse**, **Notas** e **Disponibilidade**, cada uma destas ao lado da
 prévia da distribuição que seus parâmetros produzem. As duas últimas editam
 listas de **perfis**, e as duas editam coisas diferentes porque as
 distribuições são de famílias diferentes: cada linha de **Notas** traz nome,
@@ -1219,7 +1258,7 @@ desenha, uma curva por vez. A **oferta não se edita ali**: a grade é **única
 no aplicativo** (`presets.GRADE`), igual em todo cenário, e quem a mostra é a
 tela Grade. Ao executar, a simulação entra no histórico e a tela abre nela.
 
-Ao lado dos campos de **notas** e de **utilidades**, a tela desenha a
+Ao lado dos campos de **notas** e de **interesse**, a tela desenha a
 distribuição que aqueles parâmetros produzem, recalculada a cada tecla
 (`web/src/distributions.ts`). São as mesmas dez faixas que a observação reporta,
 de modo que a prévia e o histograma do resultado se leem lado a lado. A das
@@ -1263,20 +1302,19 @@ o par vai separado por ponto e vírgula. A legenda em palavras não é enfeite �
 estado nunca diz sozinha o que quer dizer, e a amarela fica abaixo de 3:1 contra
 o fundo claro.
 
-A prévia **das utilidades** sorteia linhas de semente fixa e **deixa o degrau
-por altura de fora**: ele é curricular, não populacional, e domina tanto a linha
-que, com ele, o desenho não se mexeria com σ (as faixas andam menos de 2 pontos
-entre σ = 0,25 e σ = 3; sem ele, vão de um sino a 92% na primeira faixa). A
-régua é a **utilidade relativa** — a fração vezes o número de disciplinas, de
-modo que 1 é a indiferença e a média é 1 em qualquer cenário —, e o eixo vai de
-0 ao maior valor sorteado. A régua da fração saiu: ela mede a mesma
-distribuição dividida por |disciplinas|, e com isso o eixo encolhia na mesma
-proporção — numa grade de 60 a massa inteira cabia em 4% dele.
+A prévia **do interesse** desenha a **log-normal fonte**, antes da
+normalização — `exp(μ + A + σ·Z)` —, em forma fechada, com o eixo de 0 ao
+percentil 95. É a fonte, e não o interesse normalizado, porque a normalização
+apaga μ: a prévia anterior, em **interesse relativo** (a fração vezes o número
+de disciplinas, sorteada linha a linha), era invariante a μ por construção, e
+mostrar μ foi o motivo de abri-lo ao cenário. σ aparece nas duas do mesmo
+jeito: grande concentra, pequeno achata.
 
 Como a prévia das notas, ela desenha **um caso de cada vez**, e o campo abaixo
 do gráfico diz qual: a **atratividade** da disciplina, quando as demais estão
 em 0. É o recorte, não o cenário — lá a atratividade é declarada por
-disciplina. Em 0 a curva é a da disciplina média; subi-la desloca a
+disciplina. Ela se soma a μ no expoente: em 0 a curva é a da disciplina média;
+subi-la desloca a
 distribuição inteira para a direita e baixá-la para a esquerda, porque a
 atratividade é a parte do gosto comum a toda a população.
 
@@ -1359,7 +1397,7 @@ determinística, então refazê-la custa segundos e não fidelidade. A configura
 passa pelo mesmo `arm_config` que a comparação usou, e é isso que garante que o
 traço seja a observação de que o ponto saiu, e não uma parecida.
 
-Trocar o modelo **mantém o aluno escolhido**: a população, as utilidades e as
+Trocar o modelo **mantém o aluno escolhido**: a população, o interesse e as
 notas saem da seed, então o aluno 42 de uma seed é a mesma pessoa nos quatro
 modelos — é a comparação pareada da Seção 7.3 lida numa pessoa só.
 

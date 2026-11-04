@@ -154,7 +154,7 @@ class RequestRecord:
     """
 
     discipline: str
-    utility: float  # u_{a,x}^(t)
+    utility: float  # ũ_{a,x}^(t) — a utilidade, não o interesse
     bids: list[int]  # c_{a,x}^(t,r) por rodada; 0 = não pediu
     won_round: int | None  # `None` = recusada; `GUARANTEED_ROUND` = garantida
     paid: int  # eq. (27)
@@ -236,5 +236,6 @@ class SimulationResult:
     curriculum_periods: dict[str, int] = field(default_factory=dict)
     # As duas distribuições de **entrada**, como histogramas. Saem das
     # matrizes que esta observação de fato usou, e não de uma amostra à parte.
-    utility_distribution: list[float] = field(default_factory=list)
+    # A primeira é do interesse, não da utilidade: é o que σ governa.
+    interest_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)

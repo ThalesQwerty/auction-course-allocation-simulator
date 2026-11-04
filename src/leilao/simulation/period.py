@@ -105,8 +105,8 @@ def _eligible_count(
 ) -> dict[str, int]:
     """Quantos alunos tinham cada disciplina no conjunto elegível.
 
-    Sai das próprias linhas de utilidade elegível: elas já são o recorte do
-    que cada aluno podia pedir, então não há segunda fonte de verdade.
+    Sai das próprias linhas de utilidade: elas só trazem o que cada aluno
+    podia pedir, então não há segunda fonte de verdade.
     """
     count: dict[str, int] = {}
     for row in utilities.values():
@@ -370,7 +370,7 @@ def run_period(
     """
     utilities = {
         s.id: utility_matrix(
-            row=draws.utility_rows[(s.id, period)], student=s, config=config
+            interest=draws.interest_rows[(s.id, period)], student=s, config=config
         )
         for s in active
     }

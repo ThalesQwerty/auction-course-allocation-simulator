@@ -126,7 +126,7 @@ POPULATION = {
     "mode_grade": 4.0,
     "zero_rate": 0.05,
     "max_rate": 0.002,
-    "utility_sigma": 1,
+    "interest_sigma": 1,
     "max_hours": 120,
     # As modas da disponibilidade estão em horas, então os perfis padrão
     # (dimensionados para W_a = 360) não cabem neste W_a.

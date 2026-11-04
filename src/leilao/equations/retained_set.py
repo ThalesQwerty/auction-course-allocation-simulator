@@ -24,7 +24,7 @@ que contém a disciplina **listada primeiro** no cenário. A ordem dos itens sai
 de `utilities`, que é a ordem da grade, e o desempate compara as posições
 escolhidas lexicograficamente — menor vence, isto é, índice mais baixo vence.
 
-Com utilidade sorteada o empate tem probabilidade zero. A regra existe para
+Com interesse sorteado o empate tem probabilidade zero. A regra existe para
 que um cenário escrito à mão não dependa da ordem de iteração, que é a mesma
 exigência de determinismo da Seção 7.3.
 

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { DensityChart, STATUS } from "./charts";
 import { entryDisciplines } from "./curriculum";
-import { availabilityCurve, gradeCurve, utilityCurve } from "./distributions";
+import { availabilityCurve, gradeCurve, interestCurve } from "./distributions";
 import { fullLoadThreshold } from "./equations";
 import { PresetList } from "./PresetList";
 import { formatSavedDate, nameExists } from "./savedPresets";
@@ -113,21 +113,21 @@ export function Config({
     () => availabilityCurve(availability, config.max_hours),
     [availability, config.max_hours]
   );
-  const utilities = useMemo(
-    () => utilityCurve(config, attractiveness),
+  const interest = useMemo(
+    () => interestCurve(config, attractiveness),
     [config, attractiveness]
   );
-  // O eixo da utilidade é o suporte da própria amostra, que a curva já carrega
+  // O eixo do interesse é o suporte da própria amostra, que a curva já carrega
   // no último ponto.
-  const utilityTop = utilities.points.length
-    ? utilities.points[utilities.points.length - 1].x
+  const interestTop = interest.points.length
+    ? interest.points[interest.points.length - 1].x
     : 1;
   // Uma casa a mais do que a régua do eixo: o rodapé dá um número, e um número
   // arredondado à casa do eixo perderia justamente o que ele acrescenta.
-  const utilityDigits =
-    Math.max(0, Math.ceil(-Math.log10(Math.max(utilityTop, 1e-9) / 10))) + 1;
-  const utilityValue = (value: number) =>
-    value.toLocaleString("pt-BR", { maximumFractionDigits: utilityDigits });
+  const interestDigits =
+    Math.max(0, Math.ceil(-Math.log10(Math.max(interestTop, 1e-9) / 10))) + 1;
+  const interestValue = (value: number) =>
+    value.toLocaleString("pt-BR", { maximumFractionDigits: interestDigits });
 
   // O nome proposto ao salvar. Vindo de um preset carregado, é o nome dele —
   // salvar por cima de um salvo é o caminho de edição, e repetir o nome é
@@ -278,18 +278,29 @@ export function Config({
         </div>
 
         <div className="panel">
-          <h2>Utilidades</h2>
+          <h2>Interesse</h2>
           <div className="config-split">
             <div>
               <div className="field-row">
+                <div className="field">
+                  <label>Média da log-normal</label>
+                  {/* Sem `min`: μ é ℝ inteiro, e não mexe em alocação — some
+                      na normalização. Serve à prévia ao lado. */}
+                  <input
+                    type="number"
+                    step={0.1}
+                    value={config.interest_mean}
+                    onChange={(e) => patch({ interest_mean: Number(e.target.value) })}
+                  />
+                </div>
                 <div className="field">
                   <label>Desvio da log-normal</label>
                   <input
                     type="number"
                     min={0.05}
                     step={0.05}
-                    value={config.utility_sigma}
-                    onChange={(e) => patch({ utility_sigma: Number(e.target.value) })}
+                    value={config.interest_sigma}
+                    onChange={(e) => patch({ interest_sigma: Number(e.target.value) })}
                   />
                 </div>
                 <div className="field">
@@ -299,8 +310,8 @@ export function Config({
                     min={0}
                     max={1}
                     step={0.1}
-                    value={config.utility_stability}
-                    onChange={(e) => patch({ utility_stability: Number(e.target.value) })}
+                    value={config.interest_stability}
+                    onChange={(e) => patch({ interest_stability: Number(e.target.value) })}
                   />
                 </div>
               </div>
@@ -308,11 +319,11 @@ export function Config({
 
             <div className="config-preview">
               <DensityChart
-                id="curva-utilidade"
-                title="Distribuição de utilidade relativa"
-                points={utilities.points}
-                domain={[0, utilityTop]}
-                footer={<>mais provável: {utilityValue(utilities.mode)}</>}
+                id="curva-interesse"
+                title="Log-normal fonte do interesse"
+                points={interest.points}
+                domain={[0, interestTop]}
+                footer={<>mais provável: {interestValue(interest.mode)}</>}
                 controls={
                   <div className="field-row">
                     <div className="field">
@@ -396,7 +407,7 @@ export function Config({
                   at: fullLoadThreshold(config.max_hours),
                   below: STATUS.critical,
                   above: STATUS.good,
-                  labels: ["pode excluir", "enche a carga"],
+                  labels: ["não usa toda a CH máx", "usa toda a CH máx"],
                 }}
                 footer={
                   availabilities ? (

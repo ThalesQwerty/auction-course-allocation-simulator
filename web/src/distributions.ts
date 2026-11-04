@@ -17,10 +17,8 @@ import {
   gradeDensity,
   gradeShape,
   gradeSds,
-  kernelSmooth,
   lognormalDensity,
   lognormalQuantile,
-  relativeUtilitySample,
 } from "./equations";
 import type { Curve } from "./equations";
 import type { PerformanceProfile, Profile, Scenario } from "./types";
@@ -125,53 +123,48 @@ export function availabilityCurve(
   };
 }
 
-/** Quantos pontos a curva da utilidade leva para a tela. */
-const CURVE_POINTS = 120;
+/** Onde o eixo da prévia do interesse termina: o percentil 95 da fonte. Sem
+ * máximo, o topo é escolha de quem desenha, e um quantil mais alto espremeria a
+ * moda contra o zero — a cauda da log-normal cresce depressa com σ. */
+const INTEREST_TOP = 0.95;
 
-/** Células do grid fino em que a amostra é contada antes de ser suavizada. */
-const FINE_CELLS = 600;
-
-/** Largura do núcleo gaussiano, em células do grid fino. */
-const KERNEL_CELLS = 10;
-
-/** A curva de como um aluno reparte a preferência, em **utilidade relativa**:
- * a fração vezes o número de disciplinas, de modo que 1 é a indiferença e a
- * média é exatamente 1 em qualquer cenário. O eixo vai de 0 ao maior valor
- * sorteado — é o suporte da distribuição, e é ele que uma densidade desenha.
+/** A curva da **log-normal fonte** do interesse, antes da normalização:
+ *
+ *     x = exp(μ + A + σ·Z),   Z ~ N(0, 1)
+ *
+ * É a distribuição de onde o motor sorteia (`behavior.draw_interest`), numa
+ * disciplina de atratividade `attractiveness`. Forma fechada, como a da
+ * disponibilidade: sem amostragem, e por isso a curva não treme enquanto se
+ * digita.
+ *
+ * **É a fonte, não o interesse normalizado.** A normalização divide a linha
+ * pelo somatório e com isso apaga μ — o fator e^μ é comum à linha toda —, de
+ * modo que μ não muda alocação nenhuma. Ele existe para esta prévia: em μ = 0
+ * a massa se espreme entre 0 e 1 e a forma não se lê. O que σ faz aparece aqui
+ * do mesmo jeito que na linha normalizada: grande concentra, pequeno achata.
  *
  * A `attractiveness` é o **recorte** que se olha, como a dificuldade é na
- * prévia das notas: a curva é a de uma disciplina com aquela atratividade,
- * quando as demais estão em 0. Não é parâmetro de cenário — lá ela é
- * declarada por disciplina. Campo vazio vira 0, que agora é justamente o
+ * prévia das notas: a curva é a de uma disciplina com aquela atratividade.
+ * Não é parâmetro de cenário — lá ela é declarada por disciplina. Ela se soma
+ * a μ no expoente, então desloca a curva inteira; campo vazio vira 0, o
  * neutro.
  *
- * A régua da **fração** saiu em 30/10/2026: ela mede a mesma distribuição
- * dividida por |disciplinas|, e com isso o eixo x encolhia na mesma
- * proporção — numa grade de 60 a massa inteira cabia em 4% do eixo e a
- * densidade subia a 100, o que não se lê.
+ * **A estabilidade não entra**: ela reparte a variância entre a peça
+ * permanente e a do semestre, e a soma das duas é sempre σ², de modo que a
+ * distribuição de um período qualquer não depende dela.
+ *
+ * Substitui, em 04/11/2026, a prévia em **interesse relativo** (a fração
+ * vezes |disciplinas|, sorteada linha a linha): ela é invariante a μ por
+ * construção, e mostrar μ foi o motivo de abri-lo ao cenário.
  */
-export function utilityCurve(scenario: Scenario, attractiveness = 0): Curve {
-  const size = scenario.disciplines.length;
-  if (size < 2) return { points: [], mode: 0 };
+export function interestCurve(scenario: Scenario, attractiveness = 0): Curve {
+  const logMean = scenario.interest_mean + attractiveness;
+  const logSd = scenario.interest_sigma;
+  if (!(logSd > 0) || !Number.isFinite(logMean)) return { points: [], mode: 0 };
 
-  const values = relativeUtilitySample(size, scenario.utility_sigma, attractiveness);
-  const highest = values.reduce((max, value) => Math.max(max, value), 0);
-  if (!(highest > 0)) return { points: [], mode: 0 };
-
-  const counts = new Array<number>(FINE_CELLS).fill(0);
-  for (const value of values) {
-    const cell = Math.floor((value / highest) * FINE_CELLS);
-    counts[Math.min(FINE_CELLS - 1, Math.max(0, cell))] += 1;
-  }
-  const smooth = kernelSmooth(counts, KERNEL_CELLS);
-
-  // O grid fino desce para os pontos da curva, e a área vai a 1 na saída.
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let i = 0; i < CURVE_POINTS; i++) {
-    const part = i / (CURVE_POINTS - 1);
-    xs.push(highest * part);
-    ys.push(smooth[Math.min(FINE_CELLS - 1, Math.round(part * (FINE_CELLS - 1)))]);
-  }
-  return densityCurve(xs, ys);
+  const top = lognormalQuantile(INTEREST_TOP, logMean, logSd);
+  const { xs, ys } = lognormalDensity(logMean, logSd, top);
+  // A moda tem forma fechada, e ela vence a do grid: o rodapé dá um número,
+  // e o grid o arredondaria à largura de um passo.
+  return { ...densityCurve(xs, ys), mode: Math.exp(logMean - logSd * logSd) };
 }

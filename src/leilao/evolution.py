@@ -1,7 +1,7 @@
 """O algoritmo genético: coortes evoluindo independentes sobre o mesmo cenário.
 
 A camada estocástica da evolução — torneio, elitismo e mutação —, ao lado de
-`behavior.draw_utilities` e `grading.draw_base_quantiles`: as contas puras ficam em
+`behavior.draw_interest` e `grading.draw_base_quantiles`: as contas puras ficam em
 `equations.genome_grid` e `equations.genome_drift`.
 
 VOCABULÁRIO

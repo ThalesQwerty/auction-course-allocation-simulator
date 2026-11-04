@@ -1,26 +1,33 @@
-"""O sorteio da matriz de utilidades e o recorte dela (Seção 7.2.4).
+"""O sorteio do interesse e a utilidade que sai dele (Seção 7.2.4).
 
-A matriz é **parâmetro de entrada**, como a aptidão: todo o sorteio acontece
-na inicialização, a partir da seed, para todos os alunos e todos os períodos
-de uma vez. Em tempo de execução só se recorta o que já foi sorteado, e os
-lances saem deterministicamente dali — nenhuma aleatoriedade dentro do laço,
-como exige a Seção 7.3.
+**Interesse** é o quanto o aluno quer cada disciplina: o sorteio normalizado
+sobre a grade inteira, que soma 1 e não depende do histórico. **Utilidade** é
+esse interesse com o inelegível zerado e redistribuído sobre o que ele pode
+cursar — soma 1 no elegível e depende do histórico. A fronteira entre os dois
+está em `equations.utility`.
+
+O interesse é **parâmetro de entrada**, como a aptidão: todo o sorteio
+acontece na inicialização, a partir da seed, para todos os alunos e todos os
+períodos de uma vez. Em tempo de execução ele só é convertido em utilidade
+pelo estado do aluno, e os lances saem deterministicamente dali — nenhuma
+aleatoriedade dentro do laço, como exige a Seção 7.3.
 
 Isso importa para comparar cenários: com o sorteio dentro do laço, mexer numa
 vaga deslocaria o fluxo do gerador e mudaria as preferências de todo mundo, e
 a diferença entre dois cenários deixaria de ser atribuível ao mecanismo. Há
-um teste que triplica as vagas e confirma que nenhuma utilidade se mexe.
+um teste que triplica as vagas e confirma que nenhum interesse se mexe.
 
 **Uma linha por (aluno, período).** O gosto é resorteado a cada período, na
-proporção que `utility_stability` deixa para o ruído do semestre — a conta
+proporção que `interest_stability` deixa para o ruído do semestre — a conta
 está em `equations.preference_split`. Com uma preferência fixa, perder uma
 vaga disputada condenava o aluno a querer a mesma disciplina com a mesma
 intensidade até consegui-la, e a fila se acumulava.
 
-As três contas feitas sobre o sorteio têm arquivo próprio:
-`equations.preference_split` (repartição da variância),
-`equations.utility_row` (altura e normalização) e `equations.eligible_set`
-(os zeros da eq. 42).
+As contas feitas sobre o sorteio têm arquivo próprio. Do lado do interesse,
+`equations.preference_split` (repartição da variância) e
+`equations.interest_row` (normalização); do lado da utilidade,
+`equations.eligible_set` (os zeros da eq. 42) e `equations.utility` (a
+redistribuição).
 
 ORDEM DE DESEMPATE
 ------------------
@@ -36,7 +43,7 @@ varredura, e dicionário em Python preserva a ordem de inserção. Por isso as
 duas mochilas leem o posto a partir de `utilities`, nunca de `available`, que
 é só um filtro e pode chegar em qualquer ordem.
 
-Com utilidade sorteada o empate tem probabilidade zero, então a regra quase
+Com interesse sorteado o empate tem probabilidade zero, então a regra quase
 nunca é acionada. Ela existe para que um cenário escrito à mão — uma grade
 simétrica, um teste — não dependa da ordem de iteração, que é a mesma
 exigência de determinismo que mantém os sorteios fora do laço. Não se confunde
@@ -58,12 +65,12 @@ from .equations import (
     admitted_set,
     concave_bids,
     decision_scores,
-    eligible_utility,
     normalize_rows,
     preference_split,
+    utility,
 )
-from .equations.utility_histogram import BINS as DISTRIBUTION_BINS
-from .equations.utility_histogram import utility_histogram
+from .equations.interest_histogram import BINS as DISTRIBUTION_BINS
+from .equations.interest_histogram import interest_histogram
 
 if TYPE_CHECKING:  # `population` importa `Behavior` daqui; o ciclo só existe
     from .population import Student  # em tempo de verificação de tipo.
@@ -73,8 +80,9 @@ if TYPE_CHECKING:  # `population` importa `Behavior` daqui; o ciclo só existe
 # que faça sentido — ela é seguro, não mecanismo.
 #
 # Existe porque utilidade zero é o que marca o **inelegível**, e as duas
-# mochilas filtram por `utilidade > 0`: um zero aqui tiraria a disciplina do
-# conjunto de escolha e o aluno nunca a cursaria, nem sendo a única disponível.
+# mochilas filtram por `utilidade > 0`: um interesse zero aqui viraria utilidade
+# zero, tiraria a disciplina do conjunto de escolha e o aluno nunca a cursaria,
+# nem sendo a única disponível.
 UNDERFLOW_GUARD = sys.float_info.min
 
 __all__ = [
@@ -85,8 +93,8 @@ __all__ = [
     "Signals",
     "compute_bids",
     "decision_scores",
-    "draw_utilities",
-    "utility_distribution",
+    "draw_interest",
+    "interest_distribution",
     "utility_matrix",
 ]
 
@@ -101,7 +109,7 @@ def _stability_by_discipline(config: SimulationConfig) -> np.ndarray:
     """
     return np.array(
         [
-            config.utility_stability if d.stability is None else d.stability
+            config.interest_stability if d.stability is None else d.stability
             for d in config.disciplines
         ],
         dtype=float,
@@ -118,7 +126,7 @@ def _attractiveness(config: SimulationConfig) -> np.ndarray:
 
     Entra **somada ao log, sem transformação**, e é isso que a põe na mesma
     unidade de sigma: A é a média do expoente, sigma é o desvio dele. Em 0 o
-    valor preliminar gravita em torno de 1, negativo o puxa para dentro de
+    interesse cru gravita em torno de 1, negativo o puxa para dentro de
     (0, 1) e positivo o leva acima; em múltiplos da disciplina média o fator é
     e^{A_x}.
 
@@ -133,12 +141,12 @@ def _attractiveness(config: SimulationConfig) -> np.ndarray:
     ).reshape(1, 1, -1)
 
 
-def draw_utilities(
+def draw_interest(
     students: list["Student"], config: SimulationConfig, rng: np.random.Generator
 ) -> dict[tuple[str, int], dict[str, float]]:
-    """Sorteia a matriz inteira: uma linha por (aluno, período), sobre a grade.
+    """Sorteia o interesse: uma linha por (aluno, período), sobre a grade.
 
-    O valor preliminar vem de uma **log-normal** de média logarítmica A_x e
+    O interesse vem de uma **log-normal** de média logarítmica μ + A_x e
     desvio σ, repartida entre uma peça permanente e um ruído do semestre
     (`preference_split`). A log-normal é o que se obtém quando a grandeza é
     **produto** de muitos fatores independentes — e é assim que se forma o
@@ -150,9 +158,15 @@ def draw_utilities(
     achata**: o coeficiente de variação é √(e^{σ²} − 1), que cresce depressa,
     de modo que a faixa útil inteira cabe entre ~0,25 (aluno quase
     indiferente) e ~3 (quer uma disciplina e despreza o resto). E a moda do
-    sorteio cru é e^{A_x − σ²}, sempre positiva: não há limiar de σ a respeitar.
+    sorteio cru é e^{μ + A_x − σ²}, sempre positiva: não há limiar de σ a
+    respeitar.
 
-    **A média desse logaritmo é a atratividade da disciplina**
+    **μ (`interest_mean`) é só escala.** Comum a todas as disciplinas, ele
+    multiplica a linha inteira por e^μ, e a normalização desfaz o fator — nada
+    abaixo daqui o vê. Existe para a prévia da interface desenhar a fonte numa
+    escala que se lê.
+
+    **O que sobra da média desse logaritmo é a atratividade da disciplina**
     (`_attractiveness`): sigma é a dispersão privada de cada aluno, A_x é o
     nível comum a todos, e as duas estão na mesma unidade. Em A = 0 as linhas
     são independentes e a disputa por uma disciplina não tem como ser
@@ -160,7 +174,7 @@ def draw_utilities(
     a ser sinal de que os colegas também gostam.
 
     O que vem depois do sorteio — deslocamento por altura e normalização —
-    está em `equations.utility_row`. Note que **a invariante de altura domina a
+    está em `equations.interest_row`. Note que **a invariante de altura domina a
     atratividade**: o degrau entre camadas é a amplitude da linha mais 1, maior
     que qualquer A, de modo que A ordena dentro de uma altura e não entre
     alturas. Como optativa tem altura 0, nenhuma atratividade a faz passar à
@@ -172,8 +186,8 @@ def draw_utilities(
         permanent=rng.normal(0.0, 1.0, size=(len(students), 1, len(names))),
         seasonal=rng.normal(0.0, 1.0, size=shape),
         stability=_stability_by_discipline(config),
-        sigma=config.utility_sigma,
-    ) + _attractiveness(config)
+        sigma=config.interest_sigma,
+    ) + config.interest_mean + _attractiveness(config)
     normalized = normalize_rows(np.maximum(np.exp(log), UNDERFLOW_GUARD))
     return {
         (student.id, period + 1): {
@@ -184,33 +198,34 @@ def draw_utilities(
     }
 
 
-def utility_distribution(
+def interest_distribution(
     rows: dict[tuple[str, int], dict[str, float]], bins: int = DISTRIBUTION_BINS
 ) -> list[float]:
-    """O histograma da matriz — ver `equations.utility_histogram`."""
-    return utility_histogram(rows.values(), bins)
+    """O histograma do interesse — ver `equations.interest_histogram`."""
+    return interest_histogram(rows.values(), bins)
 
 
 def utility_matrix(
-    *, row: dict[str, float], student: "Student", config: SimulationConfig
+    *, interest: dict[str, float], student: "Student", config: SimulationConfig
 ) -> dict[str, float]:
-    """u_{a,·}^(t): o recorte elegível da linha do aluno — eqs. (41)-(43).
+    """ũ_{a,·}^(t): a utilidade do aluno no período — o interesse dele, visto
+    pelo histórico.
 
-    Determinística: mesma linha e mesmo estado do aluno, mesma saída. Devolve
-    só as disciplinas do conjunto elegível (`equations.eligible_set`); as já
-    aprovadas e as ainda bloqueadas valem zero por construção e não aparecem.
+    Determinística: mesmo interesse e mesmo estado do aluno, mesma saída.
+    Devolve só as disciplinas do conjunto elegível (`equations.eligible_set`);
+    as já aprovadas e as ainda bloqueadas têm utilidade zero por definição e
+    não aparecem, e o interesse delas foi redistribuído sobre as que aparecem
+    (`equations.utility`). Como a redistribuição conserva a massa, a soma é 1.
 
-    **Os valores não são renormalizados.** São os mesmos da linha sorteada, e
-    a soma deles é o U_a^(t) da eq. (43) — menor que 1 sempre que algo estiver
-    fora do alcance do aluno. Isso não muda alocação nenhuma: as duas mochilas
-    comparam só razões.
+    É o **único** ponto onde o interesse vira utilidade, e tudo o que decide —
+    lance, pedido, reserva, ψ — lê daqui.
 
     A **ordem das chaves** é a da grade no cenário, e é carga: é dela que as
     duas mochilas tiram o desempate. Reordenar a saída muda resultado.
     """
     approved = student.approved(config.min_grade)
-    return eligible_utility(
-        row=row,
+    return utility(
+        interest=interest,
         eligible=config.eligible_disciplines(approved),
         approved=approved,
         prerequisites=config.prerequisites_by_discipline(),

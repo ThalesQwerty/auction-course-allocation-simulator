@@ -417,12 +417,12 @@ def utilities_by_student(result) -> dict[tuple[str, int], dict[str, float]]:
 
 
 def test_utilities_come_from_the_seed_not_from_the_simulation_path():
-    """A matriz de utilidades é parâmetro de entrada: mexer num parâmetro do
-    mecanismo não pode re-sortear a preferência de ninguém, senão a diferença
-    entre dois cenários deixa de ser atribuível ao mecanismo.
+    """O interesse é parâmetro de entrada: mexer num parâmetro do mecanismo
+    não pode re-sortear a preferência de ninguém, senão a diferença entre dois
+    cenários deixa de ser atribuível ao mecanismo.
 
-    O sorteio é um peso por disciplina; a utilidade é esse peso normalizado
-    sobre o conjunto elegível. Então o que tem de bater entre cenários é:
+    O interesse é um peso por disciplina; a utilidade é esse peso visto pelo
+    conjunto elegível. Então o que tem de bater entre cenários é:
     utilidade idêntica quando o aluno chega com o mesmo conjunto elegível, e
     razão entre duas disciplinas quaisquer sempre — a razão cancela a
     normalização e expõe o peso sorteado.
@@ -574,7 +574,7 @@ def test_entrants_get_every_entry_discipline_without_bidding():
             if r.won_round is not None and not r.excluded
         )
         assert record.satisfaction == pytest.approx(served)
-        # Com a matriz de utilidade elegível a linha do calouro soma 1 sobre
+        # Com a redistribuição, a utilidade do calouro soma 1 sobre
         # as disciplinas de entrada, e ele as recebe todas: ψ = 1 exato. ψ
         # passou a ler "fração do que dava para querer e levar".
         # A tolerância é de soma em ponto flutuante: a linha normalizada

@@ -9,6 +9,7 @@
  * A chave é separada da do histórico de propósito. Limpar execuções não apaga
  * cenários, e um formato que mude de um lado não derruba o outro.
  */
+import { migrateInterest } from "./history";
 import { horizonFor } from "./types";
 import type { Scenario } from "./types";
 
@@ -48,7 +49,12 @@ export function loadSavedPresets(): SavedPreset[] {
     if (!Array.isArray(parsed)) return [];
     return (parsed as SavedPreset[])
       .filter((entry) => entry && typeof entry.id === "string" && entry.config)
-      .map((entry) => ({ ...entry, config: withoutGrade(entry.config as Scenario) }));
+      .map((entry) => ({
+        ...entry,
+        // Salvo antes de 04/11/2026 traz `utility_sigma` e `utility_stability`,
+        // e não traz `interest_mean`.
+        config: withoutGrade(migrateInterest(entry.config as Scenario)),
+      }));
   } catch {
     // localStorage indisponível (modo privado) ou conteúdo corrompido.
     return [];

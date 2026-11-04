@@ -13,8 +13,8 @@ POR QUE NÃO A SATISFAÇÃO
 
 ψ chegou a ser candidata. O argumento contra ela era que, sem a invariante de
 altura, maximizar ψ seria cursar o que se gosta sem nunca avançar — e com a
-matriz de utilidade elegível isso deixou de valer, porque a porteira carrega
-o valor do que destrava. Ficou carga/período mesmo: mede vazão direto, e é a
+utilidade redistribuindo o inelegível isso deixou de valer, porque a porteira
+carrega o interesse do que destrava. Ficou carga/período mesmo: mede vazão direto, e é a
 mais simples de defender num texto.
 
 O JUBILADO ENTRA
