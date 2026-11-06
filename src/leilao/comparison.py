@@ -16,8 +16,8 @@ existe para fazer as duas valerem de uma vez:
    configurações: N populações diferentes, cada uma vista pelos dois
    mecanismos.
 
-Juntas, as duas isolam o nexo causal no mecanismo. Uma observação só não diria
-nada — a diferença poderia ser daquela população; e N observações sem parear as
+Juntas, as duas isolam o nexo causal no mecanismo. Uma simulação só não diria
+nada — a diferença poderia ser daquela população; e N simulações sem parear as
 seeds mediriam a variação entre populações junto da variação entre mecanismos.
 
 **São dois braços** (`ARMS`): a ordenação por CR e o leilão com retorno. A
@@ -58,7 +58,7 @@ Por isso a política de retorno e o resolvedor **não são parâmetros do cenár
 aqui**: são eixos do experimento, e o que vier na configuração é ignorado,
 como a seed. Cada braço impõe o seu.
 
-**Uma observação vira um número por métrica**, que é o ponto do boxplot. Para as
+**Uma simulação vira um número por métrica**, que é o ponto do boxplot. Para as
 três métricas de período a redução é a média **ponderada pelos alunos medidos**:
 a simulação termina numa fase de drenagem, em que a população só diminui, e uma
 média simples daria a um período final de vinte alunos o mesmo peso de um
@@ -71,7 +71,7 @@ período, em que todo mundo acabou de ingressar, simplesmente não entra na méd
 
 **As quatro métricas.** Satisfação (psi-barra), equidade (phi) e correlação
 (lambda) são de período e passam pela média ponderada. O **tempo de formatura**
-não é: é propriedade da observação inteira, a média de quantos períodos cada
+não é: é propriedade da simulação inteira, a média de quantos períodos cada
 concluinte levou do ingresso ao diploma.
 
 Ficaram de fora, e por motivos diferentes. Nada de **crédito**: orçamento, preço
@@ -129,8 +129,8 @@ from .metrics import Metrics
 from .population import generate_students
 from .simulation import SimulationResult, run_simulation
 
-# Teto de observações por braço. Não é limitação técnica: é que o boxplot para de
-# ganhar informação muito antes disso, e cada observação a mais custa uma
+# Teto de simulações por braço. Não é limitação técnica: é que o boxplot para de
+# ganhar informação muito antes disso, e cada simulação a mais custa uma
 # simulação inteira em cada braço.
 MAX_RUNS = 100
 
@@ -195,7 +195,7 @@ ABLATION_ARMS: tuple[Arm, ...] = (
 
 
 # Os braços por chave — como a interface se refere a um deles ao pedir o traço
-# de uma observação. Inclui a ablação: o traço de um braço que não rodou por
+# de uma simulação. Inclui a ablação: o traço de um braço que não rodou por
 # padrão continua reproduzível.
 ARM_BY_KEY: dict[str, Arm] = {arm.key: arm for arm in ARMS + ABLATION_ARMS}
 
@@ -225,7 +225,7 @@ def arms_from_keys(keys: list[str]) -> tuple[Arm, ...]:
 
 @dataclass(frozen=True)
 class PeriodSeries:
-    """As métricas de período de uma observação, sem reduzir.
+    """As métricas de período de uma simulação, sem reduzir.
 
     É o mesmo material de que `summarize` tira a média ponderada — a diferença
     é que aqui ele não vira um número. A média esconde que o horizonte tem três
@@ -252,7 +252,7 @@ class PeriodSeries:
     o mesmo eixo.
 
     O tempo de formatura não está aqui, e não por recorte de escopo: é
-    propriedade da observação inteira. A versão por período — quanto levou quem
+    propriedade da simulação inteira. A versão por período — quanto levou quem
     concluiu em t — seria outra grandeza, com viés de sobrevivência, porque
     quem conclui cedo é rápido por construção.
     """
@@ -283,7 +283,7 @@ class PeriodSeries:
 
 @dataclass(frozen=True)
 class CohortSeries:
-    """O mesmo resumo da observação, uma linha por coorte.
+    """O mesmo resumo da simulação, uma linha por coorte.
 
     A coorte é o período de ingresso (t_a): a coorte 3 é quem entrou no
     período 3, e o aluno fica nela do ingresso ao diploma — o que torna esta
@@ -337,7 +337,7 @@ class CohortSeries:
 
 @dataclass(frozen=True)
 class RunSummary:
-    """Uma observação reduzida a um ponto por métrica.
+    """Uma simulação reduzida a um ponto por métrica.
 
     `periods` é quantos períodos a simulação de fato publicou — pode ser menor
     que |T| se a população se esvaziou antes do horizonte —, e serve para
@@ -396,7 +396,7 @@ class RunSummary:
 
 @dataclass(frozen=True)
 class ArmResult:
-    """As N observações de um braço, na ordem das seeds."""
+    """As N simulações de um braço, na ordem das seeds."""
 
     key: str
     mechanism: Mechanism
@@ -406,7 +406,7 @@ class ArmResult:
 
 @dataclass(frozen=True)
 class ComparisonResult:
-    """As N observações de cada braço, pareadas pela seed.
+    """As N simulações de cada braço, pareadas pela seed.
 
     Todas as listas têm o mesmo tamanho e a mesma ordem de seeds: o i-ésimo
     elemento de cada uma é a *mesma* população sob regras diferentes. Quem lê
@@ -419,7 +419,7 @@ class ComparisonResult:
     arms: list[ArmResult]
     # As duas distribuições de entrada do cenário, para a tela mostrar de onde
     # vieram os números. Não variam entre braços nem entre seeds — são do
-    # cenário, não da observação.
+    # cenário, não da simulação.
     interest_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)
 
@@ -484,7 +484,7 @@ def weighted_states(pairs: list[tuple[Metrics, int]]) -> RequestStates:
 
 
 def cohort_series(result: SimulationResult) -> CohortSeries:
-    """Reduz a observação coorte a coorte.
+    """Reduz a simulação coorte a coorte.
 
     É a mesma média ponderada de `summarize`, corrida sobre `by_cohort` em vez
     de `overall`. O recorte particiona a população, então nenhum aluno-período
@@ -570,7 +570,7 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     """Reduz uma simulação inteira a um ponto por métrica.
 
     As três de período passam pela média ponderada pelos alunos medidos; o tempo
-    de formatura é da observação inteira; a saturação é uma média dessas por
+    de formatura é da simulação inteira; a saturação é uma média dessas por
     rodada. O ponto não substitui o material de que saiu: `by_period` leva as
     mesmas métricas sem reduzir, e as duas leituras ficam conferíveis uma contra
     a outra.
@@ -660,7 +660,7 @@ def sample_interest_distribution(config: SimulationConfig) -> list[float]:
     """O histograma de interesse do cenário, sorteado à parte da simulação.
 
     Descreve a **entrada**, não o resultado: a mesma distribuição que a
-    simulação usa, numa amostra própria. Vem daqui, e não de uma observação,
+    simulação usa, numa amostra própria. Vem daqui, e não de uma simulação,
     porque numa comparação há 3N matrizes, todas da mesma distribuição, sem uma
     que seja "a" certa. (Na execução única, ao contrário, o histograma sai da
     matriz que a simulação de fato usou.)
@@ -702,7 +702,7 @@ def arm_config(config: SimulationConfig, *, arm: Arm, seed: int) -> SimulationCo
     """O cenário como um braço o roda: as quatro escolhas do braço e a seed.
 
     É o **único** lugar em que um braço vira configuração, e é o que torna o
-    traço de uma observação conferível: a tela individual pede a mesma
+    traço de uma simulação conferível: a tela individual pede a mesma
     `(braço, seed)` que o boxplot resumiu e recebe a simulação idêntica, porque
     a configuração passa por aqui dos dois lados.
     """
@@ -741,7 +741,7 @@ def run_comparison(
     horizonte, rodadas — vale igual em todos, que é o que torna a diferença
     atribuível ao modelo.
 
-    As observações saem em paralelo por `ThreadPoolExecutor`, e não por processos:
+    As simulações saem em paralelo por `ThreadPoolExecutor`, e não por processos:
     o tempo do leilão está quase todo dentro do CBC, que roda como processo
     externo e devolve a GIL enquanto se espera por ele. Threads também evitam
     reimportar numpy e pulp em cada worker, que custaria mais do que a
@@ -749,7 +749,7 @@ def run_comparison(
     de cada lista é a mesma população.
     """
     if not 1 <= runs <= MAX_RUNS:
-        raise ValueError(f"o número de observações deve estar entre 1 e {MAX_RUNS}")
+        raise ValueError(f"o número de simulações deve estar entre 1 e {MAX_RUNS}")
     seeds = list(range(1, runs + 1))
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:

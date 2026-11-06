@@ -13,12 +13,10 @@ from dataclasses import dataclass
 from ..behavior import utility_matrix
 from ..config import SimulationConfig
 from ..equations import (
-    Signals,
     demand_per_seat,
+    entry_class,
     mean_price,
-    approval_index,
     satisfaction,
-    supply_index,
 )
 from ..population import Student
 from .closing import PeriodClosing, close_period
@@ -43,7 +41,6 @@ class PeriodOutcome:
     satisfaction: dict[str, float]
     first_grades: list[float]
     # O que este período publica para o próximo ler.
-    signals: Signals
 
 
 def _scarcities(
@@ -115,45 +112,6 @@ def _eligible_count(
     return count
 
 
-def _publish_signals(
-    *,
-    config: SimulationConfig,
-    state: PeriodState,
-    closing: PeriodClosing,
-    demand: dict[str, int],
-    eligible: dict[str, int],
-) -> Signals:
-    """Os sinais do próximo período, saídos do que este acabou de publicar.
-
-    É todo o conjunto de informação do aluno sobre a disciplina, e é o mesmo
-    que um aluno real lê. As fórmulas estão em `equations.supply_index` e
-    `equations.approval_index`.
-
-    `eligible` é quantos alunos **podiam** pedir cada disciplina neste
-    período. Entra só no índice de oferta, e serve para separar "ninguém
-    quis" de "ninguém podia querer": sem essa distinção, a disciplina que
-    acaba de destravar anunciaria folga máxima e atrairia o estouro de
-    pedidos que vai lotá-la.
-    """
-    return Signals(
-        supply={
-            d.name: supply_index(
-                seats=d.seats,
-                requests=demand.get(d.name, 0),
-                eligible=eligible.get(d.name, 0),
-            )
-            for d in config.disciplines
-        },
-        approval={
-            d.name: approval_index(
-                approvals=closing.approvals[d.name],
-                allocations=d.seats - state.seats[d.name],
-            )
-            for d in config.disciplines
-        },
-    )
-
-
 def _request_records(
     *,
     student: Student,
@@ -161,17 +119,30 @@ def _request_records(
     state: PeriodState,
     closing: PeriodClosing,
     config: SimulationConfig,
+    groups: dict[str, str],
 ) -> list[RequestRecord]:
-    """Uma linha por disciplina que o aluno quis — a tela de depuração.
+    """Uma linha por **turma** que o aluno quis — a tela de depuração.
 
     Ordenação **estável** sobre um dicionário que já vem na ordem da grade:
     utilidades empatadas saem na ordem de listagem do cenário, a mesma que
     desempata as duas mochilas.
+
+    A linha é da turma, mas a tentativa e a nota são do **histórico**, que é
+    por disciplina: é por `groups` que a turma cursada encontra a nota que
+    ela produziu.
     """
     records: list[RequestRecord] = []
     excluded = set(closing.excluded.get(student.id, ()))
+    # Só a turma que ele de fato cursou carrega a nota. A tentativa é da
+    # disciplina, então sem este filtro as turmas **irmãs** — que ele quis e
+    # não levou — exibiriam a nota que a outra produziu.
+    taken = closing.retained.get(student.id, set())
     for name, utility in sorted(utilities.items(), key=lambda item: -item[1]):
-        attempt = closing.attempts.get((student.id, name))
+        attempt = (
+            closing.attempts.get((student.id, groups[name]))
+            if name in taken
+            else None
+        )
         records.append(
             RequestRecord(
                 discipline=name,
@@ -241,6 +212,7 @@ class _Reporter:
             bids=bids,
             ages=ages,
             hours=self.draws.hours,
+            discipline_hours=self.draws.discipline_hours,
             credit_returns=credit_returns,
             retained=retained,
             excluded=excluded,
@@ -277,15 +249,19 @@ class _Reporter:
 
 
 def _period_prices(*, config: SimulationConfig, state: PeriodState) -> dict[str, float]:
-    """O preço do período de cada disciplina que esteve no mercado."""
+    """O preço do período de cada **turma** que esteve no mercado.
+
+    Por turma porque é ela que tem vaga: duas turmas da mesma disciplina
+    fecham a preços diferentes, e é essa diferença que diz qual delas o
+    mecanismo achou mais disputada."""
     prices: dict[str, float] = {}
-    for discipline in config.disciplines:
+    for name in config.seats_by_class():
         price = mean_price(
-            price_sum=state.price_sum[discipline.name],
-            rounds_on_market=state.price_rounds[discipline.name],
+            price_sum=state.price_sum[name],
+            rounds_on_market=state.price_rounds[name],
         )
         if price is not None:
-            prices[discipline.name] = price
+            prices[name] = price
     return prices
 
 
@@ -300,18 +276,19 @@ def _discipline_snapshots(
 ) -> list[DisciplineSnapshot]:
     return [
         DisciplineSnapshot(
-            name=d.name,
-            curriculum_period=draws.curriculum[d.name],
-            hours=d.hours,
-            seats=d.seats,
-            filled=d.seats - state.seats[d.name],
-            granted=state.granted[d.name],
-            requests=demand.get(d.name, 0),
-            mean_price=prices.get(d.name),
-            approvals=closing.approvals[d.name],
-            exclusions=closing.exclusions[d.name],
+            name=name,
+            discipline=draws.discipline_of[name],
+            curriculum_period=draws.curriculum[draws.discipline_of[name]],
+            hours=draws.hours[name],
+            seats=seats,
+            filled=seats - state.seats[name],
+            granted=state.granted[name],
+            requests=demand.get(name, 0),
+            mean_price=prices.get(name),
+            approvals=closing.approvals[name],
+            exclusions=closing.exclusions[name],
         )
-        for d in config.disciplines
+        for name, seats in draws.seats.items()
     ]
 
 
@@ -336,7 +313,9 @@ def _student_records(
             credits_end=student.credits,
             satisfaction=satisfactions[student.id],
             grade_average=grade_averages[student.id],
-            approved_hours=student.approved_hours(draws.hours, config.min_grade),
+            approved_hours=student.approved_hours(
+                draws.discipline_hours, config.min_grade
+            ),
             enrolled_hours=sum(draws.hours[name] for name in state.won[student.id]),
             retained_hours=sum(
                 draws.hours[name] for name in closing.retained[student.id]
@@ -348,6 +327,7 @@ def _student_records(
                 state=state,
                 closing=closing,
                 config=config,
+                groups=draws.discipline_of,
             ),
             graduated=student.graduated_at == period,
         )
@@ -361,7 +341,6 @@ def run_period(
     draws: Draws,
     period: int,
     active: list[Student],
-    signals: Signals,
     enrollments: dict[str, int],
 ) -> PeriodOutcome | None:
     """Roda o período. `None` quando não há ninguém a medir — e aí a
@@ -382,16 +361,27 @@ def run_period(
     if not active:
         return None
 
-    grade_averages = {s.id: s.grade_average(draws.hours) for s in active}
+    grade_averages = {s.id: s.grade_average(draws.discipline_hours) for s in active}
     state = PeriodState.opening(config=config, active=active)
     scarcities = _scarcities(
         active=active, utilities=utilities, config_seats=state.config_seats
     )
 
-    for student in (s for s in active if s.entry_period == period):
+    # A coorte é repartida entre as turmas de cada disciplina de entrada em
+    # blocos contíguos (`equations.entry_class`): o calouro não escolhe turma
+    # porque a matrícula garantida não passa pelo mecanismo.
+    newcomers = [s for s in active if s.entry_period == period]
+    for ordinal, student in enumerate(newcomers):
         state.enroll_newcomer(
             student.id,
-            entry_courses=draws.entry_courses,
+            entry_courses=[
+                entry_class(
+                    ordinal=ordinal,
+                    cohort=len(newcomers),
+                    classes=draws.classes[discipline],
+                )
+                for discipline in draws.entry_courses
+            ],
             hours=draws.hours,
             uses_credits=config.uses_credits,
         )
@@ -403,7 +393,6 @@ def run_period(
             active=active,
             utilities=utilities,
             grade_averages=grade_averages,
-            signals=signals,
             state=state,
             round_number=number,
         )
@@ -507,11 +496,4 @@ def run_period(
         ),
         satisfaction=period_satisfaction,
         first_grades=closing.first_grades,
-        signals=_publish_signals(
-            config=config,
-            state=state,
-            closing=closing,
-            demand=demand,
-            eligible=_eligible_count(utilities),
-        ),
     )

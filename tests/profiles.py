@@ -10,7 +10,13 @@ O que ainda precisa ser escrito à mão é o controle sem exclusão, porque ele 
 """
 from __future__ import annotations
 
-from leilao.config import AvailabilityProfile
+from leilao.config import (
+    DEFAULT_PERFORMANCE,
+    NEUTRAL_CONCENTRATION,
+    NEUTRAL_SELECTIVITY,
+    AvailabilityProfile,
+    default_availability,
+)
 
 
 def always_available(max_hours: int) -> tuple[AvailabilityProfile, ...]:
@@ -27,3 +33,21 @@ def always_available(max_hours: int) -> tuple[AvailabilityProfile, ...]:
             name="cheia", mode_hours=max_hours - 1, full_load_rate=0.9999
         ),
     )
+
+
+def single_axis(max_hours: int) -> dict:
+    """Um perfil em cada um dos quatro eixos.
+
+    Com uma combinação só, `students_per_profile` **é** o tamanho da coorte —
+    que é o que a maioria dos testes quer dizer quando pede "N alunos por
+    período". Quem testa a repartição entre perfis declara os seus.
+
+    O desempenho é o do meio dos três padrões, para a nota ficar perto da
+    média da população que o cenário real produz.
+    """
+    return {
+        "performance_profiles": (DEFAULT_PERFORMANCE[1],),
+        "availability_profiles": default_availability(max_hours)[1:2],
+        "selectivity_profiles": (NEUTRAL_SELECTIVITY,),
+        "concentration_profiles": (NEUTRAL_CONCENTRATION,),
+    }

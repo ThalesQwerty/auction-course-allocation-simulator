@@ -17,7 +17,9 @@ from leilao.config import (
     DEFAULT_AVAILABILITY,
     DEFAULT_PERFORMANCE,
     AvailabilityProfile,
+    ConcentrationProfile,
     PerformanceProfile,
+    SelectivityProfile,
     SimulationConfig,
 )
 from leilao.equations import (
@@ -34,10 +36,10 @@ from leilao.population import Student, generate_students
 from leilao.simulation import run_simulation
 
 GRADE = disciplines_from_predecessors(
-    ("D1", 20, 60),
-    ("D2", 20, 60),
-    ("D3", 12, 90, ("D1",)),
-    ("D4", 12, 90, ("D2",)),
+    ("D1", 80, 60),
+    ("D2", 80, 60),
+    ("D3", 48, 90, ("D1",)),
+    ("D4", 48, 90, ("D2",)),
 )
 
 
@@ -47,7 +49,15 @@ def make_config(**overrides) -> SimulationConfig:
         periods=6,
         entry_periods=3,
         max_residence=4,
-        students_per_period=9,
+        students_per_profile=1,
+        selectivity_profiles=(
+            SelectivityProfile(name="Nenhuma", value=0.0),
+            SelectivityProfile(name="Alta", value=1.0),
+        ),
+        concentration_profiles=(
+            ConcentrationProfile(name="Sincera", value=1.0),
+            ConcentrationProfile(name="Concentrada", value=2.0),
+        ),
         rounds=2,
         max_hours=240,
         credit_return="ratio",
@@ -233,49 +243,57 @@ def test_the_average_is_per_student_and_never_a_sum():
 
 
 def test_the_combinations_split_the_generation_equally():
-    """Com 3 perfis em cada eixo são 9 pares, e cada um fica com ~1/9 da
-    geração. Não há porcentagem a configurar."""
-    config = make_config(students_per_period=18)
+    """Com 3 · 3 · 2 · 2 = 36 combinações e 2 exemplares de cada, a coorte tem
+    72 alunos e cada combinação aparece exatamente duas vezes. Não há
+    porcentagem a configurar nem sobra a distribuir."""
+    config = make_config(students_per_profile=2)
     students = generate_students(config, np.random.default_rng(0))
     first = [s for s in students if s.entry_period == 1]
-    assert len(first) == 18
+    assert len(first) == 72
 
-    pairs = [(s.performance.name, s.availability.name) for s in first]
-    assert len(set(pairs)) == 9
-    assert all(pairs.count(pair) == 2 for pair in set(pairs))
+    combinations = [
+        (
+            s.performance.name,
+            s.availability.name,
+            s.selectivity.name,
+            s.concentration.name,
+        )
+        for s in first
+    ]
+    assert len(set(combinations)) == 36
+    assert all(combinations.count(c) == 2 for c in set(combinations))
+
+
+def test_the_cohort_is_derived_from_the_profile_grid():
+    """O tamanho não é digitado: é exemplares × combinações. É isso que faz a
+    repartição ser exata por construção, sem sobra a girar entre coortes."""
+    config = make_config(students_per_profile=2)
+    assert config.profile_combinations() == 36
+    assert config.students_per_period == 72
+
+
+def test_the_strategy_axes_become_the_behaviour():
+    """Desempenho e disponibilidade são traço e ficam no sorteio;
+    seletividade e concentração **são** a decisão do aluno."""
+    config = make_config(students_per_profile=1)
+    students = generate_students(config, np.random.default_rng(0))
+    for student in students:
+        assert student.behavior.selectivity == student.selectivity.value
+        assert student.behavior.concentration == student.concentration.value
 
 
 def test_the_profile_does_not_come_from_the_seed():
     """Mesmo motivo do período de ingresso: duas execuções com seeds
     diferentes têm a mesma estrutura de grupos, então a diferença entre elas
-    não é quem calhou de ser frágil."""
+    não é quem calhou de ser frágil nem quem calhou de ser especulador."""
     config = make_config()
     one = generate_students(config, np.random.default_rng(1))
     two = generate_students(config, np.random.default_rng(99))
     assert [s.performance.name for s in one] == [s.performance.name for s in two]
     assert [s.availability.name for s in one] == [s.availability.name for s in two]
-    # O que muda com a seed é o nome — e, fora daqui, os dois escalares.
+    assert [s.selectivity.name for s in one] == [s.selectivity.name for s in two]
+    # O que muda com a seed é o nome — e, fora daqui, os escalares de traço.
     assert [s.name for s in one] != [s.name for s in two]
-
-
-def test_the_leftover_of_an_uneven_generation_rotates_between_generations():
-    """Com geração que não é múltipla do número de pares, o excedente gira em
-    vez de cair sempre nos mesmos primeiros pares."""
-    config = make_config(students_per_period=10, entry_periods=3)
-    students = generate_students(config, np.random.default_rng(0))
-    by_generation = [
-        [
-            (s.performance.name, s.availability.name)
-            for s in students
-            if s.entry_period == period
-        ]
-        for period in (1, 2, 3)
-    ]
-    extras = [
-        {pair for pair in set(gen) if gen.count(pair) == 2} for gen in by_generation
-    ]
-    assert all(len(e) == 1 for e in extras)
-    assert extras[0] != extras[1] != extras[2]
 
 
 def test_the_grade_follows_the_profile_of_each_student():
@@ -321,14 +339,20 @@ def test_the_summary_carries_both_profiles_of_the_student():
     result = run_simulation(config)
     desempenho = {p.name for p in config.performance_profiles}
     disponibilidade = {p.name for p in config.availability_profiles}
+    seletividade = {p.name for p in config.selectivity_profiles}
 
     assert result.students
     for summary in result.students:
         assert summary.performance in desempenho
         assert summary.availability in disponibilidade
-    # A repartição igualitária aparece no resumo, não só na população.
-    pares = {(s.performance, s.availability) for s in result.students}
-    assert len(pares) == config.profile_combinations()
+        assert summary.selectivity in seletividade
+    # A repartição igualitária aparece no resumo, não só na população — e
+    # nos quatro eixos, que é o que o relatório recorta.
+    combinacoes = {
+        (s.performance, s.availability, s.selectivity, s.concentration)
+        for s in result.students
+    }
+    assert len(combinacoes) == config.profile_combinations()
 
 
 def test_a_student_built_by_hand_gets_the_neutral_profile():

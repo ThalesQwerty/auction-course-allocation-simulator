@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from profiles import single_axis
 from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig, horizon_for_lifecycle
 from leilao.grading import credit_return
@@ -45,9 +46,10 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=5,
-        students_per_period=3,
+        students_per_profile=3,
         rounds=2,
         max_hours=WORKLOAD,
+        **single_axis(WORKLOAD),
         seed=11,
     )
     return SimulationConfig(**{**base, **overrides})
@@ -633,6 +635,7 @@ def test_a_root_that_is_not_entry_is_not_granted():
             ("Livre", 6, 60, False),
         ),
         max_hours=120,
+        **single_axis(120),
     )
     result = run_simulation(config)
     granted = {d.name: d.granted for d in result.periods[0].disciplines}
@@ -656,15 +659,16 @@ def test_guaranteed_seats_leave_the_market_before_the_first_round():
 
 
 def test_a_generation_larger_than_the_smallest_entry_offer_is_rejected():
-    """A garantia só é garantia se couber: o ritmo de ingresso não pode passar
-    da menor oferta entre as disciplinas de entrada."""
-    with pytest.raises(ValueError, match="menor oferta"):
+    """A garantia só é garantia se couber: o bloco da coorte que vai parar em
+    cada turma de entrada não pode passar das vagas dela."""
+    with pytest.raises(ValueError, match="ingressantes em"):
         SimulationConfig(
             disciplines=[
                 Discipline("D1", seats=5, hours=60, entry=True),
                 Discipline("D2", seats=3, hours=60, entry=True),
             ],
-            students_per_period=4,
+            students_per_profile=4,
+            **single_axis(360),
         )
     # Exatamente no teto passa — e não sobra vaga nenhuma para quem recursa.
     assert SimulationConfig(
@@ -672,7 +676,8 @@ def test_a_generation_larger_than_the_smallest_entry_offer_is_rejected():
             Discipline("D1", seats=4, hours=60, entry=True),
             Discipline("D2", seats=4, hours=60, entry=True),
         ],
-        students_per_period=4,
+        students_per_profile=4,
+        **single_axis(360),
     ).students_per_period == 4
 
 
@@ -685,8 +690,9 @@ def test_entry_disciplines_heavier_than_the_workload_cap_are_rejected():
                 Discipline("D1", seats=5, hours=60, entry=True),
                 Discipline("D2", seats=5, hours=60, entry=True),
             ],
-            students_per_period=2,
+            students_per_profile=2,
             max_hours=100,
+            **single_axis(100),
         )
 
 
@@ -916,12 +922,14 @@ def test_credit_return_is_reported_only_at_the_end_of_the_period():
 def test_scenario_without_students_or_disciplines_is_rejected():
     """Garantia de que todo período tem aluno começa na entrada: um cenário sem
     ninguém não produziria período algum, e toda métrica sairia indefinida."""
-    with pytest.raises(ValueError, match="pelo menos um aluno"):
+    with pytest.raises(ValueError, match="pelo menos um exemplar"):
         SimulationConfig(
-            disciplines=[Discipline("D1", seats=5, hours=60)], students_per_period=0
+            disciplines=[Discipline("D1", seats=5, hours=60)],
+            students_per_profile=0,
+            **single_axis(360),
         )
     with pytest.raises(ValueError, match="pelo menos uma disciplina"):
-        SimulationConfig(students_per_period=5)
+        SimulationConfig(students_per_profile=5, **single_axis(360))
 
 
 def test_entry_periods_limits_how_many_generations_enter():
@@ -1015,8 +1023,9 @@ def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
             ("D", 5, 60, ("A",)),
             ("E", 5, 60, ("A",)),
         ),
-        students_per_period=5,
+        students_per_profile=5,
         max_hours=60,
+        **single_axis(60),
     )
     assert wide.hours_to_graduate() == 300
     assert max(wide.curriculum_periods().values()) == 2

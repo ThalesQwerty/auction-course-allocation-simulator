@@ -26,7 +26,7 @@ diferença entre eles é atribuível ao mecanismo.
 from __future__ import annotations
 
 from ..config import SimulationConfig
-from ..equations import Signals, grade_histogram, interest_histogram
+from ..equations import grade_histogram, interest_histogram
 from ..equations._mean import mean
 from .period import run_period
 from .reports import (
@@ -79,7 +79,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     first_grades: list[float] = []
     # No 1º período não há histórico, e os dois índices caem no neutro de 1/2
     # sozinhos — os genes de oferta e de aprovação não agem.
-    signals = Signals()
 
     for period in range(1, config.periods + 1):
         # Matriculados: já ingressaram (t_a) e ainda não saíram — por
@@ -95,7 +94,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             draws=draws,
             period=period,
             active=active,
-            signals=signals,
             enrollments=enrollments,
         )
         if outcome is None:
@@ -106,7 +104,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         for student_id, record in outcome.records.items():
             history[student_id].append(record)
             satisfactions[student_id].append(outcome.satisfaction[student_id])
-        signals = outcome.signals
 
     return SimulationResult(
         periods=periods,
@@ -117,8 +114,12 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 entry_period=s.entry_period,
                 performance=s.performance.name,
                 availability=s.availability.name,
-                grade_average=s.grade_average(draws.hours),
-                approved_hours=s.approved_hours(draws.hours, config.min_grade),
+                selectivity=s.selectivity.name,
+                concentration=s.concentration.name,
+                grade_average=s.grade_average(draws.discipline_hours),
+                approved_hours=s.approved_hours(
+                    draws.discipline_hours, config.min_grade
+                ),
                 hours_to_graduate=draws.hours_to_graduate,
                 credits=s.credits,
                 enrollments=enrollments[s.id],
@@ -132,7 +133,8 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         histories=[
             StudentHistory(student_id=s.id, periods=history[s.id]) for s in students
         ],
-        disciplines=[d.name for d in config.disciplines],
+        disciplines=list(draws.seats),
+        classes=dict(draws.discipline_of),
         curriculum_periods=draws.curriculum,
         interest_distribution=interest_histogram(draws.interest_rows.values()),
         grade_distribution=grade_histogram(first_grades),

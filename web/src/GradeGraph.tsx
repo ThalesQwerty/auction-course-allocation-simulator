@@ -211,8 +211,8 @@ export function GradeGraph({
         {discipline.entry && <em>entrada</em>}
       </p>
       <p className="grade-traits">
-        dif. {trait(discipline.difficulty, 1)} · atr.{" "}
-        {trait(discipline.attractiveness, 0)}
+        {discipline.classes > 1 && <>{discipline.classes} turmas · </>}
+        atr. {trait(discipline.attractiveness, 1)}
       </p>
     </article>
   );

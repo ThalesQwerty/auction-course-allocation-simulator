@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from ..auction import AuctionInput, Bid, run_auction
 from ..behavior import compute_bids
 from ..config import SimulationConfig
-from ..entities import Agent, Good
-from ..equations import Signals, available_goods, satisfaction
+from ..entities import Agent, Good, MutualExclusion
+from ..equations import available_goods, reachable_utility, satisfaction
 from ..population import Student
 from ..ranking import allocate_by_ilp, allocate_by_ranking, request_set
 from .reports import PriceStats
@@ -51,6 +51,7 @@ def _available(
     utilities: dict[str, dict[str, float]],
     state: PeriodState,
     hours: dict[str, int],
+    groups: dict[str, str],
 ) -> dict[str, list[str]]:
     """B_a^(t,r) de cada aluno — ver `equations.available_goods`.
 
@@ -64,6 +65,7 @@ def _available(
             hours=hours,
             capacity=state.capacity[s.id],
             already_won=state.won[s.id],
+            groups=groups,
         )
         for s in active
     }
@@ -75,7 +77,6 @@ def _run_credit_round(
     draws: Draws,
     active: list[Student],
     utilities: dict[str, dict[str, float]],
-    signals: Signals,
     state: PeriodState,
     available: dict[str, list[str]],
     round_number: int,
@@ -89,7 +90,7 @@ def _run_credit_round(
             available=available[student.id],
             budget=state.budget[student.id],
             behavior=student.behavior,
-            signals=signals,
+            classes=draws.classes,
         )
         for name, credits in posted.items():
             state.record_bid(student.id, name, round_number, credits)
@@ -100,7 +101,7 @@ def _run_credit_round(
     # só essas disciplinas têm preço com leitura. As vagas já entregues aos
     # ingressantes saíram do mercado antes da rodada 1.
     prices = {
-        d.name: PRICE_FLOOR for d in config.disciplines if state.seats[d.name] > 0
+        name: PRICE_FLOOR for name in draws.seats if state.seats[name] > 0
     }
     if not bids:
         return prices
@@ -109,8 +110,13 @@ def _run_credit_round(
         AuctionInput(
             agents=[Agent(s.id, state.capacity[s.id]) for s in active],
             goods=[
-                Good(d.name, state.seats[d.name], d.hours) for d in config.disciplines
+                Good(name, state.seats[name], draws.hours[name])
+                for name in draws.seats
             ],
+            # X — os cliques da eq. (5): ninguém leva duas turmas da mesma
+            # disciplina. Vazio quando toda disciplina é de turma única.
+            exclusions=[MutualExclusion(group) for group in draws.exclusions],
+            groups=draws.discipline_of,
             budgets=state.budget,
             bids=bids,
             tie_break_order=draws.tie_break_order,
@@ -138,7 +144,6 @@ def _run_ranking_round(
     active: list[Student],
     utilities: dict[str, dict[str, float]],
     grade_averages: dict[str, float],
-    signals: Signals,
     state: PeriodState,
     available: dict[str, list[str]],
     round_number: int,
@@ -155,7 +160,7 @@ def _run_ranking_round(
             utilities=utilities[student.id],
             available=available[student.id],
             behavior=student.behavior,
-            signals=signals,
+            classes=draws.classes,
         ):
             state.record_bid(student.id, name, round_number, 1)
             requests.append((student.id, name))
@@ -175,6 +180,7 @@ def _run_ranking_round(
         seats=state.seats,
         hours=draws.hours,
         capacity={s.id: int(state.capacity[s.id]) for s in active},
+        groups=draws.discipline_of,
     ):
         won_now[student_id].append(name)
         state.grant(student_id, name, round_number=round_number, hours=draws.hours)
@@ -187,12 +193,15 @@ def run_round(
     active: list[Student],
     utilities: dict[str, dict[str, float]],
     grade_averages: dict[str, float],
-    signals: Signals,
     state: PeriodState,
     round_number: int,
 ) -> RoundOutcome:
     available = _available(
-        active=active, utilities=utilities, state=state, hours=draws.hours
+        active=active,
+        utilities=utilities,
+        state=state,
+        hours=draws.hours,
+        groups=draws.discipline_of,
     )
     # A vaga garantida entra como conquista da rodada 1: é ali que ela passa a
     # valer, e sem isso o ingressante apareceria com satisfação zero na
@@ -208,7 +217,6 @@ def run_round(
             draws=draws,
             active=active,
             utilities=utilities,
-            signals=signals,
             state=state,
             available=available,
             round_number=round_number,
@@ -221,7 +229,6 @@ def run_round(
             active=active,
             utilities=utilities,
             grade_averages=grade_averages,
-            signals=signals,
             state=state,
             available=available,
             round_number=round_number,
@@ -236,7 +243,13 @@ def run_round(
     return RoundOutcome(
         number=round_number,
         satisfaction={
-            s.id: satisfaction(utilities=utilities[s.id], allocated=won_now[s.id])
+            s.id: satisfaction(
+                utilities=utilities[s.id],
+                allocated=won_now[s.id],
+                reachable=reachable_utility(
+                    utilities=utilities[s.id], classes=draws.classes
+                ),
+            )
             for s in active
         },
         won={s.id: set(won_now[s.id]) for s in active},

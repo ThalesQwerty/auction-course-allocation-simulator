@@ -40,7 +40,7 @@ from .state import PeriodState
 class PeriodClosing:
     """O que o fim do período produziu, para os relatórios."""
 
-    approvals: dict[str, int]  # por disciplina
+    approvals: dict[str, int]  # por turma: é contagem da oferta
     # (aluno, disciplina) -> (tentativa, nota **desta** tentativa)
     attempts: dict[tuple[str, str], tuple[int, float]] = field(default_factory=dict)
     returned: dict[tuple[str, str], int] = field(default_factory=dict)  # γ_{a,x}
@@ -61,6 +61,7 @@ def _grade(
     *,
     student: Student,
     name: str,
+    discipline: str,
     attempt: int,
     draws: Draws,
 ) -> float:
@@ -69,12 +70,17 @@ def _grade(
     A dificuldade e a tentativa escolhem a distribuição; o quantil do aluno
     diz onde ele cai dentro dela. A utilidade não entra: ela já governa o que
     ele pede e o que ele exclui.
+
+    **A dificuldade é da turma; o quantil é da disciplina.** O traço do
+    aluno é na matéria — ele não fica melhor por mudar de seção —, e o que
+    a turma move é a distribuição sob ele. É a mesma decomposição que a
+    recursada já usa, agora num segundo eixo.
     """
     mode, left_sd, right_sd = draws.grade_shapes.of(
         student.performance, draws.difficulty[name], attempt
     )
     return grade_for_attempt(
-        quantile=draws.base_quantiles[(student.id, name)],
+        quantile=draws.base_quantiles[(student.id, discipline)],
         mode=mode,
         left_sd=left_sd,
         right_sd=right_sd,
@@ -92,8 +98,9 @@ def close_period(
     enrollments: dict[str, int],
 ) -> PeriodClosing:
     closing = PeriodClosing(
-        approvals={d.name: 0 for d in config.disciplines},
-        exclusions={d.name: 0 for d in config.disciplines},
+        # Por turma: são contagens da **oferta**, e a oferta é da turma.
+        approvals={name: 0 for name in draws.seats},
+        exclusions={name: 0 for name in draws.seats},
     )
 
     for student in active:
@@ -136,12 +143,20 @@ def close_period(
             gammas.append(gamma)
 
         # A ordem é a da grade, vinda da mochila — e não a de um conjunto, que
-        # varia com o hash das strings entre observações.
+        # varia com o hash das strings entre simulações.
         for name in kept:
-            attempt = student.attempts.get(name, 0) + 1
-            student.attempts[name] = attempt
+            # O histórico é da **disciplina**: tentativa, nota e aprovação
+            # não sabem em que turma ele cursou. A turma entra só na
+            # dificuldade, que move a distribuição da nota.
+            discipline = draws.discipline_of[name]
+            attempt = student.attempts.get(discipline, 0) + 1
+            student.attempts[discipline] = attempt
             grade = _grade(
-                student=student, name=name, attempt=attempt, draws=draws
+                student=student,
+                name=name,
+                discipline=discipline,
+                attempt=attempt,
+                draws=draws,
             )
             if attempt == 1:
                 closing.first_grades.append(grade)
@@ -150,9 +165,11 @@ def close_period(
             # a desta tentativa: com a aptidão fixa mas o expoente caindo a
             # cada recursada, a nota nova raramente é menor, mas a tela
             # individual precisa mostrar o que aconteceu no período.
-            student.grades[name] = max(student.grades.get(name, 0.0), grade)
-            closing.attempts[(student.id, name)] = (attempt, grade)
-            if student.grades[name] >= config.min_grade:
+            student.grades[discipline] = max(
+                student.grades.get(discipline, 0.0), grade
+            )
+            closing.attempts[(student.id, discipline)] = (attempt, grade)
+            if student.grades[discipline] >= config.min_grade:
                 closing.approvals[name] += 1
 
             # f_γ é do leilão: devolve parte do *preço pago*. Na linha de base
@@ -162,7 +179,7 @@ def close_period(
                 credit_return(
                     config.credit_return,
                     paid=state.paid.get((student.id, name), 0),
-                    grade=student.grades[name],
+                    grade=student.grades[discipline],
                     min_grade=config.min_grade,
                 )
                 if config.uses_credits

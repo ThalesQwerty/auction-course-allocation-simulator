@@ -30,11 +30,22 @@ Uma rodada de leilão (Seção 7.1)
 
 Decisão do aluno (Seção 7.2.4)
 
-    decision_score            u_rel^β · avanço^ρ                  —
+    decision_scores           score = ũ^concentração              —
+    reserve_threshold         seletividade · score médio          —
     available_goods           B_a^(t,r)                           eq. (15)
     concave_bids              mochila côncava do lance        substitui 44-46
     request_set               D_a^(t,r), tudo em ordem            eq. (50)
     serial_dictatorship       ditadura serial por CR              7.3.1
+
+Turmas, o bem alocado
+
+    class_difficulty          escada das turmas da disciplina     —
+    entry_class               o bloco da coorte em cada turma     —
+    best_class                argmax do score dentro do grupo     —
+
+    A exclusão mútua (eq. 5) não tem arquivo próprio: ela é a restrição de
+    clique montada em `wdp_solver`, o filtro por grupo de `available_goods`
+    e a caminhada de `serial_dictatorship` — três lugares, uma regra.
 
 Interesse, utilidade e grade
 
@@ -82,14 +93,10 @@ Disponibilidade e exclusão
     exclusion_rate            ε = excluídas / obtidas             —
     request_states            os seis estados de uma solicitação  —
 
-Sinais publicados
-
-    supply_index              q/(q + n), neutro 1/2         substitui P̂(obter)
-    approval_index            (a + 1)/(m + 2), Laplace    substitui P̂(aprovar)
-
 Métricas de um recorte (Seção 7.3.3)
 
-    satisfaction              ψ_a = Σ u·z                         eq. (51)
+    reachable_utility         U_a = Σ_d max_t ũ_t                  eq. (43)
+    satisfaction              ψ_a = Σ u·z / U_a                         eq. (51)
     mean_satisfaction         ψ̄                                   eq. (53)
     occupancy                 θ = alocadas/ofertadas              eq. (54)
     jain_index                φ de Jain                           eq. (55)
@@ -102,13 +109,7 @@ Métricas de um recorte (Seção 7.3.3)
     credits_per_seat          oferta de crédito / vagas           —
     mean_price                π̄ sobre as rodadas com vaga         —
 
-Algoritmo genético
-
-    fitness                   f_a = carga aprovada / idade        —
-    genome_grid               produto cartesiano dos níveis       —
-    genome_drift              desvio da média na janela           —
-
-Agregação de uma observação (Seção 7.3)
+Agregação de uma simulação (Seção 7.3)
 
     weighted_mean             média ponderada pelos medidos       —
     time_to_graduate          períodos do ingresso ao diploma     —
@@ -121,19 +122,18 @@ Não implementadas, e por quê
     eq. (41)   a invariante de altura saiu: punha valor curricular dentro do
                gosto. `utility` a substitui redistribuindo o interesse
                do inelegível sobre o que destrava
-    eq. (43)   U_a: a redistribuição conserva a massa, então a utilidade soma
-               1 sempre — não há mais "utilidade ao alcance" menor que o
-               interesse inteiro
     eqs. (47)-(48)  grupos da grade: toda obrigatória pesa igual, não há o
                     que hierarquizar
 """
 from __future__ import annotations
 
-from .approval_index import approval_index
 from .admitted_set import admitted_set
 from .attempt_rates import attempt_rates
 from .availability_shape import availability_shape
 from .available_goods import available_goods
+from .best_class import best_class
+from .class_difficulty import class_difficulty
+from .entry_class import entry_class, entry_class_load
 from .concave_bids import concave_bids
 from .credit_consumption import consumption
 from .credit_return import credit_return
@@ -141,16 +141,13 @@ from .credits_per_seat import credits_per_seat
 from .curriculum_height import curriculum_heights
 from .curriculum_period import curriculum_periods
 from .curriculum_reach import curriculum_reach
-from .decision_score import NEUTRAL, Behavior, Signals, decision_scores
+from .decision_score import NEUTRAL, Behavior, decision_scores
 from .demand_per_seat import demand_per_seat
 from .effective_load import effective_load
 from .eligible_set import eligible_set
 from .exclusion_refund import exclusion_refund
 from .exclusion_rate import exclusion_rate
 from .final_preference import final_preference
-from .fitness import fitness
-from .genome_drift import genome_drift
-from .genome_grid import genome_grid
 from .grade_average import grade_average
 from .grade_for_attempt import MAX_GRADE, MIN_GRADE, grade_for_attempt
 from .grade_histogram import grade_histogram
@@ -172,17 +169,18 @@ from .occupancy import occupancy
 from .pearson_correlation import pearson
 from .period_return import period_return
 from .preference_split import preference_split
+from .reachable_utility import reachable_utility
 from .rectified_bias import rectify_bias
 from .remaining_budget import remaining_budget
 from .remaining_capacity import remaining_capacity
 from .remaining_seats import remaining_seats
 from .request_set import request_set
+from .reserve_threshold import reserve_threshold
 from .request_states import RequestStates, request_states
 from .retained_set import retained_set
 from .satisfaction import satisfaction
 from .semestralization import semestralization
 from .serial_dictatorship import serial_dictatorship
-from .supply_index import supply_index
 from .stochastic_perturbation import stochastic_perturbations
 from .tie_break_factor import tie_break_factor
 from .time_to_graduate import time_to_graduate
@@ -199,12 +197,14 @@ __all__ = [
     "Behavior",
     "NEUTRAL",
     "RequestStates",
-    "Signals",
     "attempt_rates",
     "available_goods",
     "admitted_set",
-    "approval_index",
     "availability_shape",
+    "best_class",
+    "class_difficulty",
+    "entry_class",
+    "entry_class_load",
     "concave_bids",
     "consumption",
     "credit_return",
@@ -219,9 +219,6 @@ __all__ = [
     "exclusion_rate",
     "exclusion_refund",
     "final_preference",
-    "fitness",
-    "genome_drift",
-    "genome_grid",
     "grade_average",
     "grade_for_attempt",
     "grade_histogram",
@@ -252,6 +249,7 @@ __all__ = [
     "remaining_capacity",
     "remaining_seats",
     "request_set",
+    "reserve_threshold",
     "request_states",
     "retained_set",
     "satisfaction",
@@ -263,5 +261,4 @@ __all__ = [
     "utility",
     "utilization",
     "weighted_mean",
-    "supply_index",
 ]

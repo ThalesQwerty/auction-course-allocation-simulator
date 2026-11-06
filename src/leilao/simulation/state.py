@@ -54,8 +54,11 @@ class PeriodState:
     def opening(
         cls, *, config: SimulationConfig, active: list[Student]
     ) -> "PeriodState":
-        names = [d.name for d in config.disciplines]
-        config_seats = {d.name: d.seats for d in config.disciplines}
+        # O bem é a **turma**: a oferta declarada na disciplina vem
+        # repartida entre as turmas dela, e é por turma que a vaga é
+        # descontada. Com turma única os dois coincidem.
+        config_seats = config.seats_by_class()
+        names = list(config_seats)
         return cls(
             rounds=config.rounds,
             config_seats=config_seats,

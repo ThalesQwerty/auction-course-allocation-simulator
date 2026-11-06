@@ -49,6 +49,18 @@ são os **pré-requisitos**, e o período de cada disciplina sai deles por indu�
 sem pré-requisito é 1º período, com pré-requisitos é o período seguinte ao mais
 tardio deles.
 
+**O bem alocado é a turma.** A disciplina declara quantas oferece, a oferta
+dela é repartida entre essas turmas, e a disciplina passa a ser o **clique**
+do grafo de conflito: o único critério de conflito na simulação é serem duas
+turmas da mesma disciplina, e ninguém leva duas (eq. 5). Com uma turma por
+disciplina — o padrão — o nome da turma é o da disciplina, não há clique
+nenhum a impor e o modelo é exatamente o de antes de elas existirem.
+
+A divisão de trabalho é: a **turma** tem vaga, preço, demanda e dificuldade; a
+**disciplina** tem nota, tentativa, pré-requisito e conclusão. O aluno não
+fica melhor por trocar de seção — o quantil de desempenho dele é na matéria —,
+e o que a turma move é a distribuição sob esse quantil.
+
 ```
 Simulador/
 ├── src/leilao/
@@ -65,8 +77,7 @@ Simulador/
 │   ├── availability.py   # Sorteio da disponibilidade (horas), uma por período
 │   ├── metrics.py        # O registro de métricas de um recorte
 │   ├── simulation/       # O laço multi-período — Seção 7.2
-│   ├── comparison.py     # N observações pareadas de cada braço — Seção 7.3
-│   ├── evolution.py      # O algoritmo genético: coortes evoluindo independentes
+│   ├── comparison.py     # N simulações pareadas de cada braço — Seção 7.3
 │   ├── api/storage.py    # Grava a execução em disco, no formato do histórico
 │   ├── playground.py     # Uma alocação isolada, sem períodos
 │   └── api/              # Ponte FastAPI (sem persistência — stateless)
@@ -106,7 +117,7 @@ interface monta a configuração inteira no navegador e manda para `/compare`,
 que roda o cenário em cada braço, N vezes, e devolve os resumos pareados. Não
 há banco de dados — cada execução é independente e reprodutível pela seed.
 
-O detalhe de **uma** das observações fica numa rota à parte, `/trace`: o mesmo
+O detalhe de **uma** das simulações fica numa rota à parte, `/trace`: o mesmo
 cenário mais o par (braço, seed) que a endereça, e de volta o que cada aluno
 pediu em cada rodada. Ele é pedido sob demanda porque é a resposta grande da
 API — uns 10 MB contra 100 kB do resumo —, e refazer a simulação é legítimo
@@ -117,7 +128,10 @@ porque ela é determinística: a mesma configuração dá a mesma execução.
 Para cada período letivo `t`:
 
 1. Quem ingressa em `t` recebe **vaga garantida** em todas as disciplinas de
-   1º período, e essas vagas saem do estoque antes de o leilão abrir.
+   1º período, e essas vagas saem do estoque antes de o leilão abrir. O calouro
+   não escolhe turma: a coorte é repartida entre as turmas de cada disciplina
+   de entrada em blocos contíguos (`equations.entry_class`), os primeiros na
+   primeira turma e assim por diante.
 2. Cada aluno ativo converte sua linha de **interesse** `u^(t)` — já sorteada
    na inicialização — em **utilidade** `ũ^(t)` sobre o seu **conjunto
    elegível**: as disciplinas que ainda não aprovou e cujos pré-requisitos já
@@ -125,14 +139,18 @@ Para cada período letivo `t`:
    ficou de fora é redistribuído sobre o que ele pode cursar. O interesse não
    muda dentro do laço: é sorteado uma vez só, para a simulação inteira.
 3. Para cada rodada `r`, os lances saem deterministicamente das utilidades
-   (mochila côncava), o leilão resolve o WDP por PLI (eqs. 22-25) e vagas, carga
-   horária e orçamento são descontados (eqs. 13, 14, 27).
+   (mochila côncava **em dois níveis**: entre disciplinas, depois entre as
+   turmas de cada uma), o leilão resolve o WDP por PLI (eqs. 22-25) — com a
+   restrição de clique que impede duas turmas da mesma disciplina (eq. 5) — e
+   vagas, carga horária e orçamento são descontados (eqs. 13, 14, 27).
 4. Encerradas as rodadas, o aluno **exclui**: descarta disciplinas obtidas
    até que a carga retida caiba nas horas que a disponibilidade
    daquele período lhe deu (`equations.retained_set`). A vaga descartada
    **não volta** para a oferta — a esta altura as alocações já se encerraram.
 5. Só então saem as notas do que ficou (eq. 33), o retorno de créditos
-   (eqs. 34-36) e as conclusões de curso (eq. 40).
+   (eqs. 34-36) e as conclusões de curso (eq. 40). Aqui a turma **colapsa na
+   disciplina**: a tentativa, a nota e a aprovação são do histórico, e a turma
+   entra só pela dificuldade, que move a distribuição sob o quantil do aluno.
 
 Tudo que é aleatório vem da `seed` e é sorteado **na inicialização**, antes do
 primeiro período — nada é sorteado dentro do loop, como exige a Seção 7.3:
@@ -141,13 +159,14 @@ primeiro período — nada é sorteado dentro do loop, como exige a Seção 7.3:
 | --- | --- | --- |
 | `q` | quantil de desempenho de cada par (aluno, disciplina), persistente | `grading.draw_base_quantiles` |
 | `δ^(t)` | disponibilidade em horas de cada par (aluno, período) | `availability.draw_availability` |
-| `u^(t)` | interesse de cada par (aluno, disciplina) em cada período | `behavior.draw_interest` |
+| `u^(t)` | interesse de cada par (aluno, turma) em cada período | `behavior.draw_interest` |
 | `alpha`, `epsilon` | ordem de desempate e perturbação | `simulation.setup` |
 
-Duas coisas **não** vêm da seed, de propósito: o período de ingresso `t_a` e o
-par de perfis. As coortes têm todas o mesmo tamanho, em períodos consecutivos,
+Três coisas **não** vêm da seed, de propósito: o período de ingresso `t_a`, a
+combinação de perfis e a turma de entrada do calouro. As coortes têm todas o mesmo tamanho, em períodos consecutivos,
 e os perfis se repartem igualmente entre as combinações
-(`population.generate_students`) — assim duas observações que só diferem na seed
+(`population.generate_students`), com a turma de entrada saindo da posição do
+aluno na coorte — assim duas simulações que só diferem na seed
 têm a mesma estrutura de entrada e os mesmos grupos, e a diferença entre elas
 não é quem entrou quando nem quem calhou de ser frágil. Da seed vêm os
 escalares que as distribuições dos perfis produzem, não o grupo.
@@ -209,8 +228,12 @@ do aluno**:
 
 | | O que é | Soma | Depende do histórico | Quando |
 | --- | --- | --- | --- | --- |
-| **interesse** `u` | o sorteio normalizado: o quanto o aluno quer cada disciplina | 1 sobre a grade inteira | não | sorteado na inicialização, nunca mais tocado |
-| **utilidade** `ũ` | o interesse com o inelegível zerado e redistribuído | 1 sobre o elegível | sim | recalculada a cada período |
+| **interesse** `u` | o sorteio normalizado: o quanto o aluno quer cada turma | 1 sobre as turmas todas | não | sorteado na inicialização, nunca mais tocado |
+| **utilidade** `ũ` | o interesse com o inelegível zerado e redistribuído | 1 sobre as turmas elegíveis | sim | recalculada a cada período |
+
+A disciplina vale o da **turma mais útil** dela: `max_t ũ_t`. É dessa forma
+que a decisão é em dois níveis — primeiro quais disciplinas, depois qual turma
+de cada —, e é por isso que a soma sobre disciplinas é menor que 1.
 
 O `u_{a,x}` do anteprojeto, como sai do sorteio da eq. (41), é o **interesse**
 daqui. Os zeros da eq. (42) não são máscara: são a **definição** da utilidade —
@@ -229,17 +252,38 @@ A linha fica na **elegibilidade**, não na disponibilidade:
 | --- | --- | --- |
 | travada por pré-requisito | zero | os ancestrais elegíveis |
 | fora da grade dele (aprovada, ou optativa dispensada pela cota) | zero | igualmente para todas as elegíveis |
-| sem vaga, carga não cabe, já conquistada na rodada | inalterada | lugar nenhum |
+| sem vaga, carga não cabe, já conquistada na rodada, **ou é irmã de uma já conquistada** | inalterada | lugar nenhum |
+
+Na redistribuição quem conta é a **disciplina**: a travada entrega `max_t ũ_t`,
+o divisor é o número de disciplinas-alvo, e a parcela entra **inteira** em cada
+turma do alvo — não repartida entre elas. Repartir trataria as turmas como
+partes da disciplina, e elas são alternativas. Somar inteiro é o que faz o
+máximo do alvo subir exatamente a parcela, e é o que conserva `U_a`.
 
 A terceira linha é o `available_goods` (eq. 15): filtro do que se pode pedir
 *nesta rodada*, não afirmação sobre valor — o aluno continua querendo a
 disciplina que lotou.
 
-O interesse é sorteado como **uma linha por (aluno, período)**, em dois passos:
+O interesse é sorteado como **uma linha por (aluno, período)**, sobre as
+**turmas**, em dois passos:
 
-1. Um valor por par (aluno, disciplina), tirado de uma **log-normal** de média
-   logarítmica `interest_mean + A_x` e desvio `interest_sigma`.
-2. **Divisão pelo somatório**, que faz a linha valer 1 sobre a grade inteira.
+1. Um valor por par (aluno, turma), tirado de uma **log-normal** de média
+   logarítmica `interest_mean + ln(A_x)` e desvio `interest_sigma`.
+2. **Divisão pelo somatório**, que faz a linha valer 1 sobre as turmas todas.
+
+O passo 1 é composto em **dois níveis**: um valor da disciplina, comum às
+turmas dela, mais um desvio por turma, repartidos por `class_stability` com
+pesos `√s` e `√(1−s)` — a mesma repartição que `interest_stability` faz no
+tempo, e que preserva σ. Em `class_stability = 1` não há desvio a sortear e
+todas as turmas de uma disciplina valem o mesmo; em 0 cada uma tem valor
+próprio. O desvio da turma passa pela **mesma** repartição temporal da
+disciplina, de modo que estabilidade entre períodos igual a 1 congela também
+as turmas.
+
+Baixar a estabilidade entre turmas **alarga** a distribuição do interesse sem
+que ninguém tenha mexido em σ, e não é defeito: normalizar subtrai `log(Σ)` da
+linha inteira, e quanto mais correlacionadas as entradas, mais da variância vai
+parar nesse termo comum — que some na subtração.
 
 A log-normal é o que se obtém quando a grandeza é **produto** de muitos fatores
 independentes — e é assim que se forma o quanto alguém quer uma disciplina:
@@ -268,9 +312,15 @@ variação fica em ~1,3.
 **A normalização deixou de ser dispensável.** Ela já mantinha o número legível
 no relatório — 0,11 é "11% do que o aluno quer", 1,94 não é nada —, e agora
 carrega o modelo: como a redistribuição conserva a massa do interesse, **a
-utilidade também soma 1**, e é isso que põe a utilidade de reserva `alpha_u`
-na mesma unidade da utilidade. O aluno compara participações,
-e a reserva é um valor nessa mesma escala.
+utilidade também soma 1** sobre as turmas. O aluno compara participações, e é
+nessa escala que a **seletividade** fixa a reserva — em múltiplos do score
+médio, não em valor absoluto.
+
+Sobre as **disciplinas** a soma é menor que 1, porque a disciplina vale o da
+turma mais útil dela e as irmãs não são alcançáveis junto. Esse número é o
+`U_a` da eq. (43) e é o denominador de ψ (`equations.reachable_utility`): com
+o 1 da linha inteira ali, ψ ganharia teto de ~1/k e chegar a 1 seria
+impossível por construção, não por escassez.
 
 **A invariante de altura da eq. (41) saiu.** Ela impunha `s_x > s_y ⇒ u_x > u_y`:
 a disciplina que destrava uma cadeia mais longa valia sempre mais que a terminal,
@@ -330,10 +380,13 @@ deixou de ser leitura — não há "utilidade ao alcance" menor que o interesse
 inteiro. E `psi = 1` é atingível, que é o que o ingressante com matrícula
 garantida obtém.
 
-Sobre poupar: não há. A eq. (42) prevê um `U_a` que é a fração do que o aluno
-tem em mãos que ele se dispõe a comprometer, mas nem crédito nem carga horária
-passam de um período para o outro, então guardar não é estratégia, é perda — o
-aluno gasta todo o orçamento no leilão e pede até o `W_a` cheio na linha de base.
+Sobre poupar: **depende da seletividade**. No leilão o aluno investe enquanto o
+ganho marginal do próximo crédito ficar acima da reserva, e abaixo dela para de
+gastar; com `credit_memory = "carry"` (eq. 36) o saldo passa para o período
+seguinte, então poupar é decisão. Em seletividade 0 — o especulador — não há
+corte e ele gasta tudo, que era o comportamento único antes dos eixos de
+estratégia. Na linha de base não há nada a poupar: carga horária não passa de um
+período para o outro, e ele pede até o `W_a` cheio.
 
 Isso importa para comparar cenários. Com o sorteio dentro do loop, mexer numa
 vaga deslocava o fluxo do gerador e mudava as utilidades de todo mundo, de modo
@@ -356,17 +409,54 @@ diferença entre eles se lê como efeito do mecanismo.
 | **Estratégia** | mochila **côncava** de pesos unitários: o N-ésimo crédito posto em `x` vale `u_{a,x}/N` | mochila **0-1**: `w_x` é peso, `u_{a,x}` é valor |
 | **Quem decide a alocação** | PLI exata sobre todos os lances (eq. 22) | varredura por `N_a^(t) + ε` — eq. (49) |
 | **Onde as restrições são resolvidas** | globalmente, no resolvedor | localmente e *ex-ante*, por cada aluno |
+| **A exclusão mútua entre turmas (eq. 5)** | restrição de clique dentro da PLI | roteamento: a caminhada pula o grupo já atendido |
 | **Preço** | 2º preço, eq. (24) | não existe |
 | **Retorno de créditos** | `f_γ`, eq. (34) | não existe — não houve preço a devolver |
 | **Custo de excluir** | metade do preço pago volta (`paid // 2`) | nenhum — não há moeda a perder |
 
 Em **empate de utilidade**, as duas mochilas preferem a disciplina **listada
-primeiro** no cenário — ver abaixo. Os dois lados gastam **tudo**, cada um na sua
-moeda, e é o que mantém a
-comparação honesta: o que os separa tem de ser o mecanismo, não quanto cada um
-resolveu guardar. A perda de expressividade é o ponto da comparação — a mochila
-0-1 só lê a *ordem* das utilidades, enquanto a côncava carrega o *quanto*: ela
-decide não só quais disciplinas, mas quantos créditos cada uma merece.
+primeiro** no cenário — ver abaixo. A perda de expressividade é o ponto da
+comparação: a mochila 0-1 só lê a *ordem* das utilidades, enquanto a côncava
+carrega o *quanto* — ela decide não só quais disciplinas, mas quantos créditos
+cada uma merece.
+
+**As duas decisões são em dois níveis**, e pelo mesmo motivo. No leilão, a
+mochila entre disciplinas usa `max_t ũ_t` como valor; plana — todas as turmas
+como bens independentes —, o orçamento da disciplina seguiria o **número de
+turmas** dela, e o funil entraria no lance. Na linha de base, as disciplinas são
+ordenadas e as turmas de cada uma saem juntas; plana, a caminhada consumiria
+`W_a` em ordem de turma, e o braço passaria a mudar *quais disciplinas* o aluno
+leva em vez de só qual turma.
+
+O **segundo nível difere entre os braços, e a diferença é do mecanismo**. No
+leilão ele é uma **escolha** (`equations.best_class`): tudo o que a disciplina
+ganhou vai para a turma mais bem pontuada. Repartir ali reproduziria um nível
+abaixo a pulverização que o nível de fora evita — o ganho marginal `score/N`
+vale por bem, então o 1º crédito na turma B ganha do 2º na turma A quase
+sempre —, e não compraria seguro nenhum, porque o clique reduz a uma turma o
+que o lance espalhou. O seguro são as **rodadas**: perdida a turma na rodada 1,
+as irmãs voltam na rodada 2 com o orçamento que sobrou.
+
+Na linha de base o aluno **lista todas** as turmas, em ordem: pedido recusado
+não custa nada, e o roteamento já o leva à primeira com vaga. É a mesma
+assimetria que separa as duas mochilas um nível acima — mensagem cara contra
+mensagem gratuita.
+
+O custo de repartir foi medido, e é o que decidiu: numa coorte de 324 ao longo
+de 4 períodos, repartir produziu 33 856 lances e 43,9 s de PLI contra 14 250
+lances e 1,9 s concentrando. Cada restrição de clique nasce de um aluno que
+apostou em mais de uma turma do grupo, e são elas que tornam a PLI
+intratável.
+
+**O roteamento** é o análogo da restrição de clique na ditadura serial: a
+caminhada guarda os grupos já atendidos e, ao chegar numa turma cuja disciplina
+já foi concedida, pula para a próxima. Sem ele o braço CR alocaria duas turmas
+da mesma disciplina — `serial_dictatorship` não checa clique nenhum por si.
+
+**O preço também conhece o grupo**: quem apostou em três turmas da mesma
+disciplina e foi atendido numa delas não é perdedor nas outras duas. Contá-lo
+ali faria cada membro do grupo encarecer as turmas do próprio grupo, e o efeito
+apareceria como "turmas encarecem tudo", que é artefato.
 
 **A mochila côncava substitui as eqs. (44)-(46)**, que repartiam o orçamento
 proporcionalmente à utilidade, truncavam e distribuíam a sobra em ordem de
@@ -460,7 +550,7 @@ As duas condições da Seção 7.3 saem daí:
    mesma gente encontrando regras diferentes. As listas da resposta são
    **pareadas**: o i-ésimo elemento de cada uma é a mesma população.
 2. **Múltiplas configurações de entrada.** As N seeds são essas configurações.
-   Uma observação só não diria nada — a diferença poderia ser daquela população.
+   Uma simulação só não diria nada — a diferença poderia ser daquela população.
 
 São **cinco métricas**: eficiência (ψ̄), equidade (φ), correlação (λ),
 **desperdício de vaga** (ε) e **tempo de formatura**. Nada de crédito, porque
@@ -474,7 +564,7 @@ de **contagem** (vagas alocadas, θ, aproveitamento) ficam no alocado, as de
 **valor** (ψ, φ, λ) ficam no retido, porque o aluno não consumiu a utilidade do
 que largou.
 
-As três primeiras são de período, e uma observação vira um número pela média
+As três primeiras são de período, e uma simulação vira um número pela média
 **ponderada pelos alunos medidos** (`metrics.students`, não `active`): a
 simulação termina numa fase de drenagem, e uma média simples daria a um período
 final de vinte alunos o mesmo peso de um período cheio de trezentos. O 1º
@@ -544,7 +634,7 @@ caem na primeira faixa, de modo que todos os gráficos sairiam iguais.
 Ficaram de fora, por motivos diferentes. A **ocupação** (θ) porque, com o
 calouro fora do recorte, ela deixou de se ler como "o quanto a universidade
 encheu" — as vagas garantidas continuam ocupadas e não entram mais no
-numerador; essa leitura está nos gráficos por disciplina de uma observação. E a
+numerador; essa leitura está nos gráficos por disciplina de uma simulação. E a
 **semestralização** (σ̄) porque o tempo de formatura mede a mesma coisa —
 progressão na grade — num número que se lê direto, em períodos. As duas
 continuam nos relatórios de uma execução única.
@@ -584,6 +674,37 @@ sozinho.
 
 ### Escolhas de modelagem não fixadas pelo anteprojeto
 
+- **A turma como bem alocado** (`Discipline.classes`, `class_size`): o
+  anteprojeto é de turma única, e a exclusão mútua da eq. (5) está lá sem
+  critério declarado. Aqui o **único** critério de conflito é serem duas turmas
+  da mesma disciplina — não há horário, e sem ele uma turma não pode conflitar
+  com turma de outra matéria. A oferta da disciplina é repartida entre as
+  turmas, com a sobra da divisão nas primeiras.
+
+  O que isso acrescenta ao modelo é a **escolha dentro da disciplina**. Hoje,
+  numa obrigatória, não há nada a ganhar além da vaga; com turmas de
+  dificuldades diferentes, toda disciplina vira também disputa pela nota — e aí
+  os dois mecanismos se separam de novo: sob CR a vantagem é posicional e se
+  acumula (quem tem CR alto pega a turma fácil, tira nota melhor, mantém o CR
+  alto), sob leilão a turma fácil tem preço e a vantagem se dilui.
+- **A dificuldade por turma** (`class_difficulty_levels`): uma escada de três
+  níveis reparte as turmas de cada disciplina com `n_baixa = n_alta =
+  round(k/3)`, o que fixa a média **geométrica** no nível do meio para todo `k`.
+  A geométrica é o invariante certo porque a dificuldade entra em
+  `attempt_rates` como expoentes recíprocos (`zero_rate^(t/d)` e
+  `max_rate^(d/t)`). Com níveis fixos e contagens inteiras dá para segurar o
+  centro ou a amplitude, não os dois — e o centro é o que vale segurar, porque é
+  ele que calibra a taxa de aprovação do cenário inteiro.
+
+  Com os três níveis iguais a escada está **desligada**, que é o padrão.
+- **A turma de entrada do calouro** (`equations.entry_class`): a matrícula
+  garantida não escolhe turma, então a coorte é repartida em blocos contíguos,
+  na ordem em que os alunos foram gerados. Em blocos e não sorteada porque não
+  há sorteio em tempo de execução, e porque o bloco é o único jeito de a
+  repartição ser exata sem consultar nada. O bloco **não gira** entre as
+  disciplinas de entrada: quem é do bloco 0 leva a primeira turma de todas elas.
+  A consequência, se a escada de dificuldade estiver ligada, é que o primeiro
+  bloco cursa a turma fácil de tudo — declarada na docstring da equação.
 - **Pré-requisitos** (`Discipline.prerequisites`): tomam o lugar da senioridade
   `s_x` da eq. (38). O período de uma disciplina não é configurado — sai da
   indução `1 + max(período dos pré-requisitos)`, com 1 para quem não tem
@@ -624,14 +745,14 @@ sozinho.
   | disponibilidade | a log-normal das horas que ele tem para o período, e por aí a frequência com que exclui | uma por par (aluno, período) |
   | interesse | o quanto o aluno diferencia as disciplinas | `interest_sigma`, uma linha por (aluno, período) |
 
-  O perfil descreve o comportamento do aluno **fora do mecanismo** — se ele vai
-  bem na disciplina ou se a larga. É **traço imutável**: não evolui, não
-  responde a sinal, não entra no genoma e o aluno não o conhece. A estratégia
-  (`equations.decision_score`) age *dentro* do mecanismo, ao pedir, e são
-  coisas separadas de propósito.
+  Estes dois eixos descrevem o comportamento do aluno **fora do mecanismo** —
+  se ele vai bem na disciplina ou se a larga. São **traço imutável**: não
+  respondem a sinal e o aluno não os conhece. Os outros dois eixos de perfil,
+  seletividade e concentração, são de **estratégia** e agem *dentro* do
+  mecanismo, ao pedir — são coisas separadas de propósito.
 
-  Não há eixo de perfil para **interesse**: o β do score já é o parâmetro de o
-  quanto o aluno diferencia as disciplinas, e dois botões para a mesma coisa
+  Não há eixo de perfil para **interesse**: a concentração já é o parâmetro de
+  o quanto o aluno diferencia as disciplinas, e dois botões para a mesma coisa
   tornariam qualquer resultado ambíguo de ler.
 
   A repartição é **igualitária entre as combinações**: com 3 perfis em cada
@@ -722,8 +843,8 @@ sozinho.
 
   **O aluno não conhece o próprio perfil nem o sorteio do período.** Dar-lhe a
   média seria petição de princípio: a conclusão entraria como entrada, e o que
-  a evolução dos genes precisa *demonstrar* é que os incentivos do sistema
-  fazem perfis diferentes jogarem diferente. Dar-lhe o valor realizado antes de
+  a comparação precisa *demonstrar* é que os incentivos do sistema fazem
+  perfis diferentes se saírem diferente. Dar-lhe o valor realizado antes de
   pedir seria pior: os dois mecanismos cortariam o pedido no teto certo e a
   exclusão sumiria dos dois.
 
@@ -895,15 +1016,16 @@ sozinho.
   nem a tela por aluno de uma execução por CR.
 - Teste estatístico sobre as duas amostras: a comparação mostra a dispersão e a
   contagem pareada, mas não calcula p-valor nem intervalo de confiança.
-- Choque de horário: existe no motor (`MutualExclusion`), mas a simulação não
-  gera horários.
-- **Poupança.** O aluno gasta sempre tudo: todo o orçamento de créditos no
-  leilão, todo o `W_a` na linha de base. Guardar não teria para onde ir — nem
-  crédito nem hora passam de um período para o outro —, mas guardar *entre
-  rodadas do mesmo período* seria uma estratégia de verdade, e não existe: hoje
-  o aluno reparte na rodada 1 tudo o que tem. Enquanto o lance perdedor não
-  consome crédito, apostar cedo não custa nada, então essa estratégia só
-  apareceria com uma regra que cobrasse a aposta.
+- Choque de **horário**: a exclusão mútua existe e é usada, mas o único
+  critério de conflito é serem duas turmas da mesma disciplina. Sem horário,
+  uma turma não pode conflitar com turma de outra matéria.
+- **Poupança entre rodadas.** Poupar *entre períodos* existe desde que a
+  seletividade entrou: o aluno para de investir quando o ganho marginal cai
+  abaixo da reserva, e com `credit_memory = "carry"` o saldo passa adiante.
+  Poupar **entre rodadas do mesmo período** não: ele reparte na rodada 1 tudo o
+  que a reserva deixa gastar. Enquanto o lance perdedor não consome crédito,
+  apostar cedo não custa nada, então essa estratégia só apareceria com uma
+  regra que cobrasse a aposta.
 - Persistência de cenários no servidor: o histórico de execuções fica no
   navegador, mas não há como salvar, nomear ou exportar um cenário.
 - **Evasão comportamental.** Há duas portas de saída — concluir e ser jubilado
@@ -912,160 +1034,190 @@ sozinho.
   exógena: sai da log-normal do perfil, não de um cálculo do aluno. A evasão do curso
   responde ao mecanismo, e é contra a linha de base por CR que ela precisaria
   ser medida — agora que ela existe, é comparação possível.
-- **O teste de invasão.** A evolução roda com a coorte inteira jogando, e a
-  pergunta "quanto o mecanismo premia desviar quando há com quem comparar na
-  mesma disputa" pede uma população mista — uma fração sincera contra uma
-  fração estrategista, varrida de 0 a 100%. É o que distingue estratégia
+- **A sincronização de turma.** A atratividade é da disciplina, e não há
+  análogo dela um andar abaixo — o "todo mundo quer a da manhã". O que separa
+  as turmas hoje é só o desvio privado de cada aluno, governado pela
+  estabilidade entre turmas.
+- **A fama da turma fácil.** Sem os sinais publicados, o aluno não percebe que
+  uma turma aprova mais que a outra. O atalho barato para recuperá-lo seria
+  correlacionar, por construção, a atratividade da turma com a facilidade dela
+  — a turma do professor leve é mais querida porque a fama circula —, o que dá
+  o mesmo gráfico sem aparato de sinal.
+- **A varredura do teste de invasão.** Os eixos de estratégia já põem as
+  frações coexistindo e disputando entre si — um exemplar de cada perfil na
+  mesma coorte —, mas a **proporção** é fixa: 1/6 em cada nível. Varrer a
+  fração de estrategistas de 0 a 100% é o que distinguiria estratégia
   posicional (uma corrida que redistribui sem mudar o bolo) de mecanismo que
   premia reportar torto.
 
-## O genoma
+## Os quatro eixos de perfil
 
-Como o aluno traduz utilidade e sinais em mensagem. São **quatro genes**, e nos
-quatro **0 quer dizer "ignora esse sinal"**:
+Todo aluno carrega quatro rótulos, e a coorte contém **um exemplar de cada
+combinação**: nos padrões, 3 × 3 × 6 × 6 = 324 alunos por período com ingresso.
+O tamanho da coorte não é digitado — ele é `exemplares por perfil × número de
+combinações —, e é assim que todo perfil recebe o mesmo número de exemplares em
+toda coorte, sem sobra a girar entre elas.
 
-| Gene | Campo | O que pesa | Linha de base |
-| --- | --- | --- | --- |
-| viés de utilidade | `beta_u` | a própria preferência | 1 |
-| viés de oferta | `beta_v` | o índice de oferta | 0 |
-| viés de aprovação | `beta_n` | o índice de aprovação | 0 |
-| utilidade de reserva | `alpha_u` | — (corta o conjunto) | 0 |
+Os dois primeiros são **traço**: governam sorteios, e o aluno não os conhece.
 
-```
-score_x = ũ_x^β_u · oferta_x^β_v · aprovação_x^β_n
-pede x enquanto ũ_x ≥ α_u
-```
-
-Os três primeiros são **expoentes**, de modo que o modelo é log-linear e os
-efeitos ficam aditivos em log. A forma de potência aceita qualquer real sem
-produzir peso negativo, então **não há fronteira a tratar** — a única restrição
-do genoma é `alpha_u ≥ 0`.
-
-Na linha de base (`1, 0, 0, 0`) o score **é** a utilidade, e as duas mochilas
-decidem exatamente o que decidiriam sem genoma. É assim que a população roda
-hoje.
-
-`alpha_u` é a **utilidade de reserva** no sentido da literatura de desenho de
-mecanismos — o payoff da opção externa, contra o qual se escreve a restrição de
-participação. Ela corta o *conjunto de escolha*, não o gasto: o orçamento vai
-inteiro para o que foi admitido. Como as participações somam 1, no máximo
-`⌊1/α_u⌋` disciplinas passam do corte, e o gene é na prática um teto de
-amplitude do pedido.
-
-### Os dois sinais publicados
-
-Por disciplina, do período anterior, idênticos nos dois mecanismos, ambos em
-(0, 1) com **1/2 como ausência de informação**:
-
-```
-oferta(x)    = vagas / (vagas + pedidos_anteriores)
-aprovação(x) = (aprovações + 1) / (alocações + 2)
-```
-
-A soma no denominador fecha as duas pontas: a razão crua teria uma cauda que
-explode (uma vaga contra quatrocentos pedidos, ou ninguém pedindo) e outra
-esmagada em [0, 1]. Perde-se distinguir 10× de 100× de sobredemanda, e isso é
-ganho — a dissuasão real satura também.
-
-O `+1/+2` do índice de aprovação é **suavização de Laplace**. Ele corrige a
-variância de contagem pequena (uma alocação e uma aprovação valem 2/3, não 100%)
-e resolve o *cold start*: disciplina nunca ofertada dá exatamente 1/2. De quebra,
-garante base estritamente entre 0 e 1, o que torna a potência sempre segura.
-
-No índice de oferta a suavização não bastaria — as contagens de vaga são grandes
-e a pseudocontagem some. Por isso vale a regra explícita: **se nenhum aluno era
-elegível para a disciplina no período anterior, o índice é 1/2**. Sem ela, a
-disciplina que acaba de destravar anunciaria folga máxima e atrairia o estouro de
-pedidos que vai lotá-la — o sinal erraria justo quando o funil abre.
-
-## A camada evolutiva
-
-Um algoritmo genético sobre os quatro genes, com **as coortes evoluindo
-independentes entre si**. O vocabulário é fixo e os três níveis não se
-confundem:
-
-- **coorte** — a turma de ingresso: quem entra no mesmo período;
-- **observação** — uma execução da simulação;
-- **geração** — exclusivamente do algoritmo genético: uma rodada de seleção e
-  mutação.
-
-O desenho se escreve de uma vez: **N observações, M gerações, coortes
-independentes**. São `N × M` simulações completas.
-
-| Peça | Escolha |
+| Eixo | O que governa |
 | --- | --- |
-| População inicial | fatorial completo dos níveis — um exemplar de cada combinação |
-| Aptidão | carga aprovada por período, relativa à média da própria coorte |
-| Seleção | torneio k = 2, 10 elites por coorte, sem cruzamento |
-| Mutação | gaussiana aditiva nos quatro genes, `σ = c · espaçamento` |
-| Parada | piso, teto, e deriva do genoma médio abaixo do ε do controle negativo numa janela |
+| desempenho | a normal dividida da nota — nota mais provável, chance de 0, chance de 10 |
+| disponibilidade | a log-normal das horas do período, resorteada a cada um |
 
-A seleção acontece **dentro** da coorte porque quem entra tarde tem a carreira
-truncada pelo horizonte: o truncamento é constante dentro da coorte e some na
-seleção local. Isso dá linhagens paralelas, e convergirem para a mesma região
-é evidência forte — com a ressalva de que elas não enfrentam o mesmo ambiente,
-já que a primeira entra numa universidade vazia e a última numa cheia.
+Os dois últimos são **estratégia**: entram na decisão do aluno, e por isso são
+valor fixo em vez de distribuição. Um perfil de estratégia é tratamento, não
+descrição — não se mede a frequência de especuladores no mundo, declara-se
+quais existem para ver como cada mecanismo os trata.
 
-A régua é a **média da própria coorte**, e não um genótipo de linha de base:
-com a grade ocupando a coorte inteira não sobra lugar para ele. Além de
-resolver, é o que se queria — dependência de frequência explícita, e o
-resultado se escreve como *estratégia estável*, não como ótimo.
+| Eixo | Campo | O que faz | Neutro |
+| --- | --- | --- | --- |
+| concentração | `concentration` | expoente do score sobre a utilidade | 1 |
+| seletividade | `selectivity` | múltiplo do score médio abaixo do qual não pede | 0 |
 
-### Por que a parada não olha a aptidão
+```
+score_x  = ũ_x^concentração
+reserva  = seletividade · (Σ_d max_t score_t) / |disciplinas|
+pede x enquanto score_x ≥ reserva
+```
 
-A aptidão é relativa à coorte, então a média relativa é ~0 **por construção**:
-não existe "parou de melhorar" para servir de platô. Amplitude de aptidão
-também não serve — com 180 genótipos, a amplitude esperada *só de ruído* é
-`~7,3/√N`, e só desce de 1 acima de N ≈ 55.
+A **concentração** é expoente, de modo que o modelo é log-linear: 1 é o lance
+sincero, abaixo achata, acima concentra, e **negativo inverte** — aposta mais
+no que o aluno quer menos, que é o controle do absurdo. Acima de 2 satura e
+deixa de graduar. Em 0 todas as elegíveis valem o mesmo, que é a premissa da
+Seção 2.2 sobre revelação de preferência posta à prova.
 
-O que se mede é o **genoma**: o desvio da média de cada gene numa janela de
-gerações, normalizado por uma escala **fixa** (o espalhamento da 1ª geração) e
-agregado nas coortes. Escala fixa e não a corrente, senão a normalização
-encolhe junto com o que se mede e o critério nunca dispara quando deveria. E
-agregado antes de testar, nunca "todas as coortes abaixo de ε": com 75% de
-chance por coorte, oito juntas dão 10%, e cinco gerações seguidas, 10⁻⁵.
+A **seletividade** é a utilidade de reserva no sentido da literatura de
+desenho de mecanismos — o payoff da opção externa, contra o qual se escreve a
+restrição de participação. Em múltiplos do score médio porque o score cru não
+tem escala que se calibre: dizer "a disciplina precisa valer metade de uma
+disciplina média" se lê, "precisa valer 0,03" não.
 
-### O controle negativo
+Ela age em **dois lugares**, e é essa a diferença entre os mecanismos:
 
-Com ele, o genoma é selecionado e mutado mas **não é expresso**: todo mundo
-roda na linha de base. As diferenças de aptidão viram puro ruído, e o que a
-população andar é deriva.
+- **corta o conjunto** — o que está abaixo da reserva não é pedido, nos dois
+  braços;
+- **para o gasto** — na mochila do leilão, o aluno investe enquanto o ganho
+  marginal do próximo crédito ficar acima da reserva, e depois **poupa**. Como
+  o orçamento carrega entre períodos (eq. 36), poupar é decisão, não desperdício.
+  Na linha de base por CR não há análogo: lá não há investimento marginal que
+  se interrompa.
 
-É o modelo nulo de neutralidade, e serve para duas coisas: separar o que a
-seleção produziu do que o ambiente produziu sozinho, e **produzir o ε** do
-critério de parada. Rode-o antes do experimento real — se a população varrer a
-faixa inteira dos genes sob o nulo, nenhum resultado do real seria
-interpretável, e você descobre isso gastando uma rodada em vez de todas.
+Em 0 não há corte nenhum: é o **especulador**, que pede tudo e gasta o
+orçamento inteiro. Acima de 1 o aluno fica mais exigente que a média e
+acumula saldo para um período em que valha a pena.
 
-**O ε não se digita.** É a deriva da última janela do nulo — a mesma
-estatística, na mesma escala —, e um número sem escala intuitiva não se chuta.
-Então o formulário não tem campo: tem uma caixa que oferece o ε do controle
-negativo mais recente que rodou **nestas mesmas condições**, com a data. Sem um
-nulo compatível no histórico, a caixa não existe e a rodada vai ao teto.
+### O ε da eq. (7.1.2) some na tolerância do resolvedor
 
-Compatível quer dizer: mesmo cenário e mesmos parâmetros do AG que governam
-quanto a população anda por geração — passo, observações, torneio, elites,
-níveis e a janela. Ficam de fora a seed (outra realização da mesma deriva, não
-outra deriva) e o piso/teto de gerações, que só dizem quando a rodada termina.
-Mexer em qualquer um dos primeiros derruba a oferta na hora.
+A perturbação estocástica existe para tornar **única** a solução ótima: ela
+decide onde lance, viés e ordem de desempate empatam. O teto é
+`1/(|A|²·|B|)`, e ele é justo para o argumento que o sustenta — somados todos
+os ε de uma solução, o total fica abaixo de 1/|A|, que é o menor passo do
+desempate, de modo que a perturbação nunca desloca uma solução de preferência
+agregada maior.
 
-Reaproveitar o nulo é o que evita dobrar o custo: calibrar dentro do `/evolve`
-faria toda evolução rodar duas vezes, e aqui o controle roda uma vez e serve a
-quantos experimentos vierem depois.
+O problema é o outro lado: em escala realista esse teto fica **abaixo da
+tolerância numérica do resolvedor**.
 
-O nulo, por sua vez, **ignora o ε** e vai sempre ao teto. Um nulo interrompido
-mediria a deriva da janela mais parada que apareceu, e o limiar sairia
-enviesado para baixo — o critério pararia o experimento real antes da hora.
+| |A| | |B| | teto de ε | menor passo do desempate | some em 10⁻⁶? |
+| --- | --- | --- | --- | --- |
+| 3 | 3 | 3,7·10⁻² | 3,3·10⁻¹ | não |
+| 40 | 63 | 9,9·10⁻⁶ | 2,5·10⁻² | não |
+| 180 | 63 | 4,9·10⁻⁷ | 5,6·10⁻³ | **sim** |
+| 324 | 288 | 3,3·10⁻⁸ | 3,1·10⁻³ | **sim** |
 
-A deriva não é pequena: torneio sobre aptidão ruidosa escolhe quase ao acaso, o
-que é deriva de Wright-Fisher, e a média de uma população de P indivíduos se
-move por geração com desvio `σ_população/√P`. Nulo barulhento significa
-experimento com pouca resolução, e o conserto é aumentar `observations` ou
-diminuir o passo da mutação.
+O CBC trabalha com tolerância de integralidade de 10⁻⁶, então em qualquer
+preset de tamanho real ele **não vê** o ε: onde o modelo diz que há
+desempate, o resolvedor vê empate e devolve um ótimo qualquer entre os
+empatados. Isso **não é novidade das turmas** — já valia com |A| = 180 e 63
+disciplinas.
+
+Em consequência prática a execução continua reprodutível, porque o CBC é
+determinístico dado o mesmo modelo; o que não vale é a afirmação de que a
+alocação é única *pela eq. (22)*. Quem decide entre empatados é o caminho
+interno do resolvedor. Medido antes da correção abaixo: dar ao CBC um incumbente inicial — a mesma
+PLI, só com um piso conhecido — **mudava a alocação**, que é exatamente o
+sintoma de ótimos múltiplos.
+
+**A correção óbvia foi testada e não serve.** Escalar a função objetivo por
+uma constante preserva o argmax e põe o ε de volta acima da tolerância, e por
+isso parecia resolver os dois problemas de uma vez. Medido no mesmo período:
+
+| escala | total | pior PLI | mediana |
+| --- | --- | --- | --- |
+| 1 (como está) | 32,0 s | 28,0 s | 0,07 s |
+| 10⁶ | 4,2 s | 0,7 s | 0,07 s |
+| 10⁸ | 57,2 s | **52,6 s** | 0,07 s |
+| 10¹⁰ | 10,6 s | 6,3 s | 0,07 s |
+
+Não é monotônico — 10⁸ é pior que a escala 1 —, e **cada escala devolve uma
+alocação diferente**. O ganho de 10⁶ foi sorte da árvore de busca naquela
+instância, não condicionamento. O código fica como estava.
+
+O que o teste mostra de verdade é o tamanho do problema: enquanto o ε não
+decide, a alocação entre ótimos empatados depende de detalhes do resolvedor
+que nada no modelo controla. Fechar isso exige mexer no teto do ε — derivá-lo
+do número de termos que uma solução de fato tem, em vez do pior caso
+`|A|·|B|` —, e isso é decisão sobre a Seção 7.1.2, não sobre o código.
+
+### O que a concentração 0 custa ao resolvedor
+
+Medido em 06/11/2026, coorte de 324, 288 turmas, 3 períodos, braço com PLI:
+
+| população | total | pior PLI | mediana |
+| --- | --- | --- | --- |
+| os quatro eixos completos | 30,9 s | **27,0 s** | 0,06 s |
+| só o perfil sincero (mesma coorte) | 4,2 s | 0,5 s | 0,39 s |
+| sem a seletividade 0 | 14,5 s | 11,3 s | 0,30 s |
+| sem a concentração 0 e −1 | 2,6 s | 0,2 s | 0,07 s |
+
+A leitura é a mediana contra o pior caso: **quase toda rodada fecha em
+centésimos de segundo, e uma em cada dez come trinta**. Não é tamanho — a
+rodada de 27 s tem o mesmo número de lances que as de meio segundo.
+
+A causa é a **concentração 0**. Com expoente zero todo score vale 1, a mochila
+côncava reparte o orçamento igualmente por tudo o que está disponível, e o
+aluno chega à rodada com algumas dezenas de lances de valor idêntico. Como a
+preferência final é `lance + desempate + ε` (eq. 22), as preferências ficam
+quase iguais num conjunto enorme: a relaxação linear fica degenerada e o
+*branch and bound* não tem o que podar. É a simetria, não a escala.
+
+Vale dizer o que **não** é a causa, porque os dois suspeitos naturais foram
+descartados por medição: não é a coorte (com os mesmos 324 alunos sinceros o
+pior caso cai para 0,5 s) e não é a seletividade (tirá-la deixa 11,3 s).
+
+É propriedade do problema, não defeito: o WDP é uma mochila múltipla 0-1 com
+itens compartilhados e grafo de conflito, NP-difícil, e o tempo de um
+resolvedor exato nela tem variância alta por natureza. O que a concentração 0
+faz é produzir instâncias que caem no lado ruim dessa variância com frequência
+que importa — e o empate numérico do ε (seção anterior) é o que as deixa sem
+o que podar.
+
+**A consequência prática é de escopo, e é decisão de quem calibra**: com os
+seis níveis de concentração, uma comparação de N seeds nos dois braços não
+fecha em tempo útil. As saídas medidas são tirar a concentração 0 e −1 do
+eixo (2,6 s, mas perde dois controles), rodar o braço guloso para explorar
+(linear e previsível: 0,8 s para a coorte cheia em dois períodos), ou dar ao
+CBC um limite de nós — determinístico, mas aí a PLI deixa de ser exata.
+
+### Por que não há algoritmo genético
+
+Houve um, sobre quatro genes, com as coortes evoluindo independentes. Saiu em
+05/11/2026, e o motivo é de escopo: a pergunta que ele existia para responder
+— *compensa reportar torto?* — fica respondida com **tipos fixos** em vez de
+busca. Evolução diria *qual* distorção é a melhor; tipos fixos dizem *se* uma
+distorção dada compensa, que é o que o trabalho precisa e o que se lê sem
+aparato.
+
+Com ele saíram os dois **genes de sinal** — viés de oferta e viés de aprovação
+—, e com eles os índices publicados por disciplina. A consequência a declarar:
+o aluno não percebe que uma turma aprova mais que a outra. A dificuldade por
+turma continua afetando a nota, então o efeito bola de neve sobrevive, mas some
+o comportamento de caçar o professor leve.
 
 ### Onde o resultado fica
 
-`/compare` e `/evolve` gravam a execução em **`resultados/`** (git-ignored;
+`/compare` grava a execução em **`resultados/`** (git-ignored;
 outro caminho em `LEILAO_RESULTS_DIR`) e devolvem `saved_to`. O formato é o
 mesmo do histórico do navegador — `{kind, at, config, result}` —, de modo que
 carregar um arquivo na interface é só acrescentá-lo à lista, sem conversão.
@@ -1073,12 +1225,12 @@ carregar um arquivo na interface é só acrescentá-lo à lista, sem conversão.
 A API continua **sem estado**: nenhuma rota lê de lá, nenhuma depende de o
 arquivo existir, e apagar a pasta não muda comportamento nenhum. Falha de
 escrita não derruba a requisição — `saved_to` sai nulo e o resultado vai
-inteiro, porque perder uma evolução de dezenas de minutos pelo registro que
-não coube seria o pior dos dois mundos.
+inteiro, porque perder uma comparação de muitos minutos pelo registro que não
+coube seria o pior dos dois mundos.
 
-Disco em vez de `localStorage` porque uma evolução custa `N × M` simulações
-completas, e o navegador tem poucos megabytes para o domínio inteiro,
-disputados com todas as comparações.
+Disco em vez de `localStorage` porque uma comparação custa `N × braços`
+simulações completas, e o navegador tem poucos megabytes para o domínio
+inteiro, disputados com todas as outras.
 
 ## Como rodar
 
@@ -1110,8 +1262,7 @@ do `PATH`.
 Em `http://localhost:5173`, a barra lateral tem **Configurar** (o formulário do
 cenário), **Projeto** (visão teórica do modelo e das métricas), **Grade** (a
 oferta desenhada), **Submochila** (a decisão de um aluno, passo a passo) e a
-lista de **Execuções** já feitas, cada uma identificada por data e hora — as
-comparações levam uma etiqueta, porque abrem numa tela diferente.
+lista de **Execuções** já feitas, cada uma identificada por data e hora.
 
 A tela **Grade** traz duas grades, porque são duas regras de conclusão. A das
 **obrigatórias** é a cadeia de pré-requisitos lida da esquerda para a direita:
@@ -1123,13 +1274,17 @@ que ela exige e o que ela destrava, no mesmo tom, porque quem separa os dois
 lados é a coluna de cada um — e o resto da grade recua. Os conectores não levam
 ponta pelo mesmo motivo: a grade corre num sentido só.
 
-O botão de "Configurar" faz uma coisa só:
+O botão de "Configurar" faz uma coisa só: **comparar os modelos** — o mesmo
+cenário roda em cada braço, `N` vezes, com as seeds de 1 a `N`. Três campos do
+cenário não vão para lá: a **seed** (ali ela vira o eixo da amostra), o
+**retorno de créditos** e o **resolvedor** (ali eles viram eixos do
+experimento, e cada braço impõe o seu). No lugar entra **simulações por modelo
+(N)**.
 
-- **comparar os modelos** — o mesmo cenário roda em cada braço, `N` vezes, com
-  as seeds de 1 a `N`. Somem três campos: a **seed** (ali ela vira o eixo da
-  amostra), o **retorno de créditos** e o **resolvedor** (ali eles viram eixos
-  do experimento, e cada braço impõe o seu). No lugar entra **observações por
-  modelo (N)**. São `N` simulações completas por braço.
+O **tamanho da coorte não se digita**: ele sai de *exemplares por perfil* vezes
+o número de combinações, e o painel mostra o número derivado. É a conta que
+dimensiona `class_size` — a coorte repartida entre as turmas de cada disciplina
+de entrada tem de caber nelas, e o formulário recusa quando não cabe.
 
 Em "Configurar", a barra lateral **direita** lista os **cenários salvos** —
 não há catálogo fixo. O formulário abre nos **valores padrão**, que são o
@@ -1178,22 +1333,18 @@ elas variam por período, então ali não dá para separar "tem poucas vagas" de
 "é avançada". Quem recupera o eixo são as optativas, que não têm período: os
 três patamares de oferta cruzam o mesmo 2³.
 
-**A oferta está defasada do ingresso.** O funil foi dimensionado para 40 alunos
-por coorte; 180 é o tamanho da grade de genótipos da camada evolutiva
-(5 × 3 × 3 × 4) e veio de lá, não da oferta. Medido numa seed — com os
-parâmetros de 03/11/2026, antes de `W_a = 30`, da residência de 16 e das 3
-rodadas, então as grandezas mudaram e a conclusão não —, ir de 40 para 180
-derrubava a conclusão de 77% para 40% e subia o jubilamento de 23% para 60%;
-multiplicando toda a oferta por 4,5 ela voltava a 76% com o mesmo tempo de
-formatura. É escassez de vaga, não efeito do tamanho da coorte.
+**O tamanho da coorte vem dos perfis, não da oferta.** São 324 alunos por
+período com ingresso — 3 × 3 × 6 × 6 combinações, um exemplar de cada —, e é a
+oferta que tem de acompanhar. Medido numa seed, com os parâmetros de
+03/11/2026, ir de 40 para 180 por coorte derrubava a conclusão de 77% para 40%
+e subia o jubilamento de 23% para 60%; multiplicando toda a oferta por 4,5 ela
+voltava a 76% com o mesmo tempo de formatura. É escassez de vaga, não efeito do
+tamanho da coorte.
 
-A grade passou a declarar **turmas**, e a lotação virou campo do cenário
-(`class_size`, 25 por padrão), o que afrouxa parte disso sem mexer na
-estrutura: as oito do 1º período passam de 180 para 225 vagas, e os 45 lugares
-que sobram sobre os 180 ingressantes são os que a recursada disputa — antes,
-com 20 por turma, a matrícula garantida consumia a oferta inteira e ninguém
-recursava uma disciplina de entrada enquanto houvesse ingresso. A ponta do
-funil, 4 turmas, vai a 100 vagas. Se isso basta, não foi medido.
+A lotação é campo do cenário (`class_size`, 45 por padrão) e é o botão que
+acompanha a coorte sem mexer na estrutura: as 9 turmas de cada disciplina de
+entrada dão 405 vagas, a coorte repartida põe 36 em cada uma e sobram 9 por
+turma para quem recursa.
 
 Isso mexe na leitura do jubilamento: enquanto ele morde, o tempo de formatura é
 censurado e volta a medir quem sobreviveu em vez de quem foi rápido.
@@ -1260,7 +1411,7 @@ tela Grade. Ao executar, a simulação entra no histórico e a tela abre nela.
 
 Ao lado dos campos de **notas** e de **interesse**, a tela desenha a
 distribuição que aqueles parâmetros produzem, recalculada a cada tecla
-(`web/src/distributions.ts`). São as mesmas dez faixas que a observação reporta,
+(`web/src/distributions.ts`). São as mesmas dez faixas que a simulação reporta,
 de modo que a prévia e o histograma do resultado se leem lado a lado. A das
 notas sai em forma fechada da acumulada da normal dividida — exata, e por isso
 não treme enquanto se digita —, e traz ao pé a nota mais provável, a aprovação
@@ -1350,7 +1501,7 @@ Uma comparação tem **quatro boxplots** de alocação, um por métrica, mais **
 por rodada** na seção de saturação — todos com **uma caixa por modelo**. A linha
 grossa é a mediana, a caixa é a metade central da amostra (1º ao 3º quartil),
 os bigodes vão até 1,5 IQR e o que sobra aparece como ponto solto. Cada valor
-dentro de uma caixa é uma observação.
+dentro de uma caixa é uma simulação.
 
 O que se lê é a **sobreposição**: caixas que não se tocam separam os modelos;
 caixas sobrepostas dizem que a diferença entre as medianas cabe dentro da
@@ -1369,7 +1520,7 @@ aquele modelo saiu *melhor* que o CR — maior em ψ̄ e φ, menor no tempo). Em
 duas colunas vêm vazias: ela descreve se a alocação segue o CR, e qual lado é
 melhor ali depende de alocar por mérito passado ou por necessidade.
 
-**Observação a observação** põe o pareamento à vista: cada linha é uma seed, e os
+**Simulação a simulação** põe o pareamento à vista: cada linha é uma seed, e os
 três valores de cada coluna são a mesma população sob regras diferentes. A
 coluna **formados** está ali porque o tempo de formatura não se lê sem ela; as
 rodadas ficam de fora desta tabela, que já tem três valores por célula, e estão
@@ -1387,7 +1538,7 @@ detalhe aluno a aluno não cabe ali, e é o assunto da seção a seguir.
 #### Histórico de um aluno ou de uma disciplina
 
 No fim da tela de comparação está a saída para o outro extremo do agregado: um
-aluno, uma disciplina, uma rodada. Dois seletores endereçam **uma** observação —
+aluno, uma disciplina, uma rodada. Dois seletores endereçam **uma** simulação —
 o **modelo** e a **seed**, que juntos são um dos pontos dentro de uma caixa do
 boxplot —, e a interface pede ao `/trace` a simulação daquele par. Ela não vem
 junto do resultado nem é guardada: são uns 10 MB de JSON num cenário do
@@ -1395,16 +1546,16 @@ tamanho do preset (cerca de 1 comprimido) contra 100 kB do resumo, e a
 simulação é
 determinística, então refazê-la custa segundos e não fidelidade. A configuração
 passa pelo mesmo `arm_config` que a comparação usou, e é isso que garante que o
-traço seja a observação de que o ponto saiu, e não uma parecida.
+traço seja a simulação de que o ponto saiu, e não uma parecida.
 
 Trocar o modelo **mantém o aluno escolhido**: a população, o interesse e as
 notas saem da seed, então o aluno 42 de uma seed é a mesma pessoa nos quatro
 modelos — é a comparação pareada da Seção 7.3 lida numa pessoa só.
 
-A vista por **aluno** traz os **dois perfis** dele junto do nome — desempenho e
-disponibilidade, como rótulo de grupo e não como estado —, porque é ali que se
-pergunta "por que *este* aluno foi assim", e o perfil é metade da resposta, com
-a seed sendo a outra. Traz também o cabeçalho (coorte, CR, carga aprovada,
+A vista por **aluno** traz os **quatro perfis** dele junto do nome — os dois de
+traço (desempenho e disponibilidade) e os dois de estratégia (seletividade e
+concentração) —, porque é ali que se pergunta "por que *este* aluno foi assim",
+e o perfil é metade da resposta, com a seed sendo a outra. Traz também o cabeçalho (coorte, CR, carga aprovada,
 conclusão) e, período a período, **uma tabela por rodada** com as disciplinas
 que lhe eram elegíveis: a utilidade, o lance daquela rodada, o resultado, a
 nota, o que pagou e o que o retorno devolveu. A vista por **disciplina** troca
@@ -1433,7 +1584,8 @@ nem era estado de solicitação nem estava em jogo.
 As cinzas só existem na vista por aluno — na por disciplina elas seriam a
 população inteira em toda linha — e são **ocultáveis**: num período de ingresso
 são quase todas, porque as optativas são elegíveis desde o começo e a matrícula
-garantida já tomou 20 das 30 h do calouro.
+garantida já tomou 15 das 24 h do calouro. Cada linha é uma **turma**, e as
+irmãs de uma já conquistada saem junto com ela: o clique as tirou de disputa.
 
 É a tela de depuração do projeto: quando um agregado sai fora do esperado, é
 aqui que se vê por quê.

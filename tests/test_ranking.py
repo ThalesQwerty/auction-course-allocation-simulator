@@ -16,6 +16,7 @@ from leilao.comparison import (
     summarize,
 )
 from leilao.equations import weighted_mean
+from profiles import single_axis
 from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig
 from leilao.ranking import allocate_by_ilp, allocate_by_ranking, request_set
@@ -38,9 +39,10 @@ def make_config(**overrides) -> SimulationConfig:
         disciplines=GRADE,
         periods=6,
         entry_periods=3,
-        students_per_period=3,
+        students_per_profile=3,
         rounds=2,
         max_hours=WORKLOAD,
+        **single_axis(WORKLOAD),
         mechanism="ranking",
         seed=11,
     )
@@ -253,7 +255,7 @@ def test_the_two_credit_arms_differ_only_by_the_return():
     o que devolver. Cinco alunos por período bastam para a disputa existir.
     """
     result = run_comparison(
-        make_config(students_per_period=5), runs=4, arms=ARMS + ABLATION_ARMS
+        make_config(students_per_profile=5), runs=4, arms=ARMS + ABLATION_ARMS
     )
     with_return = next(a for a in result.arms if a.key == "credits_return")
     without = next(a for a in result.arms if a.key == "credits_ilp")

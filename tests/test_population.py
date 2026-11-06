@@ -16,6 +16,7 @@ from leilao.behavior import (
     interest_distribution,
     utility_matrix,
 )
+from profiles import single_axis
 from disciplines import disciplines_from_predecessors
 from leilao.config import DEFAULT_PERFORMANCE, Discipline, SimulationConfig
 from leilao.equations import (
@@ -42,8 +43,9 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=5,
-        students_per_period=8,
+        students_per_profile=8,
         max_hours=WORKLOAD,
+        **single_axis(WORKLOAD),
         seed=7,
     )
     return SimulationConfig(**{**base, **overrides})
@@ -58,6 +60,7 @@ def _grade_config(disciplines, **overrides):
         # As 40 disciplinas são todas de entrada: o ingressante cursaria as 40
         # de uma vez, e a eq. (4) tem de caber.
         max_hours=40 * 60,
+        **single_axis(40 * 60),
         **overrides,
     )
 
@@ -368,8 +371,9 @@ def test_the_eligible_sum_is_always_one():
     # Numa grade sem pré-requisito nenhum, tudo é elegível de saída e a soma é 1.
     flat = SimulationConfig(
         disciplines=[Discipline(name, seats=20, hours=60, entry=True) for name in ("A", "B", "C")],
-        students_per_period=8,
+        students_per_profile=8,
         max_hours=WORKLOAD,
+        **single_axis(WORKLOAD),
     )
     flat_row = draw_interest(
         generate_students(flat, np.random.default_rng(6)), flat, np.random.default_rng(6)
@@ -399,8 +403,9 @@ def test_the_workload_cap_bounds_the_enrolled_hours():
         config = SimulationConfig(
             disciplines=disciplines,
             periods=4,
-            students_per_period=10,
+            students_per_profile=10,
             max_hours=max_hours,
+            **single_axis(max_hours),
             seed=5,
         )
         result = run_simulation(config)
@@ -458,6 +463,7 @@ def _rows(stability, periods=8, **overrides):
         periods=periods,
         max_hours=20 * 60,
         interest_stability=stability,
+        **single_axis(20 * 60),
         **overrides,
     )
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(400)]
@@ -521,6 +527,7 @@ def test_a_discipline_can_carry_its_own_stability():
         periods=4,
         max_hours=20 * 60,
         interest_stability=0.0,
+        **single_axis(20 * 60),
     )
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(400)]
     rows = draw_interest(students, config, np.random.default_rng(7))
@@ -543,8 +550,9 @@ def _rows_for(disciplines, **overrides):
     config = SimulationConfig(
         disciplines=disciplines,
         periods=3,
-        students_per_period=12,
+        students_per_profile=12,
         max_hours=240,
+        **single_axis(240),
         seed=11,
         **overrides,
     )
@@ -569,14 +577,14 @@ def test_attractiveness_moves_the_whole_population_the_same_way():
     preferência alheia — sem ela as linhas são independentes e ninguém pode
     antecipar a disputa a partir do que gosta."""
     mean_of = lambda a: np.mean([row["X"] for row in _rows_for(_pair(a)).values()])
-    assert mean_of(1.0) > mean_of(0.0) > mean_of(-1.0)
+    assert mean_of(2.0) > mean_of(1.0) > mean_of(0.5)
 
 
-def test_attractiveness_zero_is_the_neutral():
-    """0 é a disciplina média, e declarar 0 tem de dar exatamente o que dá não
-    declarar nada — é a regressão que garante que o eixo novo não mexeu nos
+def test_attractiveness_one_is_the_neutral():
+    """1 é a disciplina média, e declarar 1 tem de dar exatamente o que dá não
+    declarar nada — é a regressão que garante que o eixo não mexeu nos
     cenários que não o usam."""
-    assert _rows_for(_pair(0.0)) == _rows_for(
+    assert _rows_for(_pair(1.0)) == _rows_for(
         [Discipline(name="X", seats=20, hours=60, entry=True),
          Discipline(name="Y", seats=20, hours=60, entry=True)]
     )
@@ -592,20 +600,19 @@ def test_attractiveness_now_outranks_the_position_in_the_curriculum():
         Discipline(name="OBR", seats=20, hours=60, entry=True, unlocks=("SEG",)),
         Discipline(name="SEG", seats=20, hours=60),
         Discipline(name="OPT", seats=20, hours=60, elective=True,
-                   attractiveness=10.0),
+                   attractiveness=1000.0),
     ], elective_hours=60)
     assert all(row["OPT"] > row["OBR"] for row in rows.values())
 
 
-def test_negative_attractiveness_is_a_discipline_below_the_average():
-    """O eixo é ℝ inteiro: a atratividade é a média de um expoente, não um
-    multiplicador, então negativo não é valor inválido — é a disciplina que a
-    população quer menos que a média, e a linha continua estritamente
-    positiva porque e^A nunca chega a zero.
+def test_attractiveness_below_one_is_a_discipline_below_the_average():
+    """O eixo é (0, ∞): a atratividade é **multiplicador**, então abaixo de 1
+    é a disciplina que a população quer menos que a média, e a linha continua
+    estritamente positiva porque multiplicar por A > 0 não zera nada.
 
-    σ fica em 0,25: o que se testa é o sinal de A, e com σ = 1 a distância de
-    3 no log ainda perde para o ruído em ~2% das linhas."""
-    rows = _rows_for(_pair(-3.0), interest_sigma=0.25)
+    σ fica em 0,25: o que se testa é o lado de A, e com σ = 1 a distância de
+    ln(20) no log ainda perde para o ruído em ~2% das linhas."""
+    rows = _rows_for(_pair(0.05), interest_sigma=0.25)
     assert all(row["X"] > 0 for row in rows.values())
     assert all(row["X"] < row["Y"] for row in rows.values())
 

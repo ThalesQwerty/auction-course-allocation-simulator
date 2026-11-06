@@ -38,6 +38,8 @@ class InfeasibleOrUnsolvedError(RuntimeError):
     """Levantado quando o solver não encontra solução ótima comprovada."""
 
 
+
+
 def solve_wdp(problem: Problem, *, msg: bool = False) -> Allocation:
     """z_max por PLI — eq. (10).
 

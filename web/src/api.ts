@@ -1,8 +1,6 @@
 import type {
   CompareRequest,
   CompareResponse,
-  EvolveRequest,
-  EvolveResponse,
   PlaygroundRequest,
   PlaygroundResponse,
   TraceRequest,
@@ -20,14 +18,7 @@ export async function compare(request: CompareRequest): Promise<CompareResponse>
   return post("/compare", request);
 }
 
-/** Roda o algoritmo genético sobre o cenário. São `observations × gerações`
- * simulações completas no servidor — é a requisição mais cara da API, e os
- * dois tetos são o que separa um teste de minutos de um de horas. */
-export async function evolve(request: EvolveRequest): Promise<EvolveResponse> {
-  return post("/evolve", request);
-}
-
-/** Refaz **uma** observação da comparação — o par (braço, seed) — e devolve o
+/** Refaz **uma** simulação da comparação — o par (braço, seed) — e devolve o
  * que cada aluno pediu, período a período. É uma simulação completa no
  * servidor e a maior resposta da API (uns 10 MB no preset Computação, ~1
  * comprimidos), então a tela só a pede quando alguém quer o caso individual. */

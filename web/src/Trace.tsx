@@ -82,7 +82,7 @@ const bidCell = (credits: number, usesCredits: boolean) =>
 export function Trace({ run }: { run: ComparisonRun }) {
   const result = run.result;
   /** Só os braços que esta comparação de fato rodou: uma gravada antes de um
-   * braço existir não o traz, e pedir o traço dele não encontraria observação. */
+   * braço existir não o traz, e pedir o traço dele não encontraria simulação. */
   const arms = useMemo(
     () => COMPARISON_ARMS.filter((arm) => result.arms.some((a) => a.key === arm.key)),
     [result.arms]
@@ -94,7 +94,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
   const [seed, setSeed] = useState(1);
   /** O traço custa uma simulação completa no servidor, então ele não vem
    * sozinho: a seção abre com o botão, e dali em diante trocar de modelo ou de
-   * observação já refaz. */
+   * simulação já refaz. */
   const [started, setStarted] = useState(false);
   /** Contador de tentativas: é o que dá ao botão "tentar de novo" o que mudar
    * quando o par (braço, seed) continua o mesmo. */
@@ -114,7 +114,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
     setLoading(true);
     setError(null);
     // `runs` é da comparação, não do cenário: o que o traço pede é uma
-    // observação só, endereçada pelo par (braço, seed).
+    // simulação só, endereçada pelo par (braço, seed).
     const { runs: _runs, ...scenario } = run.config;
     trace({ ...scenario, arm: armKey, seed })
       .then((payload) => {
@@ -155,8 +155,8 @@ export function Trace({ run }: { run: ComparisonRun }) {
       <header className="chart-section-head">
         <h2>Histórico de um aluno ou de uma disciplina</h2>
         <p>
-          O caso individual por trás dos agregados: uma observação, período a período e
-          rodada a rodada. O par (modelo, observação) endereça um dos pontos dos boxplots, e
+          O caso individual por trás dos agregados: uma simulação, período a período e
+          rodada a rodada. O par (modelo, simulação) endereça um dos pontos dos boxplots, e
           a simulação é refeita no servidor — determinística, então é a mesma de que o
           ponto saiu. A vista por aluno lista todas as disciplinas elegíveis dele, inclusive
           as que não pediu; a por disciplina lista quem a pediu naquela rodada.
@@ -180,7 +180,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="trace-seed">Observação (seed)</label>
+            <label htmlFor="trace-seed">Simulação (seed)</label>
             <select
               id="trace-seed"
               value={seed}
@@ -307,7 +307,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
       {error && <div className="error-banner">{error}</div>}
       {loading && (
         <p className="empty-state">
-          Refazendo a observação {seed} de {armLabel(armKey)} — é uma simulação completa.
+          Refazendo a simulação {seed} de {armLabel(armKey)} — é uma simulação completa.
         </p>
       )}
 
@@ -356,12 +356,15 @@ function groupDisciplines(
   const elective = new Set(configured.filter((d) => d.elective).map((d) => d.name));
   const groups = new Map<number, string[]>();
   const electives: string[] = [];
+  // A lista é de turmas; período e cota de optativa são da **disciplina**,
+  // então o agrupamento passa pelo clique antes de perguntar.
   for (const name of data.disciplines) {
-    if (elective.has(name)) {
+    const discipline = data.classes?.[name] ?? name;
+    if (elective.has(discipline)) {
       electives.push(name);
       continue;
     }
-    const period = data.curriculum_periods[name] ?? 0;
+    const period = data.curriculum_periods[discipline] ?? 0;
     const list = groups.get(period) ?? [];
     list.push(name);
     groups.set(period, list);
@@ -407,6 +410,8 @@ function StudentTrace({
           <p className="trace-profiles">
             <span className="chip">{student.performance}</span>
             <span className="chip">{student.availability}</span>
+            <span className="chip">seletividade {student.selectivity}</span>
+            <span className="chip">concentração {student.concentration}</span>
           </p>
         </div>
         <dl className="stat-row">
@@ -643,7 +648,7 @@ function DisciplineTrace({
           <p className="note">
             {first
               ? `${first.hours} h · ${first.seats} vagas · período ${first.curriculum_period} da grade`
-              : "fora da oferta desta observação"}
+              : "fora da oferta desta simulação"}
           </p>
         </div>
       </div>

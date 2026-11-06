@@ -1,12 +1,13 @@
 import numpy as np
 import pytest
 
+from profiles import single_axis
 from disciplines import disciplines_from_predecessors
 from leilao.behavior import (
     NEUTRAL,
     Behavior,
-    Signals,
     compute_bids,
+    decide,
     decision_scores,
     draw_interest,
     utility_matrix,
@@ -27,7 +28,10 @@ def make_config(**overrides) -> SimulationConfig:
         ("D5", 5, 60, ("D2", "D3")),
         ("D6", 5, 60, ("D4",)),
     )
-    return SimulationConfig(disciplines=disciplines, students_per_period=3, **overrides)
+    base = dict(
+        disciplines=disciplines, students_per_profile=3, **single_axis(360)
+    )
+    return SimulationConfig(**{**base, **overrides})
 
 
 def student(**overrides) -> Student:
@@ -68,8 +72,9 @@ def test_a_root_without_the_entry_flag_stays_eligible():
             ("Livre", 5, 60, False),
             ("Seguinte", 5, 60, ("Entrada",)),
         ),
-        students_per_period=2,
+        students_per_profile=2,
         max_hours=120,
+        **single_axis(120),
     )
     assert config.entry_disciplines() == ["Entrada"]
     assert config.curriculum_periods()["Livre"] == 1
@@ -83,8 +88,9 @@ def test_an_entry_discipline_cannot_have_a_prerequisite():
                 ("Base", 5, 60),
                 ("Depende", 5, 60, ("Base",), True),
             ),
-            students_per_period=2,
+            students_per_profile=2,
             max_hours=120,
+            **single_axis(120),
         )
 
 
@@ -92,8 +98,9 @@ def test_a_scenario_without_entry_disciplines_is_rejected():
     with pytest.raises(ValueError, match="disciplina de entrada"):
         SimulationConfig(
             disciplines=disciplines_from_predecessors(("Livre", 5, 60, False)),
-            students_per_period=1,
+            students_per_profile=1,
             max_hours=60,
+            **single_axis(60),
         )
 
 
@@ -388,7 +395,7 @@ def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
 # --- os genes de comportamento --------------------------------------------
 
 
-def test_the_baseline_genome_asks_in_proportion_to_utility():
+def test_the_baseline_profile_asks_in_proportion_to_utility():
     """β_u = 1 com os outros dois em 0 é a linha de base: o score **é** a
     utilidade, e as duas mochilas decidem o que decidiriam sem genoma."""
     utilities = {"D1": 0.4, "D2": 0.3, "D3": 0.2, "D4": 0.1}
@@ -403,47 +410,68 @@ def test_the_baseline_genome_asks_in_proportion_to_utility():
     assert max(ratios) == pytest.approx(min(ratios))
 
 
-def test_a_gene_at_zero_ignores_its_signal():
-    """A leitura comum aos quatro: 0 quer dizer "ignora esse sinal", porque
-    x⁰ = 1 para todos."""
-    utilities = {"D1": 0.6, "D2": 0.4}
-    signals = Signals(supply={"D1": 0.1, "D2": 0.9}, approval={"D1": 0.2, "D2": 0.8})
-
-    assert decision_scores(
-        utilities=utilities, behavior=Behavior(beta_u=1.0), signals=signals
-    ) == decision_scores(utilities=utilities, behavior=Behavior(beta_u=1.0))
-
-    # β_u = 0 achata a própria preferência: os dois scores ficam iguais.
-    flat = decision_scores(utilities=utilities, behavior=Behavior(beta_u=0.0))
+def test_concentration_at_zero_flattens_the_students_own_preference():
+    """Zero quer dizer "ignora": `u^0 = 1` para todas, e o aluno reparte igual."""
+    flat = decision_scores(
+        utilities={"D1": 0.6, "D2": 0.4}, behavior=Behavior(concentration=0.0)
+    )
     assert flat["D1"] == pytest.approx(flat["D2"])
 
 
-def test_the_utility_gene_concentrates_and_inverts():
-    """β_u é expoente: acima de 1 concentra nas mais úteis, abaixo de 0
-    inverte e concentra nas menos úteis."""
+def test_concentration_concentrates_and_inverts():
+    """O expoente: acima de 1 concentra nas mais uteis, negativo inverte e
+    poe o orcamento na que o aluno menos quer."""
     utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
     pool = list(utilities)
 
-    def bids(beta_u):
+    def bids(concentration):
         return compute_bids(
             utilities=utilities,
             available=pool,
             budget=20,
-            behavior=Behavior(beta_u=beta_u),
+            behavior=Behavior(concentration=concentration),
         )
 
     assert bids(3.0)["D1"] > bids(1.0)["D1"] > bids(0.2)["D1"]
     flat = bids(0.0)
     assert max(flat.values()) - min(flat.values()) <= 1
-    # Expoente negativo põe o orçamento na que ele menos quer.
     inverted = bids(-2.0)
     assert inverted["D3"] > inverted["D1"]
 
 
-def test_the_reserve_gene_cuts_the_choice_set():
-    """`alpha_u` está na mesma unidade da utilidade: com elegíveis
-    valendo 0,6 e 0,4 e reserva 0,5, só a primeira entra. O orçamento
-    continua indo inteiro para o que foi admitido."""
+def test_selectivity_is_a_multiple_of_the_mean_score():
+    """Com scores 0,6 e 0,4 a media e 0,5: seletividade 1 corta a segunda,
+    seletividade 0,5 nao corta nenhuma."""
+    utilities = {"D1": 0.6, "D2": 0.4}
+
+    admitted, _scores, reserve = decide(
+        utilities=utilities, behavior=Behavior(selectivity=1.0)
+    )
+    assert reserve == pytest.approx(0.5)
+    assert set(admitted) == {"D1"}
+
+    folgado, _scores, _r = decide(
+        utilities=utilities, behavior=Behavior(selectivity=0.5)
+    )
+    assert set(folgado) == {"D1", "D2"}
+
+
+def test_selectivity_survives_the_catalogue_growing():
+    """O corte e em multiplos da indiferenca: dobrar o catalogo com a mesma
+    forma nao muda quem passa, o que um limiar absoluto nao daria."""
+    pequeno = {"D1": 0.6, "D2": 0.4}
+    grande = {name: value / 2 for name, value in
+              list(pequeno.items()) + [("D3", 0.6), ("D4", 0.4)]}
+
+    perfil = Behavior(selectivity=1.0)
+    assert set(decide(utilities=pequeno, behavior=perfil)[0]) == {"D1"}
+    assert set(decide(utilities=grande, behavior=perfil)[0]) == {"D1", "D3"}
+
+
+def test_the_reserve_also_stops_the_spending():
+    """A diferenca em relacao ao filtro sozinho: com limiar 0,5 e score 0,6, o
+    ganho do 2o credito e 0,3 e a mochila para. O resto do orcamento fica no
+    saldo, que e a poupanca."""
     utilities = {"D1": 0.6, "D2": 0.4}
     pool = list(utilities)
 
@@ -452,37 +480,18 @@ def test_the_reserve_gene_cuts_the_choice_set():
     assert sum(full.values()) == 20
 
     picky = compute_bids(
-        utilities=utilities, available=pool, budget=20, behavior=Behavior(alpha_u=0.5)
+        utilities=utilities, available=pool, budget=20,
+        behavior=Behavior(selectivity=1.0),
     )
     assert set(picky) == {"D1"}
-    assert sum(picky.values()) == 20
+    assert sum(picky.values()) == 1
 
 
-def test_the_published_signals_separate_equal_utilities():
-    """β_v e β_n pesam o que a universidade publicou. Com utilidade igual,
-    duas disciplinas só se separam pelos índices — e o sinal do gene diz para
-    que lado."""
-    utilities = {"D1": 0.5, "D2": 0.5}
-    # D1 é disputada e reprova mais; D2 é folgada e aprova mais.
-    signals = Signals(
-        supply={"D1": 0.1, "D2": 0.9}, approval={"D1": 0.3, "D2": 0.8}
+def test_the_neutral_profile_spends_everything():
+    """Seletividade 0 desliga o corte e a parada: o laco roda o orcamento
+    inteiro, como antes de existir perfil."""
+    bids = compute_bids(
+        utilities={"D1": 0.6, "D2": 0.4}, available=["D1", "D2"], budget=20,
+        behavior=NEUTRAL,
     )
-
-    neutral = decision_scores(utilities=utilities, signals=signals)
-    assert neutral["D1"] == pytest.approx(neutral["D2"])
-
-    averse = decision_scores(
-        utilities=utilities, behavior=Behavior(beta_v=1.0), signals=signals
-    )
-    assert averse["D2"] > averse["D1"]
-
-    # Negativo caça vaga escassa — o mesmo gene, o outro lado.
-    seeker = decision_scores(
-        utilities=utilities, behavior=Behavior(beta_v=-1.0), signals=signals
-    )
-    assert seeker["D1"] > seeker["D2"]
-
-    easy = decision_scores(
-        utilities=utilities, behavior=Behavior(beta_n=1.0), signals=signals
-    )
-    assert easy["D2"] > easy["D1"]
+    assert sum(bids.values()) == 20

@@ -1,12 +1,15 @@
 """A utilidade: o interesse do aluno sobre o que ele pode cursar agora.
 
-    ũ_x = u_x + Σ_{y inelegível} u_y / |alvos(y)|,     x elegível
+    ũ_t = u_t + Σ_{d inelegível} max_s u_s / |alvos(d)|,   t turma elegível
 
-    alvos(y) = ancestrais elegíveis de y, se y trava por pré-requisito
-             = todas as elegíveis,        se y já saiu da grade do aluno
+    alvos(d) = ancestrais elegíveis de d, se d trava por pré-requisito
+             = todas as elegíveis,        se d já saiu da grade do aluno
 
     u = interesse  (o sorteio normalizado — `behavior.draw_interest`)
     ũ = utilidade  (o que esta função devolve)
+
+O índice é a **turma**, mas a elegibilidade e a herança são da
+**disciplina** — o grafo de pré-requisitos não enxerga turma.
 
 INTERESSE E UTILIDADE
 ---------------------
@@ -96,7 +99,7 @@ Não está no anteprojeto: substitui a eq. (41).
 """
 from __future__ import annotations
 
-from collections.abc import Sequence, Set
+from collections.abc import Mapping, Sequence, Set
 
 
 def utility(
@@ -105,13 +108,53 @@ def utility(
     eligible: Sequence[str],
     approved: Set[str],
     prerequisites: dict[str, tuple[str, ...]],
+    classes: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, float]:
+    """`interest` é por **turma**; `eligible` e `prerequisites` são por
+    **disciplina**. `classes` mapeia cada disciplina nas turmas dela; omitido,
+    cada disciplina é a própria turma e a função devolve exatamente o que
+    devolvia antes de as turmas existirem.
+
+    A DISCIPLINA VALE O DA TURMA MAIS ÚTIL
+    ---------------------------------------
+
+    Não há sorteio no nível da disciplina: o valor dela é `max_t u_t`, porque
+    o aluno só pode levar uma turma e leva a melhor que conseguir. É esse
+    valor que desce quando ela está travada.
+
+    E é por isso que a parcela entra **inteira** em cada turma do alvo, em vez
+    de ser repartida entre elas: somando a mesma parcela a todas, o máximo do
+    grupo sobe exatamente nela, e `Σ_d max_t` se conserva. Repartir trataria
+    as turmas como partes da disciplina, e elas são **alternativas**.
+
+    A adição igual tem três razões, e as três valem aqui:
+
+    - a herança é o valor de **passar** na disciplina, e você passa em
+      qualquer turma — ela é turma-invariante por natureza;
+    - quem pegou a porteira numa turma ruim perdeu pouco, e ψ é bem-estar;
+    - proporcional distribuiria massa fixa segundo razões log-normais sem
+      limite superior, e quase todo o valor curricular cairia numa turma
+      escolhida pela cauda.
+
+    O preço é que ela **comprime o contraste** onde a herança é pesada: numa
+    porteira as turmas ficam quase indiferentes. Por isso a qualidade da turma
+    se mede no **interesse**, não aqui.
+    """
     chosen = list(eligible)
     if not chosen:
         return {}
 
+    groups = {name: tuple(classes[name]) for name in classes} if classes else None
+
+    def names_of(discipline: str) -> tuple[str, ...]:
+        return groups[discipline] if groups else (discipline,)
+
     open_now = set(chosen)
-    result = {name: interest.get(name, 0.0) for name in chosen}
+    result = {
+        name: interest.get(name, 0.0)
+        for discipline in chosen
+        for name in names_of(discipline)
+    }
     unlocking: dict[str, frozenset[str]] = {}
 
     def unlockers(name: str) -> frozenset[str]:
@@ -133,13 +176,32 @@ def utility(
         unlocking[name] = frozenset(found)
         return unlocking[name]
 
-    for name, value in interest.items():
-        if name in open_now or value <= 0.0:
+    blocked = list(groups) if groups else list(interest)
+    # A parcela que vai para **todas** as elegíveis é a mesma em toda entrada,
+    # então ela se acumula num escalar e entra uma vez só no fim. É aritmética
+    # idêntica à do laço, e poupa um passeio pela grade inteira por disciplina
+    # fora dela — com turmas, esse passeio é |elegíveis| × |turmas|.
+    uniform = 0.0
+    for discipline in blocked:
+        if discipline in open_now:
             continue
-        missing = any(p not in approved for p in prerequisites.get(name, ()))
-        targets = sorted(unlockers(name)) if missing else []
-        share = value / len(targets or chosen)
-        for target in targets or chosen:
-            result[target] += share
+        value = max(
+            (interest.get(name, 0.0) for name in names_of(discipline)), default=0.0
+        )
+        if value <= 0.0:
+            continue
+        missing = any(p not in approved for p in prerequisites.get(discipline, ()))
+        targets = sorted(unlockers(discipline)) if missing else []
+        if not targets:
+            uniform += value / len(chosen)
+            continue
+        share = value / len(targets)
+        for target in targets:
+            for name in names_of(target):
+                result[name] += share
+
+    if uniform:
+        for name in result:
+            result[name] += uniform
 
     return result

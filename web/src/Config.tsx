@@ -2,9 +2,14 @@ import { useMemo, useState } from "react";
 import { DensityChart, STATUS } from "./charts";
 import { entryDisciplines } from "./curriculum";
 import { availabilityCurve, gradeCurve, interestCurve } from "./distributions";
-import { fullLoadThreshold } from "./equations";
+import {
+  cohortSize,
+  entryClassLoad,
+  fullLoadThreshold,
+  profileCombinations,
+} from "./equations";
 import { PresetList } from "./PresetList";
-import { formatSavedDate, nameExists } from "./savedPresets";
+import { nameExists } from "./savedPresets";
 import type { SavedPreset } from "./savedPresets";
 import {
   AvailabilityProfileList,
@@ -12,10 +17,25 @@ import {
   axisShare,
 } from "./ProfileList";
 import { SaveScenario } from "./SaveScenario";
-import { COMPARISON_ARMS, GENES, MAX_COMPARISON_RUNS, gridSize } from "./types";
-import type { GenomeLevels, Scenario } from "./types";
-import type { EvolutionSettings, Mode } from "./App";
-import type { Calibration } from "./calibration";
+import { COMPARISON_ARMS, MAX_COMPARISON_RUNS } from "./types";
+import type { Scenario } from "./types";
+
+/** Os três degraus da escada, na ordem em que o cenário os guarda. */
+const DIFFICULTY_LEVELS = [
+  { label: "fácil", index: 0 },
+  { label: "média", index: 1 },
+  { label: "difícil", index: 2 },
+] as const;
+
+/** A média geométrica dos três níveis — o centro que a escada fixa, e o
+ * número que de fato calibra a taxa de aprovação do cenário. */
+const difficultyCentre = (levels: readonly number[]) =>
+  (levels.every((value) => value > 0)
+    ? Math.exp(
+        levels.reduce((sum, value) => sum + Math.log(value), 0) / levels.length
+      )
+    : 0
+  ).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 
 export function Config({
   config,
@@ -24,11 +44,6 @@ export function Config({
   setRuns,
   arms,
   setArms,
-  mode,
-  setMode,
-  evolution,
-  setEvolution,
-  calibration,
   running,
   error,
   onRun,
@@ -45,13 +60,6 @@ export function Config({
   setRuns: (runs: number) => void;
   arms: string[];
   setArms: (arms: string[]) => void;
-  mode: Mode;
-  setMode: (mode: Mode) => void;
-  evolution: EvolutionSettings;
-  setEvolution: (update: (current: EvolutionSettings) => EvolutionSettings) => void;
-  /** O ε que o controle negativo mediu nestas condições, ou nulo se nenhum
-   * rodou. É ele que habilita a parada calibrada. */
-  calibration: Calibration | null;
   running: boolean;
   error: string | null;
   onRun: () => void;
@@ -74,10 +82,16 @@ export function Config({
   // aceita, e o erro cresceria com o tamanho do catálogo de optativas.
   const entryCourses = entryDisciplines(config.disciplines);
   const entryHours = entryCourses.reduce((sum, d) => sum + d.hours, 0);
-  const smallestEntrySeats = entryCourses.length
-    ? Math.min(...entryCourses.map((d) => d.classes)) * config.class_size
+  const cohort = cohortSize(config);
+  // Por **turma**: a matrícula garantida reparte a coorte entre as turmas de
+  // cada disciplina de entrada, e o que precisa caber é o maior desses
+  // blocos — não a coorte inteira.
+  const biggestEntryBlock = entryCourses.length
+    ? Math.max(
+        ...entryCourses.map((d) => Math.max(...entryClassLoad(cohort, d.classes)))
+      )
     : 0;
-  const entryTooLarge = config.students_per_period > smallestEntrySeats;
+  const entryTooLarge = biggestEntryBlock > config.class_size;
   const entryTooHeavy = entryHours > config.max_hours;
 
   // Porcentagem com casas suficientes para 0,05% não virar 0%: as chances de
@@ -89,7 +103,7 @@ export function Config({
   // vai para a API, e por isso mora aqui e não em `Scenario`.
   const [difficulty, setDifficulty] = useState(1);
   const [attempt, setAttempt] = useState(1);
-  const [attractiveness, setAttractiveness] = useState(0);
+  const [attractiveness, setAttractiveness] = useState(1);
   // Qual linha do editor a prévia ao lado desenha. Uma curva por vez, em vez
   // de todas sobrepostas: com cinco ou seis grupos aquilo vira emaranhado.
   const [performanceIndex, setPerformanceIndex] = useState(0);
@@ -159,13 +173,6 @@ export function Config({
           <h2>Configurações gerais</h2>
           <div className="field-row">
             <div className="field">
-              <label>Simulação</label>
-              <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
-                <option value="naive">ingênua</option>
-                <option value="evolutionary">evolutiva</option>
-              </select>
-            </div>
-            <div className="field">
               <label>Modelos</label>
               <select
                 value={arms.length === 1 ? arms[0] : "both"}
@@ -185,25 +192,17 @@ export function Config({
                 ))}
               </select>
             </div>
-          </div>
-
-          {/* Observações da comparação, abaixo do que decide o que vai rodar.
-              Na evolutiva quem conta é o campo homônimo do painel do AG —
-              este nem entra na requisição. */}
-          {mode === "naive" && (
-            <div className="field-row">
-              <div className="field">
-                <label>Observações por modelo</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={MAX_COMPARISON_RUNS}
-                  value={runs}
-                  onChange={(e) => setRuns(Number(e.target.value))}
-                />
-              </div>
+            <div className="field">
+              <label>Simulações por modelo</label>
+              <input
+                type="number"
+                min={1}
+                max={MAX_COMPARISON_RUNS}
+                value={runs}
+                onChange={(e) => setRuns(Number(e.target.value))}
+              />
             </div>
-          )}
+          </div>
 
           <div className="field-row">
             <div className="field">
@@ -227,17 +226,18 @@ export function Config({
               />
             </div>
             <div className="field">
-              <label>Alunos novos por período</label>
+              <label>Exemplares por perfil</label>
               <input
                 type="number"
                 min={1}
                 className={entryTooLarge ? "invalid" : undefined}
-                value={config.students_per_period}
-                onChange={(e) => patch({ students_per_period: Number(e.target.value) })}
+                value={config.students_per_profile}
+                onChange={(e) => patch({ students_per_profile: Number(e.target.value) })}
               />
               {entryTooLarge && (
                 <span className="field-hint invalid-text">
-                  Passa das {smallestEntrySeats} vagas da disciplina de entrada mais apertada.
+                  A coorte põe {biggestEntryBlock} ingressantes numa turma de{" "}
+                  {config.class_size} vagas.
                 </span>
               )}
             </div>
@@ -275,6 +275,11 @@ export function Config({
               />
             </div>
           </div>
+
+          <p className="note">
+            Coorte de {cohort} ({profileCombinations(config)} combinações de
+            perfil) · {cohort * config.entry_periods} alunos no total
+          </p>
         </div>
 
         <div className="panel">
@@ -304,7 +309,7 @@ export function Config({
                   />
                 </div>
                 <div className="field">
-                  <label>Estabilidade</label>
+                  <label>Estabilidade entre períodos</label>
                   <input
                     type="number"
                     min={0}
@@ -312,6 +317,17 @@ export function Config({
                     step={0.1}
                     value={config.interest_stability}
                     onChange={(e) => patch({ interest_stability: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Estabilidade entre turmas</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={config.class_stability}
+                    onChange={(e) => patch({ class_stability: Number(e.target.value) })}
                   />
                 </div>
               </div>
@@ -330,11 +346,12 @@ export function Config({
                       <label>Atratividade</label>
                       {/* O recorte, não o cenário: a curva é a de uma
                           disciplina com esta atratividade quando as demais
-                          estão em 0. No cenário ela é declarada por
-                          disciplina. Sem `min`: o eixo é ℝ inteiro, e
-                          negativo é gosto abaixo da disciplina média. */}
+                          estão em 1. No cenário ela é declarada por
+                          disciplina. É multiplicador, então o eixo é (0, ∞) e
+                          abaixo de 1 é gosto abaixo da disciplina média. */}
                       <input
                         type="number"
+                        min={0.1}
                         step={0.1}
                         value={attractiveness}
                         onChange={(e) => setAttractiveness(Number(e.target.value))}
@@ -451,6 +468,33 @@ export function Config({
                   />
                 </div>
               </div>
+
+              <div className="field-row">
+                {DIFFICULTY_LEVELS.map(({ label, index }) => (
+                  <div className="field" key={label}>
+                    <label>Turma {label}</label>
+                    <input
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      value={config.class_difficulty_levels[index]}
+                      onChange={(e) =>
+                        patch({
+                          class_difficulty_levels: config.class_difficulty_levels.map(
+                            (current, position) =>
+                              position === index ? Number(e.target.value) : current
+                          ) as [number, number, number],
+                        })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="note">
+                A escada multiplica a dificuldade da disciplina e reparte as
+                turmas com tantas fáceis quantas difíceis. Centro geométrico:{" "}
+                {difficultyCentre(config.class_difficulty_levels)}
+              </p>
             </div>
 
             <div className="config-preview">
@@ -517,155 +561,13 @@ export function Config({
           <p className="note">{performanceShare}</p>
         </div>
 
-        {mode === "evolutionary" && (
-          <div className="panel">
-            <h2>Algoritmo genético</h2>
-            <div className="field-row">
-              <div className="field">
-                <label>Observações por geração</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={evolution.observations}
-                  onChange={(e) =>
-                    setEvolution((c) => ({ ...c, observations: Number(e.target.value) }))
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Gerações (mínimo)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={evolution.min_generations}
-                  onChange={(e) =>
-                    setEvolution((c) => ({ ...c, min_generations: Number(e.target.value) }))
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Gerações (máximo)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={evolution.max_generations}
-                  onChange={(e) =>
-                    setEvolution((c) => ({ ...c, max_generations: Number(e.target.value) }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="field-row">
-              <div className="field">
-                <label>Janela da parada</label>
-                <input
-                  type="number"
-                  min={2}
-                  max={50}
-                  value={evolution.window}
-                  onChange={(e) =>
-                    setEvolution((c) => ({ ...c, window: Number(e.target.value) }))
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Passo da mutação</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={5}
-                  step={0.05}
-                  value={evolution.step}
-                  onChange={(e) =>
-                    setEvolution((c) => ({ ...c, step: Number(e.target.value) }))
-                  }
-                />
-              </div>
-            </div>
-
-            <h3>Valores iniciais, por gene</h3>
-            <div className="field-row">
-              {GENES.map((gene) => (
-                <div className="field" key={gene.key}>
-                  <label>
-                    {gene.label} — {gene.name}
-                  </label>
-                  <input
-                    type="text"
-                    value={evolution.levels[gene.key as keyof GenomeLevels].join(", ")}
-                    onChange={(e) =>
-                      setEvolution((c) => ({
-                        ...c,
-                        levels: {
-                          ...c.levels,
-                          [gene.key]: e.target.value
-                            .split(",")
-                            .map((part) => Number(part.trim()))
-                            .filter((value) => Number.isFinite(value)),
-                        },
-                      }))
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-            <p className={gridSize(evolution.levels) === config.students_per_period ? "note" : "error-banner"}>
-              {gridSize(evolution.levels)} genótipos para {config.students_per_period} lugares
-              por coorte
-              {gridSize(evolution.levels) === config.students_per_period
-                ? " — um exemplar de cada combinação."
-                : ": genótipo sobrando não roda, e faltando faz alguns pesarem o dobro na seleção."}
-            </p>
-
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={evolution.neutral}
-                onChange={(e) =>
-                  setEvolution((c) => ({ ...c, neutral: e.target.checked }))
-                }
-              />
-              Controle negativo — carrega o genoma sem expressá-lo
-            </label>
-
-            {/* O ε não se digita: é a deriva que o nulo mediu nestas mesmas
-                condições. Sem um nulo compatível no histórico não há limiar, e
-                a rodada vai ao teto. */}
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={evolution.calibrated && calibration !== null}
-                disabled={evolution.neutral || calibration === null}
-                onChange={(e) =>
-                  setEvolution((c) => ({ ...c, calibrated: e.target.checked }))
-                }
-              />
-              {evolution.neutral
-                ? "Parar pela deriva — o controle negativo vai sempre ao teto"
-                : calibration
-                  ? `Parar quando a deriva cair a ${calibration.epsilon.toLocaleString("pt-BR", {
-                      maximumFractionDigits: 4,
-                    })} — o ε do controle negativo de ${formatSavedDate(calibration.at)}`
-                  : "Parar pela deriva — nenhum controle negativo rodou nestas condições"}
-            </label>
-          </div>
-        )}
-
         <div className="actions sticky-actions">
           <button className="primary" disabled={running} onClick={onRun}>
-            {mode === "evolutionary"
-              ? running
-                ? `Evoluindo — até ${evolution.observations * evolution.max_generations} simulações...`
-                : "Evoluir"
-              : running
-                ? `Comparando — ${runs * arms.length} simulações...`
-                : arms.length === 1
-                  ? "Rodar modelo"
-                  : "Comparar modelos"}
+            {running
+              ? `Comparando — ${runs * arms.length} simulações...`
+              : arms.length === 1
+                ? "Rodar modelo"
+                : "Comparar modelos"}
           </button>
           <div className="actions-right">
             <SaveScenario

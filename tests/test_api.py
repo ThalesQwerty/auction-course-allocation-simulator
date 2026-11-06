@@ -111,8 +111,18 @@ COMPARE_SCENARIO = {
     # Uma turma por vaga: estes cenários foram calibrados em vagas, e
     # `class_size = 1` preserva as contas de antes de a grade declarar turmas.
     "class_size": 1,
+    # Um nível em cada eixo: a coorte passa a ser exatamente
+    # `students_per_profile`, como era antes de a grade de perfis existir.
+    "performance_profiles": [
+        {"name": "Médio", "mode_grade": 8.0, "zero_rate": 0.005, "max_rate": 0.008}
+    ],
+    "availability_profiles": [
+        {"name": "Cheia", "mode_hours": 350.0, "full_load_rate": 0.9}
+    ],
+    "selectivity_profiles": [{"name": "Neutra", "value": 0.0}],
+    "concentration_profiles": [{"name": "Neutra", "value": 1.0}],
     "periods": 3,
-    "students_per_period": 4,
+    "students_per_profile": 4,
     "rounds": 2,
     "seed": 5,
 }
@@ -131,8 +141,7 @@ POPULATION = {
     # As modas da disponibilidade estão em horas, então os perfis padrão
     # (dimensionados para W_a = 360) não cabem neste W_a.
     "availability_profiles": [
-        {"name": "Alta", "mode_hours": 110.0, "full_load_rate": 0.4},
-        {"name": "Baixa", "mode_hours": 70.0, "full_load_rate": 0.01},
+        {"name": "Alta", "mode_hours": 110.0, "full_load_rate": 0.4}
     ],
 }
 
@@ -186,55 +195,23 @@ def test_compare_rejects_an_unknown_arm(client):
     assert "xpto" in response.json()["detail"]
 
 
-EVOLVE_SCENARIO = {
-    "disciplines": [
-        {"name": "A", "classes": 16, "hours": 60, "entry": True, "unlocks": ["C", "D"]},
-        {"name": "B", "classes": 16, "hours": 60, "entry": True},
-        {"name": "C", "classes": 5, "hours": 60},
-        {"name": "D", "classes": 5, "hours": 60},
-    ],
-    "class_size": 1,
-    "students_per_period": 16,
-    "entry_periods": 2,
-    "periods": 10,
-    "max_hours": 120,
-    # As modas da disponibilidade estão em horas, então os perfis padrão
-    # (dimensionados para W_a = 360) não cabem neste W_a.
-    "availability_profiles": [
-        {"name": "Alta", "mode_hours": 110.0, "full_load_rate": 0.4},
-        {"name": "Baixa", "mode_hours": 70.0, "full_load_rate": 0.01},
-    ],
-    "mechanism": "credits",
-    "seed": 3,
-    # Grade pequena: 2 x 2 x 2 x 2 = 16, o tamanho da coorte.
-    "levels": {
-        "beta_u": [0.0, 3.0],
-        "beta_v": [-1.0, 1.0],
-        "beta_n": [-1.0, 1.0],
-        "alpha_u": [0.0, 0.3],
-    },
-    "observations": 1,
-    "max_generations": 2,
-    "window": 2,
-}
-
-
 def test_a_run_is_written_to_disk_in_the_history_format(client, results_dir):
     """O arquivo gravado é uma entrada de histórico: carregá-lo na interface é
     só acrescentá-lo à lista, sem conversão e sem segundo esquema."""
-    payload = client.post("/evolve", json=EVOLVE_SCENARIO).json()
+    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 1}).json()
 
     saved = pathlib.Path(payload["saved_to"])
     assert saved.parent == results_dir
     stored = json.loads(saved.read_text(encoding="utf-8"))
     assert sorted(stored) == ["at", "config", "kind", "result"]
-    assert stored["kind"] == "evolution"
-    assert stored["result"]["generations"] == payload["generations"]
+    assert stored["kind"] == "comparison"
+    assert stored["result"]["arms"] == payload["arms"]
 
 
 def test_two_runs_in_the_same_second_do_not_overwrite_each_other(client, results_dir):
-    first = client.post("/evolve", json=EVOLVE_SCENARIO).json()["saved_to"]
-    second = client.post("/evolve", json=EVOLVE_SCENARIO).json()["saved_to"]
+    scenario = {**COMPARE_SCENARIO, "runs": 1}
+    first = client.post("/compare", json=scenario).json()["saved_to"]
+    second = client.post("/compare", json=scenario).json()["saved_to"]
 
     assert first != second
     assert len(list(results_dir.glob("*.json"))) == 2
@@ -247,63 +224,10 @@ def test_a_disk_that_refuses_does_not_fail_the_request(client, tmp_path, monkeyp
     blocked.write_text("não é pasta", encoding="utf-8")
     monkeypatch.setenv("LEILAO_RESULTS_DIR", str(blocked))
 
-    payload = client.post("/evolve", json=EVOLVE_SCENARIO).json()
+    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 1}).json()
 
     assert payload["saved_to"] is None
-    assert len(payload["generations"]) == 2
-
-
-def test_evolve_returns_one_report_per_generation(client):
-    payload = client.post("/evolve", json=EVOLVE_SCENARIO).json()
-
-    assert [g["generation"] for g in payload["generations"]] == [1, 2]
-    # Uma linhagem por coorte de ingresso, em toda geração — elas evoluem
-    # independentes entre si.
-    for generation in payload["generations"]:
-        assert [c["entry_period"] for c in generation["cohorts"]] == [1, 2]
-        assert all(len(c["mean"]) == 4 for c in generation["cohorts"])
-    assert len(payload["scales"]) == 4
-
-
-def test_evolve_sends_an_unclosed_window_as_null(client):
-    """JSON não tem infinito, e a deriva da 1ª geração não existe: a janela
-    precisa de pelo menos dois pontos."""
-    payload = client.post("/evolve", json=EVOLVE_SCENARIO).json()
-
-    assert payload["generations"][0]["drift"] is None
-    assert payload["generations"][-1]["drift"] is not None
-
-
-def test_evolve_runs_the_negative_control(client):
-    payload = client.post("/evolve", json={**EVOLVE_SCENARIO, "neutral": True}).json()
-
-    assert payload["neutral"] is True
-    assert len(payload["generations"]) == 2
-
-
-def test_evolve_stops_on_the_drift_trigger(client):
-    """Com ε enorme o gatilho dispara assim que o piso de gerações permite."""
-    payload = client.post(
-        "/evolve",
-        json={
-            **EVOLVE_SCENARIO,
-            "min_generations": 2,
-            "max_generations": 8,
-            "epsilon": 10.0,
-        },
-    ).json()
-
-    assert payload["stopped_by"] == "convergiu"
-    assert len(payload["generations"]) == 2
-
-
-def test_evolve_rejects_a_gene_without_levels(client):
-    response = client.post(
-        "/evolve",
-        json={**EVOLVE_SCENARIO, "levels": {**EVOLVE_SCENARIO["levels"], "beta_u": []}},
-    )
-
-    assert response.status_code == 422
+    assert payload["arms"]
 
 
 def test_compare_returns_only_the_allocation_metrics(client):
@@ -495,7 +419,7 @@ def test_compare_rejects_an_invalid_run_count(client):
 
 def test_compare_rejects_an_invalid_scenario(client):
     response = client.post(
-        "/compare", json={**COMPARE_SCENARIO, "students_per_period": 7, "runs": 2}
+        "/compare", json={**COMPARE_SCENARIO, "students_per_profile": 7, "runs": 2}
     )
 
     assert response.status_code == 400

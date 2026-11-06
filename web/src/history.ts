@@ -1,13 +1,8 @@
 import { withUnlocks } from "./curriculum";
+import { cohortSize } from "./equations";
 import { COMPARISON_ARMS, creditReturnLabel, horizonFor } from "./types";
 import type { PerformanceProfile, Profile } from "./types";
-import type {
-  CompareRequest,
-  CompareResponse,
-  EvolveRequest,
-  EvolveResponse,
-  Scenario,
-} from "./types";
+import type { CompareRequest, CompareResponse, Scenario } from "./types";
 
 export interface ComparisonRun {
   kind: "comparison";
@@ -17,15 +12,7 @@ export interface ComparisonRun {
   result: CompareResponse;
 }
 
-export interface EvolutionRun {
-  kind: "evolution";
-  id: string;
-  at: string; // ISO 8601
-  config: EvolveRequest;
-  result: EvolveResponse;
-}
-
-export type HistoryEntry = ComparisonRun | EvolutionRun;
+export type HistoryEntry = ComparisonRun;
 
 /** A versão faz parte da chave porque o formato do resultado mudou com o
  * modelo: a v1 guardava recortes por curso (`by_course`) e um `overall` que era
@@ -46,8 +33,17 @@ export type HistoryEntry = ComparisonRun | EvolutionRun;
  * perfil de desempenho da v4 traz média e concentração de uma distribuição que
  * não existe mais, e não há tradução — a família mudou, não a parametrização.
  * Junto saíram o ganho por utilidade (a utilidade não mexe mais na nota) e o
- * ganho por recursada (quem calibra isso é a dificuldade). */
-const STORAGE_KEY = "leilao.historico.v5";
+ * ganho por recursada (quem calibra isso é a dificuldade).
+ *
+ * A **v6** (05/11/2026) é a quarta quebra da mesma espécie, e a maior: o bem
+ * alocado deixou de ser a disciplina e passou a ser a **turma**, e o perfil do
+ * aluno ganhou dois eixos de estratégia — seletividade e concentração — no
+ * lugar do algoritmo genético, que saiu do escopo. Uma execução da v5 traz
+ * `students_per_period` como campo do cenário (hoje ele é derivado dos
+ * exemplares por perfil) e não traz eixo de estratégia nenhum; reexecutá-la
+ * mandaria à API um cenário que ela recusa. Junto some a entrada evolutiva:
+ * `kind: "evolution"` não tem mais tela. */
+const STORAGE_KEY = "leilao.historico.v6";
 
 /** Teto de execuções guardadas: cada resultado carrega todas as séries e todos
  * os alunos, então o histórico é podado pelas mais antigas. */
@@ -63,13 +59,6 @@ export function newComparison(
   result: CompareResponse
 ): ComparisonRun {
   return { kind: "comparison", ...stamp(), config, result };
-}
-
-export function newEvolution(
-  config: EvolveRequest,
-  result: EvolveResponse
-): EvolutionRun {
-  return { kind: "evolution", ...stamp(), config, result };
 }
 
 /** Os nomes de antes de 04/11/2026, quando "utilidade" se partiu em duas
@@ -192,11 +181,21 @@ export function saveHistory(entries: HistoryEntry[]): HistoryEntry[] {
  * um arquivo gravado por uma versão anterior do motor continua abrindo. */
 export function entryFromFile(text: string): HistoryEntry {
   const parsed = JSON.parse(text);
-  if (parsed?.kind !== "evolution" && parsed?.kind !== "comparison") {
-    throw new Error("arquivo não é um resultado do simulador");
+  if (parsed?.kind !== "comparison") {
+    throw new Error("arquivo não é uma comparação do simulador");
   }
   if (!parsed.config || !parsed.result) {
     throw new Error("arquivo sem cenário ou sem resultado");
+  }
+  // O mesmo corte que a chave de armazenamento faz com o histórico do
+  // navegador, agora com um arquivo: sem os eixos de estratégia o cenário é
+  // de antes de 05/11/2026, e reexecutá-lo mandaria à API um pedido que ela
+  // recusa — a coorte era digitada e a atratividade era outro tipo de
+  // grandeza. Não há tradução, e abrir meio vazio seria pior que recusar.
+  if (!Array.isArray(parsed.config.selectivity_profiles)) {
+    throw new Error(
+      "arquivo de antes dos eixos de estratégia e das turmas — não há como convertê-lo"
+    );
   }
   return {
     ...parsed,
@@ -223,18 +222,17 @@ export function formatRunDate(at: string): string {
   });
 }
 
-/** Resumo de uma linha do cenário, para distinguir execuções do mesmo minuto.
- * Vale para os dois tipos: a comparação roda exatamente o mesmo cenário, e é o
- * que ela acrescenta — o número de execuções — que a distingue. */
+/** Resumo de uma linha do cenário, para distinguir execuções do mesmo minuto. */
 function describeScenario(
   config: Scenario | CompareRequest,
   { withCreditReturn }: { withCreditReturn: boolean }
 ): string {
   const { rounds, disciplines } = config;
   const periods = horizonFor(config.entry_periods, config.max_residence);
-  // Uma coorte por período *com ingresso*: a população é o que entra por
-  // período vezes a quantidade desses períodos, não vezes |T|.
-  const students = config.students_per_period * config.entry_periods;
+  // Uma coorte por período *com ingresso*: a população é a coorte vezes a
+  // quantidade desses períodos, não vezes |T|. E a coorte é derivada dos
+  // perfis — ver `equations.cohortSize`.
+  const students = cohortSize(config) * config.entry_periods;
   const rodadas = rounds === 1 ? "1 rodada" : `${rounds} rodadas`;
   // O ciclo de vida muda o resultado inteiro, não só a escala: duas execuções
   // que só diferem nele precisam se distinguir. E como |T| é derivado dos dois
@@ -246,11 +244,13 @@ function describeScenario(
   // Os perfis entram pela contagem, não pelos parâmetros: o que distingue
   // duas execuções à primeira vista é quantos grupos a população tinha, e a
   // lista inteira não caberia num rótulo de uma linha.
-  const perfis = (axis: readonly { name: string }[]) =>
+  const perfis = (axis: readonly unknown[]) =>
     `${axis.length} ${axis.length === 1 ? "perfil" : "perfis"}`;
   const populacao = [
     `desempenho: ${perfis(config.performance_profiles)}`,
     `disponibilidade: ${perfis(config.availability_profiles)}`,
+    `seletividade: ${perfis(config.selectivity_profiles)}`,
+    `concentração: ${perfis(config.concentration_profiles)}`,
     `interesse σ ${config.interest_sigma.toLocaleString("pt-BR")}`,
   ];
   return (
@@ -275,17 +275,5 @@ export function describeComparison(run: ComparisonRun): string {
   } · ${describeScenario(run.config, { withCreditReturn: false })}`;
 }
 
-export function describeEvolution(run: EvolutionRun): string {
-  // Gerações e observações primeiro: são os dois números que dizem quanto a
-  // rodada custou e quanta resolução ela tem.
-  const generations = run.result.generations.length;
-  return (
-    `${generations} ${generations === 1 ? "geração" : "gerações"}` +
-    ` × ${run.config.observations} obs` +
-    `${run.result.neutral ? " · controle negativo" : ""}` +
-    ` · ${describeScenario(run.config, { withCreditReturn: false })}`
-  );
-}
-
 export const describeEntry = (entry: HistoryEntry): string =>
-  entry.kind === "evolution" ? describeEvolution(entry) : describeComparison(entry);
+  describeComparison(entry);

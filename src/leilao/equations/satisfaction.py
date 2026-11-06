@@ -2,12 +2,16 @@
 
     ψ_a = Σ_{x ∈ B} u_{a,x} · z_{a,x}
 
-A fração do **desejo total** do aluno naquele período que foi atendida. O
-denominador da eq. (51) é a utilidade inteira do aluno, e ela vale 1 por
-construção — o interesse é normalizado sobre a grade (`interest_row`) e a
-redistribuição o conserva (`utility`) —, então a divisão some e ψ é a soma
-simples das utilidades atendidas. É utilidade, e não interesse, porque
-disciplina que o aluno não podia cursar não é desejo atendível.
+A fração do **desejo alcançável** do aluno naquele período que foi
+atendida. O denominador é `equations.reachable_utility` — a soma, sobre as
+disciplinas, da utilidade da turma mais útil de cada uma —, porque o aluno
+só pode levar uma turma por disciplina. É utilidade, e não interesse,
+porque disciplina que ele não podia cursar não é desejo atendível.
+
+**Sem turmas o denominador vale 1** e a divisão some: o interesse é
+normalizado sobre a grade (`interest_row`) e a redistribuição o conserva
+(`utility`), de modo que ψ volta a ser a soma simples das utilidades
+atendidas, como era antes de as turmas existirem.
 
 **O denominador mudou**, e vale saber qual leitura você está olhando. Antes
 era `U_a` — a soma só sobre o conjunto elegível (eq. 43) —, e ψ media "do que
@@ -26,5 +30,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 
-def satisfaction(*, utilities: dict[str, float], allocated: Iterable[str]) -> float:
-    return sum(utilities.get(name, 0.0) for name in allocated)
+def satisfaction(
+    *,
+    utilities: dict[str, float],
+    allocated: Iterable[str],
+    reachable: float = 1.0,
+) -> float:
+    if reachable <= 0.0:
+        return 0.0
+    return sum(utilities.get(name, 0.0) for name in allocated) / reachable

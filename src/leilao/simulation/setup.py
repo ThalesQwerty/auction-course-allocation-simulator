@@ -52,47 +52,30 @@ class Draws:
     epsilon: dict[tuple[str, str], float]
 
     # Derivados do cenário, calculados uma vez porque são lidos em todo laço.
-    hours: dict[str, int]
-    difficulty: dict[str, float]
+    #
+    # **O que é por turma e o que é por disciplina.** O bem alocado é a
+    # turma, então tudo que indexa o que o aluno ganhou — carga, vaga,
+    # dificuldade — é por turma. O histórico acadêmico é por disciplina:
+    # nota, tentativa e conclusão não sabem em que seção ele cursou.
+    hours: dict[str, int]  # por turma, replicada inteira
+    difficulty: dict[str, float]  # por turma, pela escada do grupo
+    seats: dict[str, int]  # por turma
+    discipline_hours: dict[str, int]  # por disciplina, para o histórico
+    classes: dict[str, tuple[str, ...]]  # grupo -> turmas
+    discipline_of: dict[str, str]  # turma -> grupo
+    exclusions: tuple[frozenset[str], ...]  # X, os cliques da eq. (5)
     curriculum: dict[str, int]
     entry_courses: list[str]
     required: set[str]
     elective_hours_by_discipline: dict[str, int]
     hours_to_graduate: int
     total_seats: int
-    # |disciplinas| — põe a indiferença em 1 na utilidade relativa, e é o que
-    # faz os parâmetros de nota e de score sobreviverem ao catálogo crescer.
-    catalogue: int
     entry_periods: list[int]
-
-
-def _assign_genomes(
-    students: list[Student], genomes: tuple[tuple, ...]
-) -> list[Student]:
-    """Dá a cada aluno o genótipo da sua posição dentro da coorte de ingresso.
-
-    `genomes` vem indexado pela ordem crescente de período de ingresso, que é
-    a mesma ordem em que `run_evolution` mantém as linhagens. Coorte sem
-    genoma declarado fica na linha de base, e genoma mais curto que a coorte
-    recicla — nenhum dos dois acontece no cenário evolutivo, onde a grade tem
-    exatamente o tamanho da coorte, mas os dois precisam ter resposta.
-    """
-    if not genomes:
-        return students
-    entries = sorted({s.entry_period for s in students})
-    seen = {entry: 0 for entry in entries}
-    for student in students:
-        cohort = entries.index(student.entry_period)
-        if cohort < len(genomes) and genomes[cohort]:
-            pool = genomes[cohort]
-            student.behavior = pool[seen[student.entry_period] % len(pool)]
-        seen[student.entry_period] += 1
-    return students
 
 
 def prepare(config: SimulationConfig) -> Draws:
     rng = np.random.default_rng(config.seed)
-    students = _assign_genomes(generate_students(config, rng), config.genomes)
+    students = generate_students(config, rng)
     base_quantiles = draw_base_quantiles(students, config.disciplines, config, rng)
     availability = draw_availability(students, config, rng)
     interest_rows = draw_interest(students, config, rng)
@@ -117,14 +100,18 @@ def prepare(config: SimulationConfig) -> Draws:
         interest_rows=interest_rows,
         tie_break_order=tie_break_order,
         epsilon=epsilon,
-        hours=config.hours_by_discipline(),
-        difficulty={d.name: d.difficulty for d in config.disciplines},
+        hours=config.hours_by_class(),
+        difficulty=config.difficulty_by_class(),
+        seats=config.seats_by_class(),
+        discipline_hours=config.hours_by_discipline(),
+        classes=config.classes_by_discipline(),
+        discipline_of=config.discipline_by_class(),
+        exclusions=config.class_exclusions(),
         curriculum=config.curriculum_periods(),
         entry_courses=config.entry_disciplines(),
         required=config.required_disciplines(),
         elective_hours_by_discipline=config.elective_hours_by_discipline(),
         hours_to_graduate=config.hours_to_graduate(),
         total_seats=sum(d.seats for d in config.disciplines),
-        catalogue=len(config.disciplines),
         entry_periods=sorted({s.entry_period for s in students}),
     )

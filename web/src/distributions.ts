@@ -130,7 +130,7 @@ const INTEREST_TOP = 0.95;
 
 /** A curva da **log-normal fonte** do interesse, antes da normalização:
  *
- *     x = exp(μ + A + σ·Z),   Z ~ N(0, 1)
+ *     x = A · exp(μ + σ·Z),   Z ~ N(0, 1)
  *
  * É a distribuição de onde o motor sorteia (`behavior.draw_interest`), numa
  * disciplina de atratividade `attractiveness`. Forma fechada, como a da
@@ -145,9 +145,9 @@ const INTEREST_TOP = 0.95;
  *
  * A `attractiveness` é o **recorte** que se olha, como a dificuldade é na
  * prévia das notas: a curva é a de uma disciplina com aquela atratividade.
- * Não é parâmetro de cenário — lá ela é declarada por disciplina. Ela se soma
- * a μ no expoente, então desloca a curva inteira; campo vazio vira 0, o
- * neutro.
+ * Não é parâmetro de cenário — lá ela é declarada por disciplina. É
+ * **multiplicador**, então entra como ln(A) somado a μ e desloca a curva
+ * inteira; campo vazio vira 1, o neutro.
  *
  * **A estabilidade não entra**: ela reparte a variância entre a peça
  * permanente e a do semestre, e a soma das duas é sempre σ², de modo que a
@@ -157,8 +157,8 @@ const INTEREST_TOP = 0.95;
  * vezes |disciplinas|, sorteada linha a linha): ela é invariante a μ por
  * construção, e mostrar μ foi o motivo de abri-lo ao cenário.
  */
-export function interestCurve(scenario: Scenario, attractiveness = 0): Curve {
-  const logMean = scenario.interest_mean + attractiveness;
+export function interestCurve(scenario: Scenario, attractiveness = 1): Curve {
+  const logMean = scenario.interest_mean + Math.log(attractiveness);
   const logSd = scenario.interest_sigma;
   if (!(logSd > 0) || !Number.isFinite(logMean)) return { points: [], mode: 0 };
 

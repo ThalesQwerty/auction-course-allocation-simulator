@@ -1,7 +1,7 @@
 /** O boxplot — a forma da comparação entre modelos.
  *
  * Aqui o eixo horizontal não é o tempo: cada caixa é a **distribuição** de
- * uma métrica sobre as N observações de um modelo, e o que se lê é a mediana e
+ * uma métrica sobre as N simulações de um modelo, e o que se lê é a mediana e
  * a dispersão. Uma média sozinha não serviria — se as caixas se sobrepõem, a
  * diferença entre as medianas pode ser do sorteio; se não se sobrepõem, não
  * é.
@@ -268,7 +268,7 @@ export function BoxPlot({
             }}
           >
             <div className="tooltip-title">
-              {boxes[hovered].label} · {boxes[hovered].stats!.n} observações
+              {boxes[hovered].label} · {boxes[hovered].stats!.n} simulações
             </div>
             {(
               [

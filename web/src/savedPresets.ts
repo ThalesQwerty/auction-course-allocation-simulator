@@ -9,6 +9,7 @@
  * A chave é separada da do histórico de propósito. Limpar execuções não apaga
  * cenários, e um formato que mude de um lado não derruba o outro.
  */
+import { cohortSize } from "./equations";
 import { migrateInterest } from "./history";
 import { horizonFor } from "./types";
 import type { Scenario } from "./types";
@@ -128,8 +129,8 @@ const withoutGrade = (config: Scenario): SavedScenario => {
  * entra: a grade é a mesma para todos, e repeti-la em toda linha não separaria
  * nada. */
 export const describeSaved = (preset: SavedPreset): string => {
-  const { students_per_period: perPeriod, entry_periods: entries } = preset.config;
-  const students = perPeriod * entries;
+  const entries = preset.config.entry_periods;
+  const students = cohortSize(preset.config) * entries;
   const periods = horizonFor(entries, preset.config.max_residence);
   return (
     `${students} alunos · ${periods} períodos · ` +

@@ -19,6 +19,22 @@ do aluno e ele levaria o que calhasse, não o que preferia.
 que torna comparável esta célula com a de PLI: as duas recebem a mesma
 mensagem e só diferem em quem decide.
 
+O ROTEAMENTO
+------------
+
+`groups` mapeia cada turma na disciplina dela, e o conjunto `served` é o que
+impede o aluno de levar duas turmas do mesmo grupo: a caminhada **pula** o
+que ele já atendeu em vez de conceder de novo.
+
+Como `requests` vem em **dois níveis** — disciplinas na ordem de preferência,
+e dentro de cada uma as turmas —, a caminhada entrega a melhor turma
+disponível de cada disciplina. É isso que torna o braço comparável ao
+tradicional: o conjunto e a ordem das disciplinas ficam idênticos, e só a
+turma dentro do grupo muda.
+
+O conjunto cobre a **rodada**; entre rodadas quem cobre é o filtro por grupo
+de `equations.available_goods`.
+
 `seats` e `capacity` não são modificados: a concessão é descontada em cópias.
 """
 from __future__ import annotations
@@ -31,6 +47,7 @@ def serial_dictatorship(
     seats: dict[str, int],
     hours: dict[str, int],
     capacity: dict[str, int],
+    groups: dict[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     remaining = dict(seats)
     room = dict(capacity)
@@ -40,9 +57,14 @@ def serial_dictatorship(
 
     granted: list[tuple[str, str]] = []
     for student_id in sorted(wanted, key=lambda s: (-priority[s], s)):
+        served: set[str] = set()
         for name in wanted[student_id]:
+            group = groups[name] if groups else name
+            if group in served:
+                continue
             if remaining.get(name, 0) > 0 and room.get(student_id, 0) >= hours[name]:
                 remaining[name] -= 1
                 room[student_id] -= hours[name]
+                served.add(group)
                 granted.append((student_id, name))
     return granted

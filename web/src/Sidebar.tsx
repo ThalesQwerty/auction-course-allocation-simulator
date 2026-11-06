@@ -70,9 +70,6 @@ export function Sidebar({
                   title={describeEntry(entry)}
                 >
                   {formatRunDate(entry.at)}
-                  <em className="nav-tag">
-                    {entry.kind === "evolution" ? "evolução" : "comparação"}
-                  </em>
                   <span>{describeEntry(entry)}</span>
                 </button>
                 <button

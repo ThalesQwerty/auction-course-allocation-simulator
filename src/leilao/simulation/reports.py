@@ -114,7 +114,20 @@ class RoundReport:
 
 @dataclass(frozen=True)
 class DisciplineSnapshot:
+    """O recorte da **turma**: é dela que são a vaga, o preço e a demanda.
+
+    O nome do tipo é histórico — com turma única, turma e disciplina são a
+    mesma coisa, e era esse o modelo até elas existirem. `discipline` diz a
+    qual clique a linha pertence, e é por onde a interface agrupa.
+
+    O que **não** está aqui é o histórico do aluno: nota, tentativa e
+    conclusão são da disciplina, e não sabem de turma. `approvals` é a
+    exceção aparente e não é uma: conta aprovações *ocorridas nesta turma*,
+    que é o que torna visível o efeito da escada de dificuldade.
+    """
+
     name: str
+    discipline: str
     curriculum_period: int
     hours: int  # w_x — repetido para o recorte por carga horária
     seats: int  # q_x no início do período
@@ -211,11 +224,15 @@ class StudentSummary:
     id: str
     name: str
     entry_period: int  # t_a
-    # Os dois grupos a que ele pertence, pelo nome. São traço imutável e não
-    # entram em decisão nenhuma do aluno: estão aqui porque a tela individual
-    # é onde se pergunta "por que *este* aluno foi assim".
+    # Os **quatro** grupos a que ele pertence, pelo nome. Os dois primeiros
+    # são traço e não entram em decisão nenhuma; os dois últimos são a
+    # estratégia dele. Estão aqui porque a tela individual é onde se
+    # pergunta "por que *este* aluno foi assim", e porque o relatório
+    # recorta por eles.
     performance: str
     availability: str
+    selectivity: str
+    concentration: str
     grade_average: float  # N_a
     approved_hours: int
     hours_to_graduate: int  # S — igual para todos
@@ -232,10 +249,15 @@ class SimulationResult:
     periods: list[PeriodReport] = field(default_factory=list)
     students: list[StudentSummary] = field(default_factory=list)
     histories: list[StudentHistory] = field(default_factory=list)
+    # As **turmas**, na ordem da grade: são elas que a tela individual
+    # endereça, porque é delas que são o lance e a vaga.
     disciplines: list[str] = field(default_factory=list)
+    # Turma -> disciplina. É por aqui que a tela volta ao clique para achar o
+    # período da grade e saber se é optativa, que são coisas da disciplina.
+    classes: dict[str, str] = field(default_factory=dict)
     curriculum_periods: dict[str, int] = field(default_factory=dict)
     # As duas distribuições de **entrada**, como histogramas. Saem das
-    # matrizes que esta observação de fato usou, e não de uma amostra à parte.
+    # matrizes que esta simulação de fato usou, e não de uma amostra à parte.
     # A primeira é do interesse, não da utilidade: é o que σ governa.
     interest_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)

@@ -93,7 +93,8 @@ def measure(
     supply: dict[str, int],
     bids: dict[str, int],
     ages: dict[str, int],
-    hours: dict[str, int],
+    hours: dict[str, int],  # por turma: pesa o que foi alocado
+    discipline_hours: dict[str, int],  # por disciplina: pesa o histórico
     credit_returns: dict[str, int] | None,
     retained: dict[str, set[str]] | None = None,
     excluded: dict[str, list[str]] | None = None,
@@ -108,7 +109,11 @@ def measure(
     `retained` e `excluded` só existem no recorte de fim de período, pelo
     mesmo motivo que `credit_returns`: a exclusão é posterior à última rodada.
     """
-    approved_hours = {s.id: s.approved_hours(hours, config.min_grade) for s in active}
+    # A carga aprovada é do **histórico**, que é por disciplina: o aluno
+    # aprovou a matéria, não a seção em que a cursou.
+    approved_hours = {
+        s.id: s.approved_hours(discipline_hours, config.min_grade) for s in active
+    }
     return Measurements(
         satisfactions=satisfactions,
         # Aproveitamento sai de `won`, e não da carga aprovada, porque mede

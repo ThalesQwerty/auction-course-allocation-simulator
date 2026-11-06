@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from leilao.equations import approval_index, fitness, supply_index, utility
+from leilao.equations import utility
 
 # Cadeia linear: C depende de B, que depende de A.
 CHAIN = {"A": (), "B": ("A",), "C": ("B",)}
@@ -98,42 +98,3 @@ def test_sem_elegivel_nao_ha_para_onde_redistribuir():
     assert utility(
         interest=interest, eligible=[], approved={"A"}, prerequisites={"A": ()}
     ) == {}
-
-
-def test_o_indice_de_oferta_e_neutro_sem_ninguem_elegivel():
-    """O artefato do funil: disciplina que ninguém podia pedir daria folga
-    máxima pela razão crua, e o bônus cairia justo onde vai lotar."""
-    assert supply_index(seats=40, requests=0, eligible=0) == 0.5
-    # Com elegíveis e nenhum pedido, a demanda baixa é informação de verdade.
-    assert supply_index(seats=40, requests=0, eligible=12) == 1.0
-
-
-def test_o_indice_de_oferta_satura_nas_duas_pontas():
-    assert supply_index(seats=1, requests=400, eligible=400) < 0.01
-    assert supply_index(seats=40, requests=40, eligible=40) == 0.5
-
-
-def test_a_suavizacao_de_laplace_resolve_o_cold_start():
-    """Disciplina nunca ofertada dá exatamente o neutro: a prior uniforme *é*
-    ausência de informação."""
-    assert approval_index(approvals=0, allocations=0) == 0.5
-    # Contagem pequena não vale 100%.
-    assert approval_index(approvals=1, allocations=1) == pytest.approx(2 / 3)
-
-
-def test_o_indice_de_aprovacao_nunca_chega_as_pontas():
-    """É o que torna a potência de `decision_score` sempre segura."""
-    for allocations in (1, 10, 1000):
-        assert 0.0 < approval_index(approvals=0, allocations=allocations) < 1.0
-        assert 0.0 < approval_index(approvals=allocations, allocations=allocations) < 1.0
-
-
-def test_a_aptidao_e_carga_por_periodo():
-    assert fitness(approved_hours=120, periods_enrolled=6) == 20.0
-    # Jubilado cedo com pouca carga pontua baixo, que é o desejado.
-    assert fitness(approved_hours=10, periods_enrolled=5) == 2.0
-
-
-def test_a_aptidao_recusa_idade_nao_positiva():
-    with pytest.raises(ValueError):
-        fitness(approved_hours=10, periods_enrolled=0)

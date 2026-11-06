@@ -38,6 +38,10 @@
  *     niceScale          domínio e marcas legíveis
  *     paddedScale        a régua de um gráfico: o contradomínio, ou os dados
  *
+ * A população
+ *     cohortSize         |A| = exemplares × combinações de perfil
+ *     entryClassLoad     o bloco da coorte que cai em cada turma de entrada
+ *
  * A grade
  *     induct             a travessia das duas induções
  *     curriculumPeriods  o período induzido dos pré-requisitos
@@ -46,6 +50,7 @@
 export { approvalShare } from "./approvalShare";
 export { availabilityShape, fullLoadThreshold } from "./availabilityShape";
 export { boxStats } from "./boxStats";
+export { cohortSize, entryClassLoad, profileCombinations } from "./cohort";
 export type { BoxStats } from "./boxStats";
 export { CYCLIC, curriculumPeriods } from "./curriculumPeriods";
 export { HEIGHT_CYCLE, curriculumHeights } from "./curriculumHeights";

@@ -40,10 +40,12 @@ from typing import Literal
 from .equations import (
     Behavior,
     availability_shape,
+    class_difficulty,
     curriculum_heights,
     curriculum_periods,
     curriculum_reach,
     eligible_set,
+    entry_class_load,
     grade_shape,
 )
 
@@ -256,6 +258,67 @@ NEUTRAL_AVAILABILITY = AvailabilityProfile(
 
 
 @dataclass(frozen=True)
+class SelectivityProfile:
+    """Um grupo da população no eixo de **seletividade**.
+
+    O valor é um múltiplo do score médio: o aluno não pede — nem financia —
+    nada abaixo de `valor × média`. Ver `equations.reserve_threshold`.
+
+    Em 0 não há corte: ele pede tudo que é elegível e gasta o orçamento
+    inteiro. É o especulador, e é o perfil que a Seção 2.2 do anteprojeto diz
+    que o CR incentiva.
+    """
+
+    name: str
+    value: float
+
+    def __post_init__(self) -> None:
+        if self.value < 0:
+            raise ValueError(f"seletividade {self.name!r}: o valor deve ser >= 0")
+
+
+@dataclass(frozen=True)
+class ConcentrationProfile:
+    """Um grupo da população no eixo de **concentração**.
+
+    O valor é o expoente do score sobre a utilidade. 1 é o lance sincero — o
+    ótimo da relaxação contínua da mochila côncava —, e os extremos existem
+    para mostrar o que acontece fora dele. Ver `equations.decision_score`.
+    """
+
+    name: str
+    value: float
+
+
+# Seis níveis em cada eixo novo, e com os três de cada eixo antigo dão
+# 3 · 3 · 6 · 6 = 324 combinações. Elas é que fixam o tamanho da coorte: ver
+# `students_per_period`.
+DEFAULT_SELECTIVITY: tuple[SelectivityProfile, ...] = (
+    SelectivityProfile(name="Neutra", value=0.0),
+    SelectivityProfile(name="Baixíssima", value=0.125),
+    SelectivityProfile(name="Baixa", value=0.25),
+    SelectivityProfile(name="Média", value=0.5),
+    SelectivityProfile(name="Alta", value=1.0),
+    SelectivityProfile(name="Altíssima", value=2.0),
+)
+
+# O Invertido e o Homogêneo são controles: um demonstra o absurdo de reportar
+# torto, o outro testa a premissa da Seção 2.2 sobre revelação de preferência.
+# Acima de 2 o expoente satura e deixa de graduar — o 3 mostra a saturação.
+DEFAULT_CONCENTRATION: tuple[ConcentrationProfile, ...] = (
+    ConcentrationProfile(name="Invertida", value=-1.0),
+    ConcentrationProfile(name="Homogênea", value=0.0),
+    ConcentrationProfile(name="Diluída", value=0.5),
+    ConcentrationProfile(name="Neutra", value=1.0),
+    ConcentrationProfile(name="Concentrada", value=2.0),
+    ConcentrationProfile(name="Muito concentrada", value=3.0),
+)
+
+NEUTRAL_SELECTIVITY = SelectivityProfile(name="—", value=0.0)
+NEUTRAL_CONCENTRATION = ConcentrationProfile(name="—", value=1.0)
+
+
+@dataclass(frozen=True)
 class Discipline:
     """Uma disciplina ofertada — o bem escasso x in B (Tabela 1).
 
@@ -277,8 +340,17 @@ class Discipline:
     """
 
     name: str
-    seats: int  # q_x — vagas
-    hours: int  # w_x — carga horária
+    seats: int  # vagas somadas de todas as turmas
+    hours: int  # w_x — carga horária, replicada inteira em cada turma
+    # Em **quantas turmas** a oferta está repartida. O bem alocado é a turma,
+    # e a disciplina é o clique do grafo de conflito (eq. 5): ninguém leva duas
+    # turmas da mesma disciplina.
+    #
+    # Com 1 a turma **é** a disciplina — mesmo nome, mesmas vagas —, e a
+    # simulação se comporta exatamente como antes de as turmas existirem. É o
+    # que torna o modelo sem turmas um caso particular deste, e não um modelo
+    # anterior a ele.
+    classes: int = 1
     # A **dificuldade**, lida em **quantas tentativas a disciplina custa** para
     # render o que uma de dificuldade 1 rende de primeira: na fórmula da nota
     # ela entra dividida pela tentativa, então dificuldade 2 na 2ª tentativa
@@ -296,10 +368,10 @@ class Discipline:
     # vez de girar, e é essa sincronia (e não a persistência em si) que trava a
     # fila. Por aluno ou por célula o efeito se dilui.
     stability: float | None = None
-    # A_x — a **atratividade**, o quanto a **média do expoente** da log-normal
-    # do interesse se desloca de μ (`interest_mean`): em 0 a disciplina é a
-    # média, negativo a puxa para baixo e positivo a leva acima. Em múltiplos
-    # da disciplina média o fator é e^A, de modo que A = 1 é ≈ 2,72×.
+    # A_x — a **atratividade**: o multiplicador do interesse sorteado, comum a
+    # toda a população. Em 1 a disciplina é a média; 2 vale o dobro dela, 0,5
+    # a metade. Entra como ln(A) somado ao expoente da log-normal, que é a
+    # mesma conta dita na unidade em que se lê.
     #
     # É a componente do gosto **comum a toda a população**, enquanto sigma é a
     # privada de cada aluno, e as duas estão na mesma unidade — por isso A/σ se
@@ -310,11 +382,7 @@ class Discipline:
     #
     # Ela é a irmã estática de `stability`: aquela sincroniza a persistência
     # entre concorrentes no *tempo*, esta sincroniza o *nível*.
-    #
-    # A invariante de altura a domina entre camadas — `u'_x` soma
-    # `(amplitude + 1)·s_x`, que é maior que qualquer atratividade —, então A
-    # ordena **dentro** de uma mesma altura, que é exatamente onde sigma age.
-    attractiveness: float = 0.0
+    attractiveness: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -358,11 +426,16 @@ class SimulationConfig:
     # tardias têm tempo de chegar ao fim do curso em vez de serem cortadas pelo
     # horizonte.
     entry_periods: int | None = None
-    # Alunos que ingressam em cada período com ingresso. O ingressante tem vaga
-    # garantida nas disciplinas de entrada, então o ritmo de entrada não pode
-    # passar da menor oferta entre elas — senão a garantia não caberia. A
-    # população é este número vezes a quantidade de períodos com ingresso.
-    students_per_period: int = 1
+    # **Exemplares de cada perfil em cada coorte** — é por aqui que se controla
+    # o tamanho da população.
+    #
+    # A coorte não é digitada: ela é `students_per_profile × combinações`, e
+    # com os padrões de 3 · 3 · 6 · 6 isso dá 324 alunos por exemplar. Deixar
+    # o controle aqui faz a divisibilidade sair de graça — a repartição do
+    # `profile_index` é exata por construção, e some a classe inteira de
+    # cenários em que a sobra gira entre as coortes e os perfis ficam
+    # desiguais.
+    students_per_profile: int = 1
     # **Jubilamento**: quantos períodos o aluno tem para concluir, contados do
     # ingresso. Quem chega ao fim do último sem concluir sai da simulação e não
     # disputa mais nada. `None` desliga, e aí a conclusão (eq. 40) volta a ser a
@@ -402,17 +475,36 @@ class SimulationConfig:
     # são absolutas, e uma constante dimensionada para 360 h recusaria todo
     # cenário de teto menor. Declarar explicitamente desliga a derivação.
     availability_profiles: tuple[AvailabilityProfile, ...] = ()
-    # **Genomas por coorte**, na ordem crescente de período de ingresso: cada
-    # tupla traz o genótipo de cada aluno daquela coorte, por posição. Vazio
-    # quer dizer que todo mundo carrega a linha de base, que é como a
-    # simulação ingênua roda.
+    # Os dois eixos de **estratégia**. Ao contrário dos dois de cima, que
+    # são traço e entram só no sorteio, estes viram o `Behavior` do aluno e
+    # entram na decisão: a seletividade corta o pedido e para o gasto, a
+    # concentração reparte o crédito. Ver `equations.reserve_threshold` e
+    # `equations.decision_score`.
+    # **Estabilidade entre turmas**: quanto da variância do interesse fica no
+    # nível da disciplina, de 0 a 1. É a irmã espacial da estabilidade entre
+    # períodos — uma reparte a variância no tempo, a outra no espaço —, e as
+    # duas preservam σ, que é o que mantém a calibragem.
     #
-    # Quem preenche é `evolution.run_evolution`, e é por aqui que uma coorte
-    # do algoritmo genético vira uma observação da simulação. Fica no cenário, e
-    # não num parâmetro de `run_simulation`, porque a comparação entre braços
-    # troca só o miolo da rodada: os dois lados têm de receber a mesma
-    # população com os mesmos genes.
-    genomes: tuple[tuple[Behavior, ...], ...] = ()
+    # Em **1** todas as turmas de uma disciplina recebem necessariamente o
+    # mesmo interesse: o gosto é inteiramente pela matéria, e o sorteio da
+    # turma nem acontece. Em **0** cada turma é um sorteio independente, e
+    # turmas da mesma disciplina não se parecem mais entre si do que turmas
+    # de disciplinas diferentes — o agrupamento some *do gosto*, e continua
+    # valendo para clique, pré-requisito, carga e nota.
+    #
+    # O parâmetro decide, portanto, se o gosto é **por matéria ou por
+    # seção**: em 1 a turma não existe como objeto de preferência, em 0 a
+    # disciplina não existe.
+    class_stability: float = 1.0
+    # Os multiplicadores (baixa, média, alta) da escada de dificuldade entre
+    # turmas do mesmo grupo. Iguais a 1 — o padrão — desligam a escada.
+    #
+    # A escada preserva a **média geométrica** da disciplina em todo `k`,
+    # então mexer nela é mexer na amplitude, não no centro: o cenário não
+    # fica mais difícil nem mais fácil por abrir mais turmas.
+    class_difficulty_levels: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    selectivity_profiles: tuple[SelectivityProfile, ...] = DEFAULT_SELECTIVITY
+    concentration_profiles: tuple[ConcentrationProfile, ...] = DEFAULT_CONCENTRATION
     # Quanto do gosto do aluno é **permanente**, de 0 a 1 — a fração da
     # variância que não é resorteada a cada período.
     #
@@ -531,13 +623,15 @@ class SimulationConfig:
         # produziria período nenhum, e toda métrica sairia indefinida.
         if not self.disciplines:
             raise ValueError("o cenário precisa de pelo menos uma disciplina")
-        if self.students_per_period < 1:
+        if self.students_per_profile < 1:
             raise ValueError(
-                "o cenário precisa de pelo menos um aluno por período de ingresso"
+                "o cenário precisa de pelo menos um exemplar de cada perfil"
             )
         for eixo, perfis in (
             ("desempenho", self.performance_profiles),
             ("disponibilidade", self.availability_profiles),
+            ("seletividade", self.selectivity_profiles),
+            ("concentração", self.concentration_profiles),
         ):
             if not perfis:
                 raise ValueError(f"o eixo de {eixo} precisa de pelo menos um perfil")
@@ -563,7 +657,14 @@ class SimulationConfig:
                     f"perfil de disponibilidade '{perfil.name}': {erro}"
                 ) from erro
         if not 0.0 <= self.interest_stability <= 1.0:
-            raise ValueError("a estabilidade do interesse deve estar em [0, 1]")
+            raise ValueError("a estabilidade entre períodos deve estar em [0, 1]")
+        if not 0.0 <= self.class_stability <= 1.0:
+            raise ValueError("a estabilidade entre turmas deve estar em [0, 1]")
+        for nivel in self.class_difficulty_levels:
+            if nivel <= 0:
+                raise ValueError(
+                    "os níveis da escada de dificuldade devem ser > 0"
+                )
         if self.interest_sigma <= 0:
             raise ValueError("desvio do interesse (sigma) deve ser > 0")
         if not math.isfinite(self.interest_mean):
@@ -621,15 +722,21 @@ class SimulationConfig:
         if not entry:
             raise ValueError("o cenário precisa de pelo menos uma disciplina de entrada")
 
-        seats = {d.name: d.seats for d in self.disciplines}
-        smallest = min(seats[name] for name in entry)
-        if self.students_per_period > smallest:
-            tightest = min(entry, key=lambda name: (seats[name], name))
-            raise ValueError(
-                f"alunos por período ({self.students_per_period}) passa da menor oferta "
-                f"entre as disciplinas de entrada ({smallest} vagas em {tightest!r}): "
-                "o ingressante tem vaga garantida em todas elas"
-            )
+        # Por **turma**, não por disciplina: é a turma que tem vaga, e a
+        # coorte é repartida entre elas em blocos (`equations.entry_class`).
+        # Quando a disciplina de entrada tem turma única os dois conferem.
+        seats = self.seats_by_class()
+        classes = self.classes_by_discipline()
+        cohort = self.students_per_period
+        for discipline in entry:
+            load = entry_class_load(cohort=cohort, classes=classes[discipline])
+            for name, newcomers in load.items():
+                if newcomers > seats[name]:
+                    raise ValueError(
+                        f"a coorte de {cohort} alunos põe {newcomers} ingressantes em "
+                        f"{name!r}, que tem {seats[name]} vagas: o ingressante tem vaga "
+                        "garantida em toda disciplina de entrada"
+                    )
 
         hours = self.hours_by_discipline()
         entry_hours = sum(hours[name] for name in entry)
@@ -660,35 +767,56 @@ class SimulationConfig:
         """|A| — uma coorte do mesmo tamanho em cada período com ingresso."""
         return self.students_per_period * self.entry_span
 
+    @property
+    def students_per_period(self) -> int:
+        """Alunos que ingressam em cada período com ingresso.
+
+        **Derivado**, não digitado: é `students_per_profile` vezes o número de
+        combinações de perfil, de modo que toda coorte contém exatamente o
+        mesmo número de exemplares de cada perfil.
+        """
+        return self.students_per_profile * self.profile_combinations()
+
     def profile_combinations(self) -> int:
-        """Quantos pares (desempenho, disponibilidade) existem."""
-        return len(self.performance_profiles) * len(self.availability_profiles)
+        """Quantas combinações dos quatro eixos de perfil existem."""
+        return (
+            len(self.performance_profiles)
+            * len(self.availability_profiles)
+            * len(self.selectivity_profiles)
+            * len(self.concentration_profiles)
+        )
 
-    def profile_index(self, student_index: int) -> tuple[int, int]:
-        """O par (desempenho, disponibilidade) do aluno de índice global.
+    def profile_index(self, student_index: int) -> tuple[int, int, int, int]:
+        """A combinação (desempenho, disponibilidade, seletividade,
+        concentração) do aluno de índice global.
 
-        A repartição é **igualitária entre as combinações**: com 3 perfis em
-        cada eixo são 9 pares, e cada um fica com ~11% da coorte. Não há
-        porcentagem a configurar — o que o usuário escolhe é quantos perfis
-        existem em cada eixo, e as fatias saem disso.
+        A repartição é **igualitária entre as combinações**, e exata: como a
+        coorte é `students_per_profile × combinações`, cada perfil recebe o
+        mesmo número de exemplares em toda coorte, sem sobra a girar.
 
         O rodízio é sobre o índice **global**, não o índice dentro da coorte.
-        Com os dois iguais a conta seria a mesma quando a coorte é múltipla
-        do número de pares; quando não é, o índice global faz a sobra girar
-        entre as coortes, enquanto o índice local daria o excedente sempre
-        aos mesmos primeiros pares. É largest-remainder com o resto rodando.
+        Com a coorte sendo múltipla exata das combinações os dois dão a mesma
+        resposta; o global é o que continua valendo se alguém construir um
+        cenário à mão com outro tamanho.
+
+        Os dois primeiros eixos são **traço**: o aluno não os escolhe nem os
+        conhece, e eles governam o sorteio da aptidão e da disponibilidade.
+        Os dois últimos são **estratégia**: viram o `Behavior` dele e entram
+        na decisão de lance e de pedido.
 
         O perfil **não sai da seed**, pelo mesmo motivo que o período de
-        ingresso não sai: duas observações com seeds diferentes têm a mesma
+        ingresso não sai: duas simulações com seeds diferentes têm a mesma
         estrutura de perfis, então a diferença entre elas não é quem calhou de
-        ser frágil. Da seed vêm os dois escalares, não o grupo.
+        ser frágil nem quem calhou de ser especulador.
         """
-        pairs = self.profile_combinations()
-        combination = student_index % pairs
-        return (
-            combination // len(self.availability_profiles),
-            combination % len(self.availability_profiles),
-        )
+        combination = student_index % self.profile_combinations()
+        concentration = combination % len(self.concentration_profiles)
+        combination //= len(self.concentration_profiles)
+        selectivity = combination % len(self.selectivity_profiles)
+        combination //= len(self.selectivity_profiles)
+        availability = combination % len(self.availability_profiles)
+        performance = combination // len(self.availability_profiles)
+        return performance, availability, selectivity, concentration
 
     def prerequisites_by_discipline(self) -> dict[str, tuple[str, ...]]:
         """Aresta inversa dos sucessores: quem precisa estar aprovado para
@@ -739,6 +867,85 @@ class SimulationConfig:
 
     def hours_by_discipline(self) -> dict[str, int]:
         return {d.name: d.hours for d in self.disciplines}
+
+    # --- turmas: o bem alocado -------------------------------------------
+    #
+    # A disciplina deixa de ser o bem e vira o **clique** do grafo de conflito
+    # (eq. 5): ninguém leva duas turmas dela. O que se replica inteiro em cada
+    # turma é a carga horária; o que se reparte é a vaga.
+    #
+    # Com `classes = 1` a turma **é** a disciplina, com o mesmo nome e as
+    # mesmas vagas, e nenhum clique é gerado — a simulação roda idêntica à de
+    # antes de as turmas existirem.
+
+    def classes_of(self, discipline: Discipline) -> tuple[str, ...]:
+        """As turmas de uma disciplina, na ordem da escada de dificuldade."""
+        if discipline.classes <= 1:
+            return (discipline.name,)
+        return tuple(
+            f"{discipline.name} T{i}" for i in range(1, discipline.classes + 1)
+        )
+
+    def classes_by_discipline(self) -> dict[str, tuple[str, ...]]:
+        """Grupo → turmas, na ordem da grade."""
+        return {d.name: self.classes_of(d) for d in self.disciplines}
+
+    def discipline_by_class(self) -> dict[str, str]:
+        """Turma → grupo. Como o grafo de conflito é uma **partição**, este
+        dicionário basta: não é preciso varrer cliques para saber se dois bens
+        se excluem."""
+        return {
+            name: d.name for d in self.disciplines for name in self.classes_of(d)
+        }
+
+    def seats_by_class(self) -> dict[str, int]:
+        """A oferta repartida entre as turmas do grupo.
+
+        As primeiras `seats % classes` turmas levam uma vaga a mais, de modo
+        que a soma devolve exatamente a oferta declarada.
+        """
+        seats: dict[str, int] = {}
+        for discipline in self.disciplines:
+            names = self.classes_of(discipline)
+            base, extra = divmod(discipline.seats, len(names))
+            for i, name in enumerate(names):
+                seats[name] = base + (1 if i < extra else 0)
+        return seats
+
+    def hours_by_class(self) -> dict[str, int]:
+        """`w_x` replicado: cada turma custa a carga inteira da disciplina —
+        ninguém cursa um terço das horas."""
+        return {
+            name: d.hours for d in self.disciplines for name in self.classes_of(d)
+        }
+
+    def difficulty_by_class(self) -> dict[str, float]:
+        """A dificuldade da disciplina vezes o multiplicador da escada.
+
+        Com os três níveis em 1 — o padrão — a escada some e toda turma herda
+        a dificuldade do grupo. Ver `equations.class_difficulty`.
+        """
+        result: dict[str, float] = {}
+        for discipline in self.disciplines:
+            names = self.classes_of(discipline)
+            ladder = class_difficulty(
+                count=len(names), levels=self.class_difficulty_levels
+            )
+            for name, factor in zip(names, ladder):
+                result[name] = discipline.difficulty * factor
+        return result
+
+    def class_exclusions(self) -> tuple[frozenset[str], ...]:
+        """Os cliques de `X` (eq. 5): um por disciplina com mais de uma turma.
+
+        Disciplina de turma única não gera clique — a restrição
+        `Σ z ≤ 1` sobre um bem só já é a restrição binária dele.
+        """
+        return tuple(
+            frozenset(names)
+            for d in self.disciplines
+            if len(names := self.classes_of(d)) > 1
+        )
 
     def required_disciplines(self) -> set[str]:
         """As obrigatórias — o que a eq. (40) exige aprovar uma a uma."""

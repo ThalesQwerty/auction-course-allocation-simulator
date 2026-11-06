@@ -320,24 +320,42 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
       <h2>Escolhas de modelagem não fixadas pelo anteprojeto</h2>
       <ul>
         <li>
-          <strong>A nota como potência da aptidão:</strong> a aptidão de cada par (aluno,
-          disciplina) sai de uma Beta do cenário, descrita por <strong>média</strong> e{" "}
-          <strong>concentração</strong>, e a nota é <em>a</em> elevada à demanda que a disciplina
-          faz. A forma de potência tem história generativa — se a disciplina são E unidades
-          independentes e o aluno domina cada uma com probabilidade <em>a</em>, então{" "}
-          <em>a^E</em> é a chance de dominar todas — e respeita (0, 1) por construção, sem a
-          truncagem que empilhava massa nas pontas.
+          <strong>A turma como bem alocado:</strong> o que se aloca é a{" "}
+          <em>turma</em>; a disciplina é o <em>clique</em> do grafo de conflito — o
+          único critério de conflito é serem duas turmas da mesma disciplina.
+          Ninguém leva duas, e é a eq. (5) que impõe isso, dentro da PLI de um
+          lado e na caminhada da ditadura serial do outro. O histórico continua
+          por disciplina: nota, tentativa e conclusão não sabem em que turma o
+          aluno cursou.
         </li>
         <li>
-          <strong>Os dois ganhos:</strong> a demanda é a dificuldade dividida por{" "}
-          a <em>utilidade relativa</em> elevada ao <strong>ganho por utilidade</strong> e pelas tentativas
-          efetivas, que o <strong>ganho por recursada</strong> define. A nota é determinística
-          dada a aptidão: até 29/10/2026 havia um choque log-normal por tentativa, que saiu porque
-          ele atrasava o cenário em ~5% dos formados sem mover métrica nenhuma e borrava a leitura
-          de que a nota <em>é</em> a aptidão na primeira tentativa. O que não regride é a maior
-          nota já obtida, que é a que conta para o CR.
+          <strong>A nota como quantil numa normal dividida:</strong> o aluno
+          carrega, por disciplina, um <strong>quantil</strong> sorteado uma vez e
+          persistente — traço, não sorte. O perfil de desempenho descreve a
+          distribuição por <strong>nota mais provável</strong>, <strong>chance de
+          tirar 0</strong> e <strong>chance de tirar 10</strong>; a dificuldade e o
+          número da tentativa movem a distribuição sob aquele quantil, transformando
+          as duas chances de ponta por expoentes recíprocos. A nota é arredondada em
+          décimos e censurada em [0, 10], e é a censura que torna o 0 e o 10
+          alcançáveis.
         </li>
-
+        <li>
+          <strong>A dificuldade é da turma:</strong> uma escada reparte as turmas de
+          cada disciplina entre fáceis, médias e difíceis, com tantas de um lado
+          quantas do outro — o que fixa a média <em>geométrica</em> no nível do meio,
+          que é o invariante certo porque a dificuldade entra nas taxas como
+          expoentes recíprocos. É o que torna toda disciplina uma disputa pela nota,
+          e não só pela vaga.
+        </li>
+        <li>
+          <strong>Os dois eixos de estratégia:</strong> além do desempenho e da
+          disponibilidade, que são traço, o perfil declara{" "}
+          <strong>seletividade</strong> — o múltiplo do score médio abaixo do qual o
+          aluno não pede nem financia, com 0 no especulador — e{" "}
+          <strong>concentração</strong> — o expoente do score, com 1 no lance
+          sincero e negativo invertendo. São valor fixo, não distribuição: um perfil
+          de estratégia é tratamento, não descrição.
+        </li>
         <li>
           <strong>Matrícula garantida do ingressante:</strong> entra sem leilão nas disciplinas de
           entrada, com o orçamento repartido igualmente entre elas e o resto da
@@ -399,9 +417,9 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
       <p>
         Uma <strong>comparação</strong> abre quatro boxplots — satisfação (ψ̄), equidade (φ),
         correlação (λ) e tempo de formatura —, com uma caixa por modelo: a linha grossa é a
-        mediana, a caixa é a metade central das observações, os bigodes vão até 1,5 IQR. Nas três
-        primeiras, cada valor é uma observação reduzida à média dos períodos ponderada pelos alunos
-        medidos; o tempo de formatura é da observação inteira. O que se lê é a sobreposição — caixas
+        mediana, a caixa é a metade central das simulações, os bigodes vão até 1,5 IQR. Nas três
+        primeiras, cada valor é uma simulação reduzida à média dos períodos ponderada pelos alunos
+        medidos; o tempo de formatura é da simulação inteira. O que se lê é a sobreposição — caixas
         que não se tocam separam os mecanismos; caixas sobrepostas dizem que a diferença entre as
         medianas cabe dentro da variação entre populações. Como as seeds são pareadas, a tabela
         ainda informa em quantas delas o leilão saiu melhor, que é uma leitura independente da
@@ -427,7 +445,7 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         O <strong>tempo de formatura</strong> tem viés de seleção e não se lê sozinho: a média só
         existe sobre quem concluiu, então um mecanismo que forma menos gente pode exibir um tempo
         menor só porque sobraram os rápidos. Por isso a tabela traz, ao lado dele, quantos se
-        formaram em cada observação.
+        formaram em cada simulação.
       </p>
       <p>
         Uma <strong>simulação</strong> abre os gráficos do cenário, em dois blocos. Os{" "}
@@ -440,7 +458,7 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         fica no navegador, então execuções antigas sobrevivem a um recarregamento da página.
       </p>
       <p>
-        A barra lateral à direita lista os alunos daquela observação, e filtra por coorte. Clicar
+        A barra lateral à direita lista os alunos daquela simulação, e filtra por coorte. Clicar
         num deles abre a tela individual: a progressão dele período a período
         e, em cada período, tudo o que pediu. Cada pedido tem uma de quatro saídas —{" "}
         <strong>vaga garantida</strong> (o ingressante, fora do leilão),{" "}

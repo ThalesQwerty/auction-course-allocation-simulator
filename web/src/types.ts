@@ -16,13 +16,10 @@ export interface DisciplineInput {
    * pré-requisito não faz a disciplina ser de entrada — a optativa também não
    * tem e fica fora da garantia. */
   entry: boolean;
-  /** A_x — atratividade, o quanto a **média do expoente** da log-normal do
-   * interesse se desloca de μ (`interest_mean`): 0 é a disciplina média, negativo gravita abaixo dela e positivo acima, e
-   * em múltiplos da média o fator é e^A. É a parte do gosto **comum a toda a
-   * população**, enquanto `interest_sigma` é a privada de cada aluno — mesma
-   * unidade, e a razão entre as duas é a correlação de preferência entre
-   * alunos. Ordena dentro de uma mesma altura da grade, nunca entre alturas —
-   * a invariante de altura é maior que qualquer A. Opcional: ausente é 0. */
+  /** A_x — atratividade: o **multiplicador** do interesse sorteado, comum a
+   * toda a população. 1 é a disciplina média, 2 vale o dobro dela e 0,5 a
+   * metade. É a parte do gosto comum a todos, enquanto `interest_sigma` é a
+   * privada de cada aluno. Opcional: ausente é 1. */
   attractiveness?: number;
   /** Optativa: não desbloqueia nada, não é de entrada, e concluir não exige
    * aprovar em cada uma — exige somar `elective_hours` entre as aprovadas. É
@@ -108,6 +105,33 @@ export interface Profile {
   full_load_rate: number; // em (0, 1)
 }
 
+/** Um grupo da população no eixo de **seletividade** — o primeiro dos dois
+ * eixos de *estratégia*, que o aluno conhece e usa, ao contrário dos dois de
+ * traço (desempenho e disponibilidade), que governam sorteios por trás dele.
+ *
+ * O valor é um múltiplo do score médio das disciplinas elegíveis: abaixo de
+ * `valor × média` o aluno não pede nem financia. Em 0 não há corte — é o
+ * especulador, que pede tudo e gasta o orçamento inteiro. Acima de 1 ele
+ * poupa: o crédito não investido fica para o período seguinte.
+ *
+ * Espelha `api.schemas.SelectivityProfileIn`. */
+export interface SelectivityProfile {
+  name: string;
+  value: number; // >= 0
+}
+
+/** Um grupo da população no eixo de **concentração**.
+ *
+ * O expoente do score sobre a utilidade: 1 é o lance sincero, abaixo achata,
+ * acima concentra, e negativo inverte — aposta mais no que ele quer menos, que
+ * é o controle do absurdo.
+ *
+ * Espelha `api.schemas.ConcentrationProfileIn`. */
+export interface ConcentrationProfile {
+  name: string;
+  value: number; // entre -3 e 5
+}
+
 export interface Scenario {
   disciplines: DisciplineInput[];
   /** Alunos por turma — `q_x = classes × este`. É o botão de estresse do
@@ -134,11 +158,28 @@ export interface Scenario {
    * tentativa, não mexe no CR, e no leilão devolve metade do preço pago. A
    * vaga não volta para a oferta. */
   availability_profiles: Profile[];
+  /** Perfis de **seletividade** e de **concentração**: os dois eixos de
+   * estratégia. Com os de traço eles dão as combinações de perfil, e a coorte
+   * é `students_per_profile` vezes esse número. */
+  selectivity_profiles: SelectivityProfile[];
+  concentration_profiles: ConcentrationProfile[];
   /** Quanto do interesse do aluno é permanente, de 0 a 1 — a fração da
    * variância que não é resorteada a cada período. 0 reproduz o modelo
    * anterior; 1 congela o interesse. Ortogonal ao σ: a divisão preserva a dispersão de
    * cada período, e o que isto controla é só a correlação entre semestres. */
   interest_stability: number;
+  /** Quanto do interesse é comum às turmas da **mesma disciplina**, de 0 a 1.
+   * Em 1 todas valem o mesmo para o aluno (e nenhum desvio é sorteado); em 0
+   * cada turma tem valor próprio. Passa pela mesma repartição temporal que a
+   * disciplina, de modo que estabilidade entre períodos igual a 1 congela
+   * também as turmas. */
+  class_stability: number;
+  /** Os três níveis da escada de dificuldade das turmas — baixa, média e
+   * alta —, multiplicadores da dificuldade declarada pela disciplina. A
+   * escada reparte as turmas com tantas fáceis quantas difíceis, de modo que
+   * a média geométrica fica no nível do meio. Iguais entre si, a escada está
+   * desligada. */
+  class_difficulty_levels: [number, number, number];
   /** μ — média do logaritmo da log-normal de onde sai o **interesse**. Não
    * mexe em alocação nenhuma: soma-se ao log de toda a linha, o que a
    * multiplica por e^μ, e a normalização desfaz o fator. Existe para a prévia
@@ -165,11 +206,16 @@ export interface Scenario {
    * (`horizonFor`): o motor recebe o horizonte, mas quem o escolhe são estes
    * dois. */
   max_residence: number;
-  /** Alunos que ingressam em cada período com ingresso; a população é isto
-   * vezes a quantidade desses períodos.
-   * Não pode passar da menor oferta entre as disciplinas de entrada, porque o
-   * ingressante tem vaga garantida em todas elas. */
-  students_per_period: number;
+  /** Exemplares de cada combinação de perfil em cada coorte. A coorte é isto
+   * vezes o número de combinações, e a população é a coorte vezes os períodos
+   * com ingresso.
+   *
+   * O tamanho da coorte não é digitado: ele é derivado, e é assim que toda
+   * combinação de perfil recebe o mesmo número de exemplares em toda coorte,
+   * sem sobra a girar. O bloco da coorte que cai em cada turma de entrada não
+   * pode passar das vagas dela, porque o ingressante tem vaga garantida em
+   * toda disciplina de entrada. */
+  students_per_profile: number;
   rounds: number; // |R|
   min_grade: number; // n_min
   /** Quem decide a alocação — o segundo eixo da comparação. Cruzado com o
@@ -250,7 +296,7 @@ export const COMPARISON_ARMS: ArmDescription[] = [
  *
  * Separam o vão em três parcelas, e o motor os alcança por
  * `run_comparison(..., arms=ARMS + ABLATION_ARMS)`. Ficam aqui só para que o
- * traço de uma observação antiga continue com rótulo legível. */
+ * traço de uma simulação antiga continue com rótulo legível. */
 export const ABLATION_ARMS: ArmDescription[] = [
   {
     key: "credits_greedy",
@@ -272,7 +318,7 @@ export const armLabel = (key: string): string =>
 /** Uma comparação: o mesmo cenário rodado em cada modelo, N vezes.
  *
  * Dois campos do cenário não entram. A **seed**, porque as seeds são 1..N e são
- * pareadas, de modo que a i-ésima observação de cada braço parte da mesma
+ * pareadas, de modo que a i-ésima simulação de cada braço parte da mesma
  * população, das mesmas utilidades e das mesmas notas (condição metodológica da
  * Seção 7.3). E o **retorno de créditos**, porque ele é o eixo do experimento:
  * cada braço impõe o seu. */
@@ -285,81 +331,10 @@ export interface CompareRequest
   arms: string[];
 }
 
-/** Os quatro genes, na ordem em que o motor publica a média de cada um.
- * Espelha `leilao.evolution.GENES`. */
-export const GENES = [
-  { key: "beta_u", label: "β_u", name: "viés de utilidade", baseline: 1 },
-  { key: "beta_v", label: "β_v", name: "viés de oferta", baseline: 0 },
-  { key: "beta_n", label: "β_n", name: "viés de aprovação", baseline: 0 },
-  { key: "alpha_u", label: "α_u", name: "utilidade de reserva", baseline: 0 },
-] as const;
-
-/** Os valores fixados da 1ª geração, um conjunto por gene. O **produto** deles
- * é o tamanho da população inicial e precisa bater com `students_per_period`.
- * Espelha `GenomeLevelsIn`. */
-export interface GenomeLevels {
-  beta_u: number[];
-  beta_v: number[];
-  beta_n: number[];
-  alpha_u: number[];
-}
-
-export const DEFAULT_LEVELS: GenomeLevels = {
-  beta_u: [-1, 0, 1, 2, 3],
-  beta_v: [-1, 0, 1],
-  beta_n: [-1, 0, 1],
-  // Múltiplos arredondados da participação média: nada, metade da média, a
-  // média, o dobro. Níveis redondos como ⅔ e 1 não seriam estratégias, seriam
-  // desligamentos — ver `equations.genome_grid`.
-  alpha_u: [0, 0.05, 0.1, 0.2],
-};
-
-export const gridSize = (levels: GenomeLevels): number =>
-  levels.beta_u.length * levels.beta_v.length * levels.beta_n.length * levels.alpha_u.length;
-
-/** Uma rodada do algoritmo genético. Espelha `EvolveRequest`. */
-export interface EvolveRequest extends Scenario {
-  levels: GenomeLevels;
-  observations: number;
-  min_generations: number;
-  max_generations: number;
-  window: number;
-  epsilon: number | null;
-  tournament: number;
-  elites: number;
-  step: number;
-  neutral: boolean;
-}
-
-export interface CohortGeneration {
-  entry_period: number;
-  /** A média de cada gene, na ordem de `GENES`. */
-  mean: number[];
-  best_fitness: number;
-  mean_fitness: number;
-}
-
-export interface Generation {
-  generation: number;
-  cohorts: CohortGeneration[];
-  /** `null` enquanto a janela do critério de parada não fecha. */
-  drift: number | null;
-}
-
-export interface EvolveResponse {
-  /** Onde a API gravou esta execução, ou `null` se o disco recusou. */
-  saved_to: string | null;
-  generations: Generation[];
-  stopped_by: string;
-  neutral: boolean;
-  /** O espalhamento de cada gene na 1ª geração — a escala fixa da deriva. */
-  scales: number[];
-}
-
-/** Teto de observações por mecanismo. Espelha `leilao.comparison.MAX_RUNS`. */
+/** Teto de simulações por mecanismo. Espelha `leilao.comparison.MAX_RUNS`. */
 export const MAX_COMPARISON_RUNS = 100;
 
-/** As métricas de período de uma observação, sem reduzir — o que o recorte por
+/** As métricas de período de uma simulação, sem reduzir — o que o recorte por
  * período desenha.
  *
  * Listas **paralelas**, e só com os períodos medidos: `period[i]` é o número do
@@ -370,7 +345,7 @@ export const MAX_COMPARISON_RUNS = 100;
  * `students` é o peso daquele ponto na média ponderada que produz o `RunSummary`
  * — e é o que cai à vista na drenagem.
  *
- * Sem tempo de formatura: ele é da observação inteira, e a versão por período
+ * Sem tempo de formatura: ele é da simulação inteira, e a versão por período
  * ("quanto levou quem concluiu em t") seria outra grandeza, com viés de
  * sobrevivência. */
 export interface PeriodSeries {
@@ -398,7 +373,7 @@ export interface PeriodSeries {
   allocations_per_round: (number | null)[][];
 }
 
-/** O mesmo resumo da observação, uma linha por coorte — o terceiro eixo da tela.
+/** O mesmo resumo da simulação, uma linha por coorte — o terceiro eixo da tela.
  *
  * A coorte é o período de ingresso (t_a): a coorte 3 é quem entrou no período
  * 3, e o aluno fica nela do ingresso ao diploma. O recorte particiona a
@@ -434,21 +409,21 @@ export interface CohortSeries {
   allocations_per_round: (number | null)[][];
 }
 
-/** Uma observação reduzida a um ponto por métrica — o que vira um valor dentro
+/** Uma simulação reduzida a um ponto por métrica — o que vira um valor dentro
  * de uma caixa. As três de período são a média **ponderada pelos alunos
  * medidos**: a simulação termina numa fase de drenagem, e uma média simples
  * daria a um período final de vinte alunos o mesmo peso de um período cheio. O
- * tempo de formatura não é de período — é da observação inteira. */
+ * tempo de formatura não é de período — é da simulação inteira. */
 export interface RunSummary {
   seed: number;
   /** Períodos efetivamente publicados; menor que |T| se a população se
    * esvaziou antes do horizonte. */
   periods: number;
-  /** Concluintes da observação. Não é métrica: é o denominador sem o qual
+  /** Concluintes da simulação. Não é métrica: é o denominador sem o qual
    * `time_to_graduate` não se lê — quem forma menos gente pode exibir um tempo
    * menor só porque sobraram os rápidos. */
   graduates: number;
-  /** Jubilados da observação: esgotaram a residência sem fechar a grade. */
+  /** Jubilados da simulação: esgotaram a residência sem fechar a grade. */
   dismissed: number;
   /** Quantos ingressaram ao todo — o denominador das duas frações. */
   population: number;
@@ -491,7 +466,7 @@ export interface RunSummary {
   by_cohort?: CohortSeries;
 }
 
-/** Um dos modelos comparados e as suas N observações. O rótulo em português está
+/** Um dos modelos comparados e as suas N simulações. O rótulo em português está
  * em `COMPARISON_ARMS`, casado por `key`; a API manda só o identificador e o
  * que define o braço. */
 export interface ArmResult {
@@ -507,7 +482,7 @@ export interface CompareResponse {
   runs: number;
   arms: ArmResult[];
   /** As duas distribuições de entrada do cenário. Não variam entre braços nem
-   * entre seeds — são do cenário, não da observação. A primeira é do
+   * entre seeds — são do cenário, não da simulação. A primeira é do
    * interesse, não da utilidade: é o que σ governa. */
   interest_distribution?: number[];
   grade_distribution?: number[];
@@ -665,7 +640,12 @@ export interface RoundReport {
 }
 
 export interface DisciplineSnapshot {
+  /** O nome da **turma**: é dela que são a vaga, o preço e a demanda. Com
+   * turma única ele é o da disciplina, e era esse o modelo até elas
+   * existirem. */
   name: string;
+  /** O clique a que a turma pertence — por onde a tela agrupa. */
+  discipline: string;
   /** Os três eixos pelos quais as disciplinas se agrupam nos gráficos. O
    * período vem dos pré-requisitos; vagas e carga horária são do cenário, e
    * disciplinas com o mesmo valor caem no mesmo grupo. */
@@ -703,12 +683,15 @@ export interface StudentSummary {
   id: string;
   name: string;
   entry_period: number; // t_a — eq. (31)
-  /** Os dois grupos a que ele pertence, pelo nome. São **traço imutável** e
-   * não entram em decisão nenhuma dele: estão aqui porque a tela individual é
-   * onde se pergunta "por que *este* aluno foi assim" — e o perfil é metade da
-   * resposta, com a seed sendo a outra. */
+  /** Os quatro grupos a que ele pertence, pelo nome. Os dois primeiros são
+   * **traço** e não entram em decisão nenhuma dele; os dois últimos são
+   * **estratégia** e são exatamente o que ele decide. Estão aqui porque a tela
+   * individual é onde se pergunta "por que *este* aluno foi assim" — e o
+   * perfil é metade da resposta, com a seed sendo a outra. */
   performance: string;
   availability: string;
+  selectivity: string;
+  concentration: string;
   grade_average: number; // N_a — eq. (49)
   approved_hours: number;
   /** S — a carga da grade inteira. Toda disciplina é obrigatória, então é a
@@ -774,12 +757,12 @@ export interface StudentHistory {
   periods: StudentPeriodRecord[];
 }
 
-/** O pedido do traço de **uma** observação da comparação: o cenário dela mais o
- * par `(braço, seed)` que endereça a observação.
+/** O pedido do traço de **uma** simulação da comparação: o cenário dela mais o
+ * par `(braço, seed)` que endereça a simulação.
  *
  * Aqui a seed não é ignorada como em `/compare` — ela é o que se pede. E o
  * retorno de créditos e o resolvedor continuam de fora: quem os impõe é o
- * braço, que é o que faz o traço ser a mesma observação que o boxplot resumiu. */
+ * braço, que é o que faz o traço ser a mesma simulação que o boxplot resumiu. */
 export interface TraceRequest extends Omit<Scenario, "seed" | "credit_return"> {
   arm: string;
   seed: number;
@@ -792,12 +775,12 @@ export interface TracePeriod {
   disciplines: DisciplineSnapshot[];
 }
 
-/** Uma observação inteira, aluno a aluno — a tela de depuração do projeto.
+/** Uma simulação inteira, aluno a aluno — a tela de depuração do projeto.
  *
  * É a parte pesada do resultado (uns 10 MB no preset Computação, contra 100 kB
  * do resumo da comparação), e por isso **não** é persistida no `localStorage`
  * nem vem junto de `/compare`: quem quer o caso individual o pede, e só
- * daquela observação. A simulação é determinística, então refazê-la custa tempo
+ * daquela simulação. A simulação é determinística, então refazê-la custa tempo
  * e não fidelidade. */
 export interface TraceResponse {
   arm: string;
@@ -807,7 +790,12 @@ export interface TraceResponse {
   /** Detalhe período a período de cada aluno, com uma linha por disciplina
    * elegível — inclusive as que ele nem chegou a pedir. */
   histories: StudentHistory[];
+  /** As **turmas** ofertadas, na ordem da grade: são elas que a tela
+   * endereça, porque é delas que são o lance e a vaga. */
   disciplines: string[];
+  /** Turma → disciplina. É por aqui que a tela volta ao clique para achar o
+   * período da grade e saber se é optativa, que são coisas da disciplina. */
+  classes: Record<string, string>;
   /** Período de cada disciplina na grade, induzido dos pré-requisitos. */
   curriculum_periods: Record<string, number>;
 }

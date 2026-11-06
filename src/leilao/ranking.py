@@ -16,15 +16,9 @@ universidade concede) e `grade_average` (a prioridade, eq. 49).
 """
 from __future__ import annotations
 
-from .entities import Agent, Demand, Good, Problem
-from .equations import (
-    NEUTRAL,
-    Behavior,
-    Signals,
-    admitted_set,
-    decision_scores,
-    serial_dictatorship,
-)
+from .behavior import decide
+from .entities import Agent, Demand, Good, MutualExclusion, Problem
+from .equations import NEUTRAL, Behavior, serial_dictatorship
 from .equations import request_set as rank_requests
 from .wdp_solver import solve_wdp
 
@@ -38,17 +32,52 @@ def request_set(
     utilities: dict[str, float],
     available: list[str],
     behavior: Behavior = NEUTRAL,
-    signals: Signals | None = None,
+    classes: dict[str, tuple[str, ...]] | None = None,
 ) -> list[str]:
-    """D_a^(t,r) — ver `equations.request_set`."""
-    return rank_requests(
-        scores=decision_scores(
-            utilities=admitted_set(utilities=utilities, reserve=behavior.alpha_u),
-            behavior=behavior,
-            signals=signals,
-        ),
-        available=available,
+    """D_a^(t,r) — ver `equations.request_set`.
+
+    A mensagem sai de `behavior.decide`, a mesma que o leilão usa: o que o CR
+    faz com ela é só ordenar. O limiar que o leilão usa para parar o gasto
+    não tem análogo aqui — lá não há investimento marginal que se interrompa.
+
+    **Ordenar as turmas com sinceridade é dominante** neste braço: turma
+    recusada não custa nada e a prioridade do aluno não depende do que ele
+    pede. É a mesma justificativa que a docstring de `equations.request_set`
+    dá para disciplinas, um nível abaixo.
+
+    E é por isso que aqui ele lista **todas** as turmas, enquanto no leilão
+    aposta numa só (`equations.best_class`): lá cada crédito posto numa turma
+    é um crédito que não está em outra, aqui não há nada a repartir. A
+    assimetria é do mecanismo — mensagem cara contra mensagem gratuita —, a
+    mesma que separa as duas mochilas um nível acima.
+    """
+    groups, scores, _reserve = decide(
+        utilities=utilities, behavior=behavior, classes=classes
     )
+    if not classes:
+        return rank_requests(scores=groups, available=available)
+
+    # **Dois níveis**: disciplinas na ordem de preferência e, dentro de
+    # cada uma, as turmas na dela. Plana — todas as turmas misturadas — a
+    # caminhada consumiria W_a em ordem de turma, e o braço passaria a
+    # mudar *quais disciplinas* o aluno leva em vez de só qual turma.
+    reachable = set(available)
+    ordered = rank_requests(
+        scores=groups,
+        available=[
+            discipline
+            for discipline in groups
+            if any(name in reachable for name in classes[discipline])
+        ],
+    )
+    return [
+        name
+        for discipline in ordered
+        for name in rank_requests(
+            scores=scores,
+            available=[n for n in classes[discipline] if n in reachable],
+        )
+    ]
 
 
 def allocate_by_ilp(
@@ -58,6 +87,7 @@ def allocate_by_ilp(
     seats: dict[str, int],
     hours: dict[str, int],
     capacity: dict[str, int],
+    groups: dict[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     """A mesma linha de base, resolvida globalmente: maximiza a soma dos CRs
     atendidos sujeito às vagas (eq. 3) e à carga de cada aluno (eq. 4).
@@ -76,12 +106,25 @@ def allocate_by_ilp(
     """
     if not requests:
         return []
+    cliques: dict[str, set[str]] = {}
+    if groups:
+        for name, group in groups.items():
+            if name in seats:
+                cliques.setdefault(group, set()).add(name)
     problem = Problem(
         agents=[Agent(student_id, capacity[student_id]) for student_id in capacity],
         goods=[Good(name, seats[name], hours[name]) for name in seats],
         demands=[
             Demand(student_id, name, priority[student_id])
             for student_id, name in requests
+        ],
+        # O roteamento, deste lado, é a própria restrição de clique (eq. 5)
+        # dentro da PLI — não a caminhada da ditadura serial. Os dois
+        # mecanismos resolvem a mesma restrição com a máquina de cada um.
+        exclusions=[
+            MutualExclusion(frozenset(names))
+            for names in cliques.values()
+            if len(names) > 1
         ],
     )
     return [key for key, taken in solve_wdp(problem).items() if taken]

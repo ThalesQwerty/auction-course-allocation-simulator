@@ -9,14 +9,14 @@ O formato é o mesmo que o histórico do navegador usa, de propósito: um arquiv
 gravado aqui é uma entrada de histórico, e carregá-lo na interface é só
 acrescentá-lo à lista. Sem conversão, sem segundo esquema.
 
-    { "kind": "evolution" | "comparison", "at": ISO 8601,
+    { "kind": "comparison", "at": ISO 8601,
       "config": o cenário recebido, "result": a resposta devolvida }
 
-**Por que disco e não `localStorage`.** Uma evolução custa `N × M` simulações
-completas — dezenas de minutos no cenário cheio — e o `localStorage` tem uns
-poucos megabytes para o domínio inteiro, disputados com todas as comparações.
-Perder uma rodada dessas por falta de cota é caro demais para o conforto de
-não ter arquivo.
+**Por que disco e não `localStorage`.** Uma comparação custa `N` simulações
+completas por braço — minutos no cenário cheio — e o `localStorage` tem uns
+poucos megabytes para o domínio inteiro, disputados com todas as execuções
+anteriores. Perder uma rodada dessas por falta de cota é caro demais para o
+conforto de não ter arquivo.
 
 A pasta sai de `LEILAO_RESULTS_DIR` ou, sem ela, de `resultados/` ao lado de
 onde a API foi iniciada. É criada na primeira gravação.
