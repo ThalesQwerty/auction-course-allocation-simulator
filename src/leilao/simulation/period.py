@@ -174,6 +174,8 @@ class _Reporter:
     period: int
     active: list[Student]
     axis: Axis
+    # Os quatro eixos de perfil (`Axis.profiles`), recortados no mesmo instante.
+    profiles: dict[str, Axis]
     state: PeriodState
     utilities: dict[str, dict[str, float]]
     grade_averages: dict[str, float]
@@ -218,12 +220,12 @@ class _Reporter:
             excluded=excluded,
             requested=requested,
         )
-        overall, by_cohort = snapshot_groups(
+        overall, groups = snapshot_groups(
             config=self.config,
             active=self.active,
             students=self.draws.students,
             period=self.period,
-            axis=self.axis,
+            axes={"cohort": self.axis, **self.profiles},
             values=values,
             total_seats=self.draws.total_seats,
         )
@@ -231,7 +233,8 @@ class _Reporter:
             period=self.period,
             round=round_number,
             overall=overall,
-            by_cohort=by_cohort,
+            by_cohort=groups.pop("cohort"),
+            by_profile=groups,
             prices=prices,
         )
 
@@ -408,6 +411,7 @@ def run_period(
         period=period,
         active=active,
         axis=Axis.cohorts(draws.entry_periods, period),
+        profiles=Axis.profiles(config),
         state=state,
         utilities=utilities,
         grade_averages=grade_averages,

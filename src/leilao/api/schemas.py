@@ -157,6 +157,9 @@ class PerformanceProfileIn(BaseModel):
     """
 
     name: str = Field(min_length=1, max_length=40)
+    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
+    # só passa por aqui para o cenário gravado em disco voltar igual.
+    color: str | None = Field(default=None, max_length=32)
     mode_grade: float = Field(
         gt=0, lt=10, description="nota mais provável do grupo, em (0, 10)"
     )
@@ -214,6 +217,9 @@ class ProfileIn(BaseModel):
     """
 
     name: str = Field(min_length=1, max_length=40)
+    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
+    # só passa por aqui para o cenário gravado em disco voltar igual.
+    color: str | None = Field(default=None, max_length=32)
     mode_hours: float = Field(
         gt=0, description="moda da disponibilidade, em horas; deve ficar abaixo de W_a"
     )
@@ -250,6 +256,9 @@ class SelectivityProfileIn(BaseModel):
     """
 
     name: str = Field(min_length=1, max_length=40)
+    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
+    # só passa por aqui para o cenário gravado em disco voltar igual.
+    color: str | None = Field(default=None, max_length=32)
     value: float = Field(ge=0, description="múltiplo do score médio; 0 desliga o corte")
 
     @classmethod
@@ -271,6 +280,9 @@ class ConcentrationProfileIn(BaseModel):
     """
 
     name: str = Field(min_length=1, max_length=40)
+    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
+    # só passa por aqui para o cenário gravado em disco voltar igual.
+    color: str | None = Field(default=None, max_length=32)
     value: float = Field(
         ge=-3, le=5, description="expoente do score; 1 é o lance sincero"
     )
@@ -492,75 +504,35 @@ class CompareRequest(ScenarioIn):
     )
 
 
-class PeriodSeriesOut(BaseModel):
-    """As métricas de período de uma simulação, sem reduzir — o que o recorte
-    por período da tela desenha.
+class GroupBandsOut(BaseModel):
+    """Um grupo de um recorte reduzido entre as seeds, período a período.
 
-    Listas **paralelas** e só com os períodos medidos: `period[i]` é o número do
-    período a que `efficiency[i]` se refere. O primeiro período não aparece (nele
-    todo mundo acabou de ingressar), e por isso o número vem explícito em vez de
-    sair do índice. `students` é o peso do ponto na média ponderada, e cai à
-    vista na drenagem.
-
-    Sem tempo de formatura: é da simulação inteira, e a versão por período seria
-    outra grandeza, com viés de sobrevivência.
+    `values[k][i]` é `[q1, mediana, q3]` da grandeza `k` no período
+    `period[i]`, ou `null` se nenhuma seed a mediu ali. `n[i]` é quantas seeds
+    mediram o grupo naquele período.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
+    group: str
     period: list[int]
-    students: list[int]
-    efficiency: list[float]
-    utilization: list[float]
-    fidelity: list[float]
-    fairness: list[float]
-    correlation: list[float]
-    exclusion_rate: list[float]
-    # A série da seção "Solicitações de disciplinas": seis linhas não
-    # empilhadas, em média por aluno, uma posição por período medido.
-    request_states: list[RequestStatesOut]
-    # A saturação do período, rodada a rodada: a posição [i][r] é o que foi
-    # ganho por aluno na rodada r+1 do período `period[i]`. Uma linha por
-    # período medido, sempre com |R| posições.
-    allocations_per_round: list[list[float | None]]
+    n: list[int]
+    values: dict[str, list[tuple[float, float, float] | None]]
 
 
-class CohortSeriesOut(BaseModel):
-    """O mesmo resumo da simulação, uma linha por coorte — o terceiro eixo da
-    tela.
-
-    A coorte é o período de ingresso (t_a), e o aluno fica nela do ingresso ao
-    diploma. A redução é a mesma do agregado; o que muda é sobre quem ela corre.
-
-    **As coortes não são intercambiáveis**: a primeira encontra uma
-    universidade quase vazia e a última a encontra cheia, de modo que a
-    inclinação ao longo do eixo mistura mecanismo e mercado. O que se lê com
-    segurança é a comparação entre braços num mesmo ponto.
-
-    Aqui o tempo de formatura entra — cada aluno pertence a uma coorte só —, e
-    vem com os concluintes, o denominador sem o qual ele não se lê: a contagem
-    e a fração dela sobre quantos entraram naquela coorte.
-    """
+class AxisBandsOut(BaseModel):
+    """Os grupos de um recorte: `overall` (um grupo só), `cohort`,
+    `performance`, `availability`, `selectivity` ou `concentration`."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    cohort: list[int]
-    graduates: list[int]
-    graduation_rate: list[float]
-    efficiency: list[float]
-    utilization: list[float]
-    fidelity: list[float]
-    fairness: list[float]
-    correlation: list[float]
-    exclusion_rate: list[float]
-    request_states: list[RequestStatesOut]
-    time_to_graduate: list[float | None]
-    allocations_per_round: list[list[float | None]]
+    axis: str
+    groups: list[GroupBandsOut]
 
 
 class RunSummaryOut(BaseModel):
-    """Uma simulação reduzida a um ponto por métrica — o que vira um valor no
-    boxplot. As três de período são a média ponderada pelos alunos medidos, de
+    """Uma simulação reduzida a um ponto por métrica — o que vira uma linha
+    das tabelas. As três de período são a média ponderada pelos alunos medidos, de
     modo que a fase de drenagem não pese como um período cheio; o tempo de
     formatura é da simulação inteira."""
 
@@ -589,8 +561,7 @@ class RunSummaryOut(BaseModel):
     # aula. É a quinta métrica da comparação, e a que a disponibilidade existe
     # para produzir.
     exclusion_rate: float
-    # Os seis estados em média por aluno, reduzidos a um ponto cada. A série
-    # sem reduzir está em `by_period` e `by_cohort`.
+    # Os seis estados em média por aluno, reduzidos a um ponto cada.
     request_states: RequestStatesOut
     # Períodos do ingresso ao diploma, na média dos concluintes. Null quando
     # ninguém concluiu.
@@ -599,11 +570,6 @@ class RunSummaryOut(BaseModel):
     # |R| posições. Mede a **saturação**: o que se lê é o decaimento entre as
     # rodadas, não o nível de cada uma.
     allocations_per_round: list[float | None]
-    # As mesmas métricas de período, período a período: o material de que a
-    # média ponderada saiu.
-    by_period: PeriodSeriesOut
-    # O mesmo resumo por coorte: a mesma redução, corrida sobre outro recorte.
-    by_cohort: CohortSeriesOut
 
 
 class ArmResultOut(BaseModel):
@@ -619,6 +585,9 @@ class ArmResultOut(BaseModel):
     mechanism: Mechanism
     credit_return: CreditReturnPolicy
     runs: list[RunSummaryOut]
+    # As séries por período, reduzidas entre as seeds: o agregado e cada
+    # recorte. A série de cada simulação não sai — só os quartis dela.
+    series: list[AxisBandsOut]
 
 
 class CompareResponse(BaseModel):
@@ -905,10 +874,13 @@ class TraceResponse(BaseModel):
     curriculum_periods: dict[str, int]
 
 
-class PlaygroundDisciplineIn(BaseModel):
+class PlaygroundClassIn(BaseModel):
     name: str
     seats: int = Field(ge=0)
     hours: int = Field(gt=0)
+    # A disciplina da turma — o clique da eq. (5). Ausente, a turma é a
+    # própria disciplina.
+    discipline: str | None = None
 
 
 class PlaygroundStudentIn(BaseModel):
@@ -918,6 +890,11 @@ class PlaygroundStudentIn(BaseModel):
     max_hours: int = Field(gt=0)
     utilities: dict[str, float]
     eligible: list[str]
+    # Horas já realizadas; ausente, o aluno leva tudo o que obteve.
+    availability: int | None = Field(default=None, ge=0)
+    # Os mesmos limites dos perfis do cenário.
+    selectivity: float = Field(default=0.0, ge=0)
+    concentration: float = Field(default=1.0, ge=-3, le=5)
 
 
 class PlaygroundRequest(BaseModel):
@@ -927,7 +904,7 @@ class PlaygroundRequest(BaseModel):
     mode_grade: float = Field(default=8.0, gt=0, lt=10)
     zero_rate: float = Field(default=0.005, gt=0, lt=1)
     max_rate: float = Field(default=0.008, gt=0, lt=1)
-    disciplines: list[PlaygroundDisciplineIn]
+    classes: list[PlaygroundClassIn]
     students: list[PlaygroundStudentIn]
 
 
@@ -948,10 +925,18 @@ class PlaygroundRoundOut(BaseModel):
 
 class PlaygroundGradeOut(BaseModel):
     student_id: str
-    discipline: str
+    name: str  # a turma cursada
     grade: float
+
+
+class PlaygroundClosingOut(BaseModel):
+    student_id: str
+    load: int | None
+    retained: list[str]
+    excluded: list[str]
 
 
 class PlaygroundResponse(BaseModel):
     rounds: list[PlaygroundRoundOut]
+    closing: list[PlaygroundClosingOut]
     grades: list[PlaygroundGradeOut]

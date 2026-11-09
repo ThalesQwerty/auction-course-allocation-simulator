@@ -58,7 +58,7 @@ Por isso a política de retorno e o resolvedor **não são parâmetros do cenár
 aqui**: são eixos do experimento, e o que vier na configuração é ignorado,
 como a seed. Cada braço impõe o seu.
 
-**Uma simulação vira um número por métrica**, que é o ponto do boxplot. Para as
+**Uma simulação vira um número por métrica**, que é a linha das tabelas. Para as
 três métricas de período a redução é a média **ponderada pelos alunos medidos**:
 a simulação termina numa fase de drenagem, em que a população só diminui, e uma
 média simples daria a um período final de vinte alunos o mesmo peso de um
@@ -127,9 +127,9 @@ from .config import (
 )
 from .metrics import Metrics
 from .population import generate_students
-from .simulation import SimulationResult, run_simulation
+from .simulation import GroupSnapshot, SimulationResult, run_simulation
 
-# Teto de simulações por braço. Não é limitação técnica: é que o boxplot para de
+# Teto de simulações por braço. Não é limitação técnica: é que a faixa para de
 # ganhar informação muito antes disso, e cada simulação a mais custa uma
 # simulação inteira em cada braço.
 MAX_RUNS = 100
@@ -158,8 +158,8 @@ class Arm:
 # cores, e nela a correlação (eq. 57) se lê de uma vez: do mecanismo em que o
 # CR é o próprio critério ao que o ignora por completo.
 #
-# **Só entra aqui o que sai nos resultados**: cada braço é uma caixa do
-# boxplot e uma linha das tabelas, e nada roda para não ser mostrado. Duas
+# **Só entra aqui o que sai nos resultados**: cada braço é um traçado dos
+# gráficos e uma linha das tabelas, e nada roda para não ser mostrado. Duas
 # células que já foram braços saíram por não serem passos do caminho — o CR
 # resolvido por PLI (que tem defeito declarado: como todo pedido do aluno tem
 # o mesmo peso N_a, a PLI é indiferente sobre qual cortar, e o aluno não tem
@@ -259,6 +259,10 @@ class PeriodSeries:
 
     period: list[int]
     students: list[int]
+    # A fração de concluintes **acumulada**: quem já concluiu até o fim do
+    # período sobre quem já tinha ingressado. Sobe ao longo do horizonte, e no
+    # último período é a fração final.
+    graduation_rate: list[float]
     efficiency: list[float]
     utilization: list[float]
     fidelity: list[float]
@@ -282,57 +286,57 @@ class PeriodSeries:
 
 
 @dataclass(frozen=True)
-class CohortSeries:
-    """O mesmo resumo da simulação, uma linha por coorte.
+class GroupSeries:
+    """A `PeriodSeries` de um grupo de um recorte — uma coorte ou um perfil.
 
-    A coorte é o período de ingresso (t_a): a coorte 3 é quem entrou no
-    período 3, e o aluno fica nela do ingresso ao diploma — o que torna esta
-    leitura mais estável que a idade acadêmica. O recorte **particiona** a
-    população, então somá-lo reproduz o agregado.
-
-    Cada ponto é a mesma média ponderada de `summarize`, restrita aos instantes
-    daquela coorte: o eixo troca de significado, a redução não.
-
-    **As coortes não são intercambiáveis, e é o que torna este eixo
-    traiçoeiro.** A coorte 1 encontra uma universidade quase vazia e a última
-    encontra a cheia, de modo que a inclinação ao longo do eixo mistura o
-    mecanismo com o mercado que cada uma pegou. O que se lê aqui com segurança
-    é a comparação **vertical** — os braços num mesmo ponto do eixo, que é a
-    mesma coorte da mesma população sob regras diferentes.
-
-    Aqui o **tempo de formatura entra**, e por um motivo que o recorte por
-    período não tem: cada aluno pertence a exatamente uma coorte, e o tempo do
-    ingresso ao diploma é propriedade dele. Vem com os concluintes ao lado —
-    o denominador sem o qual ele não se lê —, e que nas últimas coortes são
-    poucos ou nenhum, porque o horizonte acabou antes de elas terem tempo.
+    O eixo continua sendo o período: o que muda é sobre quem a métrica corre.
+    O recorte particiona a população, então os grupos de um mesmo eixo somam o
+    agregado em cada período.
     """
 
-    # O t_a de cada coorte, em ordem. Só as que tiveram algum instante medido:
-    # quem entrou no último período não chegou a ser medido, e uma linha vazia
-    # ali não seria dado.
-    cohort: list[int]
-    graduates: list[int]
-    # A fração da coorte que concluiu: os concluintes sobre quantos entraram
-    # naquele período. É ela que se desenha, e não a contagem: o absoluto
-    # depende do tamanho do ingresso, a fração é comparável entre coortes.
-    graduation_rate: list[float]
-    # Não há `dismissal_rate` ao lado: com o horizonte derivado do ciclo de
-    # vida, ao fim dele toda coorte já se esvaziou pelas duas portas, e a
-    # fração de jubilados é exatamente `1 − graduation_rate`. Guardá-la seria
-    # transportar a mesma série espelhada.
-    efficiency: list[float]
-    utilization: list[float]
-    fidelity: list[float]
-    fairness: list[float]
-    correlation: list[float]
-    exclusion_rate: list[float]
-    request_states: list[RequestStates]
-    # `None` na coorte em que ninguém concluiu — zero ali se leria como
-    # "formou na hora".
-    time_to_graduate: list[float | None]
-    # A saturação da coorte, rodada a rodada: a posição [i][r] é a rodada r+1
-    # da coorte `cohort[i]`, na média ponderada sobre os períodos dela.
-    allocations_per_round: list[list[float | None]]
+    group: str
+    series: PeriodSeries
+
+
+# Os recortes da tela, na ordem do seletor. `cohort` é o período de ingresso;
+# os outros quatro são os eixos de perfil (`simulation.Axis.profiles`).
+CUT_AXES: tuple[str, ...] = (
+    "cohort",
+    "performance",
+    "availability",
+    "selectivity",
+    "concentration",
+)
+
+
+@dataclass(frozen=True)
+class GroupBands:
+    """Um grupo de um recorte reduzido **entre as seeds**, período a período.
+
+    Cada grandeza vira `(q1, mediana, q3)` em cada período — o que o gráfico
+    desenha como linha e faixa. A redução acontece aqui, e não na tela, porque
+    a amostra inteira (seed × grupo × período) não cabe no histórico do
+    navegador; a mediana e os quartis cabem, e não dependem de N.
+
+    `n` é quantas seeds mediram o grupo naquele período. Na cauda do horizonte
+    parte delas já esvaziou, e ali a amostra não é a mesma do começo do eixo.
+    """
+
+    group: str
+    period: list[int]
+    n: list[int]
+    # Uma lista paralela a `period` por grandeza. `None` onde nenhuma seed
+    # mediu aquela grandeza no período (uma rodada que não aconteceu).
+    values: dict[str, list[tuple[float, float, float] | None]]
+
+
+@dataclass(frozen=True)
+class AxisBands:
+    """Os grupos de um recorte, na ordem em que o cenário os declara.
+    `overall` é a universidade inteira, com um grupo só."""
+
+    axis: str
+    groups: list[GroupBands]
 
 
 @dataclass(frozen=True)
@@ -374,7 +378,7 @@ class RunSummary:
     # existe para produzir. Ver `equations.exclusion_rate`.
     exclusion_rate: float
     # Os seis estados em média por aluno, reduzidos a um ponto cada. A série
-    # sem reduzir está em `by_period` e `by_cohort`.
+    # sem reduzir está em `by_period` e `by_group`.
     request_states: RequestStates
     # Períodos do ingresso ao diploma, na média dos concluintes. `None` quando
     # ninguém concluiu: a média não existe, e 0 ali se leria como "formou na
@@ -389,9 +393,9 @@ class RunSummary:
     # resume. É o recorte por período da tela; a redução continua sendo a dos
     # campos acima, e as duas leituras saem do mesmo material.
     by_period: PeriodSeries
-    # O mesmo resumo por coorte — o terceiro eixo da tela. Aqui a redução é a
-    # mesma; o que muda é sobre quem ela corre.
-    by_cohort: CohortSeries
+    # A mesma série por período, um grupo de cada vez, para cada recorte de
+    # `CUT_AXES`. É o material das faixas do braço (`ArmResult.series`).
+    by_group: dict[str, list[GroupSeries]]
 
 
 @dataclass(frozen=True)
@@ -402,6 +406,9 @@ class ArmResult:
     mechanism: Mechanism
     credit_return: CreditReturnPolicy
     runs: list[RunSummary]
+    # As séries por período reduzidas entre as seeds: o agregado e cada
+    # recorte. É o que os gráficos desenham — ver `bands`.
+    series: list[AxisBands] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -410,7 +417,7 @@ class ComparisonResult:
 
     Todas as listas têm o mesmo tamanho e a mesma ordem de seeds: o i-ésimo
     elemento de cada uma é a *mesma* população sob regras diferentes. Quem lê
-    pode tanto tratar cada lista como uma amostra (é o que o boxplot faz) quanto
+    pode tanto tratar cada lista como uma amostra (é o que a faixa dos gráficos faz) quanto
     comparar par a par — e a comparação par a par é a que responde "o retorno
     mudou alguma coisa?", porque ali a população é literalmente a mesma.
     """
@@ -483,87 +490,199 @@ def weighted_states(pairs: list[tuple[Metrics, int]]) -> RequestStates:
     )
 
 
-def cohort_series(result: SimulationResult) -> CohortSeries:
-    """Reduz a simulação coorte a coorte.
+def _measured(snapshot: GroupSnapshot | None) -> bool:
+    """O recorte tem métrica: alguém, além dos calouros, disputou o instante."""
+    return (
+        snapshot is not None
+        and snapshot.metrics is not None
+        and snapshot.metrics.students > 0
+    )
 
-    É a mesma média ponderada de `summarize`, corrida sobre `by_cohort` em vez
-    de `overall`. O recorte particiona a população, então nenhum aluno-período
-    é contado duas vezes nem fica de fora — e somar as coortes de um período
-    reproduz o agregado dele.
 
-    A filtragem é a mesma do agregado, pelo mesmo motivo: instante sem métrica
-    não entra, e uma coorte não tem métrica no período em que ingressou,
-    porque ali ela é toda calouro e o calouro conta como gente, não como dado
-    (ver `simulation.GroupSnapshot`).
+def _period_series(
+    instants: list[tuple[int, GroupSnapshot | None, list[GroupSnapshot | None]]],
+    rounds: int,
+) -> PeriodSeries:
+    """A série por período de um recorte.
 
-    O tempo de formatura e os concluintes não saem dos instantes, e sim de
-    varrer os alunos: cada um pertence a uma coorte só, pelo `entry_period`.
-    De lá sai também o tamanho do ingresso, que é o denominador da fração —
-    e que conta **todo mundo** que entrou, inclusive quem nunca chegou a ser
-    medido.
+    `instants` traz, para cada período, o recorte no fim dele e o mesmo
+    recorte em cada rodada. Só entram os períodos em que o recorte foi medido
+    — nem os vazios, nem aquele em que todo o grupo acabou de ingressar.
+    """
+    measured = [
+        (period, snapshot, by_round)
+        for period, snapshot, by_round in instants
+        if _measured(snapshot)
+    ]
+
+    def series(of) -> list:
+        return [of(snapshot.metrics) for _, snapshot, _ in measured]
+
+    def saturation(by_round: list[GroupSnapshot | None]) -> list[float | None]:
+        """Uma posição por rodada do cenário. Período que publicou menos
+        rodadas é completado com `None`, para a coluna r ser a mesma rodada em
+        todos os períodos."""
+        row: list[float | None] = []
+        for index in range(rounds):
+            snapshot = by_round[index] if index < len(by_round) else None
+            row.append(
+                snapshot.metrics.allocations_per_student
+                if _measured(snapshot)
+                else None
+            )
+        return row
+
+    return PeriodSeries(
+        period=[period for period, _, _ in measured],
+        students=series(lambda m: m.students),
+        graduation_rate=[
+            snapshot.graduated / snapshot.population if snapshot.population else 0.0
+            for _, snapshot, _ in measured
+        ],
+        efficiency=series(lambda m: m.efficiency),
+        utilization=series(lambda m: m.utilization),
+        fidelity=series(lambda m: m.fidelity),
+        fairness=series(lambda m: m.fairness),
+        correlation=series(lambda m: m.correlation),
+        exclusion_rate=series(lambda m: m.exclusion_rate or 0.0),
+        request_states=series(
+            lambda m: m.request_states or RequestStates(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        ),
+        allocations_per_round=[saturation(by_round) for _, _, by_round in measured],
+    )
+
+
+def _cut(report, axis: str) -> list[GroupSnapshot]:
+    """Os grupos de um recorte num instante."""
+    return report.by_cohort if axis == "cohort" else report.by_profile.get(axis, [])
+
+
+def group_series(result: SimulationResult) -> dict[str, list[GroupSeries]]:
+    """A série por período de cada grupo de cada recorte de `CUT_AXES`.
+
+    A ordem dos grupos é a de primeira aparição: a dos perfis é a do cenário,
+    e a das coortes é a do ingresso.
     """
     rounds = max((len(period.rounds) for period in result.periods), default=0)
+    out: dict[str, list[GroupSeries]] = {}
+    for axis in CUT_AXES:
+        order: list[str] = []
+        for period in result.periods:
+            for snapshot in _cut(period.aggregate, axis):
+                if snapshot.group is not None and snapshot.group not in order:
+                    order.append(snapshot.group)
 
-    instants: dict[int, list[tuple[Metrics, int]]] = defaultdict(list)
-    saturation: dict[int, list[list[tuple[float, int]]]] = defaultdict(
-        lambda: [[] for _ in range(rounds)]
-    )
+        def find(report, group: str) -> GroupSnapshot | None:
+            return next((s for s in _cut(report, axis) if s.group == group), None)
 
-    def collect(report, into) -> None:
-        for snapshot in report.by_cohort:
-            metrics = snapshot.metrics
-            if snapshot.group is None or metrics is None or metrics.students <= 0:
-                continue
-            into(int(snapshot.group), metrics)
-
-    for period in result.periods:
-        collect(
-            period.aggregate,
-            lambda cohort, metrics: instants[cohort].append((metrics, metrics.students)),
-        )
-        for index in range(min(rounds, len(period.rounds))):
-            collect(
-                period.rounds[index],
-                lambda cohort, metrics, index=index: saturation[cohort][index].append(
-                    (metrics.allocations_per_student, metrics.students)
+        out[axis] = [
+            GroupSeries(
+                group=group,
+                series=_period_series(
+                    [
+                        (
+                            period.period,
+                            find(period.aggregate, group),
+                            [find(report, group) for report in period.rounds],
+                        )
+                        for period in result.periods
+                    ],
+                    rounds,
                 ),
             )
+            for group in order
+        ]
+    return out
 
-    cohorts = sorted(instants)
-    entrants: dict[int, int] = defaultdict(int)
-    graduates: dict[int, int] = defaultdict(int)
-    spans: dict[int, list[int]] = defaultdict(list)
-    for student in result.students:
-        entrants[student.entry_period] += 1
-        if student.graduated_at is None:
-            continue
-        graduates[student.entry_period] += 1
-        spans[student.entry_period].append(
-            student.graduated_at - student.entry_period + 1
-        )
 
-    def mean(cohort: int, of) -> float:
-        return weighted_mean([(of(m), w) for m, w in instants[cohort]]) or 0.0
+# As grandezas de uma faixa, na ordem em que a tela as lê. As seis de estado
+# levam o nome do estado; as de saturação, `round_<r>`.
+STATE_KEYS: tuple[str, ...] = (
+    "not_eligible",
+    "not_requested",
+    "refused",
+    "excluded",
+    "failed",
+    "approved",
+)
 
-    return CohortSeries(
-        cohort=cohorts,
-        graduates=[graduates[cohort] for cohort in cohorts],
-        graduation_rate=[
-            graduates[cohort] / entrants[cohort] if entrants[cohort] else 0.0
-            for cohort in cohorts
-        ],
-        efficiency=[mean(c, lambda m: m.efficiency) for c in cohorts],
-        utilization=[mean(c, lambda m: m.utilization) for c in cohorts],
-        fidelity=[mean(c, lambda m: m.fidelity) for c in cohorts],
-        fairness=[mean(c, lambda m: m.fairness) for c in cohorts],
-        correlation=[mean(c, lambda m: m.correlation) for c in cohorts],
-        exclusion_rate=[mean(c, lambda m: m.exclusion_rate or 0.0) for c in cohorts],
-        request_states=[weighted_states(instants[c]) for c in cohorts],
-        time_to_graduate=[mean_span(spans[cohort]) for cohort in cohorts],
-        allocations_per_round=[
-            [weighted_mean(pairs) for pairs in saturation[cohort]] for cohort in cohorts
-        ],
+
+def _quantities(series: PeriodSeries, index: int) -> dict[str, float | None]:
+    """O que um período de uma série mede, grandeza a grandeza."""
+    states = series.request_states[index]
+    values: dict[str, float | None] = {
+        "students": float(series.students[index]),
+        "graduation_rate": series.graduation_rate[index],
+        "efficiency": series.efficiency[index],
+        "utilization": series.utilization[index],
+        "fidelity": series.fidelity[index],
+        "fairness": series.fairness[index],
+        "correlation": series.correlation[index],
+        "exclusion_rate": series.exclusion_rate[index],
+    }
+    for key in STATE_KEYS:
+        values[key] = getattr(states, key)
+    for r, value in enumerate(series.allocations_per_round[index], start=1):
+        values[f"round_{r}"] = value
+    return values
+
+
+def _quartiles(values: list[float]) -> tuple[float, float, float]:
+    """`(q1, mediana, q3)` por interpolação linear — o método 7, o mesmo do
+    `quantile` da interface e o padrão do numpy.
+
+    Quatro casas: a tela mostra no máximo três, e a resposta inteira vai para
+    o histórico do navegador, onde cada casa a mais custa espaço."""
+    q1, median, q3 = np.percentile(values, [25, 50, 75])
+    return (round(float(q1), 4), round(float(median), 4), round(float(q3), 4))
+
+
+def _group_bands(group: str, samples: list[PeriodSeries]) -> GroupBands:
+    """Reduz as séries de um grupo, uma por seed, a quartis por período."""
+    by_period: dict[int, list[dict[str, float | None]]] = defaultdict(list)
+    for series in samples:
+        for index, period in enumerate(series.period):
+            by_period[period].append(_quantities(series, index))
+    periods = sorted(by_period)
+    keys: list[str] = []
+    for period in periods:
+        for row in by_period[period]:
+            keys.extend(k for k in row if k not in keys)
+
+    def band(period: int, key: str) -> tuple[float, float, float] | None:
+        values = [
+            row[key] for row in by_period[period] if row.get(key) is not None
+        ]
+        return _quartiles(values) if values else None
+
+    return GroupBands(
+        group=group,
+        period=periods,
+        n=[len(by_period[period]) for period in periods],
+        values={key: [band(period, key) for period in periods] for key in keys},
     )
+
+
+def bands(runs: list[RunSummary]) -> list[AxisBands]:
+    """As séries de um braço reduzidas entre as seeds, recorte a recorte.
+
+    O primeiro é `overall`, a universidade inteira; depois os de `CUT_AXES`.
+    Um grupo que falte numa seed (coorte que não chegou a ser medida) entra
+    com as seeds que o têm.
+    """
+    out = [AxisBands("overall", [_group_bands("overall", [r.by_period for r in runs])])]
+    for axis in CUT_AXES:
+        order: list[str] = []
+        samples: dict[str, list[PeriodSeries]] = defaultdict(list)
+        for run in runs:
+            for entry in run.by_group.get(axis, []):
+                if entry.group not in order:
+                    order.append(entry.group)
+                samples[entry.group].append(entry.series)
+        out.append(
+            AxisBands(axis, [_group_bands(group, samples[group]) for group in order])
+        )
+    return out
 
 
 def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
@@ -573,7 +692,7 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     de formatura é da simulação inteira; a saturação é uma média dessas por
     rodada. O ponto não substitui o material de que saiu: `by_period` leva as
     mesmas métricas sem reduzir, e as duas leituras ficam conferíveis uma contra
-    a outra.
+    a outra. `by_group` leva a mesma série por grupo de cada recorte.
 
     Períodos sem métrica não entram — nem os vazios, nem aquele em que todo
     mundo acabou de ingressar. Um zero ali seria um período em que ninguém ficou
@@ -581,38 +700,29 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     """
     graduates = sum(1 for s in result.students if s.graduated_at is not None)
     dismissed = sum(1 for s in result.students if s.dismissed_at is not None)
-    measured = [
-        (period, period.aggregate.overall.metrics)
-        for period in result.periods
-        if period.aggregate.overall.metrics is not None
-        and period.aggregate.overall.metrics.students > 0
-    ]
-    by_period = [(metrics, metrics.students) for _, metrics in measured]
     rounds = max((len(period.rounds) for period in result.periods), default=0)
-
-    def mean(of) -> float:
-        return weighted_mean([(of(m), w) for m, w in by_period]) or 0.0
-
-    def series(of) -> list:
-        return [of(metrics) for _, metrics in measured]
-
-    def saturation(period) -> list[float | None]:
-        """A saturação de um período, com uma posição por rodada do cenário.
-
-        Períodos que publicaram menos rodadas são completados com `None`, para
-        a linha i continuar tendo o mesmo comprimento em todas: quem lê a
-        coluna r está lendo a mesma rodada em todos os períodos.
-        """
-        row: list[float | None] = []
-        for index in range(rounds):
-            report = period.rounds[index] if index < len(period.rounds) else None
-            metrics = report.overall.metrics if report is not None else None
-            row.append(
-                metrics.allocations_per_student
-                if metrics is not None and metrics.students > 0
-                else None
+    by_period = _period_series(
+        [
+            (
+                period.period,
+                period.aggregate.overall,
+                [report.overall for report in period.rounds],
             )
-        return row
+            for period in result.periods
+        ],
+        rounds,
+    )
+    weights = by_period.students
+
+    def mean(values: list[float]) -> float:
+        return weighted_mean(list(zip(values, weights))) or 0.0
+
+    states = [
+        (metrics, metrics.students)
+        for period in result.periods
+        for metrics in [period.aggregate.overall.metrics]
+        if _measured(period.aggregate.overall)
+    ]
 
     return RunSummary(
         seed=seed,
@@ -620,30 +730,17 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         graduates=graduates,
         dismissed=dismissed,
         population=len(result.students),
-        efficiency=mean(lambda m: m.efficiency),
-        utilization=mean(lambda m: m.utilization),
-        fidelity=mean(lambda m: m.fidelity),
-        fairness=mean(lambda m: m.fairness),
-        correlation=mean(lambda m: m.correlation),
-        exclusion_rate=mean(lambda m: m.exclusion_rate or 0.0),
-        request_states=weighted_states(by_period),
+        efficiency=mean(by_period.efficiency),
+        utilization=mean(by_period.utilization),
+        fidelity=mean(by_period.fidelity),
+        fairness=mean(by_period.fairness),
+        correlation=mean(by_period.correlation),
+        exclusion_rate=mean(by_period.exclusion_rate),
+        request_states=weighted_states(states),
         time_to_graduate=time_to_graduate(result),
         allocations_per_round=allocations_per_round(result),
-        by_period=PeriodSeries(
-            period=[period.period for period, _ in measured],
-            students=series(lambda m: m.students),
-            efficiency=series(lambda m: m.efficiency),
-            utilization=series(lambda m: m.utilization),
-            fidelity=series(lambda m: m.fidelity),
-            fairness=series(lambda m: m.fairness),
-            correlation=series(lambda m: m.correlation),
-            exclusion_rate=series(lambda m: m.exclusion_rate or 0.0),
-            request_states=series(
-                lambda m: m.request_states or RequestStates(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-            ),
-            allocations_per_round=[saturation(period) for period, _ in measured],
-        ),
-        by_cohort=cohort_series(result),
+        by_period=by_period,
+        by_group=group_series(result),
     )
 
 
@@ -703,7 +800,7 @@ def arm_config(config: SimulationConfig, *, arm: Arm, seed: int) -> SimulationCo
 
     É o **único** lugar em que um braço vira configuração, e é o que torna o
     traço de uma simulação conferível: a tela individual pede a mesma
-    `(braço, seed)` que o boxplot resumiu e recebe a simulação idêntica, porque
+    `(braço, seed)` que a comparação resumiu e recebe a simulação idêntica, porque
     a configuração passa por aqui dos dois lados.
     """
     return dataclasses.replace(
@@ -765,8 +862,10 @@ def run_comparison(
                 key=arm.key,
                 mechanism=arm.mechanism,
                 credit_return=arm.credit_return,
-                runs=[job.result() for job in arm_jobs],
+                runs=summaries,
+                series=bands(summaries),
             )
             for arm, arm_jobs in zip(arms, jobs)
+            for summaries in [[job.result() for job in arm_jobs]]
         ],
     )

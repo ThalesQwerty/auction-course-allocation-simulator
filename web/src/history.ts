@@ -1,5 +1,6 @@
 import { withUnlocks } from "./curriculum";
 import { cohortSize } from "./equations";
+import { readEntries, requestPersistence, writeEntries } from "./historyStore";
 import { COMPARISON_ARMS, creditReturnLabel, horizonFor } from "./types";
 import type { PerformanceProfile, Profile } from "./types";
 import type { CompareRequest, CompareResponse, Scenario } from "./types";
@@ -42,11 +43,17 @@ export type HistoryEntry = ComparisonRun;
  * `students_per_period` como campo do cenário (hoje ele é derivado dos
  * exemplares por perfil) e não traz eixo de estratégia nenhum; reexecutá-la
  * mandaria à API um cenário que ela recusa. Junto some a entrada evolutiva:
- * `kind: "evolution"` não tem mais tela. */
+ * `kind: "evolution"` não tem mais tela.
+ *
+ * Desde 09/11/2026 o histórico mora no **IndexedDB** (`historyStore`), sob a
+ * mesma versão. A chave do `localStorage` continua aqui só para a migração:
+ * o que estiver nela é lido uma vez, copiado e apagado. */
 const STORAGE_KEY = "leilao.historico.v6";
+const STORE_KEY = "historico.v6";
 
-/** Teto de execuções guardadas: cada resultado carrega todas as séries e todos
- * os alunos, então o histórico é podado pelas mais antigas. */
+/** Teto de execuções guardadas. Não é limitação de espaço — o IndexedDB tem
+ * cota de sobra —, é que uma lista maior que isso deixa de se escolher de
+ * relance na barra lateral. */
 export const MAX_RUNS = 20;
 
 const stamp = () => ({
@@ -125,49 +132,84 @@ function migrateScenario<
   return migrated;
 }
 
-export function loadHistory(): HistoryEntry[] {
+/** Grade legada ainda pode trazer `prerequisites` no lugar de `unlocks`; o
+ * resto do cenário legado passa por `migrateScenario`. O genérico preserva o
+ * tipo de cada entrada: espalhar o cenário migrado apagaria a união
+ * discriminada e a tela não saberia mais qual painel desenhar. */
+const migrateEntry = <T extends HistoryEntry>(entry: T): T =>
+  ({
+    ...entry,
+    config: migrateScenario({
+      ...entry.config,
+      disciplines: withUnlocks(entry.config.disciplines ?? []),
+    }),
+    result: withInterestNames(entry.result),
+  }) as T;
+
+/** O histórico do `localStorage`, de antes do IndexedDB. Vazio quando não há
+ * nada lá, ou quando o `localStorage` está indisponível ou corrompido. */
+function readLegacy(): HistoryEntry[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    // Grade legada ainda pode trazer `prerequisites` no lugar de `unlocks`;
-    // o resto do cenário legado passa por `migrateScenario`. O genérico
-    // preserva o tipo de cada entrada: espalhar o cenário migrado apagaria a
-    // união discriminada e a tela não saberia mais qual painel desenhar.
-    const migrate = <T extends HistoryEntry>(entry: T): T =>
-      ({
-        ...entry,
-        config: migrateScenario({
-          ...entry.config,
-          disciplines: withUnlocks(entry.config.disciplines ?? []),
-        }),
-        result: withInterestNames(entry.result),
-      }) as T;
-    return (parsed as HistoryEntry[]).map(migrate);
+    return Array.isArray(parsed) ? (parsed as HistoryEntry[]) : [];
   } catch {
-    // localStorage indisponível (modo privado) ou conteúdo corrompido
     return [];
   }
 }
 
-/** Grava o histórico, descartando as execuções mais antigas enquanto o
- * navegador recusar por falta de espaço. Devolve o que de fato coube. */
-export function saveHistory(entries: HistoryEntry[]): HistoryEntry[] {
-  let kept = entries.slice(0, MAX_RUNS);
-  while (kept.length > 0) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(kept));
-      return kept;
-    } catch {
-      kept = kept.slice(0, kept.length - 1);
-    }
-  }
+function dropLegacy(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
     // sem localStorage não há nada a limpar
   }
-  return kept;
+}
+
+/** Lê o histórico. Na primeira vez depois da troca de armazenamento, o que
+ * estava no `localStorage` é copiado para o IndexedDB e a chave antiga some
+ * — só depois de a cópia ter sido gravada, para nada se perder no meio.
+ *
+ * Sem IndexedDB (navegador antigo, modo privado restrito), devolve o que o
+ * `localStorage` tiver: a tela abre com o histórico, só não o grava. */
+let loading: Promise<HistoryEntry[]> | null = null;
+
+export function loadHistory(): Promise<HistoryEntry[]> {
+  // Chamadas concorrentes (o StrictMode monta o efeito duas vezes) dividem a
+  // mesma leitura, senão a migração correria duas vezes em paralelo.
+  loading ??= readHistory().finally(() => (loading = null));
+  return loading;
+}
+
+async function readHistory(): Promise<HistoryEntry[]> {
+  requestPersistence();
+  try {
+    const stored = await readEntries<HistoryEntry>(STORE_KEY);
+    if (stored !== undefined) return stored.map(migrateEntry);
+    const legacy = readLegacy().slice(0, MAX_RUNS);
+    await writeEntries(STORE_KEY, legacy);
+    dropLegacy();
+    return legacy.map(migrateEntry);
+  } catch {
+    return readLegacy().map(migrateEntry);
+  }
+}
+
+/** Grava o histórico, podado a `MAX_RUNS`. Devolve o que de fato ficou
+ * gravado: se o navegador recusar por falta de espaço, as mais antigas saem
+ * até caber, como no `localStorage` — só que aqui isso não deve acontecer. */
+export async function saveHistory(entries: HistoryEntry[]): Promise<HistoryEntry[]> {
+  let kept = entries.slice(0, MAX_RUNS);
+  while (true) {
+    try {
+      await writeEntries(STORE_KEY, kept);
+      return kept;
+    } catch (error) {
+      const quota = (error as DOMException | null)?.name === "QuotaExceededError";
+      if (!quota || kept.length === 0) return kept;
+      kept = kept.slice(0, kept.length - 1);
+    }
+  }
 }
 
 /** Uma execução gravada em disco pela API, de volta para a lista.
@@ -266,7 +308,7 @@ function describeScenario(
 
 export function describeComparison(run: ComparisonRun): string {
   // O número de execuções vem primeiro: é o que muda a leitura do resultado —
-  // com poucas seeds a dispersão da caixa mal se lê. E são os braços **que
+  // com poucas seeds a faixa interquartil mal se lê. E são os braços **que
   // rodaram**, não os dois canônicos: rodar um só é metade do tempo e metade
   // do que a tela mostra.
   const arms = run.config.arms?.length ?? COMPARISON_ARMS.length;

@@ -1,3 +1,4 @@
+import { PALETTE } from "./profileColors";
 import type { SavedPreset } from "./savedPresets";
 import type { DisciplineInput, Scenario } from "./types";
 
@@ -34,9 +35,9 @@ const POPULATION: Pick<
   // e são o que torna 0 e 10 alcançáveis: o forte quase nunca zera e tira 10
   // em 3% das disciplinas; o fraco zera em 3% e quase nunca tira 10.
   performance_profiles: [
-    { name: "Alto desempenho", mode_grade: 9, zero_rate: 0.0005, max_rate: 0.03 },
-    { name: "Médio desempenho", mode_grade: 8, zero_rate: 0.005, max_rate: 0.008 },
-    { name: "Baixo desempenho", mode_grade: 6.5, zero_rate: 0.03, max_rate: 0.0015 },
+    { name: "Alto desempenho", color: PALETTE.green, mode_grade: 9, zero_rate: 0.0005, max_rate: 0.03 },
+    { name: "Médio desempenho", color: PALETTE.yellow, mode_grade: 8, zero_rate: 0.005, max_rate: 0.008 },
+    { name: "Baixo desempenho", color: PALETTE.red, mode_grade: 6.5, zero_rate: 0.03, max_rate: 0.0015 },
   ],
   // As horas que o aluno tem para o período, resorteadas a cada semestre. As
   // modas são W_a, dois terços e um terço — 28 h, 20 h e 10 h —, e o que de
@@ -46,9 +47,9 @@ const POPULATION: Pick<
   // A moda fica logo abaixo de W_a na alta, e não em cima: com o pico no teto
   // não existe log-normal que ainda o alcance com a frequência pedida.
   availability_profiles: [
-    { name: "Alta disponibilidade", mode_hours: 22, full_load_rate: 0.5 },
-    { name: "Média disponibilidade", mode_hours: 16, full_load_rate: 0.05 },
-    { name: "Baixa disponibilidade", mode_hours: 8, full_load_rate: 0.001 },
+    { name: "Alta disponibilidade", color: PALETTE.green, mode_hours: 22, full_load_rate: 0.5 },
+    { name: "Média disponibilidade", color: PALETTE.yellow, mode_hours: 16, full_load_rate: 0.05 },
+    { name: "Baixa disponibilidade", color: PALETTE.red, mode_hours: 8, full_load_rate: 0.001 },
   ],
   // O múltiplo do score médio abaixo do qual o aluno não pede nem financia.
   // Em 0 não há corte — é o **especulador**, que pede tudo e gasta o
@@ -57,24 +58,24 @@ const POPULATION: Pick<
   // compensa, que é metade da pergunta que o algoritmo genético existia para
   // responder.
   selectivity_profiles: [
-    { name: "Neutra", value: 0 },
-    { name: "Baixíssima", value: 0.125 },
-    { name: "Baixa", value: 0.25 },
-    { name: "Média", value: 0.5 },
-    { name: "Alta", value: 1 },
-    { name: "Altíssima", value: 2 },
+    { name: "Neutra", color: PALETTE.gray, value: 0 },
+    { name: "Baixíssima", color: PALETTE.red, value: 0.125 },
+    { name: "Baixa", color: PALETTE.yellow, value: 0.25 },
+    { name: "Média", color: PALETTE.green, value: 0.5 },
+    { name: "Alta", color: PALETTE.blue, value: 1 },
+    { name: "Altíssima", color: PALETTE.violet, value: 2 },
   ],
   // O expoente do score sobre a utilidade: 1 é o lance sincero, abaixo achata
   // e acima concentra. A **invertida** é o controle do absurdo — aposta mais
   // no que quer menos —, a **homogênea** testa a premissa da Seção 2.2 sobre
   // revelação de preferência, e a de 3 mostra a saturação.
   concentration_profiles: [
-    { name: "Invertida", value: -1 },
-    { name: "Homogênea", value: 0 },
-    { name: "Diluída", value: 0.5 },
-    { name: "Neutra", value: 1 },
-    { name: "Concentrada", value: 2 },
-    { name: "Muito concentrada", value: 3 },
+    { name: "Invertida", color: PALETTE.violet, value: -1 },
+    { name: "Homogênea", color: PALETTE.blue, value: 0 },
+    { name: "Diluída", color: PALETTE.green, value: 0.5 },
+    { name: "Neutra", color: PALETTE.gray, value: 1 },
+    { name: "Concentrada", color: PALETTE.yellow, value: 2 },
+    { name: "Muito concentrada", color: PALETTE.red, value: 3 },
   ],
   // μ = 1 põe a moda da fonte em e^{μ−σ²} = 1, e a prévia se lê; ele não mexe
   // em alocação, porque some na normalização. σ = 1 dá coeficiente de variação

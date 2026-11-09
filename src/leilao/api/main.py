@@ -23,13 +23,14 @@ from ..auction import AuctionInput, Bid, run_auction
 from ..comparison import ARM_BY_KEY, arm_config, arms_from_keys, run_comparison
 from ..config import Discipline, SimulationConfig
 from ..entities import Agent, Good, MutualExclusion
-from ..playground import PlaygroundDiscipline, PlaygroundStudent, run_playground
+from ..playground import PlaygroundClass, PlaygroundStudent, run_playground
 from ..simulation import run_simulation
 from .storage import save_result
 from .schemas import (
     ArmResultOut,
     CompareRequest,
     CompareResponse,
+    PlaygroundClosingOut,
     PlaygroundGradeOut,
     PlaygroundRequest,
     PlaygroundResponse,
@@ -37,6 +38,7 @@ from .schemas import (
     PlaygroundRoundStudentOut,
     RunRequest,
     RunResponse,
+    AxisBandsOut,
     RunSummaryOut,
     ScenarioIn,
     TracePeriodOut,
@@ -151,8 +153,9 @@ def compare(req: CompareRequest) -> CompareResponse:
     As seeds vão de 1 a N e são pareadas: a simulação i de um braço e a do outro
     partem da mesma população, das mesmas utilidades e das mesmas notas. A
     resposta traz só as métricas de alocação, já reduzidas a um valor por
-    simulação — nada de crédito e nenhum recorte, porque o que se compara aqui é
-    o modelo, não o que acontece dentro de cada um.
+    simulação, e as séries por período de cada braço — no agregado e em cada
+    recorte (coorte e os quatro eixos de perfil) —, reduzidas a quartis entre
+    as seeds. Nada de crédito: ele não existe do lado da linha de base.
 
     É uma simulação completa por braço e por seed; com um cenário grande a
     requisição leva dezenas de segundos.
@@ -181,6 +184,7 @@ def compare(req: CompareRequest) -> CompareResponse:
                 mechanism=arm.mechanism,
                 credit_return=arm.credit_return,
                 runs=[RunSummaryOut.model_validate(r) for r in arm.runs],
+                series=[AxisBandsOut.model_validate(a) for a in arm.series],
             )
             for arm in result.arms
         ],
@@ -193,8 +197,8 @@ def compare(req: CompareRequest) -> CompareResponse:
 def trace(req: TraceRequest) -> TraceResponse:
     """Refaz uma simulação da comparação e devolve o que cada aluno pediu.
 
-    O par `(braço, seed)` endereça uma das simulações que `/compare` resumiu num
-    ponto do boxplot, e a configuração passa pelo mesmo `arm_config` que ela
+    O par `(braço, seed)` endereça uma das simulações que `/compare` resumiu numa
+    linha das tabelas, e a configuração passa pelo mesmo `arm_config` que ela
     usou — então o que volta aqui é literalmente a simulação de que aquele
     ponto saiu, e não uma parecida.
 
@@ -245,8 +249,9 @@ def playground(req: PlaygroundRequest) -> PlaygroundResponse:
             mode_grade=req.mode_grade,
             zero_rate=req.zero_rate,
             max_rate=req.max_rate,
-            disciplines=[
-                PlaygroundDiscipline(d.name, d.seats, d.hours) for d in req.disciplines
+            classes=[
+                PlaygroundClass(c.name, c.seats, c.hours, c.discipline)
+                for c in req.classes
             ],
             students=[
                 PlaygroundStudent(
@@ -256,6 +261,9 @@ def playground(req: PlaygroundRequest) -> PlaygroundResponse:
                     s.max_hours,
                     s.utilities,
                     tuple(s.eligible),
+                    availability=s.availability,
+                    selectivity=s.selectivity,
+                    concentration=s.concentration,
                 )
                 for s in req.students
             ],
@@ -284,10 +292,19 @@ def playground(req: PlaygroundRequest) -> PlaygroundResponse:
             )
             for round_ in result.rounds
         ],
+        closing=[
+            PlaygroundClosingOut(
+                student_id=row.student_id,
+                load=row.load,
+                retained=list(row.retained),
+                excluded=list(row.excluded),
+            )
+            for row in result.closing
+        ],
         grades=[
             PlaygroundGradeOut(
                 student_id=grade.student_id,
-                discipline=grade.discipline,
+                name=grade.name,
                 grade=grade.grade,
             )
             for grade in result.grades

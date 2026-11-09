@@ -8,12 +8,18 @@ interface PlaygroundStudent {
   credits: number;
   cr: number;
   maxHours: number;
+  /** δ em horas, já realizada: aqui não há perfil de onde sorteá-la. */
+  availability: number;
+  selectivity: number;
+  concentration: number;
+  /** Utilidade por **turma**: é a turma que se aloca, como na simulação. */
   rows: Record<string, number>;
 }
 
 export interface PlaygroundDraft {
   mechanism: Mechanism;
   rounds: number;
+  /** Vagas de cada turma. */
   seats: number;
   seed: number;
   modeGrade: number;
@@ -40,6 +46,27 @@ export function createPlaygroundDraft(config: Scenario): PlaygroundDraft {
   };
 }
 
+interface OfferedClass {
+  name: string;
+  discipline: string;
+  hours: number;
+}
+
+/** As turmas do cenário, na ordem da grade. Espelha
+ * `SimulationConfig.classes_of`: turma única tem o nome da disciplina, e as
+ * demais ganham o sufixo " T1", " T2"… */
+function offeredClasses(disciplines: DisciplineInput[]): OfferedClass[] {
+  return disciplines.flatMap(({ name, hours, classes }) =>
+    (classes ?? 1) <= 1
+      ? [{ name, discipline: name, hours }]
+      : Array.from({ length: classes }, (_, i) => ({
+          name: `${name} T${i + 1}`,
+          discipline: name,
+          hours,
+        }))
+  );
+}
+
 function newStudent(id: string, label: string, config: Scenario): PlaygroundStudent {
   return {
     id,
@@ -47,6 +74,12 @@ function newStudent(id: string, label: string, config: Scenario): PlaygroundStud
     credits: config.base_credits,
     cr: 7,
     maxHours: config.max_hours,
+    // Disponibilidade que cobre a carga e os dois valores neutros: o aluno
+    // novo não exclui nada e manda a mensagem sincera, como o `Student`
+    // construído à mão no motor.
+    availability: config.max_hours,
+    selectivity: 0,
+    concentration: 1,
     rows: {},
   };
 }
@@ -67,11 +100,12 @@ export function Playground({
   const [utility, setUtility] = useState(1);
   const selected = draft.students[draft.selected] ?? draft.students[0];
   const auction = draft.mechanism === "credits";
+  const offer = offeredClasses(config.disciplines);
   const listed = Object.keys(selected.rows)
-    .map((name) => config.disciplines.find((discipline) => discipline.name === name))
-    .filter((discipline): discipline is DisciplineInput => discipline !== undefined);
-  const remaining = config.disciplines.filter((discipline) => selected.rows[discipline.name] === undefined);
-  const adding = remaining.find((discipline) => discipline.name === toAdd) ?? remaining[0];
+    .map((name) => offer.find((offered) => offered.name === name))
+    .filter((offered): offered is OfferedClass => offered !== undefined);
+  const remaining = offer.filter((offered) => selected.rows[offered.name] === undefined);
+  const adding = remaining.find((offered) => offered.name === toAdd) ?? remaining[0];
 
   function patchStudent(update: (student: PlaygroundStudent) => PlaygroundStudent) {
     setDraft({
@@ -114,15 +148,16 @@ export function Playground({
           mode_grade: draft.modeGrade,
           zero_rate: draft.zeroRate,
           max_rate: draft.maxRate,
-          disciplines: config.disciplines.map(({ name, hours }) => ({
+          classes: offer.map(({ name, discipline, hours }) => ({
             name,
+            discipline,
             seats: draft.seats ?? 1,
             hours,
           })),
           students: draft.students.map((student) => {
-            const eligible = config.disciplines
-              .filter((discipline) => student.rows[discipline.name] !== undefined)
-              .map((discipline) => discipline.name);
+            const eligible = offer
+              .filter((offered) => student.rows[offered.name] !== undefined)
+              .map((offered) => offered.name);
             return {
               id: student.id,
               credits: student.credits,
@@ -130,6 +165,9 @@ export function Playground({
               max_hours: student.maxHours,
               utilities: Object.fromEntries(eligible.map((name) => [name, student.rows[name]])),
               eligible,
+              availability: student.availability ?? student.maxHours,
+              selectivity: student.selectivity ?? 0,
+              concentration: student.concentration ?? 1,
             };
           }),
         })
@@ -169,7 +207,7 @@ export function Playground({
             />
           </div>
           <div className="field">
-            <label>Vagas por disciplina</label>
+            <label>Vagas por turma</label>
             <input
               type="number"
               min={1}
@@ -302,16 +340,64 @@ export function Playground({
               }
             />
           </div>
+          <div className="field">
+            <label>CH disponível</label>
+            <input
+              type="number"
+              min={0}
+              value={selected.availability ?? selected.maxHours}
+              onChange={(e) =>
+                patchStudent((student) => ({ ...student, availability: Number(e.target.value) }))
+              }
+            />
+          </div>
+          <div className="field">
+            <label>Seletividade</label>
+            <input
+              type="number"
+              min={0}
+              step={0.125}
+              list="submochila-seletividade"
+              value={selected.selectivity ?? 0}
+              onChange={(e) =>
+                patchStudent((student) => ({ ...student, selectivity: Number(e.target.value) }))
+              }
+            />
+            <datalist id="submochila-seletividade">
+              {config.selectivity_profiles.map((profile) => (
+                <option key={profile.name} value={profile.value} label={profile.name} />
+              ))}
+            </datalist>
+          </div>
+          <div className="field">
+            <label>Concentração</label>
+            <input
+              type="number"
+              min={-3}
+              max={5}
+              step={0.5}
+              list="submochila-concentracao"
+              value={selected.concentration ?? 1}
+              onChange={(e) =>
+                patchStudent((student) => ({ ...student, concentration: Number(e.target.value) }))
+              }
+            />
+            <datalist id="submochila-concentracao">
+              {config.concentration_profiles.map((profile) => (
+                <option key={profile.name} value={profile.value} label={profile.name} />
+              ))}
+            </datalist>
+          </div>
         </div>
 
         {adding && (
           <div className="field-row">
             <div className="field grow">
-              <label>Disciplina</label>
+              <label>Turma</label>
               <select value={adding.name} onChange={(e) => setToAdd(e.target.value)}>
-                {remaining.map((discipline) => (
-                  <option key={discipline.name} value={discipline.name}>
-                    {discipline.name}
+                {remaining.map((offered) => (
+                  <option key={offered.name} value={offered.name}>
+                    {offered.name}
                   </option>
                 ))}
               </select>
@@ -338,28 +424,28 @@ export function Playground({
           <table>
             <thead>
               <tr>
-                <th>Disciplina</th>
+                <th>Turma</th>
                 <th style={{ width: 80 }}>Carga</th>
                 <th style={{ width: 120 }}>Utilidade</th>
                 <th style={{ width: 90 }} />
               </tr>
             </thead>
             <tbody>
-              {listed.map((discipline) => (
-                <tr key={discipline.name}>
-                  <td>{discipline.name}</td>
-                  <td className="muted-cell">{discipline.hours} h</td>
+              {listed.map((offered) => (
+                <tr key={offered.name}>
+                  <td>{offered.name}</td>
+                  <td className="muted-cell">{offered.hours} h</td>
                   <td>
                     <input
                       type="number"
                       min={0.01}
                       step={0.1}
-                      value={selected.rows[discipline.name]}
-                      onChange={(e) => setUtilityOf(discipline.name, Number(e.target.value))}
+                      value={selected.rows[offered.name]}
+                      onChange={(e) => setUtilityOf(offered.name, Number(e.target.value))}
                     />
                   </td>
                   <td>
-                    <button className="link" onClick={() => removeDiscipline(discipline.name)}>
+                    <button className="link" onClick={() => removeDiscipline(offered.name)}>
                       remover
                     </button>
                   </td>
@@ -376,7 +462,14 @@ export function Playground({
         </div>
       </div>
 
-      {result && <PlaygroundResult result={result} labels={draft.students} auction={auction} />}
+      {result && (
+        <PlaygroundResult
+          result={result}
+          labels={draft.students}
+          auction={auction}
+          hours={Object.fromEntries(offer.map(({ name, hours }) => [name, hours]))}
+        />
+      )}
     </div>
   );
 }
@@ -399,12 +492,28 @@ function PlaygroundResult({
   result,
   labels,
   auction,
+  hours,
 }: {
   result: PlaygroundResponse;
   labels: { id: string; label: string }[];
   auction: boolean;
+  hours: Record<string, number>;
 }) {
   const label = (id: string) => labels.find((student) => student.id === id)?.label ?? id;
+  const grades = new Map(
+    result.grades.map((grade) => [`${grade.student_id}\u0000${grade.name}`, grade.grade])
+  );
+  // A ordem da grade, que é a mesma das duas listas: cursadas e excluídas
+  // intercaladas como a disciplina aparece no cenário.
+  const closing = result.closing
+    .map((row) => ({
+      ...row,
+      obtained: Object.keys(hours).filter(
+        (name) => row.retained.includes(name) || row.excluded.includes(name)
+      ),
+      taken: row.retained.reduce((sum, name) => sum + (hours[name] ?? 0), 0),
+    }))
+    .filter((row) => row.obtained.length > 0);
   return (
     <>
       {result.rounds.map((round) => (
@@ -415,7 +524,7 @@ function PlaygroundResult({
               <tr>
                 <th>Aluno</th>
                 <th>Resultado</th>
-                <th>Disciplina</th>
+                <th>Turma</th>
                 <th>Utilidade</th>
                 {auction && <th>Lance</th>}
                 {auction && <th>Preço</th>}
@@ -460,26 +569,46 @@ function PlaygroundResult({
         </div>
       ))}
       <div className="panel">
-        <h2>Notas</h2>
-        {result.grades.length === 0 ? (
+        <h2>Fechamento</h2>
+        {closing.length === 0 ? (
           <p className="empty-state">Nenhuma disciplina conquistada.</p>
         ) : (
           <table>
             <thead>
               <tr>
                 <th>Aluno</th>
-                <th>Disciplina</th>
+                <th>Situação</th>
+                <th>Turma</th>
                 <th>Nota</th>
+                <th>CH disponível</th>
+                <th>CH cursada</th>
               </tr>
             </thead>
             <tbody>
-              {result.grades.map((grade) => (
-                <tr key={`${grade.student_id}-${grade.discipline}`}>
-                  <td>{label(grade.student_id)}</td>
-                  <td>{grade.discipline}</td>
-                  <td>{grade.grade.toLocaleString("pt-BR")}</td>
-                </tr>
-              ))}
+              {closing.map((row) =>
+                row.obtained.map((name, index) => {
+                  const excluded = row.excluded.includes(name);
+                  const grade = grades.get(`${row.student_id}\u0000${name}`);
+                  return (
+                    <tr key={`${row.student_id}-${name}`}>
+                      {index === 0 && <td rowSpan={row.obtained.length}>{label(row.student_id)}</td>}
+                      <td>
+                        <span className={`outcome ${excluded ? "dropped" : "approved"}`}>
+                          {excluded ? "Excluída" : "Cursada"}
+                        </span>
+                      </td>
+                      <td>{name}</td>
+                      <td>{grade === undefined ? "—" : grade.toLocaleString("pt-BR")}</td>
+                      {index === 0 && (
+                        <td rowSpan={row.obtained.length}>
+                          {row.load === null ? "—" : `${row.load} h`}
+                        </td>
+                      )}
+                      {index === 0 && <td rowSpan={row.obtained.length}>{row.taken} h</td>}
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         )}

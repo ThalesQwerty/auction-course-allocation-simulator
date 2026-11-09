@@ -252,31 +252,23 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "request_states",
         "time_to_graduate",
         "allocations_per_round",
-        "by_period",
-        "by_cohort",
     }
-    # A série por período é o mesmo recorte sem reduzir: as mesmas métricas —
-    # a saturação inclusive, que ali vira uma linha por período —, mais o peso
-    # de cada ponto e o número do período a que ele pertence. O tempo de
-    # formatura não entra: é da execução inteira.
-    assert set(payload["arms"][0]["runs"][0]["by_period"]) == {
-        "period",
-        "students",
-        "efficiency",
-        "utilization",
-        "fidelity",
-        "fairness",
-        "correlation",
-        "exclusion_rate",
-        "request_states",
-        "allocations_per_round",
-    }
-    # O recorte por geração leva as mesmas, mais o tempo de formatura — que ali
-    # existe, porque cada aluno pertence a uma geração só — e os concluintes,
-    # que são o denominador dele.
-    assert set(payload["arms"][0]["runs"][0]["by_cohort"]) == {
+    # As séries por período saem por braço, já reduzidas entre as seeds: o
+    # agregado e os cinco recortes, cada grupo com `[q1, mediana, q3]` por
+    # grandeza e período.
+    series = payload["arms"][0]["series"]
+    assert [axis["axis"] for axis in series] == [
+        "overall",
         "cohort",
-        "graduates",
+        "performance",
+        "availability",
+        "selectivity",
+        "concentration",
+    ]
+    overall = series[0]["groups"][0]
+    assert set(overall) == {"group", "period", "n", "values"}
+    assert {
+        "students",
         "graduation_rate",
         "efficiency",
         "utilization",
@@ -284,10 +276,11 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "fairness",
         "correlation",
         "exclusion_rate",
-        "request_states",
-        "time_to_graduate",
-        "allocations_per_round",
-    }
+        "approved",
+        "round_1",
+    } <= set(overall["values"])
+    for band in overall["values"]["efficiency"]:
+        assert band is None or band[0] <= band[1] <= band[2]
 
 
 def test_compare_reports_the_time_to_graduate_with_its_denominator(client):

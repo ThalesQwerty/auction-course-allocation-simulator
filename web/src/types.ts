@@ -81,6 +81,9 @@ export const cohortLabel = (entryPeriod: number): string => `Coorte ${entryPerio
 export interface PerformanceProfile {
   /** Rótulo de relatório; precisa ser único dentro do seu eixo. */
   name: string;
+  /** Cor do grupo nos gráficos. Ausente em cenário gravado antes dela: a tela
+   * cai na paleta por posição (`profileColor`). */
+  color?: string;
   mode_grade: number; // em (0, 10)
   zero_rate: number; // em (0, 1)
   max_rate: number; // em (0, 1)
@@ -101,6 +104,7 @@ export interface PerformanceProfile {
 export interface Profile {
   /** Rótulo de relatório; precisa ser único dentro do seu eixo. */
   name: string;
+  color?: string;
   mode_hours: number; // > 0, abaixo de W_a
   full_load_rate: number; // em (0, 1)
 }
@@ -117,6 +121,7 @@ export interface Profile {
  * Espelha `api.schemas.SelectivityProfileIn`. */
 export interface SelectivityProfile {
   name: string;
+  color?: string;
   value: number; // >= 0
 }
 
@@ -129,6 +134,7 @@ export interface SelectivityProfile {
  * Espelha `api.schemas.ConcentrationProfileIn`. */
 export interface ConcentrationProfile {
   name: string;
+  color?: string;
   value: number; // entre -3 e 5
 }
 
@@ -256,14 +262,14 @@ export type Mechanism = "credits" | "ranking";
  * 3. **Retorno**: quem aprova recupera a fatia do preço correspondente à
  *    nota. É a única fonte de mérito do leilão.
  *
- * **Só entra aqui o que sai nos resultados**: cada braço é uma caixa do
- * boxplot e uma linha das tabelas, e nada roda para não ser mostrado.
+ * **Só entra aqui o que sai nos resultados**: cada braço é um traçado dos
+ * gráficos e uma linha das tabelas, e nada roda para não ser mostrado.
  *
  * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas. */
 interface ArmDescription {
   key: string;
   label: string;
-  /** Rótulo do eixo do boxplot: embaixo da caixa cabe pouco, e o nome inteiro
+  /** Rótulo curto: em espaço apertado cabe pouco, e o nome inteiro
    * fica na legenda. */
   short: string;
   hint: string;
@@ -373,44 +379,8 @@ export interface PeriodSeries {
   allocations_per_round: (number | null)[][];
 }
 
-/** O mesmo resumo da simulação, uma linha por coorte — o terceiro eixo da tela.
- *
- * A coorte é o período de ingresso (t_a): a coorte 3 é quem entrou no período
- * 3, e o aluno fica nela do ingresso ao diploma. O recorte particiona a
- * população, e a redução é a mesma do agregado — o que muda é sobre quem ela
- * corre.
- *
- * **As coortes não são intercambiáveis.** A primeira encontra uma universidade
- * quase vazia e a última a encontra cheia, de modo que a inclinação ao longo do
- * eixo mistura mecanismo e mercado. O que se lê com segurança é a comparação
- * **vertical**: os braços num mesmo ponto, que é a mesma coorte da mesma
- * população sob regras diferentes.
- *
- * Aqui o tempo de formatura **entra** — cada aluno pertence a uma coorte só —,
- * e vem com os concluintes, o denominador sem o qual ele não se lê. */
-export interface CohortSeries {
-  cohort: number[];
-  graduates: number[];
-  /** A fração da coorte que concluiu: os concluintes sobre quantos entraram
-   * naquele período. É ela que se desenha — a contagem depende do tamanho do
-   * ingresso, a fração é comparável entre coortes. */
-  graduation_rate: number[];
-  efficiency: number[];
-  utilization: number[];
-  fidelity: number[];
-  fairness: number[];
-  correlation: number[];
-  exclusion_rate: number[];
-  request_states: RequestStates[];
-  /** `null` na coorte em que ninguém concluiu. */
-  time_to_graduate: (number | null)[];
-  /** A saturação da coorte, rodada a rodada — lê-se por coluna, como a de
-   * período: a 1ª rodada de cada coorte, a 2ª de cada coorte. */
-  allocations_per_round: (number | null)[][];
-}
-
 /** Uma simulação reduzida a um ponto por métrica — o que vira um valor dentro
- * de uma caixa. As três de período são a média **ponderada pelos alunos
+ * das tabelas. As três de período são a média **ponderada pelos alunos
  * medidos**: a simulação termina numa fase de drenagem, e uma média simples
  * daria a um período final de vinte alunos o mesmo peso de um período cheio. O
  * tempo de formatura não é de período — é da simulação inteira. */
@@ -442,7 +412,7 @@ export interface RunSummary {
    * para produzir. */
   exclusion_rate: number;
   /** Os seis estados em média por aluno, reduzidos a um ponto cada. A série
-   * sem reduzir está em `by_period` e `by_cohort`. */
+   * por período está em `ArmResult.series`. */
   request_states: RequestStates;
   /** Períodos do ingresso ao diploma, na média dos concluintes; conta o período
    * da formatura. `null` quando ninguém concluiu — zero ali se leria como
@@ -456,14 +426,11 @@ export interface RunSummary {
    * somadas dão as vagas por aluno do período. E, como o calouro está fora do
    * recorte, a matrícula garantida não infla a primeira. */
   allocations_per_round: (number | null)[];
-  /** As mesmas métricas de período, período a período: o material de que a
-   * média ponderada saiu. **Opcional** porque comparações gravadas antes dela
-   * existir não a trazem — e aí o modo por período some em vez de desenhar
-   * vazio. */
+  /** A série por período desta simulação. Só existe em comparação gravada
+   * antes de 09/11/2026, quando a redução entre seeds era feita na tela; hoje
+   * a API manda `ArmResult.series` já reduzida. É dela que sai o recorte
+   * "Geral" dessas comparações antigas (`legacyBands`). */
   by_period?: PeriodSeries;
-  /** O mesmo resumo por coorte. **Opcional** pelo mesmo motivo que
-   * `by_period`: execução gravada antes dele existir não o traz. */
-  by_cohort?: CohortSeries;
 }
 
 /** Um dos modelos comparados e as suas N simulações. O rótulo em português está
@@ -474,6 +441,44 @@ export interface ArmResult {
   mechanism: Mechanism;
   credit_return: CreditReturnPolicy;
   runs: RunSummary[];
+  /** As séries por período, reduzidas entre as seeds: o agregado e cada
+   * recorte. Ausente em comparação gravada antes de 09/11/2026. */
+  series?: AxisBands[];
+}
+
+/** Os recortes da tela de comparação. `overall` é a universidade inteira, um
+ * grupo só; `cohort` é o período de ingresso; os outros quatro são os eixos
+ * de perfil. */
+export type CutAxis =
+  | "overall"
+  | "cohort"
+  | "performance"
+  | "availability"
+  | "selectivity"
+  | "concentration";
+
+/** `[q1, mediana, q3]` entre as seeds. */
+export type Band = [number, number, number];
+
+/** Um grupo de um recorte, reduzido entre as seeds período a período.
+ * `values[k][i]` é a faixa da grandeza `k` no período `period[i]`, ou `null`
+ * se nenhuma seed a mediu. `n[i]` é quantas seeds mediram o grupo ali.
+ *
+ * As grandezas: `students`, `graduation_rate` (acumulada), `efficiency`,
+ * `utilization`, `fidelity`, `fairness`, `correlation`, `exclusion_rate`, os
+ * seis estados de solicitação pelo nome e `round_<r>` para a saturação.
+ *
+ * Espelha `api.schemas.GroupBandsOut`. */
+export interface GroupBands {
+  group: string;
+  period: number[];
+  n: number[];
+  values: Record<string, (Band | null)[]>;
+}
+
+export interface AxisBands {
+  axis: CutAxis;
+  groups: GroupBands[];
 }
 
 export interface CompareResponse {
@@ -762,7 +767,7 @@ export interface StudentHistory {
  *
  * Aqui a seed não é ignorada como em `/compare` — ela é o que se pede. E o
  * retorno de créditos e o resolvedor continuam de fora: quem os impõe é o
- * braço, que é o que faz o traço ser a mesma simulação que o boxplot resumiu. */
+ * braço, que é o que faz o traço ser a mesma simulação que a comparação resumiu. */
 export interface TraceRequest extends Omit<Scenario, "seed" | "credit_return"> {
   arm: string;
   seed: number;
@@ -777,8 +782,8 @@ export interface TracePeriod {
 
 /** Uma simulação inteira, aluno a aluno — a tela de depuração do projeto.
  *
- * É a parte pesada do resultado (uns 10 MB no preset Computação, contra 100 kB
- * do resumo da comparação), e por isso **não** é persistida no `localStorage`
+ * É a parte pesada do resultado (uns 10 MB no preset Computação, contra uns
+ * 450 kB do resumo da comparação), e por isso **não** é persistida no histórico
  * nem vem junto de `/compare`: quem quer o caso individual o pede, e só
  * daquela simulação. A simulação é determinística, então refazê-la custa tempo
  * e não fidelidade. */
@@ -807,7 +812,8 @@ export interface PlaygroundRequest {
   mode_grade: number;
   zero_rate: number;
   max_rate: number;
-  disciplines: { name: string; seats: number; hours: number }[];
+  /** Turmas: o bem alocado. `discipline` é o clique — ninguém leva duas. */
+  classes: { name: string; discipline: string; seats: number; hours: number }[];
   students: {
     id: string;
     credits: number;
@@ -815,6 +821,10 @@ export interface PlaygroundRequest {
     max_hours: number;
     utilities: Record<string, number>;
     eligible: string[];
+    /** Horas já realizadas; ausente, o aluno leva tudo o que obteve. */
+    availability?: number;
+    selectivity: number;
+    concentration: number;
   }[];
 }
 
@@ -833,9 +843,19 @@ export interface PlaygroundRound {
   students: PlaygroundRoundStudent[];
 }
 
+export interface PlaygroundClosing {
+  student_id: string;
+  /** Ŵ_a; `null` quando a disponibilidade não foi dada. */
+  load: number | null;
+  retained: string[];
+  excluded: string[];
+}
+
 export interface PlaygroundResponse {
   rounds: PlaygroundRound[];
-  grades: { student_id: string; discipline: string; grade: number }[];
+  closing: PlaygroundClosing[];
+  /** Só do que foi cursado: a excluída não recebe nota. `name` é a turma. */
+  grades: { student_id: string; name: string; grade: number }[];
 }
 
 /** |T| — o horizonte que esgota a população, dado o ciclo de vida dela.

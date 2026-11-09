@@ -509,6 +509,17 @@ input.invalid {
   text-decoration: line-through;
 }
 
+/* Separa as cores (grupos) dos traçados (modelos) na mesma legenda. */
+.legend-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+
+.line-sample {
+  flex: none;
+}
+
 /* Os dois modos de ler as métricas de alocação: a distribuição entre as
    execuções e o perfil dentro delas. Não é filtro nem opção de estilo — é a
    troca do eixo horizontal, e por isso fica no cabeçalho da seção. */
@@ -562,22 +573,6 @@ input.invalid {
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 10px;
-}
-
-/* O boxplot é SVG desenhado à mão — não há primitiva dele no recharts. O
-   contêiner é o referencial do tooltip, que é posicionado em pixels sobre a
-   faixa onde o mouse está. */
-.boxplot {
-  position: relative;
-  margin-top: 4px;
-}
-
-.boxplot-tooltip {
-  position: absolute;
-  top: 12px;
-  pointer-events: none;
-  min-width: 132px;
-  z-index: 1;
 }
 
 .tooltip {
@@ -1472,6 +1467,49 @@ td.failed {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* A cor do grupo: um quadrado como o da legenda, na altura dos campos. */
+.profile-row .color-field {
+  flex: 0 0 auto;
+  position: relative;
+}
+/* A altura sai da mesma tipografia, padding e borda do `input` — o conteúdo é
+   um espaço —, para o quadrado acompanhar o campo ao lado sem número mágico. */
+.color-swatch {
+  box-sizing: border-box;
+  width: 25px;
+  font-size: 13px;
+  line-height: normal;
+  padding: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.color-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(5, 22px);
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+.color-option {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.color-option.on {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
 }
 /* A mensagem de validação ocupa a linha inteira, abaixo dos campos. */
 .profile-row .invalid-text {

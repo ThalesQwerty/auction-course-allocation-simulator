@@ -156,7 +156,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
         <h2>Histórico de um aluno ou de uma disciplina</h2>
         <p>
           O caso individual por trás dos agregados: uma simulação, período a período e
-          rodada a rodada. O par (modelo, simulação) endereça um dos pontos dos boxplots, e
+          rodada a rodada. O par (modelo, simulação) endereça uma das linhas das tabelas, e
           a simulação é refeita no servidor — determinística, então é a mesma de que o
           ponto saiu. A vista por aluno lista todas as disciplinas elegíveis dele, inclusive
           as que não pediu; a por disciplina lista quem a pediu naquela rodada.

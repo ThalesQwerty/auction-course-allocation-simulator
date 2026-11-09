@@ -110,6 +110,11 @@ class RoundReport:
     # reproduz `overall`.
     by_cohort: list[GroupSnapshot]
     prices: PriceStats | None
+    # O mesmo instante por perfil, um recorte por eixo — `performance`,
+    # `availability`, `selectivity` e `concentration` —, cada um na ordem em
+    # que o cenário declara os grupos. Também particiona `overall`. A API de
+    # traço não o publica: quem o lê é a comparação, que o reduz por período.
+    by_profile: dict[str, list[GroupSnapshot]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -25,11 +25,15 @@ import { COMPARISON_ARMS } from "./types";
 
 export default function App() {
   const [choice, setChoice] = useState<PresetChoice>(initialChoice);
-  // Os cenários salvos no navegador. Leitura preguiçosa, como o
-  // histórico: `localStorage` só é tocado na primeira renderização.
+  // Os cenários salvos no navegador. Leitura preguiçosa: `localStorage` só é
+  // tocado na primeira renderização.
   const [saved, setSaved] = useState(loadSavedPresets);
   const config = choice.config;
-  const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
+  // O histórico vem do IndexedDB, que é assíncrono: a lista começa vazia e se
+  // preenche quando a leitura termina. `loaded` segura a gravação até lá —
+  // sem ele, a lista vazia do primeiro render sobrescreveria o que está salvo.
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState<View>({ kind: "config" });
   const [playground, setPlayground] = useState<PlaygroundDraft | null>(null);
   // O modo e o número de execuções não são do cenário: o mesmo cenário se roda
@@ -42,11 +46,31 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  useEffect(() => {
+    let alive = true;
+    loadHistory().then((stored) => {
+      if (!alive) return;
+      // O que entrou antes de a leitura terminar (uma execução rápida, um
+      // arquivo carregado) fica no topo, como se tivesse entrado depois.
+      setHistory((current) => [...current, ...stored].slice(0, MAX_RUNS));
+      setLoaded(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // O histórico mora no navegador: execuções antigas sobrevivem a um recarregamento.
   useEffect(() => {
-    const kept = saveHistory(history);
-    if (kept.length !== history.length) setHistory(kept);
-  }, [history]);
+    if (!loaded) return;
+    let alive = true;
+    saveHistory(history).then((kept) => {
+      if (alive && kept.length !== history.length) setHistory(kept);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [history, loaded]);
 
   /** Carrega um resultado gravado em disco e o abre. Ele entra no histórico
    * como qualquer execução — o arquivo tem o mesmo formato. */

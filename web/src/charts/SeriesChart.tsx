@@ -1,22 +1,14 @@
-/** O gráfico de séries — o perfil de uma métrica ao longo do horizonte.
- *
- * É a outra leitura do mesmo material do boxplot, e a diferença está no eixo
- * horizontal. Lá ele é categórico: cada caixa é um modelo, e o que se lê é a
- * **distribuição** de uma média entre as simulações. Aqui ele é **ordenado** —
- * o período —, e o que se lê é a trajetória que aquela média resume. Por isso
- * a linha é lícita aqui e não seria sobre as seeds: entre o período 5 e o 6 há
- * caminho; entre a seed 5 e a 6 não há nada, e uma linha ali desenharia uma
- * tendência que é só a ordem do sorteio.
+/** O gráfico de séries — uma métrica ao longo do horizonte, período a período.
  *
  * **A linha é a mediana entre as simulações, e a faixa é o intervalo
- * interquartil.** A mediana, e não a média, porque é o número que as caixas e
- * as tabelas já usam — duas estatísticas para a mesma grandeza na mesma tela
- * obrigariam quem lê a reconciliá-las. A faixa não é enfeite: sem ela, linhas
- * lisas convidam a ler um vão de 0,01 como real quando as simulações se
- * espalham por 0,08 — e os quartis exatos ficam no tooltip.
+ * interquartil.** A redução já vem feita da API (`GroupBands`): aqui só se
+ * desenha. A faixa não é enfeite: sem ela, linhas lisas convidam a ler um vão
+ * de 0,01 como real quando as simulações se espalham por 0,08.
  *
- * **A legenda alterna.** Com quatro braços sobrepostos, isolar dois é o que
- * torna um vão legível — e é assim que a figura vai para o texto.
+ * **Duas codificações, uma por dimensão.** A cor é o grupo do recorte (um
+ * perfil, uma coorte); o traçado é o modelo (contínuo, tracejado). A legenda
+ * alterna cada uma por conta própria: esconder um traçado deixa todas as cores
+ * de um modelo só, e esconder cores isola grupos nos dois modelos.
  */
 import { useMemo, useState } from "react";
 import {
@@ -30,49 +22,73 @@ import {
   YAxis,
 } from "recharts";
 
-import { boxStats, paddedScale } from "../equations";
-import type { BoxStats } from "../equations";
+import { paddedScale } from "../equations";
 import { formatRatio } from "./format";
 import { inkFor, usePrefersDark } from "./theme";
 
-const HEIGHT = 200;
+const HEIGHT = 220;
 
-/** Folga menor que a do boxplot, e pelo mesmo motivo que ele tem a dele: a
- * faixa é a metade central da amostra, não os extremos. Só vale para métrica
- * sem contradomínio — ver `paddedScale`. */
+/** Folga da régua quando a métrica não tem contradomínio — ver `paddedScale`. */
 const PADDING = 0.1;
 
-export interface SeriesPoint {
+/** Um período de uma linha: a faixa entre as seeds e quantas a mediram. */
+export interface BandPoint {
   x: number;
-  y: number;
+  q1: number;
+  median: number;
+  q3: number;
+  n: number;
 }
 
-export interface SeriesGroup {
+/** Uma linha do gráfico: um grupo do recorte sob um modelo. */
+export interface SeriesLine {
+  group: string;
+  arm: string;
+  points: BandPoint[];
+}
+
+/** Um grupo do recorte, com a cor que o cenário lhe deu. */
+export interface SeriesGroupStyle {
+  key: string;
   label: string;
-  /** Uma amostra por simulação. Cada uma traz os próprios `x`: as seeds não
-   * precisam cobrir o mesmo intervalo, e na cauda do horizonte de fato não
-   * cobrem — quem esvaziou antes para de publicar período. */
-  samples: SeriesPoint[][];
+  color: string;
 }
 
-/** O que foi medido num ponto do eixo: os cinco números entre as simulações que
- * chegaram até ali. São os mesmos de `boxStats` de propósito — a linha é a
- * mediana de uma caixa que não se desenha, e as duas leituras da tela não
- * podem sair de estatísticas diferentes. */
-interface Summary {
-  stats: BoxStats;
+/** Um modelo, com o traçado da linha dele (`strokeDasharray`; vazio é
+ * contínuo). */
+export interface SeriesArmStyle {
+  key: string;
+  label: string;
+  dash: string;
 }
 
-const summarize = (values: number[]): Summary | null => {
-  const stats = boxStats(values);
-  return stats ? { stats } : null;
-};
+/** O traço de amostra de um modelo, para a legenda e o tooltip. */
+export function LineSample({ dash, color }: { dash: string; color: string }) {
+  return (
+    <svg className="line-sample" width="22" height="10" aria-hidden="true">
+      <line
+        x1="1"
+        y1="5"
+        x2="21"
+        y2="5"
+        stroke={color}
+        strokeWidth="2"
+        strokeDasharray={dash || undefined}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+const lineKey = (line: { arm: string; group: string }) => `${line.arm}|${line.group}`;
+const bandKey = (key: string) => `${key} (faixa)`;
 
 export function SeriesChart({
   title,
   accent,
+  lines,
   groups,
-  colors,
+  arms,
   format = formatRatio,
   bounds,
   zeroLine = false,
@@ -81,92 +97,89 @@ export function SeriesChart({
 }: {
   title: string;
   /** Cor do quadrado ao lado do título, quando o que o gráfico mostra é um
-   * **estado** e não uma grandeza — os seis de uma solicitação. Amarra o
-   * painel aos mesmos tons da tela individual, sem que a cor precise carregar
-   * a identidade sozinha: o nome está no título. */
+   * **estado** e não uma grandeza — os seis de uma solicitação. */
   accent?: string;
-  groups: SeriesGroup[];
-  colors: Record<string, string>;
+  lines: SeriesLine[];
+  groups: SeriesGroupStyle[];
+  arms: SeriesArmStyle[];
   format?: (value: number) => string;
   /** O contradomínio da métrica. Com os dois limites finitos, **a régua é
    * ele** — a série se desenha na escala da grandeza, e não na da amostra. */
   bounds?: [number, number];
   /** Marca o zero quando o sinal da métrica é o que se lê (λ). */
   zeroLine?: boolean;
-  /** Quantas simulações cada braço tem. Serve ao tooltip, para avisar quando o
-   * ponto foi medido sobre menos que todas — na cauda do horizonte parte das
-   * seeds já esvaziou, e ali a amostra não é a mesma do começo do eixo. */
+  /** Quantas simulações cada modelo tem. O tooltip avisa quando o ponto foi
+   * medido sobre menos que todas. */
   runs: number;
   xLabel?: (x: number) => string;
 }) {
   const dark = usePrefersDark();
   const ink = inkFor(dark);
-  const [hidden, setHidden] = useState<Record<string, boolean>>({});
+  const [hiddenGroups, setHiddenGroups] = useState<Record<string, boolean>>({});
+  const [hiddenArms, setHiddenArms] = useState<Record<string, boolean>>({});
 
-  /** Memoizado porque dele saem a tabela e a régua: alternar a legenda não
-   * muda `groups`, e sem isso cada clique recalcularia os quartis de todas as
-   * simulações. */
-  const visible = useMemo(
-    () => groups.filter((group) => !hidden[group.label]),
-    [groups, hidden]
+  const colorOf = useMemo(
+    () => Object.fromEntries(groups.map((g) => [g.key, g.color])),
+    [groups]
   );
+  const dashOf = useMemo(
+    () => Object.fromEntries(arms.map((a) => [a.key, a.dash])),
+    [arms]
+  );
+  const groupLabel = useMemo(
+    () => Object.fromEntries(groups.map((g) => [g.key, g.label])),
+    [groups]
+  );
+  const armLabel = useMemo(
+    () => Object.fromEntries(arms.map((a) => [a.key, a.label])),
+    [arms]
+  );
+
+  const visible = useMemo(
+    () => lines.filter((line) => !hiddenGroups[line.group] && !hiddenArms[line.arm]),
+    [lines, hiddenGroups, hiddenArms]
+  );
+
+  /** Por linha, o ponto de cada período — o que o tooltip consulta. */
+  const byX = useMemo(() => {
+    const table = new Map<string, Map<number, BandPoint>>();
+    lines.forEach((line) =>
+      table.set(lineKey(line), new Map(line.points.map((p) => [p.x, p])))
+    );
+    return table;
+  }, [lines]);
 
   /** O eixo: a união dos períodos publicados, em ordem. */
   const xs = useMemo(() => {
     const seen = new Set<number>();
-    groups.forEach((group) =>
-      group.samples.forEach((sample) => sample.forEach((point) => seen.add(point.x)))
-    );
+    lines.forEach((line) => line.points.forEach((p) => seen.add(p.x)));
     return [...seen].sort((a, b) => a - b);
-  }, [groups]);
-
-  /** Por braço e por ponto do eixo, o resumo entre as simulações. */
-  const summaries = useMemo(() => {
-    const table: Record<string, Map<number, Summary>> = {};
-    groups.forEach((group) => {
-      const byX = new Map<number, number[]>();
-      group.samples.forEach((sample) =>
-        sample.forEach((point) => {
-          const bucket = byX.get(point.x);
-          if (bucket) bucket.push(point.y);
-          else byX.set(point.x, [point.y]);
-        })
-      );
-      const summarized = new Map<number, Summary>();
-      byX.forEach((values, x) => {
-        const summary = summarize(values);
-        if (summary) summarized.set(x, summary);
-      });
-      table[group.label] = summarized;
-    });
-    return table;
-  }, [groups]);
+  }, [lines]);
 
   const data = useMemo(
     () =>
       xs.map((x) => {
         const row: Record<string, number | [number, number] | null> = { x };
-        visible.forEach((group) => {
-          const summary = summaries[group.label]?.get(x);
-          row[group.label] = summary ? summary.stats.median : null;
-          row[bandKey(group.label)] = summary
-            ? [summary.stats.q1, summary.stats.q3]
-            : null;
+        visible.forEach((line) => {
+          const key = lineKey(line);
+          const point = byX.get(key)?.get(x);
+          row[key] = point ? point.median : null;
+          row[bandKey(key)] = point ? [point.q1, point.q3] : null;
         });
         return row;
       }),
-    [xs, visible, summaries]
+    [xs, visible, byX]
   );
 
-  /** A régua sai dos quartis desenhados — mas só quando a métrica não tem
-   * contradomínio; tendo, é ele. */
-  const spread = visible.flatMap((group) =>
-    [...(summaries[group.label]?.values() ?? [])].flatMap((summary) => [
-      summary.stats.q1,
-      summary.stats.q3,
-    ])
-  );
+  const spread = visible.flatMap((line) => line.points.flatMap((p) => [p.q1, p.q3]));
   const scale = paddedScale(spread, { bounds, zeroLine, padding: PADDING });
+  // Com muitas linhas as faixas se somam e viram névoa; mais leves, elas
+  // continuam dizendo onde a amostra se espalha sem cobrir as medianas.
+  const bandOpacity = visible.length > 4 ? 0.05 : 0.12;
+
+  const toggle =
+    (set: typeof setHiddenGroups, key: string) => () =>
+      set((current) => ({ ...current, [key]: !current[key] }));
 
   return (
     <figure className="chart-card">
@@ -178,21 +191,33 @@ export function SeriesChart({
       </figcaption>
 
       <div className="legend">
-        {groups.map((group) => (
+        {groups.length > 1 &&
+          groups.map((group) => (
+            <button
+              type="button"
+              className={`legend-item legend-toggle${hiddenGroups[group.key] ? " off" : ""}`}
+              key={`g-${group.key}`}
+              aria-pressed={!hiddenGroups[group.key]}
+              onClick={toggle(setHiddenGroups, group.key)}
+            >
+              <span className="swatch" style={{ background: group.color }} />
+              {group.label}
+            </button>
+          ))}
+        {groups.length > 1 && <span className="legend-divider" aria-hidden="true" />}
+        {arms.map((arm) => (
           <button
             type="button"
-            className={`legend-item legend-toggle${hidden[group.label] ? " off" : ""}`}
-            key={group.label}
-            aria-pressed={!hidden[group.label]}
-            onClick={() =>
-              setHidden((current) => ({
-                ...current,
-                [group.label]: !current[group.label],
-              }))
-            }
+            className={`legend-item legend-toggle${hiddenArms[arm.key] ? " off" : ""}`}
+            key={`a-${arm.key}`}
+            aria-pressed={!hiddenArms[arm.key]}
+            onClick={toggle(setHiddenArms, arm.key)}
           >
-            <span className="swatch" style={{ background: colors[group.label] }} />
-            {group.label}
+            <LineSample
+              dash={arm.dash}
+              color={groups.length === 1 ? groups[0].color : ink.secondary}
+            />
+            {arm.label}
           </button>
         ))}
       </div>
@@ -224,9 +249,13 @@ export function SeriesChart({
             cursor={{ stroke: ink.axis }}
             content={
               <PeriodTip
-                groups={visible}
-                summaries={summaries}
-                colors={colors}
+                lines={visible}
+                byX={byX}
+                colorOf={colorOf}
+                dashOf={dashOf}
+                groupLabel={groupLabel}
+                armLabel={armLabel}
+                showGroup={groups.length > 1}
                 format={format}
                 runs={runs}
                 dark={dark}
@@ -234,26 +263,26 @@ export function SeriesChart({
               />
             }
           />
-          {/* As faixas primeiro, para as medianas ficarem por cima de todas —
-              senão a linha de um braço some sob a faixa do vizinho. */}
-          {visible.map((group) => (
+          {/* As faixas primeiro, para as medianas ficarem por cima de todas. */}
+          {visible.map((line) => (
             <Area
-              key={bandKey(group.label)}
-              dataKey={bandKey(group.label)}
+              key={bandKey(lineKey(line))}
+              dataKey={bandKey(lineKey(line))}
               stroke="none"
-              fill={colors[group.label]}
-              fillOpacity={0.12}
+              fill={colorOf[line.group]}
+              fillOpacity={bandOpacity}
               isAnimationActive={false}
               connectNulls
               activeDot={false}
             />
           ))}
-          {visible.map((group) => (
+          {visible.map((line) => (
             <Line
-              key={group.label}
+              key={lineKey(line)}
               type="monotone"
-              dataKey={group.label}
-              stroke={colors[group.label]}
+              dataKey={lineKey(line)}
+              stroke={colorOf[line.group]}
+              strokeDasharray={dashOf[line.arm] || undefined}
               strokeWidth={2}
               dot={false}
               isAnimationActive={false}
@@ -266,22 +295,19 @@ export function SeriesChart({
   );
 }
 
-/** A chave da faixa de um braço na tabela que o recharts lê. Sai do rótulo
- * para a série e a faixa andarem juntas sem uma segunda estrutura. */
-const bandKey = (label: string) => `${label} (faixa)`;
-
-/** No mouse: um período, e o que cada braço mediu nele.
- *
- * Em ordem decrescente de mediana, como no `SeriesTip` das outras séries — com
- * várias linhas no mesmo ponto, a ordem da legenda obrigaria a procurar. O `n`
- * só aparece quando o ponto foi medido sobre menos simulações que o total: é o
- * aviso de que ali a amostra mudou. */
+/** No mouse: um período, e o que cada linha mediu nele, em ordem decrescente
+ * de mediana. O `n` só aparece quando o ponto foi medido sobre menos
+ * simulações que o total. */
 function PeriodTip({
   active,
   label,
-  groups,
-  summaries,
-  colors,
+  lines,
+  byX,
+  colorOf,
+  dashOf,
+  groupLabel,
+  armLabel,
+  showGroup,
   format,
   runs,
   dark,
@@ -289,9 +315,13 @@ function PeriodTip({
 }: {
   active?: boolean;
   label?: number;
-  groups: SeriesGroup[];
-  summaries: Record<string, Map<number, Summary>>;
-  colors: Record<string, string>;
+  lines: SeriesLine[];
+  byX: Map<string, Map<number, BandPoint>>;
+  colorOf: Record<string, string>;
+  dashOf: Record<string, string>;
+  groupLabel: Record<string, string>;
+  armLabel: Record<string, string>;
+  showGroup: boolean;
   format: (value: number) => string;
   runs: number;
   dark: boolean;
@@ -299,24 +329,28 @@ function PeriodTip({
 }) {
   if (!active || label === undefined) return null;
   const ink = inkFor(dark);
-  const rows = groups
-    .map((group) => ({ group, summary: summaries[group.label]?.get(label) }))
-    .filter((row): row is { group: SeriesGroup; summary: Summary } => !!row.summary)
-    .sort((a, b) => b.summary.stats.median - a.summary.stats.median);
+  const rows = lines
+    .map((line) => ({ line, point: byX.get(lineKey(line))?.get(label) }))
+    .filter((row): row is { line: SeriesLine; point: BandPoint } => !!row.point)
+    .sort((a, b) => b.point.median - a.point.median);
   if (!rows.length) return null;
 
   return (
     <div className="tooltip">
       <div className="tooltip-title">{xLabel(label)}</div>
-      {rows.map(({ group, summary }) => (
-        <div className="tooltip-row" key={group.label}>
-          <span className="swatch" style={{ background: colors[group.label] }} />
-          <span className="tooltip-label">{group.label}</span>
+      {rows.map(({ line, point }) => (
+        <div className="tooltip-row" key={lineKey(line)}>
+          <LineSample dash={dashOf[line.arm]} color={colorOf[line.group]} />
+          <span className="tooltip-label">
+            {showGroup
+              ? `${groupLabel[line.group] ?? line.group} · ${armLabel[line.arm] ?? line.arm}`
+              : armLabel[line.arm] ?? line.arm}
+          </span>
           <span className="tooltip-value" style={{ color: ink.secondary }}>
-            {format(summary.stats.median)}
+            {format(point.median)}
             <span className="tooltip-aside">
-              {` ${format(summary.stats.q1)}–${format(summary.stats.q3)}`}
-              {summary.stats.n < runs ? ` · n=${summary.stats.n}` : ""}
+              {` ${format(point.q1)}–${format(point.q3)}`}
+              {point.n < runs ? ` · n=${point.n}` : ""}
             </span>
           </span>
         </div>

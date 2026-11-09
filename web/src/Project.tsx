@@ -415,19 +415,19 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
 
       <h2>Como ler os resultados</h2>
       <p>
-        Uma <strong>comparação</strong> abre quatro boxplots — satisfação (ψ̄), equidade (φ),
-        correlação (λ) e tempo de formatura —, com uma caixa por modelo: a linha grossa é a
-        mediana, a caixa é a metade central das simulações, os bigodes vão até 1,5 IQR. Nas três
-        primeiras, cada valor é uma simulação reduzida à média dos períodos ponderada pelos alunos
-        medidos; o tempo de formatura é da simulação inteira. O que se lê é a sobreposição — caixas
-        que não se tocam separam os mecanismos; caixas sobrepostas dizem que a diferença entre as
-        medianas cabe dentro da variação entre populações. Como as seeds são pareadas, a tabela
-        ainda informa em quantas delas o leilão saiu melhor, que é uma leitura independente da
-        primeira.
+        Uma <strong>comparação</strong> desenha cada métrica ao longo do horizonte, período a
+        período. A linha é a mediana entre as simulações e a faixa é o intervalo interquartil.
+        A cor é o grupo do <strong>recorte</strong> escolhido — a universidade inteira, a
+        coorte ou um dos quatro eixos de perfil — e o traçado é o modelo: contínuo para o
+        leilão, tracejado para o CR. A legenda esconde cores e traçados separadamente. O que se
+        lê é a sobreposição das faixas: faixas que não se tocam separam os mecanismos; faixas
+        sobrepostas dizem que a diferença cabe dentro da variação entre populações. As tabelas
+        reduzem cada simulação à média dos períodos ponderada pelos alunos medidos e, como as
+        seeds são pareadas, informam em quantas delas o leilão saiu melhor.
       </p>
       <p>
         Uma seção à parte mede a <strong>saturação da demanda</strong>: as vagas obtidas por aluno
-        em cada rodada, um boxplot por rodada. Cada um conta o que foi ganho <em>naquela</em>
+        em cada rodada, um gráfico por rodada. Cada um conta o que foi ganho <em>naquela</em>
         rodada, não o acumulado, então o que se lê é o <strong>decaimento</strong> entre eles. Uma
         das hipóteses do trabalho é que o leilão satura mais rápido — atende mais demanda em menos
         rodadas —, e é aqui que isso aparece: quem atende mais de saída começa alto e cai rápido,

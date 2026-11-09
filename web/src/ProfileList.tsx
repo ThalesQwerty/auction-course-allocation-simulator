@@ -20,15 +20,88 @@
  * vez de todas as curvas sobrepostas, que com cinco ou seis grupos vira
  * emaranhado.
  */
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { gradeShape } from "./equations";
+import { PRESET_COLORS, nextColor, profileColor } from "./profileColors";
 import type { PerformanceProfile, Profile } from "./types";
+
+/** O quadrado da cor do grupo, como o da legenda do gráfico. O clique abre a
+ * paleta; escolher fecha, e clicar fora também. */
+function ColorPicker({
+  color,
+  onChange,
+  label,
+}: {
+  color: string;
+  onChange: (color: string) => void;
+  label: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
+  return (
+    <div className="field color-field" ref={root}>
+      <label>Cor</label>
+      <button
+        type="button"
+        className="color-swatch"
+        style={{ background: color }}
+        aria-label={`Cor de ${label}`}
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
+        {"\u00a0"}
+      </button>
+      {open && (
+        <div className="color-popover" role="listbox" onClick={(e) => e.stopPropagation()}>
+          {PRESET_COLORS.map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              role="option"
+              aria-selected={option.value === color}
+              title={option.name}
+              className={`color-option${option.value === color ? " on" : ""}`}
+              style={{ background: option.value }}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Row({
   selected,
   onSelect,
   name,
   onName,
+  color,
+  onColor,
   removable,
   onRemove,
   children,
@@ -38,6 +111,8 @@ function Row({
   onSelect: () => void;
   name: string;
   onName: (value: string) => void;
+  color: string;
+  onColor: (value: string) => void;
   removable: boolean;
   onRemove: () => void;
   children: ReactNode;
@@ -48,6 +123,7 @@ function Row({
       className={`profile-row${selected ? " on" : ""}${warning ? " invalid" : ""}`}
       onClick={onSelect}
     >
+      <ColorPicker color={color} onChange={onColor} label={name} />
       <div className="field">
         <label>Nome</label>
         <input
@@ -120,6 +196,7 @@ export function PerformanceProfileList({
           profiles.map((p) => p.name),
           "desempenho"
         ),
+        color: nextColor(profiles),
         mode_grade: last?.mode_grade ?? 8,
         zero_rate: last?.zero_rate ?? 0.005,
         max_rate: last?.max_rate ?? 0.008,
@@ -148,6 +225,8 @@ export function PerformanceProfileList({
             onSelect={() => onSelect(index)}
             name={profile.name}
             onName={(name) => replace(index, { name })}
+            color={profileColor(profile, index)}
+            onColor={(color) => replace(index, { color })}
             removable={profiles.length > 1}
             onRemove={() => {
               onChange(profiles.filter((_, i) => i !== index));
@@ -237,6 +316,7 @@ export function AvailabilityProfileList({
           profiles.map((p) => p.name),
           "disponibilidade"
         ),
+        color: nextColor(profiles),
         mode_hours: last?.mode_hours ?? Math.round(top * 0.8),
         full_load_rate: last?.full_load_rate ?? 0.1,
       },
@@ -253,6 +333,8 @@ export function AvailabilityProfileList({
           onSelect={() => onSelect(index)}
           name={profile.name}
           onName={(name) => replace(index, { name })}
+          color={profileColor(profile, index)}
+          onColor={(color) => replace(index, { color })}
           removable={profiles.length > 1}
           onRemove={() => {
             onChange(profiles.filter((_, i) => i !== index));
@@ -305,6 +387,7 @@ export function AvailabilityProfileList({
 interface StrategyProfile {
   name: string;
   value: number;
+  color?: string;
 }
 
 /** O editor dos eixos de estratégia. Um só componente para os dois porque a
@@ -347,6 +430,7 @@ export function StrategyProfileList<T extends StrategyProfile>({
           profiles.map((p) => p.name),
           base
         ),
+        color: nextColor(profiles),
         value: last?.value ?? fallback,
       } as T,
     ]);
@@ -381,6 +465,8 @@ export function StrategyProfileList<T extends StrategyProfile>({
             onSelect={() => {}}
             name={profile.name}
             onName={(name) => replace(index, { name })}
+            color={profileColor(profile, index)}
+            onColor={(color) => replace(index, { color })}
             removable={profiles.length > 1}
             onRemove={() => onChange(profiles.filter((_, i) => i !== index))}
             warning={warning}

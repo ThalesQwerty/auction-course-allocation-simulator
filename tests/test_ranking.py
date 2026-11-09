@@ -3,6 +3,7 @@ dois mecanismos (Seção 7.3)."""
 import dataclasses
 from collections import Counter
 
+import numpy as np
 import pytest
 
 from leilao.behavior import DISTRIBUTION_BINS
@@ -12,13 +13,19 @@ from leilao.comparison import (
     ARMS,
     MAX_RUNS,
     allocations_per_round,
+    bands,
     run_comparison,
     summarize,
 )
 from leilao.equations import weighted_mean
 from profiles import single_axis
 from disciplines import disciplines_from_predecessors
-from leilao.config import Discipline, SimulationConfig
+from leilao.config import (
+    DEFAULT_CONCENTRATION,
+    DEFAULT_SELECTIVITY,
+    Discipline,
+    SimulationConfig,
+)
 from leilao.ranking import allocate_by_ilp, allocate_by_ranking, request_set
 from leilao.simulation import GUARANTEED_ROUND, run_simulation
 
@@ -342,66 +349,106 @@ def test_the_series_by_period_is_the_material_of_the_weighted_mean():
     assert recomputed == pytest.approx(summary.efficiency)
 
 
-def test_the_cohorts_partition_the_aggregate():
-    """Somadas com o peso delas, as gerações reproduzem o agregado da execução.
+# Dois grupos em dois dos eixos de perfil, para o recorte ter o que repartir.
+# A coorte (4) cabe nas 6 vagas de entrada da grade de teste.
+MIXED = dict(
+    students_per_profile=1,
+    selectivity_profiles=DEFAULT_SELECTIVITY[:2],
+    concentration_profiles=DEFAULT_CONCENTRATION[2:4],
+)
 
-    Vale porque o recorte **particiona** a população: cada aluno-período está em
-    exatamente uma geração. A identidade é exata nas métricas que são média por
-    aluno — ψ̄, aproveitamento e fidelidade. φ e λ ficam de fora e não por
-    descuido: o índice de Jain e a correlação de Pearson não são médias, e o
-    valor do todo não se recompõe dos valores das partes.
+
+@pytest.mark.parametrize(
+    "axis", ["cohort", "performance", "availability", "selectivity", "concentration"]
+)
+def test_each_cut_partitions_the_aggregate_period_by_period(axis):
+    """Em cada período, os grupos de um recorte somados com o peso deles
+    reproduzem o agregado — o recorte **particiona** a população.
+
+    A identidade é exata nas métricas que são média por aluno — ψ̄,
+    aproveitamento e fidelidade. φ e λ ficam de fora e não por descuido: o
+    índice de Jain e a correlação de Pearson não são médias, e o valor do todo
+    não se recompõe dos valores das partes.
     """
+    result = run_simulation(make_config(**MIXED))
+    summary = summarize(result, seed=3)
+    groups = summary.by_group[axis]
+    overall = summary.by_period
+
+    assert groups
+    for index, period in enumerate(overall.period):
+        assert sum(
+            g.series.students[g.series.period.index(period)]
+            for g in groups
+            if period in g.series.period
+        ) == overall.students[index]
+        for name in ("efficiency", "utilization", "fidelity"):
+            recomposed = weighted_mean(
+                [
+                    (
+                        getattr(g.series, name)[g.series.period.index(period)],
+                        g.series.students[g.series.period.index(period)],
+                    )
+                    for g in groups
+                    if period in g.series.period
+                ]
+            )
+            assert recomposed == pytest.approx(getattr(overall, name)[index]), name
+
+
+def test_the_profile_cuts_follow_the_scenario_order():
+    """Os grupos de um eixo de perfil saem na ordem em que o cenário os
+    declara — é a ordem da legenda."""
+    config = make_config(**MIXED)
+    summary = summarize(run_simulation(config), seed=3)
+
+    assert [g.group for g in summary.by_group["selectivity"]] == [
+        p.name for p in config.selectivity_profiles
+    ]
+    assert [g.group for g in summary.by_group["concentration"]] == [
+        p.name for p in config.concentration_profiles
+    ]
+
+
+def test_the_graduation_rate_is_cumulative_over_who_entered():
+    """A fração de concluintes por período é acumulada: quem já concluiu até
+    ali sobre quem já tinha entrado. Mora em [0, 1] e, por coorte, nunca
+    desce — ninguém deixa de ter concluído."""
     result = run_simulation(make_config())
     summary = summarize(result, seed=3)
-    series = summary.by_cohort
 
-    # O peso de cada geração: os alunos medidos dela, somados no horizonte.
-    weights = {cohort: 0 for cohort in series.cohort}
-    for period in result.periods:
-        for snapshot in period.aggregate.by_cohort:
-            if snapshot.group is None or snapshot.metrics is None:
-                continue
-            if int(snapshot.group) in weights:
-                weights[int(snapshot.group)] += snapshot.metrics.students
+    for entry in summary.by_group["cohort"]:
+        rates = entry.series.graduation_rate
+        assert all(0.0 <= rate <= 1.0 for rate in rates)
+        assert rates == sorted(rates)
 
-    assert sum(weights.values()) > 0
-    for name in ("efficiency", "utilization", "fidelity"):
-        recomposed = weighted_mean(
-            [
-                (value, weights[cohort])
-                for cohort, value in zip(series.cohort, getattr(series, name))
-            ]
+    last = result.periods[-1].aggregate.overall
+    if summary.by_period.period and summary.by_period.period[-1] == result.periods[-1].period:
+        assert summary.by_period.graduation_rate[-1] == pytest.approx(
+            last.graduated / last.population
         )
-        assert recomposed == pytest.approx(getattr(summary, name)), name
 
 
-def test_the_cohort_series_carries_the_time_to_graduate_with_its_denominator():
-    """Aqui o tempo de formatura existe — cada aluno pertence a uma geração só.
-    E vem com `graduates`: geração sem concluinte tem tempo nulo, não zero."""
-    summary = summarize(run_simulation(make_config()), seed=3)
-    series = summary.by_cohort
+def test_the_bands_reduce_the_seeds_to_quartiles():
+    """A faixa de um braço é `(q1, mediana, q3)` entre as seeds, período a
+    período, e `n` conta quantas seeds mediram o ponto."""
+    summaries = [summarize(run_simulation(make_config(seed=seed)), seed=seed) for seed in (1, 2, 3)]
+    axes = bands(summaries)
 
-    assert len(series.time_to_graduate) == len(series.cohort)
-    for span, graduates in zip(series.time_to_graduate, series.graduates):
-        assert (span is None) == (graduates == 0)
-
-
-def test_the_graduation_rate_is_the_graduates_over_the_cohort_that_entered():
-    """A fração é a contagem sobre quem entrou naquele período — todo mundo
-    que entrou, e não só quem chegou a ser medido. Por isso ela mora em [0, 1]:
-    ninguém conclui duas vezes, e ninguém conclui sem ter entrado."""
-    result = run_simulation(make_config())
-    series = summarize(result, seed=3).by_cohort
-
-    entered = Counter(student.entry_period for student in result.students)
-
-    assert len(series.graduation_rate) == len(series.cohort)
-    for cohort, graduates, rate in zip(
-        series.cohort, series.graduates, series.graduation_rate
-    ):
-        assert entered[cohort] > 0
-        assert rate == pytest.approx(graduates / entered[cohort])
-        assert 0.0 <= rate <= 1.0
+    assert [a.axis for a in axes] == [
+        "overall", "cohort", "performance", "availability", "selectivity", "concentration"
+    ]
+    overall = axes[0].groups[0]
+    for index, period in enumerate(overall.period):
+        values = [
+            s.by_period.efficiency[s.by_period.period.index(period)]
+            for s in summaries
+            if period in s.by_period.period
+        ]
+        assert overall.n[index] == len(values)
+        q1, median, q3 = overall.values["efficiency"][index]
+        assert q1 <= median <= q3
+        assert median == pytest.approx(float(np.median(values)), abs=1e-4)
 
 
 def test_the_saturation_by_period_reduces_to_the_aggregate_one():

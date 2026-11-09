@@ -15,8 +15,8 @@ equidade e correlação da Seção 7.3.
 São **dois mecanismos de alocação** sobre o mesmo modelo de universidade: o
 **leilão por créditos** proposto (Seção 7.1) e a **ordenação por CR** que serve
 de linha de base (Seção 7.3.1, eqs. 49-50). A **comparação** roda o mesmo
-cenário em cada **braço**, N vezes, e mostra só as métricas de alocação em
-boxplot.
+cenário em cada **braço**, N vezes, e mostra as métricas de alocação período a
+período, recortadas por coorte ou por um dos quatro eixos de perfil.
 
 São **dois braços**, e só. A complexidade do trabalho foi para os parâmetros —
 os dois eixos de perfil e a disponibilidade —, e por equilíbrio saiu dos
@@ -85,7 +85,7 @@ Simulador/
 ├── examples/             # Script de exemplo executável
 └── web/src/
     ├── equations/        # O espelho das fórmulas no navegador
-    ├── charts/           # Tema, formatos e as três marcas (boxplot, densidade, histograma)
+    ├── charts/           # Tema, formatos e as marcas (séries, densidade, histograma)
     ├── App.tsx           # Shell: barra lateral, navegação e histórico
     ├── Sidebar.tsx       # Menu, lista de execuções e limpeza do histórico
     ├── Config.tsx        # Formulário do cenário, com as três prévias
@@ -99,9 +99,10 @@ Simulador/
     ├── GradeGraph.tsx    # A grade desenhada, com a cadeia de pré-requisitos
     ├── Playground.tsx    # A decisão de um aluno, passo a passo
     ├── Project.tsx       # Visão teórica do projeto
-    ├── Comparison.tsx    # Boxplots e tabelas de uma comparação
+    ├── Comparison.tsx    # Séries por período, recorte e tabelas de uma comparação
     ├── Trace.tsx         # O caso individual: um aluno ou uma disciplina, rodada a rodada
-    └── history.ts        # Histórico de execuções (localStorage)
+    ├── history.ts        # Histórico de execuções: formato, migrações e leitura
+    └── historyStore.ts   # Onde o histórico mora: IndexedDB
 ```
 
 **Onde ficam as contas.** Nenhuma fórmula do modelo mora dentro de um laço:
@@ -120,7 +121,7 @@ há banco de dados — cada execução é independente e reprodutível pela seed
 O detalhe de **uma** das simulações fica numa rota à parte, `/trace`: o mesmo
 cenário mais o par (braço, seed) que a endereça, e de volta o que cada aluno
 pediu em cada rodada. Ele é pedido sob demanda porque é a resposta grande da
-API — uns 10 MB contra 100 kB do resumo —, e refazer a simulação é legítimo
+API — uns 10 MB contra uns 450 kB do resumo —, e refazer a simulação é legítimo
 porque ela é determinística: a mesma configuração dá a mesma execução.
 
 ## Como a simulação funciona
@@ -1497,15 +1498,26 @@ escondido lá.
 
 #### Tela de comparação
 
-Uma comparação tem **quatro boxplots** de alocação, um por métrica, mais **um
-por rodada** na seção de saturação — todos com **uma caixa por modelo**. A linha
-grossa é a mediana, a caixa é a metade central da amostra (1º ao 3º quartil),
-os bigodes vão até 1,5 IQR e o que sobra aparece como ponto solto. Cada valor
-dentro de uma caixa é uma simulação.
+Todo gráfico tem o **período** no eixo X: um por métrica de alocação, um por
+rodada na seção de saturação e um por estado de solicitação. A linha é a
+mediana entre as simulações e a faixa é o intervalo interquartil — a redução
+entre as seeds é feita pela API (`ArmResult.series`), porque a série de cada
+simulação por grupo e por período não caberia no histórico do navegador.
 
-O que se lê é a **sobreposição**: caixas que não se tocam separam os modelos;
-caixas sobrepostas dizem que a diferença entre as medianas cabe dentro da
-variação entre populações. Abaixo vêm três tabelas.
+O **recorte** vale para a tela inteira: Geral (a universidade toda), Coorte
+(período de ingresso) ou um dos quatro eixos de perfil — desempenho,
+disponibilidade, seletividade e concentração. A **cor** é o grupo do recorte,
+com a cor que o cenário deu a cada perfil (as coortes usam a paleta
+categórica); o **traçado** é o modelo — contínuo para o leilão, tracejado para
+o CR. A legenda alterna cores e traçados separadamente.
+
+O tempo de formatura não tem gráfico: é da simulação inteira, e a versão por
+período teria viés de sobrevivência. A fração de concluintes, por período, é
+**acumulada** — quem concluiu até ali sobre quem já tinha entrado.
+
+O que se lê é a **sobreposição** das faixas: faixas que não se tocam separam os
+modelos; faixas sobrepostas dizem que a diferença entre as medianas cabe dentro
+da variação entre populações. Abaixo vêm três tabelas.
 
 **O que o retorno de créditos muda** isola a pergunta que motivou o terceiro
 braço: os dois braços do leilão lado a lado, a diferença entre as medianas e a
@@ -1530,19 +1542,22 @@ As duas leituras não são equivalentes. Uma diferença pequena de medianas com
 quase todas as seeds a favor é um efeito consistente e pequeno — coisa bem
 diferente de um empate.
 
-O histórico fica no `localStorage` do navegador — sobrevive a um
+O histórico fica no **IndexedDB** do navegador — sobrevive a um
 recarregamento, guarda as 20 execuções mais recentes e é apagado por "Limpar
-histórico". O que ele guarda é o **resumo** da comparação (uns 100 kB); o
-detalhe aluno a aluno não cabe ali, e é o assunto da seção a seguir.
+histórico". O que ele guarda é o **resumo** da comparação (uns 450 kB com as
+séries de todos os recortes), e foi esse tamanho que o tirou do
+`localStorage`: com uns 5 MB por origem, ali só cabia uma dezena. O histórico
+antigo do `localStorage` é copiado para o IndexedDB na primeira abertura. O
+detalhe aluno a aluno não é guardado, e é o assunto da seção a seguir.
 
 #### Histórico de um aluno ou de uma disciplina
 
 No fim da tela de comparação está a saída para o outro extremo do agregado: um
 aluno, uma disciplina, uma rodada. Dois seletores endereçam **uma** simulação —
-o **modelo** e a **seed**, que juntos são um dos pontos dentro de uma caixa do
-boxplot —, e a interface pede ao `/trace` a simulação daquele par. Ela não vem
+o **modelo** e a **seed**, que juntos são uma linha da tabela "Simulação a
+simulação" —, e a interface pede ao `/trace` a simulação daquele par. Ela não vem
 junto do resultado nem é guardada: são uns 10 MB de JSON num cenário do
-tamanho do preset (cerca de 1 comprimido) contra 100 kB do resumo, e a
+tamanho do preset (cerca de 1 comprimido) contra uns 450 kB do resumo, e a
 simulação é
 determinística, então refazê-la custa segundos e não fidelidade. A configuração
 passa pelo mesmo `arm_config` que a comparação usou, e é isso que garante que o

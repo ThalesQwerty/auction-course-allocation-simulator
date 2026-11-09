@@ -5,7 +5,7 @@ recorte **particiona** a população do agregado, então somá-lo reproduz
 `overall` — é isso que permite trocar de agregação sem trocar de gráfico.
 
 O eixo é genérico de propósito (`Axis`): um recorte novo é uma chave e uma
-ordem. Foi assim que os recortes por perfil entraram e saíram.
+ordem. É assim que a coorte e os quatro eixos de perfil convivem.
 """
 from __future__ import annotations
 
@@ -47,6 +47,33 @@ class Axis:
             key=lambda s: str(s.entry_period),
             order=[str(entry) for entry in entry_periods if entry <= period],
         )
+
+    @classmethod
+    def profiles(cls, config: SimulationConfig) -> dict[str, "Axis"]:
+        """Os quatro eixos de perfil, na ordem em que o cenário os declara.
+
+        Ao contrário da coorte, a lista não depende do período: o grupo existe
+        desde o primeiro ingresso, e um recorte vazio sai com métrica `None`,
+        como qualquer outro.
+        """
+        return {
+            "performance": cls(
+                key=lambda s: s.performance.name,
+                order=[p.name for p in config.performance_profiles],
+            ),
+            "availability": cls(
+                key=lambda s: s.availability.name,
+                order=[p.name for p in config.availability_profiles],
+            ),
+            "selectivity": cls(
+                key=lambda s: s.selectivity.name,
+                order=[p.name for p in config.selectivity_profiles],
+            ),
+            "concentration": cls(
+                key=lambda s: s.concentration.name,
+                order=[p.name for p in config.concentration_profiles],
+            ),
+        }
 
 
 @dataclass(frozen=True)
@@ -282,11 +309,11 @@ def snapshot_groups(
     active: list[Student],
     students: list[Student],
     period: int,
-    axis: Axis,
+    axes: dict[str, Axis],
     values: Measurements,
     total_seats: int,
-) -> tuple[GroupSnapshot, list[GroupSnapshot]]:
-    """O agregado da universidade e o recorte do eixo, no mesmo instante.
+) -> tuple[GroupSnapshot, dict[str, list[GroupSnapshot]]]:
+    """O agregado da universidade e o recorte de cada eixo, no mesmo instante.
 
     A contagem de concluintes sai de varrer `students`, não de um livro-caixa
     à parte: `graduated_at` só é preenchido ao fim do período, então uma
@@ -325,13 +352,16 @@ def snapshot_groups(
         sum(1 for s in entered if s.dismissed_at is not None),
     )
 
-    members: dict[str, list[Student]] = {key: [] for key in axis.order}
-    for student in active:
-        members[axis.key(student)].append(student)
-    population = Counter(axis.key(s) for s in entered)
-    graduated = Counter(axis.key(s) for s in entered if s.graduated_at is not None)
-    dismissed = Counter(axis.key(s) for s in entered if s.dismissed_at is not None)
-    return overall, [
-        take(key, members[key], population[key], graduated[key], dismissed[key])
-        for key in axis.order
-    ]
+    def split(axis: Axis) -> list[GroupSnapshot]:
+        members: dict[str, list[Student]] = {key: [] for key in axis.order}
+        for student in active:
+            members[axis.key(student)].append(student)
+        population = Counter(axis.key(s) for s in entered)
+        graduated = Counter(axis.key(s) for s in entered if s.graduated_at is not None)
+        dismissed = Counter(axis.key(s) for s in entered if s.dismissed_at is not None)
+        return [
+            take(key, members[key], population[key], graduated[key], dismissed[key])
+            for key in axis.order
+        ]
+
+    return overall, {name: split(axis) for name, axis in axes.items()}
