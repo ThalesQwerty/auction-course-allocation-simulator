@@ -11,6 +11,7 @@
  */
 import { cohortSize } from "./equations";
 import { migrateInterest } from "./history";
+import { strategyDefaults } from "./presets";
 import { horizonFor } from "./types";
 import type { Scenario } from "./types";
 
@@ -43,6 +44,19 @@ const STORAGE_KEY = "leilao.cenarios.v2";
  * é que uma lista maior que isso deixa de se escolher de relance. */
 export const MAX_SAVED = 30;
 
+function withStrategy(config: Scenario): Scenario {
+  const defaults = strategyDefaults();
+  return {
+    ...config,
+    selectivity_profiles: Array.isArray(config.selectivity_profiles)
+      ? config.selectivity_profiles
+      : defaults.selectivity_profiles,
+    concentration_profiles: Array.isArray(config.concentration_profiles)
+      ? config.concentration_profiles
+      : defaults.concentration_profiles,
+  };
+}
+
 export function loadSavedPresets(): SavedPreset[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -54,7 +68,10 @@ export function loadSavedPresets(): SavedPreset[] {
         ...entry,
         // Salvo antes de 04/11/2026 traz `utility_sigma` e `utility_stability`,
         // e não traz `interest_mean`.
-        config: withoutGrade(migrateInterest(entry.config as Scenario)),
+        //
+        // Salvo antes de 05/11/2026 não traz os eixos de estratégia: entram os
+        // seis níveis padrão de cada um, que é o que a API usava na ausência.
+        config: withoutGrade(withStrategy(migrateInterest(entry.config as Scenario))),
       }));
   } catch {
     // localStorage indisponível (modo privado) ou conteúdo corrompido.

@@ -1,8 +1,10 @@
-/** Os editores dos dois eixos de perfil.
+/** Os editores dos quatro eixos de perfil.
  *
- * O perfil descreve o comportamento do aluno **fora do mecanismo**: se ele vai
- * bem na disciplina (desempenho) ou se a larga (disponibilidade). É traço
- * imutável — não evolui, não responde a sinal e o aluno não o conhece.
+ * Dois são de **traço** e descrevem o aluno fora do mecanismo: se ele vai bem
+ * na disciplina (desempenho) e quanto tempo tem (disponibilidade). Não
+ * evoluem, não respondem a sinal e o aluno não os conhece. Os outros dois são
+ * de **estratégia** — seletividade e concentração — e descrevem como ele pede
+ * e dá lance; ver `StrategyProfileList`.
  *
  * **Não há porcentagem a editar.** A repartição entre as combinações dos dois
  * eixos é igualitária: com 3 perfis de cada lado são 9 pares e ~11% da coorte
@@ -293,6 +295,112 @@ export function AvailabilityProfileList({
           </div>
         </Row>
       ))}
+      <AddButton onClick={add} />
+    </div>
+  );
+}
+
+/** Um grupo de um dos dois eixos de **estratégia** — seletividade ou
+ * concentração. Os dois têm a mesma forma: um nome e um número. */
+interface StrategyProfile {
+  name: string;
+  value: number;
+}
+
+/** O editor dos eixos de estratégia. Um só componente para os dois porque a
+ * linha é a mesma — nome e valor —, e o que muda é o intervalo aceito e o
+ * rótulo do campo. Não há prévia ao lado: o valor não descreve distribuição
+ * nenhuma, e sim uma regra de decisão, então não há curva a desenhar.
+ *
+ * Sem seleção de linha, pelo mesmo motivo — a linha selecionada só serve para
+ * dizer qual curva a prévia mostra. */
+export function StrategyProfileList<T extends StrategyProfile>({
+  profiles,
+  onChange,
+  label,
+  base,
+  min,
+  max,
+  step,
+  fallback,
+}: {
+  profiles: T[];
+  onChange: (profiles: T[]) => void;
+  label: string;
+  /** Prefixo do nome proposto a um perfil novo. */
+  base: string;
+  min: number;
+  max?: number;
+  step: number;
+  /** Valor do primeiro perfil, se a lista estiver vazia. */
+  fallback: number;
+}) {
+  const replace = (index: number, values: Partial<StrategyProfile>) =>
+    onChange(profiles.map((p, i) => (i === index ? { ...p, ...values } : p)));
+
+  const add = () => {
+    const last = profiles[profiles.length - 1];
+    onChange([
+      ...profiles,
+      {
+        name: nextName(
+          profiles.map((p) => p.name),
+          base
+        ),
+        value: last?.value ?? fallback,
+      } as T,
+    ]);
+  };
+
+  // O nome é rótulo de relatório e precisa ser único dentro do eixo: dois
+  // grupos com o mesmo nome se fundiriam no recorte por perfil.
+  const counts = new Map<string, number>();
+  for (const p of profiles) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
+
+  const range =
+    max === undefined ? `pelo menos ${min}` : `entre ${min} e ${max}`;
+
+  return (
+    <div className="profile-list">
+      {profiles.map((profile, index) => {
+        const outOfRange =
+          !Number.isFinite(profile.value) ||
+          profile.value < min ||
+          (max !== undefined && profile.value > max);
+        const warning = !profile.name.trim()
+          ? "o nome não pode ficar vazio"
+          : (counts.get(profile.name) ?? 0) > 1
+            ? "nome repetido neste eixo"
+            : outOfRange
+              ? `o valor deve ser ${range}`
+              : undefined;
+        return (
+          <Row
+            key={index}
+            selected={false}
+            onSelect={() => {}}
+            name={profile.name}
+            onName={(name) => replace(index, { name })}
+            removable={profiles.length > 1}
+            onRemove={() => onChange(profiles.filter((_, i) => i !== index))}
+            warning={warning}
+          >
+            <div className="field">
+              <label>{label}</label>
+              <input
+                type="number"
+                min={min}
+                max={max}
+                step={step}
+                value={profile.value}
+                onChange={(e) =>
+                  replace(index, { value: Number(e.target.value) })
+                }
+              />
+            </div>
+          </Row>
+        );
+      })}
       <AddButton onClick={add} />
     </div>
   );

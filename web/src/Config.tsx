@@ -14,6 +14,7 @@ import type { SavedPreset } from "./savedPresets";
 import {
   AvailabilityProfileList,
   PerformanceProfileList,
+  StrategyProfileList,
   axisShare,
 } from "./ProfileList";
 import { SaveScenario } from "./SaveScenario";
@@ -92,6 +93,12 @@ export function Config({
       )
     : 0;
   const entryTooLarge = biggestEntryBlock > config.class_size;
+  // Quantos calouros a oferta de entrada comporta: a disciplina de entrada com
+  // menos turmas é o gargalo. Os blocos são equilibrados, então a coorte cabe
+  // exatamente quando não passa disto.
+  const entrySeats = entryCourses.length
+    ? Math.min(...entryCourses.map((d) => d.classes)) * config.class_size
+    : 0;
   const entryTooHeavy = entryHours > config.max_hours;
 
   // Porcentagem com casas suficientes para 0,05% não virar 0%: as chances de
@@ -278,7 +285,8 @@ export function Config({
 
           <p className="note">
             Coorte de {cohort} ({profileCombinations(config)} combinações de
-            perfil) · {cohort * config.entry_periods} alunos no total
+            perfil) · {entrySeats} vagas de ingresso ·{" "}
+            {cohort * config.entry_periods} alunos no total
           </p>
         </div>
 
@@ -559,6 +567,38 @@ export function Config({
             </div>
           </div>
           <p className="note">{performanceShare}</p>
+        </div>
+
+        {/* Os dois eixos de estratégia, cada um com seu painel como os de
+            traço. Sem prévia: o valor é uma regra de decisão, não uma
+            distribuição, e não há curva a desenhar. */}
+        <div className="panel">
+          <h2>Seletividade</h2>
+          <StrategyProfileList
+            profiles={config.selectivity_profiles}
+            onChange={(selectivity_profiles) => patch({ selectivity_profiles })}
+            label="Seletividade"
+            base="seletividade"
+            min={0}
+            step={0.125}
+            fallback={0}
+          />
+          <p className="note">{axisShare(config.selectivity_profiles.length)}</p>
+        </div>
+
+        <div className="panel">
+          <h2>Concentração</h2>
+          <StrategyProfileList
+            profiles={config.concentration_profiles}
+            onChange={(concentration_profiles) => patch({ concentration_profiles })}
+            label="Concentração"
+            base="concentração"
+            min={-3}
+            max={5}
+            step={0.5}
+            fallback={1}
+          />
+          <p className="note">{axisShare(config.concentration_profiles.length)}</p>
         </div>
 
         <div className="actions sticky-actions">

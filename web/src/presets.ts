@@ -14,7 +14,15 @@ import type { DisciplineInput, Scenario } from "./types";
  *
  * `max_hours` não está aqui: é do cenário, porque é a soma de um período da
  * grade. */
-const POPULATION = {
+const POPULATION: Pick<
+  Scenario,
+  | "performance_profiles"
+  | "availability_profiles"
+  | "selectivity_profiles"
+  | "concentration_profiles"
+  | "interest_mean"
+  | "interest_sigma"
+> = {
   // A nota mais provável é o pico da curva numa disciplina de dificuldade
   // padrão, de primeira. A **média** sai 1 a 2 pontos abaixo dela, porque a
   // cauda esquerda é longa, e é por ela que o "baixo" está calibrado: moda 6,5
@@ -74,6 +82,17 @@ const POPULATION = {
   interest_mean: 1,
   interest_sigma: 1,
 };
+
+/** Os seis níveis de cada eixo de estratégia, para completar um cenário salvo
+ * antes de os eixos existirem. É o que a API já assumia quando o campo vinha
+ * ausente, então preencher aqui não muda o que aquele cenário rodava. */
+export const strategyDefaults = (): Pick<
+  Scenario,
+  "selectivity_profiles" | "concentration_profiles"
+> => ({
+  selectivity_profiles: POPULATION.selectivity_profiles.map((p) => ({ ...p })),
+  concentration_profiles: POPULATION.concentration_profiles.map((p) => ({ ...p })),
+});
 
 // ---------------------------------------------------------------------------
 // O fatorial — a grade como instrumento, não como retrato
