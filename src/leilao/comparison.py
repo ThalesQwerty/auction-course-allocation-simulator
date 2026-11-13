@@ -102,9 +102,11 @@ garantida não infla a primeira rodada — o número é só o que o mecanismo al
 from __future__ import annotations
 
 import dataclasses
+import os
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 
@@ -114,6 +116,7 @@ from .equations import (
     grade_for_attempt,
     grade_histogram,
     interest_histogram,
+    request_funnel,
     weighted_mean,
 )
 from .equations import time_to_graduate as mean_span
@@ -127,12 +130,25 @@ from .config import (
 )
 from .metrics import Metrics
 from .population import generate_students
-from .simulation import GroupSnapshot, SimulationResult, run_simulation
+from .simulation import CELL_SEP, GroupSnapshot, SimulationResult, run_simulation
 
 # Teto de simulações por braço. Não é limitação técnica: é que a faixa para de
 # ganhar informação muito antes disso, e cada simulação a mais custa uma
 # simulação inteira em cada braço.
 MAX_RUNS = 100
+
+# Quantas simulações correm ao mesmo tempo. Quatro não é o número de núcleos:
+# é quanta memória cabe. No cenário cheio (63 disciplinas, 288 turmas, 2592
+# alunos, 23 períodos) cada worker pede **dois** picos ao mesmo tempo — 1,5 GB
+# do processo Python e 811 MB do `cbc.exe` que ele está esperando —, e como as
+# simulações são o mesmo trabalho começado junto, elas picam juntas. A conta é
+# a memória **livre** dividida por uns 2 GB, não o número de núcleos: acima
+# disso o lote pagina e deixa de terminar, que foi o que motivou isto tudo.
+DEFAULT_WORKERS = min(4, os.cpu_count() or 1)
+
+# Chamado a cada simulação concluída: (braço, seed).
+RunDone = Callable[["Arm", int], None]
+
 
 @dataclass(frozen=True)
 class Arm:
@@ -224,8 +240,13 @@ def arms_from_keys(keys: list[str]) -> tuple[Arm, ...]:
 
 
 @dataclass(frozen=True)
-class PeriodSeries:
-    """As métricas de período de uma simulação, sem reduzir.
+class RulerSeries:
+    """As métricas de uma simulação ao longo de **uma régua**, sem reduzir.
+
+    A régua é o eixo X (`RULERS`): o período da simulação, a idade do aluno ou
+    a coorte dele. `x[i]` é o ponto da régua a que a posição `i` se refere, e
+    para a régua do período ele é o número do período — o caso em que esta
+    classe nasceu, e a razão de todo o resto dela falar em período.
 
     É o mesmo material de que `summarize` tira a média ponderada — a diferença
     é que aqui ele não vira um número. A média esconde que o horizonte tem três
@@ -235,11 +256,11 @@ class PeriodSeries:
     qual dos três ele mora — um leilão que só ganha do CR na drenagem disse
     algo sobre a drenagem, não sobre o mecanismo.
 
-    As listas são **paralelas** e trazem só os períodos **medidos**: `period[i]`
-    é o número do período a que `efficiency[i]` se refere, e posição nenhuma é
-    nula. O primeiro período não aparece — nele todo mundo acabou de ingressar
-    e não há o que medir (ver `summarize`) —, e por isso o número do período vem
-    explícito em vez de sair do índice.
+    As listas são **paralelas** e trazem só os pontos **medidos**: `x[i]` é o
+    ponto da régua a que `efficiency[i]` se refere, e posição nenhuma é nula. O
+    primeiro período não aparece — nele todo mundo acabou de ingressar e não há
+    o que medir (ver `summarize`) —, e por isso o ponto da régua vem explícito
+    em vez de sair do índice.
 
     `students` é o peso daquele ponto na redução. Ele cai à vista na drenagem, e
     é o que torna a ponderação verificável em vez de confiável: quem lê o
@@ -257,8 +278,13 @@ class PeriodSeries:
     quem conclui cedo é rápido por construção.
     """
 
-    period: list[int]
-    students: list[int]
+    x: list[int]
+    # O peso de cada ponto, e o que cada régua conta nele: na do período, os
+    # alunos medidos ali; na da idade, quantos alunos chegaram àquela idade
+    # (cada um entra uma vez por idade); na da coorte, os aluno-períodos
+    # medidos daquela turma. É a soma das células reagrupadas, e é ela que
+    # mantém a identidade do recorte — ver `_regroup`.
+    students: list[float]
     # A fração de concluintes **acumulada**: quem já concluiu até o fim do
     # período sobre quem já tinha ingressado. Sobe ao longo do horizonte, e no
     # último período é a fração final.
@@ -287,21 +313,38 @@ class PeriodSeries:
 
 @dataclass(frozen=True)
 class GroupSeries:
-    """A `PeriodSeries` de um grupo de um recorte — uma coorte ou um perfil.
+    """A `RulerSeries` de um grupo de um recorte espacial — um perfil.
 
-    O eixo continua sendo o período: o que muda é sobre quem a métrica corre.
-    O recorte particiona a população, então os grupos de um mesmo eixo somam o
-    agregado em cada período.
+    O recorte **espacial** é quem a métrica corre; a régua é sobre o que ela
+    corre. O recorte particiona a população, então os grupos de um mesmo eixo
+    somam o agregado em cada ponto da régua.
     """
 
     group: str
-    series: PeriodSeries
+    series: RulerSeries
 
 
-# Os recortes da tela, na ordem do seletor. `cohort` é o período de ingresso;
-# os outros quatro são os eixos de perfil (`simulation.Axis.profiles`).
+# As **réguas** do eixo X, na ordem do seletor. Duas leituras diferentes do
+# mesmo material, e é por isso que elas são escolha e não gráficos separados:
+#
+# - `period` é o calendário da universidade. É onde se veem as três fases do
+#   horizonte — aquecimento, estado estacionário e drenagem —, e é a régua em
+#   que cada ponto tem uma coorte diferente em cada idade.
+# - `age` é o tempo do **aluno**: quantos períodos ele já completou. Alinha as
+#   coortes pelo ingresso e tira a fase do horizonte de dentro da curva — o
+#   que cai aqui cai na vida do aluno, não no calendário.
+# - `cohort` é um corte transversal: um ponto por turma de ingresso, com a
+#   vida inteira dela resumida. É onde se vê se entrar cedo ou tarde no
+#   horizonte muda o que a pessoa recebeu.
+RULERS: tuple[str, ...] = ("period", "age", "cohort")
+
+# Os recortes **espaciais** da tela, na ordem do seletor: os quatro eixos de
+# perfil (`simulation.Axis.profiles`). O agregado (`overall`) não está aqui
+# porque não é recorte — é a ausência de um.
+#
+# A coorte saiu daqui em 11/11/2026 e virou régua: ela é um corte do **tempo**,
+# e tê-la como cor obrigava a ler duas dimensões temporais no mesmo gráfico.
 CUT_AXES: tuple[str, ...] = (
-    "cohort",
     "performance",
     "availability",
     "selectivity",
@@ -311,30 +354,37 @@ CUT_AXES: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class GroupBands:
-    """Um grupo de um recorte reduzido **entre as seeds**, período a período.
+    """Um grupo de um recorte reduzido **entre as seeds**, ponto a ponto.
 
-    Cada grandeza vira `(q1, mediana, q3)` em cada período — o que o gráfico
-    desenha como linha e faixa. A redução acontece aqui, e não na tela, porque
-    a amostra inteira (seed × grupo × período) não cabe no histórico do
+    Cada grandeza vira `(q1, mediana, q3)` em cada ponto da régua — o que o
+    gráfico desenha como linha e faixa. A redução acontece aqui, e não na tela,
+    porque a amostra inteira (seed × grupo × ponto) não cabe no histórico do
     navegador; a mediana e os quartis cabem, e não dependem de N.
 
-    `n` é quantas seeds mediram o grupo naquele período. Na cauda do horizonte
+    `n` é quantas seeds mediram o grupo naquele ponto. Na cauda do horizonte
     parte delas já esvaziou, e ali a amostra não é a mesma do começo do eixo.
     """
 
     group: str
-    period: list[int]
+    x: list[int]
     n: list[int]
-    # Uma lista paralela a `period` por grandeza. `None` onde nenhuma seed
-    # mediu aquela grandeza no período (uma rodada que não aconteceu).
+    # Uma lista paralela a `x` por grandeza. `None` onde nenhuma seed mediu
+    # aquela grandeza no ponto (uma rodada que não aconteceu).
     values: dict[str, list[tuple[float, float, float] | None]]
 
 
 @dataclass(frozen=True)
 class AxisBands:
-    """Os grupos de um recorte, na ordem em que o cenário os declara.
-    `overall` é a universidade inteira, com um grupo só."""
+    """Os grupos de um recorte sob uma régua, na ordem em que o cenário os
+    declara.
 
+    `ruler` é o eixo X (`RULERS`) e `axis` o recorte espacial (`CUT_AXES`),
+    com `overall` para a universidade inteira, que tem um grupo só. As duas
+    escolhas são independentes na tela, e é por isso que o braço traz as
+    combinações todas em vez de uma série por recorte.
+    """
+
+    ruler: str
     axis: str
     groups: list[GroupBands]
 
@@ -392,10 +442,11 @@ class RunSummary:
     # As mesmas métricas de período, período a período — o que a média ponderada
     # resume. É o recorte por período da tela; a redução continua sendo a dos
     # campos acima, e as duas leituras saem do mesmo material.
-    by_period: PeriodSeries
-    # A mesma série por período, um grupo de cada vez, para cada recorte de
-    # `CUT_AXES`. É o material das faixas do braço (`ArmResult.series`).
-    by_group: dict[str, list[GroupSeries]]
+    by_period: RulerSeries
+    # A mesma série por grupo, régua a régua: `by_group[régua][recorte]`, com
+    # as réguas de `RULERS` e os recortes de `CUT_AXES` mais `overall`. É o
+    # material das faixas do braço (`ArmResult.series`).
+    by_group: dict[str, dict[str, list[GroupSeries]]]
 
 
 @dataclass(frozen=True)
@@ -406,8 +457,8 @@ class ArmResult:
     mechanism: Mechanism
     credit_return: CreditReturnPolicy
     runs: list[RunSummary]
-    # As séries por período reduzidas entre as seeds: o agregado e cada
-    # recorte. É o que os gráficos desenham — ver `bands`.
+    # As séries reduzidas entre as seeds: cada régua cruzada com cada recorte.
+    # É o que os gráficos desenham — ver `bands`.
     series: list[AxisBands] = field(default_factory=list)
 
 
@@ -473,7 +524,14 @@ def weighted_states(pairs: list[tuple[Metrics, int]]) -> RequestStates:
     os estados (uma rodada, onde a exclusão ainda não aconteceu) simplesmente
     não entra.
     """
-    rows = [(m.request_states, w) for m, w in pairs if m.request_states is not None]
+    return _mean_states(
+        [(m.request_states, w) for m, w in pairs if m.request_states is not None]
+    )
+
+
+def _mean_states(rows: list[tuple[RequestStates, float]]) -> RequestStates:
+    """A média ponderada dos seis estados, campo a campo. Saco vazio dá tudo
+    zero, e quem decide se publica é o chamador — como em `RequestStates`."""
     if not rows:
         return RequestStates(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
@@ -502,12 +560,15 @@ def _measured(snapshot: GroupSnapshot | None) -> bool:
 def _period_series(
     instants: list[tuple[int, GroupSnapshot | None, list[GroupSnapshot | None]]],
     rounds: int,
-) -> PeriodSeries:
-    """A série por período de um recorte.
+) -> RulerSeries:
+    """A série de um recorte ao longo dos períodos em que ele foi medido.
 
     `instants` traz, para cada período, o recorte no fim dele e o mesmo
     recorte em cada rodada. Só entram os períodos em que o recorte foi medido
     — nem os vazios, nem aquele em que todo o grupo acabou de ingressar.
+
+    É a série da régua do período e, para as outras duas, a matéria-prima:
+    `_regroup` reagrupa estas posições em idades ou coortes.
     """
     measured = [
         (period, snapshot, by_round)
@@ -532,9 +593,9 @@ def _period_series(
             )
         return row
 
-    return PeriodSeries(
-        period=[period for period, _, _ in measured],
-        students=series(lambda m: m.students),
+    return RulerSeries(
+        x=[period for period, _, _ in measured],
+        students=series(lambda m: float(m.students)),
         graduation_rate=[
             snapshot.graduated / snapshot.population if snapshot.population else 0.0
             for _, snapshot, _ in measured
@@ -553,18 +614,170 @@ def _period_series(
 
 
 def _cut(report, axis: str) -> list[GroupSnapshot]:
-    """Os grupos de um recorte num instante."""
-    return report.by_cohort if axis == "cohort" else report.by_profile.get(axis, [])
+    """Os grupos de um recorte espacial num instante."""
+    return report.by_profile.get(axis, [])
 
 
-def group_series(result: SimulationResult) -> dict[str, list[GroupSeries]]:
-    """A série por período de cada grupo de cada recorte de `CUT_AXES`.
+def _cells(report, axis: str) -> list[GroupSnapshot]:
+    """As células de um recorte espacial num instante — ver `Axis.crossed`.
 
-    A ordem dos grupos é a de primeira aparição: a dos perfis é a do cenário,
-    e a das coortes é a do ingresso.
+    No agregado as células **são** as coortes: cruzar "a universidade inteira"
+    com a coorte não dá nada além do recorte por coorte, que já vem pronto.
+    """
+    return report.by_cohort if axis == "overall" else report.by_cell.get(axis, [])
+
+
+def _cell_key(axis: str, group: str) -> tuple[str, int]:
+    """`(grupo espacial, coorte)` de uma célula.
+
+    A coorte é sempre o último segmento, de modo que o nome de um perfil com o
+    separador dentro não quebra a leitura.
+    """
+    if axis == "overall":
+        return "overall", int(group)
+    spatial, _, cohort = group.rpartition(CELL_SEP)
+    return spatial, int(cohort)
+
+
+# Uma célula num período: a coorte dela, o período, o recorte no fim dele e o
+# mesmo recorte em cada rodada.
+Instant = tuple[int, int, GroupSnapshot, list[GroupSnapshot | None]]
+
+
+def _cell_instants(
+    result: SimulationResult, axis: str
+) -> tuple[list[str], dict[str, list[Instant]]]:
+    """As células de um recorte, período a período.
+
+    Devolve a ordem dos grupos espaciais — a de primeira aparição, que é a do
+    cenário — e, por grupo, os instantes de todas as células dele, em ordem de
+    período. É a matéria-prima das réguas de idade e de coorte.
+    """
+    order: list[str] = []
+    out: dict[str, list[Instant]] = defaultdict(list)
+    for period in result.periods:
+        by_round = [
+            {s.group: s for s in _cells(report, axis) if s.group is not None}
+            for report in period.rounds
+        ]
+        for snapshot in _cells(period.aggregate, axis):
+            if snapshot.group is None:
+                continue
+            group, cohort = _cell_key(axis, snapshot.group)
+            if group not in order:
+                order.append(group)
+            out[group].append(
+                (
+                    cohort,
+                    period.period,
+                    snapshot,
+                    [found.get(snapshot.group) for found in by_round],
+                )
+            )
+    return order, out
+
+
+def _regroup(
+    instants: list[tuple[int, Instant]], *, ruler: str, rounds: int
+) -> RulerSeries:
+    """Reagrupa as células de um grupo numa série por ponto da régua.
+
+    Cada item traz o ponto da régua em que a célula cai e o instante dela.
+    Várias células caem no mesmo ponto — uma idade é alcançada por muitas
+    coortes, uma coorte vive muitos períodos —, e é o saco de cada ponto que
+    vira uma posição da série.
+
+    A redução dentro do saco é a **média ponderada pelos alunos medidos**, a
+    mesma de `summarize`: um período de vinte alunos não pesa como um cheio.
+    Para as métricas por aluno — ψ, aproveitamento, fidelidade, desperdício,
+    os seis estados, a saturação — a média ponderada das células **é** a média
+    por aluno do conjunto. Para φ e λ não é: é a média dos índices de cada
+    célula, a mesma aproximação que a redução por período já faz, e vale a
+    mesma ressalva — eles descrevem o recorte, não se somam dele.
+
+    `graduation_rate` é a exceção, porque é **acumulada**. Na régua da coorte o
+    valor é o do último período em que a coorte foi medida, não a média da
+    subida dela; na da idade a média é justamente o que se quer, porque ali
+    cada coorte contribui com a situação em que estava naquela idade.
+    """
+    buckets: dict[int, list[Instant]] = defaultdict(list)
+    for point, instant in sorted(instants, key=lambda item: item[1][1]):
+        buckets[point].append(instant)
+    points = sorted(buckets)
+    bags = {
+        point: _period_series(
+            [(period, snapshot, by_round) for _, period, snapshot, by_round in bag],
+            rounds,
+        )
+        for point, bag in buckets.items()
+    }
+    points = [point for point in points if bags[point].x]
+
+    def weighed(point: int, of) -> float:
+        bag = bags[point]
+        return weighted_mean(list(zip(of(bag), bag.students))) or 0.0
+
+    def graduation(point: int) -> float:
+        bag = bags[point]
+        if ruler != "cohort":
+            return weighed(point, lambda s: s.graduation_rate)
+        return bag.graduation_rate[-1]
+
+    def states(point: int) -> RequestStates:
+        bag = bags[point]
+        return _mean_states(list(zip(bag.request_states, bag.students)))
+
+    def saturation(point: int) -> list[float | None]:
+        bag = bags[point]
+        row: list[float | None] = []
+        for index in range(rounds):
+            pairs = [
+                (values[index], weight)
+                for values, weight in zip(bag.allocations_per_round, bag.students)
+                if index < len(values) and values[index] is not None
+            ]
+            row.append(weighted_mean(pairs) if pairs else None)
+        return row
+
+    return RulerSeries(
+        x=points,
+        # A **soma** das contagens do saco, e é ela que torna o reagrupamento
+        # exato: o peso de um ponto é o de todas as células que caíram nele, de
+        # modo que os grupos de um recorte continuam repartindo o agregado.
+        #
+        # E ela se lê, em cada régua: na da idade é quanta gente chegou àquela
+        # idade (cada aluno entra uma vez por idade); na da coorte, quantos
+        # aluno-períodos daquela turma foram medidos.
+        students=[sum(bags[point].students) for point in points],
+        graduation_rate=[graduation(point) for point in points],
+        efficiency=[weighed(point, lambda s: s.efficiency) for point in points],
+        utilization=[weighed(point, lambda s: s.utilization) for point in points],
+        fidelity=[weighed(point, lambda s: s.fidelity) for point in points],
+        fairness=[weighed(point, lambda s: s.fairness) for point in points],
+        correlation=[weighed(point, lambda s: s.correlation) for point in points],
+        exclusion_rate=[weighed(point, lambda s: s.exclusion_rate) for point in points],
+        request_states=[states(point) for point in points],
+        allocations_per_round=[saturation(point) for point in points],
+    )
+
+
+def group_series(
+    result: SimulationResult, *, by_period: RulerSeries
+) -> dict[str, dict[str, list[GroupSeries]]]:
+    """As séries de cada grupo de cada recorte, régua a régua —
+    `by_group[régua][recorte]`.
+
+    A régua do período sai dos recortes prontos de cada instante, e é exata. As
+    de idade e de coorte saem das células (`_cell_instants`) reagrupadas por
+    `_regroup`, e é esse cruzamento que permite escolher régua e recorte
+    independentemente.
+
+    A ordem dos grupos é a de primeira aparição, que é a do cenário.
     """
     rounds = max((len(period.rounds) for period in result.periods), default=0)
-    out: dict[str, list[GroupSeries]] = {}
+    out: dict[str, dict[str, list[GroupSeries]]] = {ruler: {} for ruler in RULERS}
+    out["period"]["overall"] = [GroupSeries(group="overall", series=by_period)]
+
     for axis in CUT_AXES:
         order: list[str] = []
         for period in result.periods:
@@ -572,10 +785,10 @@ def group_series(result: SimulationResult) -> dict[str, list[GroupSeries]]:
                 if snapshot.group is not None and snapshot.group not in order:
                     order.append(snapshot.group)
 
-        def find(report, group: str) -> GroupSnapshot | None:
+        def find(report, group: str, axis: str = axis) -> GroupSnapshot | None:
             return next((s for s in _cut(report, axis) if s.group == group), None)
 
-        out[axis] = [
+        out["period"][axis] = [
             GroupSeries(
                 group=group,
                 series=_period_series(
@@ -592,11 +805,34 @@ def group_series(result: SimulationResult) -> dict[str, list[GroupSeries]]:
             )
             for group in order
         ]
+
+    for axis in ("overall", *CUT_AXES):
+        order, instants = _cell_instants(result, axis)
+        for ruler in ("age", "cohort"):
+            out[ruler][axis] = [
+                GroupSeries(
+                    group=group,
+                    series=_regroup(
+                        [
+                            (
+                                cohort if ruler == "cohort" else period - cohort,
+                                instant,
+                            )
+                            for instant in instants[group]
+                            for cohort, period, _, _ in [instant]
+                        ],
+                        ruler=ruler,
+                        rounds=rounds,
+                    ),
+                )
+                for group in order
+            ]
     return out
 
 
 # As grandezas de uma faixa, na ordem em que a tela as lê. As seis de estado
-# levam o nome do estado; as de saturação, `round_<r>`.
+# levam o nome do estado; as quatro frações do funil, o nome do nó; as de
+# saturação, `round_<r>`.
 STATE_KEYS: tuple[str, ...] = (
     "not_eligible",
     "not_requested",
@@ -606,9 +842,24 @@ STATE_KEYS: tuple[str, ...] = (
     "approved",
 )
 
+# As quatro frações condicionais de `equations.request_funnel`. São elas que a
+# tela desenha; as seis contagens acima continuam na resposta porque são o
+# material de que estas saem, e porque um nó vazio só se explica olhando-as.
+FUNNEL_KEYS: tuple[str, ...] = (
+    "requested_share",
+    "granted_share",
+    "attended_share",
+    "approved_share",
+)
 
-def _quantities(series: PeriodSeries, index: int) -> dict[str, float | None]:
-    """O que um período de uma série mede, grandeza a grandeza."""
+
+def _quantities(series: RulerSeries, index: int) -> dict[str, float | None]:
+    """O que uma posição de uma série mede, grandeza a grandeza.
+
+    As frações do funil saem **daqui**, e não de dividir as faixas na tela: a
+    razão das medianas não é a mediana das razões, e o que se quer é a fração
+    de cada simulação, reduzida depois como qualquer outra grandeza.
+    """
     states = series.request_states[index]
     values: dict[str, float | None] = {
         "students": float(series.students[index]),
@@ -622,6 +873,9 @@ def _quantities(series: PeriodSeries, index: int) -> dict[str, float | None]:
     }
     for key in STATE_KEYS:
         values[key] = getattr(states, key)
+    funnel = request_funnel(states)
+    for key in FUNNEL_KEYS:
+        values[key] = getattr(funnel, key)
     for r, value in enumerate(series.allocations_per_round[index], start=1):
         values[f"round_{r}"] = value
     return values
@@ -637,51 +891,55 @@ def _quartiles(values: list[float]) -> tuple[float, float, float]:
     return (round(float(q1), 4), round(float(median), 4), round(float(q3), 4))
 
 
-def _group_bands(group: str, samples: list[PeriodSeries]) -> GroupBands:
-    """Reduz as séries de um grupo, uma por seed, a quartis por período."""
-    by_period: dict[int, list[dict[str, float | None]]] = defaultdict(list)
+def _group_bands(group: str, samples: list[RulerSeries]) -> GroupBands:
+    """Reduz as séries de um grupo, uma por seed, a quartis por ponto da
+    régua."""
+    by_point: dict[int, list[dict[str, float | None]]] = defaultdict(list)
     for series in samples:
-        for index, period in enumerate(series.period):
-            by_period[period].append(_quantities(series, index))
-    periods = sorted(by_period)
+        for index, point in enumerate(series.x):
+            by_point[point].append(_quantities(series, index))
+    points = sorted(by_point)
     keys: list[str] = []
-    for period in periods:
-        for row in by_period[period]:
+    for point in points:
+        for row in by_point[point]:
             keys.extend(k for k in row if k not in keys)
 
-    def band(period: int, key: str) -> tuple[float, float, float] | None:
-        values = [
-            row[key] for row in by_period[period] if row.get(key) is not None
-        ]
+    def band(point: int, key: str) -> tuple[float, float, float] | None:
+        values = [row[key] for row in by_point[point] if row.get(key) is not None]
         return _quartiles(values) if values else None
 
     return GroupBands(
         group=group,
-        period=periods,
-        n=[len(by_period[period]) for period in periods],
-        values={key: [band(period, key) for period in periods] for key in keys},
+        x=points,
+        n=[len(by_point[point]) for point in points],
+        values={key: [band(point, key) for point in points] for key in keys},
     )
 
 
 def bands(runs: list[RunSummary]) -> list[AxisBands]:
-    """As séries de um braço reduzidas entre as seeds, recorte a recorte.
+    """As séries de um braço reduzidas entre as seeds, régua por recorte.
 
-    O primeiro é `overall`, a universidade inteira; depois os de `CUT_AXES`.
-    Um grupo que falte numa seed (coorte que não chegou a ser medida) entra
+    Sai uma entrada por combinação: as réguas de `RULERS` cruzadas com
+    `overall` e os recortes de `CUT_AXES`. Um grupo que falte numa seed entra
     com as seeds que o têm.
     """
-    out = [AxisBands("overall", [_group_bands("overall", [r.by_period for r in runs])])]
-    for axis in CUT_AXES:
-        order: list[str] = []
-        samples: dict[str, list[PeriodSeries]] = defaultdict(list)
-        for run in runs:
-            for entry in run.by_group.get(axis, []):
-                if entry.group not in order:
-                    order.append(entry.group)
-                samples[entry.group].append(entry.series)
-        out.append(
-            AxisBands(axis, [_group_bands(group, samples[group]) for group in order])
-        )
+    out: list[AxisBands] = []
+    for ruler in RULERS:
+        for axis in ("overall", *CUT_AXES):
+            order: list[str] = []
+            samples: dict[str, list[RulerSeries]] = defaultdict(list)
+            for run in runs:
+                for entry in run.by_group.get(ruler, {}).get(axis, []):
+                    if entry.group not in order:
+                        order.append(entry.group)
+                    samples[entry.group].append(entry.series)
+            out.append(
+                AxisBands(
+                    ruler=ruler,
+                    axis=axis,
+                    groups=[_group_bands(group, samples[group]) for group in order],
+                )
+            )
     return out
 
 
@@ -740,7 +998,7 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         time_to_graduate=time_to_graduate(result),
         allocations_per_round=allocations_per_round(result),
         by_period=by_period,
-        by_group=group_series(result),
+        by_group=group_series(result, by_period=by_period),
     )
 
 
@@ -814,15 +1072,61 @@ def arm_config(config: SimulationConfig, *, arm: Arm, seed: int) -> SimulationCo
 
 
 def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:
-    return summarize(run_simulation(arm_config(config, arm=arm, seed=seed)), seed=seed)
+    # Sem histórico: nada do que `summarize` lê sai dele, e guardá-lo custa
+    # 1,1 GB por simulação — ver `run_simulation`.
+    return summarize(
+        run_simulation(arm_config(config, arm=arm, seed=seed), keep_histories=False),
+        seed=seed,
+    )
+
+
+def _run_arms(
+    config: SimulationConfig,
+    *,
+    arms: tuple[Arm, ...],
+    seeds: list[int],
+    workers: int,
+    on_run_done: RunDone | None,
+) -> list[list[RunSummary]]:
+    """As `len(arms) × len(seeds)` simulações, na ordem em que foram pedidas.
+
+    Com `workers <= 1` roda em linha, sem executor nenhum: é o modo de
+    depurar, porque o traceback de uma simulação que falha chega inteiro e no
+    lugar certo.
+    """
+    if workers <= 1:
+        done: list[list[RunSummary]] = []
+        for arm in arms:
+            summaries: list[RunSummary] = []
+            for seed in seeds:
+                summaries.append(_run_one(config, arm, seed))
+                if on_run_done is not None:
+                    on_run_done(arm, seed)
+            done.append(summaries)
+        return done
+
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        jobs = [
+            [pool.submit(_run_one, config, arm, seed) for seed in seeds] for arm in arms
+        ]
+        if on_run_done is not None:
+            where = {
+                job: (arm, seed)
+                for arm, arm_jobs in zip(arms, jobs)
+                for seed, job in zip(seeds, arm_jobs)
+            }
+            for job in as_completed(where):
+                on_run_done(*where[job])
+        return [[job.result() for job in arm_jobs] for arm_jobs in jobs]
 
 
 def run_comparison(
     config: SimulationConfig,
     *,
     runs: int,
-    workers: int = 4,
+    workers: int = DEFAULT_WORKERS,
     arms: tuple[Arm, ...] = ARMS,
+    on_run_done: RunDone | None = None,
 ) -> ComparisonResult:
     """Roda `runs` simulações em cada braço, com as seeds de 1 a `runs`.
 
@@ -838,21 +1142,32 @@ def run_comparison(
     horizonte, rodadas — vale igual em todos, que é o que torna a diferença
     atribuível ao modelo.
 
-    As simulações saem em paralelo por `ThreadPoolExecutor`, e não por processos:
-    o tempo do leilão está quase todo dentro do CBC, que roda como processo
-    externo e devolve a GIL enquanto se espera por ele. Threads também evitam
-    reimportar numpy e pulp em cada worker, que custaria mais do que a
-    simulação. A ordem das seeds é preservada, de modo que o i-ésimo elemento
-    de cada lista é a mesma população.
+    As simulações saem em paralelo por `ProcessPoolExecutor`. O tempo do
+    leilão está quase todo dentro do CBC, que já roda como processo externo e
+    devolve a GIL — mas o que sobra (sortear, pontuar, fechar o período,
+    resumir) é Python puro, e em threads ele serializaria: no cenário cheio
+    são uns 40 s por simulação, que em 40 simulações viram meia hora de espera
+    que não se paraleliza. Processos também isolam o pico de memória de cada
+    simulação, que o coletor de um processo só não devolve ao sistema entre
+    uma e outra.
+
+    O preço é que `config` e cada `RunSummary` vão e voltam serializados, e
+    que uma simulação que falhe chega como `BrokenProcessPool` em vez do erro
+    verdadeiro — para esse caso existe `workers=1`, que roda em linha.
+
+    `on_run_done` é chamado a cada simulação concluída, para quem roda isto
+    num terminal e quer ver progresso. Em paralelo ele chega **fora de
+    ordem**, que é a ordem em que as simulações de fato terminaram.
+
+    A ordem das seeds é preservada no resultado, de modo que o i-ésimo
+    elemento de cada lista é a mesma população.
     """
     if not 1 <= runs <= MAX_RUNS:
         raise ValueError(f"o número de simulações deve estar entre 1 e {MAX_RUNS}")
     seeds = list(range(1, runs + 1))
-
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        jobs = [
-            [pool.submit(_run_one, config, arm, seed) for seed in seeds] for arm in arms
-        ]
+    jobs = _run_arms(
+        config, arms=arms, seeds=seeds, workers=workers, on_run_done=on_run_done
+    )
     return ComparisonResult(
         runs=runs,
         interest_distribution=sample_interest_distribution(config),
@@ -865,7 +1180,6 @@ def run_comparison(
                 runs=summaries,
                 series=bands(summaries),
             )
-            for arm, arm_jobs in zip(arms, jobs)
-            for summaries in [[job.result() for job in arm_jobs]]
+            for arm, summaries in zip(arms, jobs)
         ],
     )

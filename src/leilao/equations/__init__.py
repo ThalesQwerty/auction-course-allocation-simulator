@@ -14,10 +14,8 @@ número está na primeira linha da docstring.
 
 Uma rodada de leilão (Seção 7.1)
 
-    tie_break_factor          α̂ = (|A| − α)/|A|                  eq. (20)
-    rectified_bias            β̂ = β − β_min                      eq. (21)
     stochastic_perturbation   ε ∈ (0, 1/(|A|²·|B|)), distintos    7.1.2
-    final_preference          p = c + β̂ + α̂ + ε                   eq. (22)
+    final_preference          p = c + ε                     substitui 22
     greedy_allocation         varredura por preferência           —
     market_price              π = maior lance perdedor            eq. (24)
     credit_consumption        δ = min(c, π)                       eq. (25)
@@ -34,6 +32,7 @@ Decisão do aluno (Seção 7.2.4)
     reserve_threshold         seletividade · score médio          —
     available_goods           B_a^(t,r)                           eq. (15)
     concave_bids              mochila côncava do lance        substitui 44-46
+                              (em dois níveis: disciplina, depois turma)
     request_set               D_a^(t,r), tudo em ordem            eq. (50)
     serial_dictatorship       ditadura serial por CR              7.3.1
 
@@ -41,7 +40,7 @@ Turmas, o bem alocado
 
     class_difficulty          escada das turmas da disciplina     —
     entry_class               o bloco da coorte em cada turma     —
-    best_class                argmax do score dentro do grupo     —
+    best_class                a turma pedida na linha de base     —
 
     A exclusão mútua (eq. 5) não tem arquivo próprio: ela é a restrição de
     clique montada em `wdp_solver`, o filtro por grupo de `available_goods`
@@ -92,6 +91,7 @@ Disponibilidade e exclusão
     exclusion_refund          γ = paid // 2, só sob `ratio`       —
     exclusion_rate            ε = excluídas / obtidas             —
     request_states            os seis estados de uma solicitação  —
+    request_funnel            as quatro frações condicionais      —
 
 Métricas de um recorte (Seção 7.3.3)
 
@@ -124,6 +124,13 @@ Não implementadas, e por quê
                do inelegível sobre o que destrava
     eqs. (47)-(48)  grupos da grade: toda obrigatória pesa igual, não há o
                     que hierarquizar
+    eq. (20)   α̂, o fator de desempate: em [0, 1) por par, mas somado sobre
+               milhares de pares ele vira milhares de créditos no objetivo
+               do WDP e passa a inverter diferenças de lance — o oposto do
+               que a eq. (22) promete. Ver `final_preference`
+    eq. (21)   β̂, o viés de alocação: saiu com α̂. A política universitária
+               que ele expressaria entrou no cenário pela oferta de vagas e
+               pelos pré-requisitos, que são anteriores ao leilão
 """
 from __future__ import annotations
 
@@ -170,10 +177,10 @@ from .pearson_correlation import pearson
 from .period_return import period_return
 from .preference_split import preference_split
 from .reachable_utility import reachable_utility
-from .rectified_bias import rectify_bias
 from .remaining_budget import remaining_budget
 from .remaining_capacity import remaining_capacity
 from .remaining_seats import remaining_seats
+from .request_funnel import RequestFunnel, request_funnel
 from .request_set import request_set
 from .reserve_threshold import reserve_threshold
 from .request_states import RequestStates, request_states
@@ -182,7 +189,6 @@ from .satisfaction import satisfaction
 from .semestralization import semestralization
 from .serial_dictatorship import serial_dictatorship
 from .stochastic_perturbation import stochastic_perturbations
-from .tie_break_factor import tie_break_factor
 from .time_to_graduate import time_to_graduate
 from .split_normal_cdf import split_normal_cdf
 from .split_normal_mean import split_normal_mean
@@ -196,6 +202,7 @@ __all__ = [
     "MIN_GRADE",
     "Behavior",
     "NEUTRAL",
+    "RequestFunnel",
     "RequestStates",
     "attempt_rates",
     "available_goods",
@@ -244,19 +251,18 @@ __all__ = [
     "pearson",
     "period_return",
     "preference_split",
-    "rectify_bias",
     "remaining_budget",
     "remaining_capacity",
     "remaining_seats",
     "request_set",
     "reserve_threshold",
+    "request_funnel",
     "request_states",
     "retained_set",
     "satisfaction",
     "semestralization",
     "serial_dictatorship",
     "stochastic_perturbations",
-    "tie_break_factor",
     "time_to_graduate",
     "utility",
     "utilization",

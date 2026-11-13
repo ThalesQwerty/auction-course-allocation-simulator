@@ -119,7 +119,6 @@ def _run_credit_round(
             groups=draws.discipline_of,
             budgets=state.budget,
             bids=bids,
-            tie_break_order=draws.tie_break_order,
             epsilon=draws.epsilon,
             seed=config.seed,
         ),

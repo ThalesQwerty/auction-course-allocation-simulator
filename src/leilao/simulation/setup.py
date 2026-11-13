@@ -45,10 +45,8 @@ class Draws:
     # Não é o que o aluno decide — a utilidade sai daqui a cada período, pelo
     # histórico dele (`behavior.utility_matrix`). Fora isso, só relatório lê.
     interest_rows: dict[tuple[str, int], dict[str, float]]
-    # α: uma ordem de desempate por disciplina, fixa para a simulação inteira,
-    # como exige a Seção 7.1.2.
-    tie_break_order: dict[str, list[str]]
-    # ε: idem, sorteada uma vez para todos os pares (a, x).
+    # ε: sorteada uma vez para todos os pares (a, x), fixa para a simulação
+    # inteira, como exige a Seção 7.1.2.
     epsilon: dict[tuple[str, str], float]
 
     # Derivados do cenário, calculados uma vez porque são lidos em todo laço.
@@ -80,11 +78,6 @@ def prepare(config: SimulationConfig) -> Draws:
     availability = draw_availability(students, config, rng)
     interest_rows = draw_interest(students, config, rng)
 
-    student_ids = [s.id for s in students]
-    tie_break_order = {
-        discipline.name: [student_ids[i] for i in rng.permutation(len(students))]
-        for discipline in config.disciplines
-    }
     epsilon = stochastic_perturbations(
         [(s.id, d.name) for s in students for d in config.disciplines],
         num_agents=max(len(students), 1),
@@ -98,7 +91,6 @@ def prepare(config: SimulationConfig) -> Draws:
         grade_shapes=GradeShapes(),
         availability=availability,
         interest_rows=interest_rows,
-        tie_break_order=tie_break_order,
         epsilon=epsilon,
         hours=config.hours_by_class(),
         difficulty=config.difficulty_by_class(),

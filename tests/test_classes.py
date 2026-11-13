@@ -17,10 +17,13 @@ from leilao.behavior import compute_bids, draw_interest, utility_matrix
 from leilao.config import Discipline, SimulationConfig
 from leilao.equations import (
     Behavior,
+    RequestStates,
     class_difficulty,
+    concave_bids,
     entry_class_load,
     market_prices,
     reachable_utility,
+    request_states,
     utility,
 )
 from leilao.population import generate_students
@@ -149,11 +152,10 @@ def test_a_routed_student_does_not_inflate_the_price_of_his_own_group():
 # --- o lance ---------------------------------------------------------------
 
 
-def test_the_bid_does_not_pulverise_inside_the_group():
-    """Num nível só, o orçamento da disciplina segue o número de turmas dela —
-    cada turma entra na mochila como um bem independente — e o aluno chega à
-    rodada com 1/k da força em cada uma. Com dois níveis o grupo recebe a
-    fatia dele e a põe inteira numa turma."""
+def test_the_bid_is_split_inside_the_group_by_the_same_knapsack():
+    """O nível de dentro é a **mesma** mochila côncava, agora entre as turmas
+    da disciplina: a fatia do grupo se reparte com retorno decrescente, mais
+    na turma preferida e menos nas irmãs."""
     classes = {"D1": ("D1 T1", "D1 T2", "D1 T3", "D1 T4"), "D2": ("D2 T1",)}
     utilities = {
         "D1 T1": 0.3, "D1 T2": 0.28, "D1 T3": 0.26, "D1 T4": 0.24, "D2 T1": 0.9,
@@ -169,9 +171,34 @@ def test_the_bid_does_not_pulverise_inside_the_group():
     }
     # D2 vale 0,9 contra os 0,3 da melhor turma de D1: o grosso vai para lá.
     assert por_grupo["D2"] > por_grupo["D1"]
-    # E o que coube a D1 foi inteiro para a turma mais útil dela: o nível de
-    # dentro é escolha, não mochila (`equations.best_class`).
-    assert set(bids) & set(classes["D1"]) == {"D1 T1"}
+    # A fatia de D1 se espalha pelas quatro turmas, em ordem de preferência.
+    dentro = [bids[name] for name in classes["D1"]]
+    assert all(credits > 0 for credits in dentro)
+    assert dentro == sorted(dentro, reverse=True)
+
+
+def test_the_two_levels_conserve_the_budget_credit_by_credit():
+    """A soma por grupo é exatamente o que o nível de fora decidiu: a
+    repartição interna gasta a fatia inteira (`reserve = 0`) e não cria nem
+    perde crédito."""
+    classes = {"D1": ("D1 T1", "D1 T2", "D1 T3"), "D2": ("D2 T1", "D2 T2")}
+    utilities = {
+        "D1 T1": 0.3, "D1 T2": 0.2, "D1 T3": 0.1, "D2 T1": 0.25, "D2 T2": 0.15,
+    }
+    pool = [name for names in classes.values() for name in names]
+
+    fora = concave_bids(
+        scores={"D1": 0.3, "D2": 0.25}, available=["D1", "D2"], budget=37
+    )
+    bids = compute_bids(
+        utilities=utilities, available=pool, budget=37, classes=classes
+    )
+
+    assert sum(bids.values()) == 37
+    assert {
+        discipline: sum(bids.get(name, 0) for name in names)
+        for discipline, names in classes.items()
+    } == fora
 
 
 def test_the_group_budget_does_not_follow_the_number_of_classes():
@@ -195,10 +222,10 @@ def test_the_group_budget_does_not_follow_the_number_of_classes():
 # --- o pedido --------------------------------------------------------------
 
 
-def test_the_request_is_ordered_in_two_levels():
-    """Disciplinas na ordem de preferência e, dentro de cada uma, as turmas.
-    Plana, a caminhada consumiria W_a em ordem de turma e o braço mudaria
-    *quais disciplinas* o aluno leva."""
+def test_the_request_is_one_class_per_discipline():
+    """Disciplinas na ordem de preferência e, de cada uma, **uma** turma — a
+    melhor disponível. Pedir duas turmas da mesma disciplina seria pedir duas
+    vezes a mesma vaga."""
     classes = {"Alta": ("A T1", "A T2"), "Baixa": ("B T1", "B T2")}
     utilities = {"A T1": 0.2, "A T2": 0.5, "B T1": 0.4, "B T2": 0.1}
     pool = [name for names in classes.values() for name in names]
@@ -206,8 +233,8 @@ def test_the_request_is_ordered_in_two_levels():
     pedido = request_set(utilities=utilities, available=pool, classes=classes)
 
     # Alta vale 0,5 (a melhor turma dela) contra 0,4 de Baixa: vem primeiro,
-    # com as turmas dela juntas, apesar de "B T1" valer mais que "A T1".
-    assert pedido == ["A T2", "A T1", "B T1", "B T2"]
+    # apesar de "B T1" valer mais que "A T1". E só a melhor turma de cada uma.
+    assert pedido == ["A T2", "B T1"]
 
 
 def test_selectivity_cuts_disciplines_not_classes():
@@ -224,8 +251,9 @@ def test_selectivity_cuts_disciplines_not_classes():
         classes=classes,
     )
     # Médias dos máximos: (0,6 + 0,4)/2 = 0,5; o limiar 0,55 corta Morna
-    # inteira e preserva Querida inteira — turma nenhuma é cortada sozinha.
-    assert pedido == ["Q T1", "Q T2"]
+    # inteira e preserva Querida — turma nenhuma é cortada sozinha, o grupo
+    # inteiro entra ou sai.
+    assert pedido == ["Q T1"]
 
 
 # --- a utilidade -----------------------------------------------------------
@@ -451,12 +479,15 @@ def test_a_class_only_prices_what_it_sold():
             assert snapshot.filled <= snapshot.seats
 
 
-def test_the_bid_never_touches_two_classes_of_a_group():
-    """A consequência mais visível do nível de dentro ser escolha: o aluno
-    nunca financia duas turmas da mesma disciplina na mesma rodada.
+def test_the_bid_funds_several_classes_of_a_group_without_leaking_credits():
+    """O aluno financia mais de uma turma do mesmo grupo — é o hedge dentro da
+    rodada —, e o que o grupo recebe continua sendo o que o nível de fora lhe
+    deu.
 
-    É também o que mantém a PLI tratável — cada restrição de clique nasce de
-    um aluno que apostou em mais de uma turma do grupo."""
+    Cada restrição de clique da PLI nasce de um aluno nesta situação, e é
+    daqui que sai o custo de resolução do braço — 2,3× os lances e 4,1× o
+    tempo no cenário padrão, medido no README.
+    """
     config = make_config(classes=4, class_stability=0.3)
     draws_rng = np.random.default_rng(config.seed)
     students = generate_students(config, draws_rng)
@@ -475,5 +506,66 @@ def test_the_bid_never_touches_two_classes_of_a_group():
             behavior=student.behavior,
             classes=classes,
         )
-        for names in classes.values():
-            assert sum(1 for name in names if bids.get(name)) <= 1
+        assert sum(bids.values()) <= 40
+        espalhou = max(
+            sum(1 for name in names if bids.get(name)) for names in classes.values()
+        )
+        assert espalhou > 1
+
+
+# --- os seis estados -------------------------------------------------------
+
+
+def test_the_six_states_are_per_discipline_and_not_per_class():
+    """O que o aluno pede, ganha e retém vem por **turma**; o catálogo e o
+    histórico são por **disciplina**. Sem dobrar um no outro, `aprovada`
+    procuraria turmas num conjunto de disciplinas, não acharia nenhuma, e
+    tudo o que ele retivesse sairia como reprovada."""
+    estados = request_states(
+        catalogue=["D1", "D2", "D3"],
+        approved={"D1"},
+        eligible=["D1 T1", "D1 T2", "D2 T1"],
+        requested={"D1 T1", "D2 T1"},
+        won={"D1 T1"},
+        retained={"D1 T1"},
+        groups={
+            "D1 T1": "D1", "D1 T2": "D1", "D2 T1": "D2", "D3 T1": "D3",
+        },
+    )
+    assert estados == RequestStates(
+        not_eligible=1,  # D3, bloqueada
+        not_requested=0,
+        refused=1,  # D2, pedida e não atendida
+        excluded=0,
+        failed=0,
+        approved=1,  # D1, retida e aprovada
+    )
+    # E os estados continuam particionando o que falta: 3 do catálogo, nenhuma
+    # aprovada antes deste período.
+    assert estados.total == 3
+
+
+def test_a_simulation_with_classes_reports_the_approvals_it_made():
+    """A consequência visível do mesmo defeito, de ponta a ponta: a soma dos
+    aprovados dos estados tem de andar junto com as aprovações do histórico."""
+    config = make_config(classes=4, periods=4)
+    result = run_simulation(config)
+    estados = [
+        period.aggregate.overall.metrics.request_states
+        for period in result.periods
+        if period.aggregate.overall.metrics
+        and period.aggregate.overall.metrics.request_states
+    ]
+
+    assert estados
+    assert any(row.approved > 0 for row in estados)
+    # E ninguém é contado duas vezes: o funil é uma partição.
+    for row in estados:
+        assert row.total == pytest.approx(
+            row.not_eligible
+            + row.not_requested
+            + row.refused
+            + row.excluded
+            + row.failed
+            + row.approved
+        )

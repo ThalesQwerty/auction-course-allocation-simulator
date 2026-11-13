@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from .behavior import decide
 from .entities import Agent, Demand, Good, MutualExclusion, Problem
-from .equations import NEUTRAL, Behavior, serial_dictatorship
+from .equations import NEUTRAL, Behavior, best_class, serial_dictatorship
 from .equations import request_set as rank_requests
 from .wdp_solver import solve_wdp
 
@@ -40,16 +40,22 @@ def request_set(
     faz com ela é só ordenar. O limiar que o leilão usa para parar o gasto
     não tem análogo aqui — lá não há investimento marginal que se interrompa.
 
-    **Ordenar as turmas com sinceridade é dominante** neste braço: turma
-    recusada não custa nada e a prioridade do aluno não depende do que ele
-    pede. É a mesma justificativa que a docstring de `equations.request_set`
-    dá para disciplinas, um nível abaixo.
+    **Ordenar com sinceridade é dominante** neste braço: pedido recusado não
+    custa nada e a prioridade do aluno não depende do que ele pede. É a mesma
+    justificativa que a docstring de `equations.request_set` dá.
 
-    E é por isso que aqui ele lista **todas** as turmas, enquanto no leilão
-    aposta numa só (`equations.best_class`): lá cada crédito posto numa turma
-    é um crédito que não está em outra, aqui não há nada a repartir. A
-    assimetria é do mecanismo — mensagem cara contra mensagem gratuita —, a
-    mesma que separa as duas mochilas um nível acima.
+    **Dois níveis**, como no leilão. De fora, as disciplinas na ordem de
+    preferência; de dentro, **uma turma por disciplina** — a melhor
+    disponível (`equations.best_class`). Aqui o aluno escolhe a seção em que
+    quer se matricular, e o pedido é por ela: pedir duas turmas da mesma
+    disciplina seria pedir duas vezes a mesma vaga, e o clique da eq. (5)
+    reduziria o par a uma delas de todo modo.
+
+    É aí que a assimetria com o leilão aparece, e ela é do mecanismo: lá o
+    nível de dentro é **outra mochila côncava**, porque há *quanto* a dizer e
+    o aluno reparte a fatia da disciplina entre as turmas dela. Aqui só há
+    *qual*, e o aluno diz a melhor. Perdida ela na rodada 1,
+    `available_goods` devolve as irmãs na rodada 2.
     """
     groups, scores, _reserve = decide(
         utilities=utilities, behavior=behavior, classes=classes
@@ -57,27 +63,20 @@ def request_set(
     if not classes:
         return rank_requests(scores=groups, available=available)
 
-    # **Dois níveis**: disciplinas na ordem de preferência e, dentro de
-    # cada uma, as turmas na dela. Plana — todas as turmas misturadas — a
-    # caminhada consumiria W_a em ordem de turma, e o braço passaria a
-    # mudar *quais disciplinas* o aluno leva em vez de só qual turma.
     reachable = set(available)
+    open_classes = {
+        discipline: [name for name in classes[discipline] if name in reachable]
+        for discipline in groups
+    }
     ordered = rank_requests(
         scores=groups,
-        available=[
-            discipline
-            for discipline in groups
-            if any(name in reachable for name in classes[discipline])
-        ],
+        available=[d for d, names in open_classes.items() if names],
     )
-    return [
-        name
+    chosen = (
+        best_class(scores=scores, available=open_classes[discipline])
         for discipline in ordered
-        for name in rank_requests(
-            scores=scores,
-            available=[n for n in classes[discipline] if n in reachable],
-        )
-    ]
+    )
+    return [name for name in chosen if name is not None]
 
 
 def allocate_by_ilp(

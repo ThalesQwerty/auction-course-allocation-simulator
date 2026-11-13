@@ -28,12 +28,45 @@ from ..population import Student
 from .reports import GroupSnapshot
 
 
+# Separa o grupo espacial da coorte na chave de uma **célula** (ver
+# `Axis.crossed`). A coorte vem por último e é sempre numérica, de modo que
+# `rpartition` a recupera mesmo que o nome de um perfil traga o separador.
+CELL_SEP = "|"
+
+
 @dataclass(frozen=True)
 class Axis:
     """Como rotular cada aluno e em que ordem as séries saem."""
 
     key: Callable[[Student], str]
     order: list[str]
+
+    @classmethod
+    def crossed(cls, spatial: "Axis", cohort: "Axis") -> "Axis":
+        """O produto de um recorte espacial pela coorte — a **célula**.
+
+        É a unidade de que as três réguas do eixo X saem: somando as células
+        de um período dá a série por período, as de uma coorte dá a série por
+        coorte, e as de mesma distância entre período e coorte dá a série por
+        idade. **Não há eixo de idade**, e não falta: dentro de um período a
+        idade e a coorte são a mesma partição (`idade = t − t_a`), e o que
+        distingue as duas réguas é só como as células são reagrupadas ao
+        longo do horizonte.
+
+        Sem o cruzamento, a régua da idade só existiria no recorte "Geral" —
+        e o ponto de escolher as duas coisas é justamente poder cruzá-las.
+
+        A ordem é a do recorte espacial por fora e a da coorte por dentro,
+        que é a ordem em que a tela lista os grupos.
+        """
+        return cls(
+            key=lambda s: f"{spatial.key(s)}{CELL_SEP}{cohort.key(s)}",
+            order=[
+                f"{group}{CELL_SEP}{entry}"
+                for group in spatial.order
+                for entry in cohort.order
+            ],
+        )
 
     @classmethod
     def cohorts(cls, entry_periods: list[int], period: int) -> "Axis":
@@ -141,6 +174,8 @@ def measure(
     approved_hours = {
         s.id: s.approved_hours(discipline_hours, config.min_grade) for s in active
     }
+    # Turma → disciplina, uma vez: os seis estados são por disciplina.
+    discipline_of = config.discipline_by_class()
     return Measurements(
         satisfactions=satisfactions,
         # Aproveitamento sai de `won`, e não da carga aprovada, porque mede
@@ -194,6 +229,9 @@ def measure(
                     requested=requested[s.id],
                     won=won[s.id],
                     retained=retained[s.id],
+                    # O estado é da **disciplina**: o que o aluno pediu e
+                    # levou vem por turma e é dobrado no grupo dela.
+                    groups=discipline_of,
                 )
                 for s in active
             }

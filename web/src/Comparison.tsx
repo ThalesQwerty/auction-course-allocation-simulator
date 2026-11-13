@@ -2,23 +2,20 @@ import { useMemo, useState } from "react";
 import {
   Histogram,
   LineSample,
-  REQUEST_STATES,
   SeriesChart,
-  categoricalColors,
   formatCount,
   formatRatio,
   inkFor,
-  requestStateColors,
   soloColor,
   usePrefersDark,
 } from "./charts";
 import type { SeriesArmStyle, SeriesLine } from "./charts";
-import { CUTS, cutGroups, seriesOf } from "./bands";
+import { CUTS, RULERS, cutGroups, pointsOf, rulerOf, seriesOf } from "./bands";
 import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
 import { Trace } from "./Trace";
 import { COMPARISON_ARMS } from "./types";
-import type { CutAxis, RunSummary } from "./types";
+import type { CutAxis, Ruler, RunSummary } from "./types";
 
 /** Períodos com uma casa: o tempo de formatura anda em frações de período, e
  * duas casas sugeririam uma precisão que a amostra não tem. */
@@ -164,6 +161,22 @@ const METRICS: Metric[] = [
 ];
 
 
+/** As quatro frações do funil de uma solicitação — `equations.request_funnel`.
+ *
+ * Cada uma divide pelo **nó anterior**, não pelo catálogo: é o que faz cada
+ * painel se mexer só quando o nó dele se mexe, e é o que permite as quatro
+ * dividirem a mesma régua de 0 a 1. Elas substituíram os seis painéis de
+ * contagem, que subiam e desciam juntos porque dividiam o mesmo denominador.
+ *
+ * As contagens continuam na resposta da API (os seis estados), e é a elas que
+ * se recorre quando uma fração sai vazia — um nó sem ninguém não tem fração. */
+const FUNNEL = [
+  { key: "requested_share", title: "Fração de solicitadas" },
+  { key: "granted_share", title: "Fração de deferidas" },
+  { key: "attended_share", title: "Fração de cursadas" },
+  { key: "approved_share", title: "Fração de aprovadas" },
+] as const;
+
 const ORDINALS = ["1ª", "2ª", "3ª", "4ª", "5ª", "6ª", "7ª", "8ª", "9ª", "10ª"];
 
 /** Uma métrica por rodada do cenário: as vagas obtidas por aluno naquela
@@ -211,11 +224,15 @@ export function Comparison({
   const dark = usePrefersDark();
   const result = run.result;
   const ink = inkFor(dark);
-  const stateColors = useMemo(() => requestStateColors(dark), [dark]);
-  /** O recorte dos gráficos: a universidade inteira, a coorte ou um dos
-   * quatro eixos de perfil. Um para a tela inteira — o que ele troca são as
-   * linhas de todos os gráficos, e lê-los com recortes diferentes lado a lado
-   * é o que não se quer. */
+  /** As duas escolhas que governam todos os gráficos: a **régua** do eixo X
+   * (período, idade ou coorte) e o **recorte** das linhas (a universidade
+   * inteira ou um dos quatro eixos de perfil). O modelo é a terceira
+   * dimensão e não é escolha — ele é sempre o traçado.
+   *
+   * Uma só de cada para a tela inteira: o que elas trocam são os eixos de
+   * todos os gráficos, e lê-los com recortes diferentes lado a lado é o que
+   * não se quer. */
+  const [rulerChoice, setRuler] = useState<Ruler>("period");
   const [cutChoice, setCut] = useState<CutAxis>("overall");
 
   /** A escada de ablação só roda quando pedida (`ARMS + ABLATION_ARMS` no
@@ -246,39 +263,57 @@ export function Comparison({
     [arms, result.arms]
   );
 
-  /** Os recortes que esta comparação traz. Uma gravada antes dos recortes por
-   * perfil só tem o "Geral", e os outros botões somem. */
-  const cuts = CUTS.filter((cut) =>
+  /** As réguas que esta comparação traz. Uma gravada antes de a régua ser
+   * escolha só tem a do período, e os outros botões somem. */
+  const rulers = RULERS.filter((option) =>
     Object.values(series).some((axes) =>
-      axes.some((a) => a.axis === cut.axis && a.groups.length)
+      axes.some((a) => rulerOf(a) === option.ruler && a.groups.length)
+    )
+  );
+  const ruler = rulers.some((r) => r.ruler === rulerChoice)
+    ? rulerChoice
+    : (rulers[0]?.ruler ?? "period");
+  const scale = RULERS.find((option) => option.ruler === ruler) ?? RULERS[0];
+
+  /** Os recortes que esta comparação traz **nesta régua**. Uma gravada antes
+   * dos recortes por perfil só tem o "Geral", e os outros botões somem. */
+  const cuts = CUTS.filter((option) =>
+    Object.values(series).some((axes) =>
+      axes.some(
+        (a) => rulerOf(a) === ruler && a.axis === option.axis && a.groups.length
+      )
     )
   );
   const cut: CutAxis = cuts.some((c) => c.axis === cutChoice)
     ? cutChoice
     : (cuts[0]?.axis ?? "overall");
 
+  /** O eixo de um braço na régua e no recorte escolhidos. */
+  const axisOf = (armKey: string) =>
+    series[armKey]?.find((a) => rulerOf(a) === ruler && a.axis === cut);
+
   /** Os grupos do recorte, com cor e rótulo. */
   const groups = useMemo(() => {
     const present = [
       ...new Set(
         Object.values(series).flatMap(
-          (axes) => axes.find((a) => a.axis === cut)?.groups.map((g) => g.group) ?? []
+          (axes) =>
+            axes
+              .find((a) => rulerOf(a) === ruler && a.axis === cut)
+              ?.groups.map((g) => g.group) ?? []
         )
       ),
     ];
-    return cutGroups(cut, run.config, present, {
-      solo: soloColor(dark),
-      categorical: (labels) => categoricalColors(labels, dark),
-    });
-  }, [series, cut, run.config, dark]);
+    return cutGroups(cut, run.config, present, { solo: soloColor(dark) });
+  }, [series, ruler, cut, run.config, dark]);
 
   /** As linhas de uma grandeza: um grupo do recorte sob um modelo. */
   const linesOf = (key: string): SeriesLine[] =>
     arms.flatMap((arm) =>
-      (series[arm.key]?.find((a) => a.axis === cut)?.groups ?? []).map((group) => ({
+      (axisOf(arm.key)?.groups ?? []).map((group) => ({
         arm: arm.key,
         group: group.group,
-        points: group.period.flatMap((x, i) => {
+        points: pointsOf(group).flatMap((x, i) => {
           const band = group.values[key]?.[i];
           return band
             ? [{ x, q1: band[0], median: band[1], q3: band[2], n: group.n[i] }]
@@ -459,7 +494,7 @@ export function Comparison({
       groups={groups}
       arms={arms}
       runs={result.runs}
-      xLabel={(x) => `Período ${x}`}
+      xLabel={scale.point}
       {...extra}
     />
   );
@@ -490,29 +525,53 @@ export function Comparison({
           {result.runs} simulações de cada modelo — {result.runs * result.arms.length}{" "}
           simulações
         </h2>
-        {cuts.length > 1 && (
-          <div className="view-switch">
-            {cuts.map((option) => (
-              <button
-                key={option.axis}
-                type="button"
-                className={cut === option.axis ? "on" : ""}
-                onClick={() => setCut(option.axis)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="switch-set">
+          {rulers.length > 1 && (
+            <div className="switch-group" role="group" aria-label="Eixo">
+              <span>Eixo</span>
+              <div className="view-switch">
+                {rulers.map((option) => (
+                  <button
+                    key={option.ruler}
+                    type="button"
+                    className={ruler === option.ruler ? "on" : ""}
+                    aria-pressed={ruler === option.ruler}
+                    onClick={() => setRuler(option.ruler)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {cuts.length > 1 && (
+            <div className="switch-group" role="group" aria-label="Linhas">
+              <span>Linhas</span>
+              <div className="view-switch">
+                {cuts.map((option) => (
+                  <button
+                    key={option.axis}
+                    type="button"
+                    className={cut === option.axis ? "on" : ""}
+                    aria-pressed={cut === option.axis}
+                    onClick={() => setCut(option.axis)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <section className="chart-section">
         <header className="chart-section-head">
           <h2>Métricas de alocação</h2>
           <p>
-            A mediana entre as simulações em cada período, com o intervalo
-            interquartil em faixa. O tempo de formatura não entra: é da
-            simulação inteira, não do período.
+            A mediana entre as simulações em cada ponto do eixo, com o
+            intervalo interquartil em faixa. O tempo de formatura não entra: é
+            da simulação inteira, não de um ponto dela.
           </p>
         </header>
         <div className="chart-grid">
@@ -521,7 +580,7 @@ export function Comparison({
               do horizonte — a universidade enchendo, o estado estacionário e
               a drenagem —, e sem ele a queda das curvas no fim se leria como
               mudança de mecanismo. */}
-          {chart("students", "Alunos ativos", "students", {
+          {chart("students", scale.weight, "students", {
             bounds: [0, Infinity],
             format: formatCount,
           })}
@@ -546,19 +605,19 @@ export function Comparison({
         <header className="chart-section-head">
           <h2>Solicitações de disciplinas</h2>
           <p>
-            Em que estado terminou cada disciplina que ainda falta ao aluno, em
-            média por aluno. Os seis particionam o que falta — o catálogo menos
-            o que ele já aprovou —, então somá-los dá o tamanho desse
-            denominador. Uma escala por estado: lê-se a diferença entre os
-            modelos <em>dentro</em> de cada painel, nunca a altura entre eles.
+            O funil de cada disciplina que ainda falta ao aluno, fração a
+            fração: quanto ele pediu do que lhe faltava, quanto do que pediu
+            lhe foi deferido, quanto do que levou chegou a cursar e quanto do
+            que cursou aprovou. Cada uma divide pelo nó anterior, de modo que
+            as quatro vão de 0 a 1 e cada painel se mexe só quando o nó dele
+            se mexe.
           </p>
         </header>
         <div className="chart-grid">
-          {REQUEST_STATES.map((state) =>
-            chart(state.key, state.label, state.key, {
-              accent: stateColors[state.key],
-              bounds: [0, Infinity],
-              format: formatCount,
+          {FUNNEL.map((share) =>
+            chart(share.key, share.title, share.key, {
+              bounds: [0, 1],
+              format: formatRatio,
             })
           )}
         </div>

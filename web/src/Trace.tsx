@@ -61,7 +61,7 @@ function outcomeOf(record: RequestRecord, round: number): Outcome | null {
       ? { label: "aprovada", tone: "approved", guaranteed }
       : { label: "reprovada", tone: "failed", guaranteed };
   }
-  if (record.bids[round - 1] > 0) return { label: "recusada", tone: "refused", guaranteed: false };
+  if (record.bids[round - 1] > 0) return { label: "indeferida", tone: "refused", guaranteed: false };
   // Já obtida antes desta rodada: fora da tabela — ver acima.
   if (won !== null && (guaranteed || won < round)) return null;
   return { label: "não solicitada", tone: "idle", guaranteed: false };
@@ -295,7 +295,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
             não passou ·{" "}
             <Chip outcome={{ label: "excluída", tone: "dropped", guaranteed: false }} /> obteve e
             largou ·{" "}
-            <Chip outcome={{ label: "recusada", tone: "refused", guaranteed: false }} /> pediu e
+            <Chip outcome={{ label: "indeferida", tone: "refused", guaranteed: false }} /> pediu e
             não obteve ·{" "}
             <Chip outcome={{ label: "não solicitada", tone: "idle", guaranteed: false }} /> elegível
             e sem pedido. A disciplina já obtida numa rodada anterior sai da tabela: ela não

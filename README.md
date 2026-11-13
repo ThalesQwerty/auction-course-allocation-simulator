@@ -99,7 +99,7 @@ Simulador/
     ├── GradeGraph.tsx    # A grade desenhada, com a cadeia de pré-requisitos
     ├── Playground.tsx    # A decisão de um aluno, passo a passo
     ├── Project.tsx       # Visão teórica do projeto
-    ├── Comparison.tsx    # Séries por período, recorte e tabelas de uma comparação
+    ├── Comparison.tsx    # Séries (régua × recorte) e tabelas de uma comparação
     ├── Trace.tsx         # O caso individual: um aluno ou uma disciplina, rodada a rodada
     ├── history.ts        # Histórico de execuções: formato, migrações e leitura
     └── historyStore.ts   # Onde o histórico mora: IndexedDB
@@ -161,7 +161,7 @@ primeiro período — nada é sorteado dentro do loop, como exige a Seção 7.3:
 | `q` | quantil de desempenho de cada par (aluno, disciplina), persistente | `grading.draw_base_quantiles` |
 | `δ^(t)` | disponibilidade em horas de cada par (aluno, período) | `availability.draw_availability` |
 | `u^(t)` | interesse de cada par (aluno, turma) em cada período | `behavior.draw_interest` |
-| `alpha`, `epsilon` | ordem de desempate e perturbação | `simulation.setup` |
+| `epsilon` | perturbação estocástica, uma por par (aluno, disciplina) | `simulation.setup` |
 
 Três coisas **não** vêm da seed, de propósito: o período de ingresso `t_a`, a
 combinação de perfis e a turma de entrada do calouro. As coortes têm todas o mesmo tamanho, em períodos consecutivos,
@@ -406,11 +406,11 @@ diferença entre eles se lê como efeito do mecanismo.
 | | `credits` (leilão, Seção 7.1) | `ranking` (linha de base, Seção 7.3.1) |
 |---|---|---|
 | **Moeda** | créditos, `C_a^(t,r)` | carga horária, `W_a^(t,r)` |
-| **O que o aluno decide** | quanto apostar em cada disciplina | quais pedir, dado o teto `W_a` — eq. (50) |
+| **O que o aluno decide** | quanto apostar em cada disciplina, e como repartir entre as turmas dela | quais pedir, dado o teto `W_a` — eq. (50), e qual turma de cada uma |
 | **Estratégia** | mochila **côncava** de pesos unitários: o N-ésimo crédito posto em `x` vale `u_{a,x}/N` | mochila **0-1**: `w_x` é peso, `u_{a,x}` é valor |
 | **Quem decide a alocação** | PLI exata sobre todos os lances (eq. 22) | varredura por `N_a^(t) + ε` — eq. (49) |
 | **Onde as restrições são resolvidas** | globalmente, no resolvedor | localmente e *ex-ante*, por cada aluno |
-| **A exclusão mútua entre turmas (eq. 5)** | restrição de clique dentro da PLI | roteamento: a caminhada pula o grupo já atendido |
+| **A exclusão mútua entre turmas (eq. 5)** | restrição de clique dentro da PLI, sobre as apostas repartidas | o pedido já é de uma turma por disciplina; o roteamento da caminhada é a guarda |
 | **Preço** | 2º preço, eq. (24) | não existe |
 | **Retorno de créditos** | `f_γ`, eq. (34) | não existe — não houve preço a devolver |
 | **Custo de excluir** | metade do preço pago volta (`paid // 2`) | nenhum — não há moeda a perder |
@@ -421,38 +421,49 @@ comparação: a mochila 0-1 só lê a *ordem* das utilidades, enquanto a côncav
 carrega o *quanto* — ela decide não só quais disciplinas, mas quantos créditos
 cada uma merece.
 
-**As duas decisões são em dois níveis**, e pelo mesmo motivo. No leilão, a
-mochila entre disciplinas usa `max_t ũ_t` como valor; plana — todas as turmas
+**As duas decisões são em dois níveis**, e o nível de fora é o mesmo nos dois
+braços: **disciplinas**, com `max_t ũ_t` como valor. Plano — todas as turmas
 como bens independentes —, o orçamento da disciplina seguiria o **número de
-turmas** dela, e o funil entraria no lance. Na linha de base, as disciplinas são
-ordenadas e as turmas de cada uma saem juntas; plana, a caminhada consumiria
-`W_a` em ordem de turma, e o braço passaria a mudar *quais disciplinas* o aluno
-leva em vez de só qual turma.
+turmas** dela no leilão, e no CR a caminhada consumiria `W_a` em ordem de
+turma; nos dois casos o funil da oferta entraria na decisão do aluno. Com dois
+níveis, o quanto (ou o se) da disciplina é decidido antes de as turmas serem
+vistas, e o número delas não o toca.
 
 O **segundo nível difere entre os braços, e a diferença é do mecanismo**. No
-leilão ele é uma **escolha** (`equations.best_class`): tudo o que a disciplina
-ganhou vai para a turma mais bem pontuada. Repartir ali reproduziria um nível
-abaixo a pulverização que o nível de fora evita — o ganho marginal `score/N`
-vale por bem, então o 1º crédito na turma B ganha do 2º na turma A quase
-sempre —, e não compraria seguro nenhum, porque o clique reduz a uma turma o
-que o lance espalhou. O seguro são as **rodadas**: perdida a turma na rodada 1,
-as irmãs voltam na rodada 2 com o orçamento que sobrou.
+leilão ele é **outra mochila côncava**, agora entre as turmas da disciplina,
+com a fatia dela como orçamento e sem limiar — o corte foi feito no nível de
+fora, e a fatia sai inteira, de modo que a soma por grupo é exatamente a do
+nível de fora. O aluno aposta mais na turma que prefere e guarda apostas
+menores nas irmãs: ele só pode **levar** uma (eq. 5), mas pode **pedir** em
+várias, e é esse hedge dentro da rodada que o segundo nível expressa.
 
-Na linha de base o aluno **lista todas** as turmas, em ordem: pedido recusado
-não custa nada, e o roteamento já o leva à primeira com vaga. É a mesma
-assimetria que separa as duas mochilas um nível acima — mensagem cara contra
-mensagem gratuita.
+Na linha de base ele é uma **escolha** (`equations.best_class`): uma turma por
+disciplina, a melhor disponível. Não há *quanto* a dizer, só *qual*, e pedir
+duas turmas da mesma disciplina seria pedir duas vezes a mesma vaga. Perdida
+a turma na rodada 1, `available_goods` devolve as irmãs na rodada 2 — do lado
+do CR o seguro é a rodada; do lado do leilão, a repartição e a rodada.
 
-O custo de repartir foi medido, e é o que decidiu: numa coorte de 324 ao longo
-de 4 períodos, repartir produziu 33 856 lances e 43,9 s de PLI contra 14 250
-lances e 1,9 s concentrando. Cada restrição de clique nasce de um aluno que
-apostou em mais de uma turma do grupo, e são elas que tornam a PLI
-intratável.
+É a mesma assimetria que separa as duas mochilas um nível acima — mensagem
+cara contra mensagem gratuita: no leilão cada crédito posto numa turma é um
+crédito que não está em outra, e é por isso que ali existe uma repartição a
+fazer.
+
+**O preço disso é tempo de PLI**, e é preciso declará-lo: cada restrição de
+clique nasce de um aluno que apostou em mais de uma turma do grupo, e repartir
+dentro do grupo faz com que quase todo aluno o faça. Medido no cenário padrão
+— 63 disciplinas, 288 turmas, coorte de 324, 23 períodos e 3 rodadas, uma
+simulação do braço `credits_return`: **1 193 356 lances e 492 s** repartindo,
+contra 526 336 lances e 120 s se a fatia da disciplina fosse inteira para uma
+turma só. São 2,3× os lances e 4,1× o tempo, e é o custo da expressividade que
+o segundo nível acrescenta — o que pesa é o número de **turmas por
+disciplina**, não o de disciplinas.
 
 **O roteamento** é o análogo da restrição de clique na ditadura serial: a
 caminhada guarda os grupos já atendidos e, ao chegar numa turma cuja disciplina
-já foi concedida, pula para a próxima. Sem ele o braço CR alocaria duas turmas
-da mesma disciplina — `serial_dictatorship` não checa clique nenhum por si.
+já foi concedida, pula para a próxima. Com o pedido de uma turma por
+disciplina ele não tem o que fazer dentro de uma rodada, e continua lá como
+**guarda**: `serial_dictatorship` não checa clique nenhum por si, e o braço
+precisa dela se o pedido voltar a listar irmãs.
 
 **O preço também conhece o grupo**: quem apostou em três turmas da mesma
 disciplina e foi atendido numa delas não é perdedor nas outras duas. Contá-lo
@@ -557,6 +568,32 @@ São **cinco métricas**: eficiência (ψ̄), equidade (φ), correlação (λ),
 **desperdício de vaga** (ε) e **tempo de formatura**. Nada de crédito, porque
 não há contraparte do outro lado.
 
+**Duas escolhas governam todos os gráficos da tela**, e são independentes: a
+**régua** do eixo X e o **recorte** das linhas. O modelo é a terceira dimensão
+e não é escolha — ele é sempre o traçado, contínuo no leilão e tracejado no CR.
+
+| Régua (eixo X) | Um ponto é | Para que serve |
+|---|---|---|
+| período | um período da simulação | o calendário da universidade: é aqui que se veem o aquecimento, o estado estacionário e a drenagem |
+| idade | quantos períodos o aluno completou | o tempo do **aluno**: alinha as coortes pelo ingresso e tira a fase do horizonte de dentro da curva |
+| coorte | um período de ingresso | um corte transversal: a vida inteira de cada turma resumida num ponto |
+
+O recorte é o **Geral** (uma linha por modelo) ou um dos quatro eixos de perfil
+— desempenho, disponibilidade, seletividade, concentração.
+
+A coorte era recorte até 11/11/2026 e virou régua: ela é um corte do **tempo**,
+e tê-la como cor obrigava a ler duas dimensões temporais no mesmo gráfico.
+
+As duas réguas novas saem das **células** — cada eixo de perfil cruzado com a
+coorte, medido período a período. É o cruzamento que permite escolher régua e
+recorte independentemente; sem ele, a régua da idade só existiria no Geral.
+Dentro de um período a idade e a coorte são a mesma partição (`idade = t − t_a`),
+e o que distingue as duas réguas é só como as células são reagrupadas ao longo
+do horizonte. O reagrupamento é a **média ponderada pelos alunos medidos**, a
+mesma da redução por período, com uma exceção: a fração de concluintes é
+acumulada, então na régua da coorte vale a do último período medido da coorte,
+não a média da subida dela.
+
 O **desperdício** é a quinta, e é a que a disponibilidade existe para produzir:
 as vagas obtidas e largadas sobre as obtidas. É o vão entre as duas leituras de
 ocupação — a vaga saiu da oferta de qualquer jeito, mas só a parte retida virou
@@ -587,40 +624,51 @@ rodadas. Nenhuma rodada isolada tem lado "melhor": na primeira, mais alto é
 atender mais; nas seguintes, mais alto é ter deixado mais para trás. E a
 matrícula garantida não infla a primeira, porque o calouro está fora do recorte.
 
-Além delas, a seção **Solicitações de disciplinas**: em que estado terminou
-cada disciplina que ainda falta ao aluno, em **média por aluno**, nos recortes
-por período e por coorte. São seis estados, que particionam o denominador:
+Além delas, a seção **Solicitações de disciplinas**: o funil de cada
+disciplina que ainda falta ao aluno. Seis estados o particionam, e a unidade é
+a **disciplina**, não a turma — o que o aluno pede e leva vem por turma e é
+dobrado no grupo dela antes de classificar, senão o histórico (que é por
+disciplina) nunca casaria com o que foi retido:
 
     ainda falta ─┬─ não elegível   pré-requisito pendente, ou optativa que a
                  │                 cota já dispensou
                  └─ elegível ──┬── não solicitada
-                               └─ solicitada ─┬─ recusada
+                               └─ solicitada ─┬─ indeferida
                                               └─ obtida ─┬─ excluída
                                                          └─ cursada ─┬─ reprovada
                                                                      └─ aprovada
 
+**A tela mostra quatro frações condicionais**, não as seis contagens
+(`equations.request_funnel`). Cada uma divide pelo **nó anterior**:
+
+| Fração | Conta | Sobre |
+|---|---|---|
+| solicitadas | o que ele pediu | o que lhe faltava |
+| deferidas | o que lhe foi concedido | o que ele pediu |
+| cursadas | o que ele não largou | o que lhe foi concedido |
+| aprovadas | o que ele passou | o que ele cursou |
+
 Três decisões de leitura sustentam esse gráfico.
+
+**Condicional, e não fração do catálogo.** Com o mesmo denominador nas seis, um
+aluno que destrava a grade vê "não elegível" cair e as outras cinco subirem sem
+que nada tenha mudado no mecanismo: as seis andam juntas e nenhuma isola um nó.
+Dividindo pelo nó anterior, cada painel se mexe só quando o nó dele se mexe — e
+as quatro passam a dividir a mesma régua, de 0 a 1, o que as torna comparáveis
+entre si e entre os braços. A fração de cursadas é, por construção, `1 − ε`: a
+mesma conta que o desperdício de vaga, vista do funil em vez da vaga.
 
 **O já aprovado sai do denominador.** O complemento da eq. (42) juntaria "já
 aprovada" com "bloqueada" num estado só, e os dois andam em sentidos opostos: o
 primeiro cresce com o progresso do aluno, o segundo encolhe com ele. Somados,
-cancelam-se em parte — a faixa esconderia a própria história. Com as aprovadas
-fora, "não elegível" significa só *bloqueada*, e cai conforme ele destrava a
-grade.
+cancelam-se em parte — a leitura esconderia a própria história. Com as
+aprovadas fora, "não elegível" significa só *bloqueada*, e cai conforme ele
+destrava a grade.
 
-**Média por aluno, nunca soma.** A soma seria governada pela população, que
-sobe no escalonamento de ingresso, estabiliza e despenca na drenagem — o
-gráfico mostraria o tamanho da universidade em vez do mecanismo. E nem o
-recorte por coorte escapa: elas nascem do mesmo tamanho, mas encolhem em
-ritmos diferentes conforme formam e jubilam.
-
-**Linhas não empilhadas, uma escala por estado.** Num empilhado a 100% toda
-faixa se mexe quando uma se mexe, e a *posição* de cada faixa depende de tudo o
-que está embaixo — comparar a linha de exclusão entre dois braços com a base
-balançando é das leituras mais difíceis que existem. Aqui cada estado é um
-painel com os dois braços dentro, de modo que a diferença se lê *dentro* do
-painel. A escala é própria de cada um porque "não elegível" gira numa ordem de
-grandeza e "excluída" em outra.
+**Nó vazio não tem fração.** Quem não pediu nada não tem fração de deferidas, e
+ali o ponto **falta** em vez de valer zero — zero diria que ele pediu e foi
+recusado. As seis contagens continuam na resposta da API, e é a elas que se
+recorre para saber por que uma fração sumiu.
 
 A comparação traz também o **histograma do interesse** do cenário —
 o gráfico da causa ao lado do da consequência. Ele mostra como a preferência de
@@ -1108,34 +1156,76 @@ Em 0 não há corte nenhum: é o **especulador**, que pede tudo e gasta o
 orçamento inteiro. Acima de 1 o aluno fica mais exigente que a média e
 acumula saldo para um período em que valha a pena.
 
-### O ε da eq. (7.1.2) some na tolerância do resolvedor
+### O desempate e o viés saíram da preferência
+
+A eq. (22) do anteprojeto somava ao lance três camadas — o viés retificado
+β̂ (eq. 21), o fator de desempate α̂ (eq. 20) e a perturbação ε —, e
+justificava α̂ ∈ [0, 1) assim: *estritamente menor que 1 crédito*, de modo
+que o desempate nunca invertesse uma diferença de lance.
+
+**A garantia vale entre dois pares e não sobrevive à soma.** O WDP não
+compara preferências duas a duas: ele maximiza `Σ p·z` sobre todos os pares
+ao mesmo tempo (eq. 8). Com α̂ até 1 por par e milhares de pares alocados, a
+massa de desempate do objetivo chega à ordem de milhares de créditos. Medido
+numa rodada do cenário cheio (2.268 alunos, 69.033 pares de demanda, 6.400
+vagas preenchidas):
+
+| camada do objetivo | massa |
+| --- | --- |
+| lance | 29.494 |
+| desempate (α̂) | **3.704** |
+
+E a consequência não é teórica. Resolvendo a mesma instância duas vezes, as
+duas até o ótimo provado:
+
+| objetivo | tempo | créditos de lance alocados |
+| --- | --- | --- |
+| `lance + α̂ + ε` (eq. 22) | 194,4 s | 30.014 |
+| só o lance, inteiro | **65,8 s** | **30.029** |
+
+A formulação antiga entregava **quinze créditos a quem foi superado no
+lance** — não é arredondamento, são vagas mudando de dono — e cobrava três
+vezes o tempo de solver por isso, porque a camada fracionária cria um
+contínuo de soluções quase ótimas que o ramifica-e-corta tem de varrer.
+
+Então **α̂ e β̂ saíram**, e a preferência passa a ser `p = c + ε`. Com β̂ vai
+junto a política universitária explícita no lance; ela continua expressável
+pelo cenário — oferta de vagas e pré-requisitos —, que age antes do leilão.
+A matriz α some de `simulation.setup`; como ela era o **último** sorteio da
+inicialização, tirá-la não desloca o gerador: população, notas,
+disponibilidade e interesse saem bit a bit iguais, e a diferença entre o
+antes e o depois é só do modelo.
+
+### O ε some na tolerância do resolvedor
 
 A perturbação estocástica existe para tornar **única** a solução ótima: ela
-decide onde lance, viés e ordem de desempate empatam. O teto é
-`1/(|A|²·|B|)`, e ele é justo para o argumento que o sustenta — somados todos
-os ε de uma solução, o total fica abaixo de 1/|A|, que é o menor passo do
-desempate, de modo que a perturbação nunca desloca uma solução de preferência
-agregada maior.
+decide onde os lances empatam. O teto é `1/(|A|²·|B|)`, justo para o
+argumento que o sustenta — somados todos os ε de uma solução o total fica
+muito abaixo de um crédito, então a perturbação nunca desloca uma solução de
+lance agregado maior.
 
 O problema é o outro lado: em escala realista esse teto fica **abaixo da
 tolerância numérica do resolvedor**.
 
-| |A| | |B| | teto de ε | menor passo do desempate | some em 10⁻⁶? |
-| --- | --- | --- | --- | --- |
-| 3 | 3 | 3,7·10⁻² | 3,3·10⁻¹ | não |
-| 40 | 63 | 9,9·10⁻⁶ | 2,5·10⁻² | não |
-| 180 | 63 | 4,9·10⁻⁷ | 5,6·10⁻³ | **sim** |
-| 324 | 288 | 3,3·10⁻⁸ | 3,1·10⁻³ | **sim** |
+| |A| | |B| | teto de ε | some em 10⁻⁶? |
+| --- | --- | --- | --- |
+| 3 | 3 | 3,7·10⁻² | não |
+| 40 | 63 | 9,9·10⁻⁶ | não |
+| 180 | 63 | 4,9·10⁻⁷ | **sim** |
+| 324 | 288 | 3,3·10⁻⁸ | **sim** |
 
 O CBC trabalha com tolerância de integralidade de 10⁻⁶, então em qualquer
 preset de tamanho real ele **não vê** o ε: onde o modelo diz que há
 desempate, o resolvedor vê empate e devolve um ótimo qualquer entre os
 empatados. Isso **não é novidade das turmas** — já valia com |A| = 180 e 63
-disciplinas.
+disciplinas — e a saída de α̂ não piora nem melhora: α̂ também não era quem
+decidia entre empates de lance, era quem os criava em outro lugar. O
+resolvedor guloso, que trabalha em ponto flutuante de dupla precisão e não
+tem tolerância de integralidade, enxerga o ε normalmente.
 
 Em consequência prática a execução continua reprodutível, porque o CBC é
 determinístico dado o mesmo modelo; o que não vale é a afirmação de que a
-alocação é única *pela eq. (22)*. Quem decide entre empatados é o caminho
+alocação é única *pelo ε*. Quem decide entre empatados é o caminho
 interno do resolvedor. Medido antes da correção abaixo: dar ao CBC um incumbente inicial — a mesma
 PLI, só com um piso conhecido — **mudava a alocação**, que é exatamente o
 sintoma de ótimos múltiplos.
@@ -1178,10 +1268,12 @@ rodada de 27 s tem o mesmo número de lances que as de meio segundo.
 
 A causa é a **concentração 0**. Com expoente zero todo score vale 1, a mochila
 côncava reparte o orçamento igualmente por tudo o que está disponível, e o
-aluno chega à rodada com algumas dezenas de lances de valor idêntico. Como a
-preferência final é `lance + desempate + ε` (eq. 22), as preferências ficam
-quase iguais num conjunto enorme: a relaxação linear fica degenerada e o
-*branch and bound* não tem o que podar. É a simetria, não a escala.
+aluno chega à rodada com algumas dezenas de lances de valor idêntico. Com a
+preferência final em `lance + ε`, as preferências ficam quase iguais num
+conjunto enorme: a relaxação linear fica degenerada e o *branch and bound*
+não tem o que podar. É a simetria, não a escala. (A medição desta seção é de
+06/11/2026, quando α̂ ainda estava na preferência e agravava o efeito; a
+causa — lances idênticos — não mudou.)
 
 Vale dizer o que **não** é a causa, porque os dois suspeitos naturais foram
 descartados por medição: não é a coorte (com os mesmos 324 alunos sinceros o
@@ -1219,8 +1311,9 @@ o comportamento de caçar o professor leve.
 ### Onde o resultado fica
 
 `/compare` grava a execução em **`resultados/`** (git-ignored;
-outro caminho em `LEILAO_RESULTS_DIR`) e devolvem `saved_to`. O formato é o
-mesmo do histórico do navegador — `{kind, at, config, result}` —, de modo que
+outro caminho em `LEILAO_RESULTS_DIR`) e devolve `saved_to`; a porta de
+terminal (`make compare`) grava no mesmo lugar e no mesmo formato. O formato é
+o mesmo do histórico do navegador — `{kind, at, config, result}` —, de modo que
 carregar um arquivo na interface é só acrescentá-lo à lista, sem conversão.
 
 A API continua **sem estado**: nenhuma rota lê de lá, nenhuma depende de o
@@ -1251,7 +1344,36 @@ por `[api]` e `[web]`; `Ctrl+C` derruba as duas.
 | `make web` | só a interface — `http://localhost:5173` |
 | `make test` | suíte pytest |
 | `make example` | cenário de exemplo direto no terminal |
+| `make compare` | uma comparação fora do servidor — ver abaixo |
 | `make install` | venv e dependências |
+
+### Comparação grande: fora do servidor
+
+A rota `/compare` roda a comparação inteira dentro de um POST, e no cenário
+cheio 20 simulações por braço são horas de CPU — tempo demais para uma
+requisição sobreviver a um `--reload`, a um navegador que desiste ou a um
+Ctrl+C, e tempo demais para ficar sem sinal de progresso. Para esses casos a
+mesma comparação tem uma porta de terminal:
+
+```sh
+make compare SCENARIO=resultados/comparison-20261111-102551.json RUNS=20
+# ou, direto:
+python -m leilao.cli --scenario <arquivo>.json --runs 20 --workers 3
+```
+
+`SCENARIO` é um JSON: um resultado já gravado (de que se lê o `config`) ou um
+cenário solto. Ela imprime cada simulação quando termina, grava em
+`resultados/` no mesmo formato de sempre, e o arquivo entra na interface por
+**Carregar resultado**. Quem monta a resposta é `api/service.py`, o mesmo
+módulo que a rota usa — não há duas implementações da comparação.
+
+`--workers` é quantas simulações correm ao mesmo tempo, e o teto é a **memória
+livre, não o número de núcleos**. No cenário cheio cada worker pede dois picos
+ao mesmo tempo — 1,5 GB do processo Python e 811 MB do `cbc.exe` que ele está
+esperando —, e como as simulações são o mesmo trabalho começado junto, elas
+picam juntas: a conta é a memória livre dividida por uns 2 GB. Se a máquina
+começar a paginar, o lote deixa de terminar. `--workers 1` roda em linha, sem
+paralelismo, e é como se depura uma simulação que falha.
 
 No Windows os alvos delegam para o PowerShell (`dev.ps1`), então funcionam
 igual chamados do PowerShell, do `cmd` ou do Git Bash. No Mac, Linux e UNIX

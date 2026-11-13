@@ -5,6 +5,9 @@
 Ele pede **tudo** que lhe é elegível, da que mais quer para a que menos quer.
 A restrição de carga (eq. 4) não é resolvida aqui — é resolvida na concessão.
 
+Com turmas, isto é o nível de fora: pede toda disciplina elegível, e de cada
+uma **uma** turma, a melhor disponível (`equations.best_class`).
+
 **A mochila 0-1 saiu daqui**, e três razões sustentam isso:
 
 1. **Sem isso o eixo ordenação × PLI não existe deste lado.** Com o pedido já

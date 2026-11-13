@@ -330,7 +330,7 @@ def test_the_series_by_period_is_the_material_of_the_weighted_mean():
 
     # Uma posição por período medido, e todas as listas do mesmo tamanho.
     lengths = {
-        len(series.period),
+        len(series.x),
         len(series.students),
         len(series.efficiency),
         len(series.utilization),
@@ -338,12 +338,12 @@ def test_the_series_by_period_is_the_material_of_the_weighted_mean():
         len(series.fairness),
         len(series.correlation),
     }
-    assert lengths == {len(series.period)}
-    assert series.period
+    assert lengths == {len(series.x)}
+    assert series.x
 
     # O primeiro período não se mede: todo mundo acabou de ingressar.
-    assert 1 not in series.period
-    assert series.period == sorted(series.period)
+    assert 1 not in series.x
+    assert series.x == sorted(series.x)
 
     recomputed = weighted_mean(list(zip(series.efficiency, series.students)))
     assert recomputed == pytest.approx(summary.efficiency)
@@ -359,7 +359,7 @@ MIXED = dict(
 
 
 @pytest.mark.parametrize(
-    "axis", ["cohort", "performance", "availability", "selectivity", "concentration"]
+    "axis", ["performance", "availability", "selectivity", "concentration"]
 )
 def test_each_cut_partitions_the_aggregate_period_by_period(axis):
     """Em cada período, os grupos de um recorte somados com o peso deles
@@ -372,78 +372,162 @@ def test_each_cut_partitions_the_aggregate_period_by_period(axis):
     """
     result = run_simulation(make_config(**MIXED))
     summary = summarize(result, seed=3)
-    groups = summary.by_group[axis]
+    groups = summary.by_group["period"][axis]
     overall = summary.by_period
 
     assert groups
-    for index, period in enumerate(overall.period):
+    for index, period in enumerate(overall.x):
         assert sum(
-            g.series.students[g.series.period.index(period)]
+            g.series.students[g.series.x.index(period)]
             for g in groups
-            if period in g.series.period
+            if period in g.series.x
         ) == overall.students[index]
         for name in ("efficiency", "utilization", "fidelity"):
             recomposed = weighted_mean(
                 [
                     (
-                        getattr(g.series, name)[g.series.period.index(period)],
-                        g.series.students[g.series.period.index(period)],
+                        getattr(g.series, name)[g.series.x.index(period)],
+                        g.series.students[g.series.x.index(period)],
                     )
                     for g in groups
-                    if period in g.series.period
+                    if period in g.series.x
                 ]
             )
             assert recomposed == pytest.approx(getattr(overall, name)[index]), name
 
 
+@pytest.mark.parametrize("ruler", ["age", "cohort"])
+def test_the_cells_partition_the_aggregate_under_every_ruler(ruler):
+    """Mudar a régua não muda quem é medido: em cada ponto dela, os grupos de
+    um recorte espacial continuam repartindo o agregado.
+
+    A identidade aqui é a da **média ponderada** — é assim que as células são
+    reagrupadas —, e vale para as métricas por aluno, pelo mesmo motivo de
+    sempre.
+    """
+    summary = summarize(run_simulation(make_config(**MIXED)), seed=3)
+    overall = summary.by_group[ruler]["overall"]
+    assert len(overall) == 1
+    aggregate = overall[0].series
+    groups = summary.by_group[ruler]["selectivity"]
+    assert groups
+    assert aggregate.x
+
+    for index, point in enumerate(aggregate.x):
+        parts = [g.series for g in groups if point in g.series.x]
+        for name in ("efficiency", "utilization", "fidelity"):
+            recomposed = weighted_mean(
+                [
+                    (
+                        getattr(series, name)[series.x.index(point)],
+                        series.students[series.x.index(point)],
+                    )
+                    for series in parts
+                ]
+            )
+            assert recomposed == pytest.approx(
+                getattr(aggregate, name)[index], abs=1e-9
+            ), name
+
+
+def test_the_age_ruler_starts_where_the_cohort_was_first_measured():
+    """A régua da idade conta períodos completados pelo aluno: o calouro não é
+    medido, então a idade 0 não publica ponto nenhum, e a maior idade não passa
+    do horizonte."""
+    config = make_config(**MIXED)
+    summary = summarize(run_simulation(config), seed=3)
+    ages = summary.by_group["age"]["overall"][0].series.x
+
+    assert ages
+    assert 0 not in ages
+    assert ages == sorted(ages)
+    assert max(ages) <= config.periods
+
+
+def test_the_cohort_ruler_gives_one_point_per_entry_period():
+    """A régua da coorte é um corte transversal: um ponto por turma de
+    ingresso, e nenhum depois do último ingresso."""
+    config = make_config(**MIXED)
+    summary = summarize(run_simulation(config), seed=3)
+    cohorts = summary.by_group["cohort"]["overall"][0].series.x
+
+    assert cohorts
+    assert max(cohorts) <= config.entry_periods
+    assert cohorts == sorted(cohorts)
+
+
 def test_the_profile_cuts_follow_the_scenario_order():
     """Os grupos de um eixo de perfil saem na ordem em que o cenário os
-    declara — é a ordem da legenda."""
+    declara — é a ordem da legenda, em qualquer régua."""
     config = make_config(**MIXED)
     summary = summarize(run_simulation(config), seed=3)
 
-    assert [g.group for g in summary.by_group["selectivity"]] == [
-        p.name for p in config.selectivity_profiles
-    ]
-    assert [g.group for g in summary.by_group["concentration"]] == [
-        p.name for p in config.concentration_profiles
-    ]
+    for ruler in ("period", "age", "cohort"):
+        assert [g.group for g in summary.by_group[ruler]["selectivity"]] == [
+            p.name for p in config.selectivity_profiles
+        ]
+        assert [g.group for g in summary.by_group[ruler]["concentration"]] == [
+            p.name for p in config.concentration_profiles
+        ]
 
 
 def test_the_graduation_rate_is_cumulative_over_who_entered():
     """A fração de concluintes por período é acumulada: quem já concluiu até
-    ali sobre quem já tinha entrado. Mora em [0, 1] e, por coorte, nunca
-    desce — ninguém deixa de ter concluído."""
+    ali sobre quem já tinha entrado. Mora em [0, 1] e, na régua da idade,
+    nunca desce — ninguém deixa de ter concluído."""
     result = run_simulation(make_config())
     summary = summarize(result, seed=3)
 
-    for entry in summary.by_group["cohort"]:
-        rates = entry.series.graduation_rate
-        assert all(0.0 <= rate <= 1.0 for rate in rates)
-        assert rates == sorted(rates)
+    rates = summary.by_group["age"]["overall"][0].series.graduation_rate
+    assert all(0.0 <= rate <= 1.0 for rate in rates)
+    assert rates == sorted(rates)
 
     last = result.periods[-1].aggregate.overall
-    if summary.by_period.period and summary.by_period.period[-1] == result.periods[-1].period:
+    if summary.by_period.x and summary.by_period.x[-1] == result.periods[-1].period:
         assert summary.by_period.graduation_rate[-1] == pytest.approx(
             last.graduated / last.population
         )
 
 
+def test_the_cohort_ruler_takes_the_last_graduation_rate_not_the_mean():
+    """A fração de concluintes é acumulada, então a da coorte é a que ela
+    tinha no fim — a média da subida diria menos do que o valor final."""
+    result = run_simulation(make_config())
+    summary = summarize(result, seed=3)
+    by_cohort = {
+        g.series.x[i]: g.series.graduation_rate[i]
+        for g in summary.by_group["cohort"]["overall"]
+        for i in range(len(g.series.x))
+    }
+    cells = {}
+    for period in result.periods:
+        for snapshot in period.aggregate.by_cohort:
+            if snapshot.metrics and snapshot.metrics.students and snapshot.population:
+                cells[int(snapshot.group)] = snapshot.graduated / snapshot.population
+
+    assert by_cohort
+    for cohort, rate in by_cohort.items():
+        assert rate == pytest.approx(cells[cohort])
+
+
 def test_the_bands_reduce_the_seeds_to_quartiles():
-    """A faixa de um braço é `(q1, mediana, q3)` entre as seeds, período a
-    período, e `n` conta quantas seeds mediram o ponto."""
+    """A faixa de um braço é `(q1, mediana, q3)` entre as seeds, ponto a
+    ponto, e `n` conta quantas seeds mediram o ponto."""
     summaries = [summarize(run_simulation(make_config(seed=seed)), seed=seed) for seed in (1, 2, 3)]
     axes = bands(summaries)
 
-    assert [a.axis for a in axes] == [
-        "overall", "cohort", "performance", "availability", "selectivity", "concentration"
+    # Uma entrada por régua × recorte, nessa ordem.
+    assert [(a.ruler, a.axis) for a in axes] == [
+        (ruler, axis)
+        for ruler in ("period", "age", "cohort")
+        for axis in ("overall", "performance", "availability", "selectivity", "concentration")
     ]
     overall = axes[0].groups[0]
-    for index, period in enumerate(overall.period):
+    for index, period in enumerate(overall.x):
         values = [
-            s.by_period.efficiency[s.by_period.period.index(period)]
+            s.by_period.efficiency[s.by_period.x.index(period)]
             for s in summaries
-            if period in s.by_period.period
+            if period in s.by_period.x
         ]
         assert overall.n[index] == len(values)
         q1, median, q3 = overall.values["efficiency"][index]

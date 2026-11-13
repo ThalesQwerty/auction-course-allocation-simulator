@@ -62,7 +62,6 @@ from .equations import (
     NEUTRAL,
     Behavior,
     admitted_set,
-    best_class,
     concave_bids,
     decision_scores,
     normalize_rows,
@@ -326,21 +325,31 @@ def compute_bids(
     A MOCHILA É EM DOIS NÍVEIS
     ---------------------------
 
-    De fora, uma **mochila côncava** sobre as disciplinas: quanto o aluno
-    investe em cada uma. De dentro, uma **escolha** (`equations.best_class`):
-    tudo o que a disciplina ganhou vai para a turma mais bem pontuada dela.
+    A **mesma** mochila côncava (`equations.concave_bids`) duas vezes, uma
+    dentro da outra. De fora, sobre as **disciplinas**, com `max_t ũ_t` como
+    valor: quantos créditos cada uma merece. De dentro, uma vez por
+    disciplina, sobre as **turmas** dela: como aqueles créditos se repartem
+    entre as seções, com o score de cada turma como valor.
 
-    Num nível só, o ganho marginal `score/N` valeria por turma, e o 1º crédito
-    na turma B ganharia do 2º na turma A sempre que `score_B > score_A/2` — o
-    que, entre turmas da mesma disciplina, é quase sempre. O aluno
-    pulverizaria o saldo dentro do grupo e chegaria à rodada com 1/k da força.
-    Pior: a mochila repartiria o orçamento entre disciplinas na proporção do
-    número de turmas, e o funil entraria no lance.
+    O nível de fora é sobre disciplinas, e não sobre turmas, porque num nível
+    só a mochila repartiria o orçamento entre disciplinas na proporção do
+    **número de turmas** de cada uma — o ganho marginal `score/N` vale por
+    bem, então o 1º crédito na turma B ganha do 2º na turma A sempre que
+    `score_B > score_A/2`, o que entre turmas da mesma disciplina é quase
+    sempre. O funil da oferta entraria no lance. Com dois níveis o quanto da
+    disciplina é decidido antes de as turmas serem vistas, e o número delas
+    não o toca.
+
+    Dentro do grupo, o mesmo retorno decrescente reparte entre as turmas: o
+    aluno aposta mais na que prefere e guarda uma aposta menor nas irmãs. Ele
+    só pode **levar** uma (eq. 5), mas pode **pedir** em várias, e é esse
+    hedge dentro da rodada que o nível de dentro expressa.
 
     O limiar da seletividade entra duas vezes, **as duas no nível de fora**:
-    cortando o conjunto e parando o gasto. Dentro do grupo não há o que parar
-    — os créditos daquela disciplina já foram decididos, e vão inteiros para
-    uma turma só.
+    cortando o conjunto e parando o gasto. Dentro do grupo não há o que
+    parar — os créditos daquela disciplina já foram decididos, e a repartição
+    gasta exatamente eles (`reserve = 0`), de modo que a soma por grupo é a
+    do nível de fora, crédito a crédito.
     """
     groups, scores, reserve = decide(
         utilities=utilities, behavior=behavior, classes=classes
@@ -351,23 +360,23 @@ def compute_bids(
         )
 
     reachable = set(available)
-    open_groups = [
-        discipline
+    open_classes = {
+        discipline: [name for name in classes[discipline] if name in reachable]
         for discipline in groups
-        if any(name in reachable for name in classes[discipline])
-    ]
+    }
     per_group = concave_bids(
-        scores=groups, available=open_groups, budget=budget, reserve=reserve
+        scores=groups,
+        available=[d for d, names in open_classes.items() if names],
+        budget=budget,
+        reserve=reserve,
     )
     bids: dict[str, int] = {}
     for discipline, credits in per_group.items():
-        # O nível de dentro é **escolha**, não mochila: ver
-        # `equations.best_class`. Repartir aqui pulverizaria a força do aluno
-        # entre turmas que o clique (eq. 5) depois reduziria a uma só.
-        chosen = best_class(
-            scores=scores,
-            available=[n for n in classes[discipline] if n in reachable],
+        # Sem limiar aqui: o corte foi feito no nível de fora, e o que esta
+        # chamada recebe é uma fatia já aprovada que precisa sair inteira.
+        bids.update(
+            concave_bids(
+                scores=scores, available=open_classes[discipline], budget=credits
+            )
         )
-        if chosen is not None:
-            bids[chosen] = credits
     return bids

@@ -545,15 +545,32 @@ input.invalid {
   font-weight: 600;
 }
 
-/* O cabeçalho dos resultados carrega o alternador: a contagem de execuções à
-   esquerda, a troca de eixo à direita. Fica acima das duas seções de gráfico
-   porque governa as duas. */
+/* O cabeçalho dos resultados carrega os alternadores: a contagem de execuções
+   à esquerda, as duas trocas de recorte à direita. Fica acima das seções de
+   gráfico porque governa todas elas. */
 .panel-switch {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+/* As duas trocas lado a lado — régua do eixo X e recorte das linhas —, cada
+   uma com o nome da dimensão que ela governa. */
+.switch-set {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.switch-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .panel-switch h2 {

@@ -253,20 +253,23 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "time_to_graduate",
         "allocations_per_round",
     }
-    # As séries por período saem por braço, já reduzidas entre as seeds: o
-    # agregado e os cinco recortes, cada grupo com `[q1, mediana, q3]` por
-    # grandeza e período.
+    # As séries saem por braço, já reduzidas entre as seeds: cada régua do eixo
+    # X cruzada com o agregado e com os quatro recortes, cada grupo com
+    # `[q1, mediana, q3]` por grandeza e ponto.
     series = payload["arms"][0]["series"]
-    assert [axis["axis"] for axis in series] == [
-        "overall",
-        "cohort",
-        "performance",
-        "availability",
-        "selectivity",
-        "concentration",
+    assert [(axis["ruler"], axis["axis"]) for axis in series] == [
+        (ruler, axis)
+        for ruler in ("period", "age", "cohort")
+        for axis in (
+            "overall",
+            "performance",
+            "availability",
+            "selectivity",
+            "concentration",
+        )
     ]
     overall = series[0]["groups"][0]
-    assert set(overall) == {"group", "period", "n", "values"}
+    assert set(overall) == {"group", "x", "n", "values"}
     assert {
         "students",
         "graduation_rate",
@@ -277,6 +280,10 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "correlation",
         "exclusion_rate",
         "approved",
+        "requested_share",
+        "granted_share",
+        "attended_share",
+        "approved_share",
         "round_1",
     } <= set(overall["values"])
     for band in overall["values"]["efficiency"]:

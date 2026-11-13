@@ -28,6 +28,7 @@ from leilao.equations import (
     effective_load,
     exclusion_rate,
     exclusion_refund,
+    request_funnel,
     request_states,
     retained_set,
 )
@@ -237,6 +238,55 @@ def test_the_average_is_per_student_and_never_a_sum():
     ]
     assert RequestStates.average(rows) == RequestStates(3, 2, 0, 1, 1, 1)
     assert RequestStates.average([]) == RequestStates(0, 0, 0, 0, 0, 0)
+
+
+# --- as quatro frações do funil --------------------------------------------
+
+
+def test_each_funnel_share_divides_by_the_node_before_it():
+    """Cada fração responde por um nó, e o denominador é o que chegou até
+    ali — não o catálogo."""
+    states = RequestStates(
+        not_eligible=4,
+        not_requested=3,
+        refused=2,
+        excluded=1,
+        failed=2,
+        approved=3,
+    )
+    funnel = request_funnel(states)
+
+    assert states.total == 15
+    # Pediu 8 das 15 que lhe faltavam.
+    assert funnel.requested_share == pytest.approx(8 / 15)
+    # Das 8 pedidas, 6 foram deferidas.
+    assert funnel.granted_share == pytest.approx(6 / 8)
+    # Das 6 deferidas, cursou 5.
+    assert funnel.attended_share == pytest.approx(5 / 6)
+    # Das 5 cursadas, passou em 3.
+    assert funnel.approved_share == pytest.approx(3 / 5)
+
+
+def test_an_empty_node_gives_none_and_never_zero():
+    """"Ninguém pediu nada" é diferente de "ninguém foi deferido" — e zero
+    diria a segunda coisa."""
+    nothing = request_funnel(RequestStates(5, 5, 0, 0, 0, 0))
+    assert nothing.requested_share == 0.0
+    assert nothing.granted_share is None
+    assert nothing.attended_share is None
+    assert nothing.approved_share is None
+    assert request_funnel(RequestStates(0, 0, 0, 0, 0, 0)).requested_share is None
+
+
+def test_the_attended_share_is_the_complement_of_the_exclusion_rate():
+    """A redundância é exata, e é bom que esteja declarada: a fração de
+    cursadas é `1 − ε`, as duas vindas das mesmas contagens."""
+    states = RequestStates(2, 2, 1, 3, 4, 5)
+    funnel = request_funnel(states)
+    allocated = int(states.excluded + states.failed + states.approved)
+    assert funnel.attended_share == pytest.approx(
+        1 - exclusion_rate(excluded=int(states.excluded), allocated=allocated)
+    )
 
 
 # --- os perfis -------------------------------------------------------------

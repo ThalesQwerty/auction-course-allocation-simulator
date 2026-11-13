@@ -429,7 +429,8 @@ export interface RunSummary {
   /** A série por período desta simulação. Só existe em comparação gravada
    * antes de 09/11/2026, quando a redução entre seeds era feita na tela; hoje
    * a API manda `ArmResult.series` já reduzida. É dela que sai o recorte
-   * "Geral" dessas comparações antigas (`legacyBands`). */
+   * "Geral" dessas comparações antigas (`legacyBands`), e só na régua do
+   * período: as outras duas precisam das células, que ali não foram gravadas. */
   by_period?: PeriodSeries;
 }
 
@@ -441,42 +442,67 @@ export interface ArmResult {
   mechanism: Mechanism;
   credit_return: CreditReturnPolicy;
   runs: RunSummary[];
-  /** As séries por período, reduzidas entre as seeds: o agregado e cada
-   * recorte. Ausente em comparação gravada antes de 09/11/2026. */
+  /** As séries reduzidas entre as seeds: cada régua do eixo X cruzada com o
+   * agregado e com cada recorte. Ausente em comparação gravada antes de
+   * 09/11/2026; sem `ruler` nas gravadas antes de 11/11/2026. */
   series?: AxisBands[];
 }
 
-/** Os recortes da tela de comparação. `overall` é a universidade inteira, um
- * grupo só; `cohort` é o período de ingresso; os outros quatro são os eixos
- * de perfil. */
+/** Os recortes **espaciais** da tela de comparação — as cores das linhas.
+ * `overall` é a universidade inteira, um grupo só; os outros quatro são os
+ * eixos de perfil.
+ *
+ * A coorte saiu daqui e virou régua (`Ruler`): ela é um corte do tempo, e
+ * tê-la como cor obrigava a ler duas dimensões temporais no mesmo gráfico. */
 export type CutAxis =
   | "overall"
-  | "cohort"
   | "performance"
   | "availability"
   | "selectivity"
   | "concentration";
 
+/** As réguas do eixo X — `leilao.comparison.RULERS`.
+ *
+ * - `period` é o calendário da universidade: é onde se veem as três fases do
+ *   horizonte, e cada ponto tem uma coorte diferente em cada idade.
+ * - `age` é o tempo do aluno: alinha as coortes pelo ingresso e tira a fase do
+ *   horizonte de dentro da curva.
+ * - `cohort` é um corte transversal: um ponto por turma de ingresso, com a
+ *   vida inteira dela resumida. */
+export type Ruler = "period" | "age" | "cohort";
+
 /** `[q1, mediana, q3]` entre as seeds. */
 export type Band = [number, number, number];
 
-/** Um grupo de um recorte, reduzido entre as seeds período a período.
- * `values[k][i]` é a faixa da grandeza `k` no período `period[i]`, ou `null`
- * se nenhuma seed a mediu. `n[i]` é quantas seeds mediram o grupo ali.
+/** Um grupo de um recorte, reduzido entre as seeds ponto a ponto da régua.
+ * `values[k][i]` é a faixa da grandeza `k` no ponto `x[i]`, ou `null` se
+ * nenhuma seed a mediu. `n[i]` é quantas seeds mediram o grupo ali.
  *
  * As grandezas: `students`, `graduation_rate` (acumulada), `efficiency`,
  * `utilization`, `fidelity`, `fairness`, `correlation`, `exclusion_rate`, os
- * seis estados de solicitação pelo nome e `round_<r>` para a saturação.
+ * seis estados de solicitação pelo nome, as quatro frações do funil
+ * (`requested_share`, `granted_share`, `attended_share`, `approved_share`) e
+ * `round_<r>` para a saturação.
  *
  * Espelha `api.schemas.GroupBandsOut`. */
 export interface GroupBands {
   group: string;
-  period: number[];
+  /** O ponto da régua: período, idade ou coorte, conforme o `ruler` do eixo.
+   * `period` é o nome que o campo tinha até 11/11/2026, quando a régua passou
+   * a ser escolha — comparação gravada antes disso traz aquele. */
+  x?: number[];
+  period?: number[];
   n: number[];
   values: Record<string, (Band | null)[]>;
 }
 
+/** Os grupos de um recorte espacial sob uma régua. As duas escolhas são
+ * independentes na tela, e a API manda as combinações todas.
+ *
+ * `ruler` é ausente em comparação gravada antes de 11/11/2026, e ali vale
+ * `period` — era a única régua. */
 export interface AxisBands {
+  ruler?: Ruler;
   axis: CutAxis;
   groups: GroupBands[];
 }
@@ -499,7 +525,7 @@ export interface CompareResponse {
  * aprovou —, de modo que a soma é o tamanho desse denominador. A ordem dos
  * campos é a do funil, do mais distante ao mais bem-sucedido:
  *
- *     não elegível → não solicitada → recusada → excluída → reprovada → aprovada
+ *     não elegível → não solicitada → indeferida → excluída → reprovada → aprovada
  *
  * **O já aprovado sai do denominador**, e isso não é detalhe: juntá-lo com o
  * bloqueado num estado só faria a mesma faixa crescer com o progresso do aluno
@@ -513,6 +539,8 @@ export interface CompareResponse {
 export interface RequestStates {
   not_eligible: number;
   not_requested: number;
+  /** Pediu e não foi atendido. "Indeferida" na tela, para não se confundir
+   * com "reprovada" de relance; a chave é a da API. */
   refused: number;
   excluded: number;
   failed: number;
@@ -723,7 +751,7 @@ export interface RequestRecord {
   discipline: string;
   utility: number; // ũ_{a,x}^(t) — a utilidade, não o interesse
   bids: number[]; // créditos apostados em cada rodada
-  /** Rodada em que obteve a vaga; `null` = recusada. `GUARANTEED_ROUND` (0) é a
+  /** Rodada em que obteve a vaga; `null` = indeferida. `GUARANTEED_ROUND` (0) é a
    * matrícula garantida do ingressante. */
   won_round: number | null;
   paid: number; // eq. (27)

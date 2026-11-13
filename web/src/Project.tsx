@@ -168,8 +168,9 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           cru: o aluno resolve uma mochila côncava em que cada crédito pesa 1 e o N-ésimo crédito
           posto numa disciplina vale ũ<sub>a,x</sub>/N. Depois o leilão resolve o WDP e vagas, carga horária e orçamento
           são descontados (eqs. 13, 14, 27).
-          Empates são resolvidos pela regra de desempate, viés administrativo e perturbação da
-          Seção 7.1.2.
+          A preferência que o WDP maximiza é o lance mais a perturbação da Seção 7.1.2: o fator
+          de desempate e o viés administrativo saíram, porque somados sobre milhares de pares
+          passavam a inverter diferenças de lance.
         </li>
         <li>
           Ao fim do período saem as notas — sorteadas da normal do cenário, com a média
@@ -382,8 +383,9 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           interface, que é a ordem em que as disciplinas foram acrescentadas. É global: a mesma
           para todo aluno, período e rodada, e vale tanto no lance quanto no pedido por CR. Com
           interesse sorteado o empate tem probabilidade zero; a regra existe para que um cenário
-          escrito à mão dê sempre o mesmo resultado. Não se confunde com o desempate do leilão
-          (eq. 20), que é <em>entre alunos</em>.
+          escrito à mão dê sempre o mesmo resultado. É a ordem com que o <em>aluno</em> resolve
+          as mochilas dele, e não uma prioridade entre alunos: essa, a da eq. (20), saiu do
+          modelo.
         </li>
         <li>
           <strong>Ingresso escalonado (t<sub>a</sub>):</strong> entra uma coorte nova a cada
@@ -462,8 +464,8 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         num deles abre a tela individual: a progressão dele período a período
         e, em cada período, tudo o que pediu. Cada pedido tem uma de quatro saídas —{" "}
         <strong>vaga garantida</strong> (o ingressante, fora do leilão),{" "}
-        <strong>atendida</strong> (e em que rodada), <strong>recusada</strong> (deu lance e perdeu
-        o desempate) ou <strong>sem lance</strong>, que significa que a disciplina saiu de B
+        <strong>atendida</strong> (e em que rodada), <strong>indeferida</strong> (deu lance e não
+        levou a vaga) ou <strong>sem lance</strong>, que significa que a disciplina saiu de B
         <sub>a</sub><sup>(t,r)</sup> antes do leilão por falta de vaga, de carga horária ou de
         orçamento. É a tela para investigar um agregado que saiu diferente do esperado: ela desce
         ao nível do aluno e da disciplina, que os dois blocos de gráficos agregam de propósito.

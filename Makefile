@@ -10,7 +10,15 @@ else
 PY := ./.venv/bin/python
 endif
 
-.PHONY: dev api web test example install
+.PHONY: dev api web test example compare install
+
+# Comparacao fora do servidor, para os cenarios grandes. SCENARIO e um JSON de
+# resultado ja gravado (le o 'config') ou um cenario solto:
+#   make compare SCENARIO=resultados/comparison-20261111-102551.json RUNS=20
+# WORKERS e opcional: sem ele vale o padrao do motor (DEFAULT_WORKERS).
+RUNS ?= 20
+COMPARE_ARGS := --scenario '$(SCENARIO)' --runs $(RUNS) $(if $(WORKERS),--workers $(WORKERS),)
+COMPARE_HELP := informe o cenario: make compare SCENARIO=resultados/<arquivo>.json
 
 ifeq ($(OS),Windows_NT)
 
@@ -33,6 +41,10 @@ test:
 # cenario de exemplo direto no terminal
 example:
 	$(PS) -Command "& $(PY) examples/simple_scenario.py"
+
+# comparacao fora do servidor (ver RUNS/WORKERS no topo)
+compare:
+	$(PS) -Command "if (-not '$(SCENARIO)') { Write-Host '$(COMPARE_HELP)'; exit 2 }; & $(PY) -m leilao.cli $(COMPARE_ARGS)"
 
 # venv + dependencias do motor e da interface
 install:
@@ -120,6 +132,12 @@ test:
 # cenario de exemplo direto no terminal
 example:
 	$(PY) examples/simple_scenario.py
+
+# comparacao fora do servidor (ver RUNS/WORKERS no topo)
+compare:
+	@test -n '$(SCENARIO)' || { printf '%s
+' '$(COMPARE_HELP)'; exit 2; }
+	$(PY) -m leilao.cli $(COMPARE_ARGS)
 
 # venv + dependencias do motor e da interface
 install:

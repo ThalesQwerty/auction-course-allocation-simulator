@@ -43,8 +43,10 @@ from .reports import (
     StudentSummary,
 )
 from .setup import prepare
+from .snapshots import CELL_SEP
 
 __all__ = [
+    "CELL_SEP",
     "GUARANTEED_ROUND",
     "DisciplineSnapshot",
     "GroupSnapshot",
@@ -60,7 +62,9 @@ __all__ = [
 ]
 
 
-def run_simulation(config: SimulationConfig) -> SimulationResult:
+def run_simulation(
+    config: SimulationConfig, *, keep_histories: bool = True
+) -> SimulationResult:
     """Roda a simulação inteira. Determinística: mesma config, mesmo resultado.
 
     **Invariante dos relatórios**: todo período publicado tem pelo menos um
@@ -68,6 +72,13 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     construção — os ingressos ocorrem em períodos consecutivos a partir do
     primeiro e, passado o último deles, a população só diminui, então o primeiro
     período vazio só é seguido de períodos vazios. A simulação para ali.
+
+    **`keep_histories` só muda o que se guarda, nunca o que acontece.** O
+    histórico é um `RequestRecord` por (aluno, disciplina que ele quis,
+    período) — no cenário cheio são 3 milhões deles, 1,1 GB, e nenhuma métrica
+    os lê: quem lê é a tela individual, pela rota `/trace`. A comparação roda
+    dezenas de simulações em paralelo e pede `False`, porque somar esse
+    histórico por execução é o que a põe na memória virtual.
     """
     draws = prepare(config)
     students = draws.students
@@ -95,15 +106,17 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             period=period,
             active=active,
             enrollments=enrollments,
+            keep_records=keep_histories,
         )
         if outcome is None:
             break
 
         periods.append(outcome.report)
         first_grades.extend(outcome.first_grades)
+        for student_id, value in outcome.satisfaction.items():
+            satisfactions[student_id].append(value)
         for student_id, record in outcome.records.items():
             history[student_id].append(record)
-            satisfactions[student_id].append(outcome.satisfaction[student_id])
 
     return SimulationResult(
         periods=periods,
@@ -130,9 +143,11 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             )
             for s in students
         ],
-        histories=[
-            StudentHistory(student_id=s.id, periods=history[s.id]) for s in students
-        ],
+        histories=(
+            [StudentHistory(student_id=s.id, periods=history[s.id]) for s in students]
+            if keep_histories
+            else []
+        ),
         disciplines=list(draws.seats),
         classes=dict(draws.discipline_of),
         curriculum_periods=draws.curriculum,

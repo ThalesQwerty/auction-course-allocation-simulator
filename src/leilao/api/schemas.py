@@ -505,27 +505,40 @@ class CompareRequest(ScenarioIn):
 
 
 class GroupBandsOut(BaseModel):
-    """Um grupo de um recorte reduzido entre as seeds, período a período.
+    """Um grupo de um recorte reduzido entre as seeds, ponto a ponto.
 
-    `values[k][i]` é `[q1, mediana, q3]` da grandeza `k` no período
-    `period[i]`, ou `null` se nenhuma seed a mediu ali. `n[i]` é quantas seeds
-    mediram o grupo naquele período.
+    `values[k][i]` é `[q1, mediana, q3]` da grandeza `k` no ponto `x[i]` da
+    régua, ou `null` se nenhuma seed a mediu ali. `n[i]` é quantas seeds
+    mediram o grupo naquele ponto.
+
+    As grandezas de `values` são as métricas de período, os seis estados de
+    uma solicitação, as quatro frações do funil (`requested_share`,
+    `granted_share`, `attended_share`, `approved_share`) e um `round_<r>` por
+    rodada do cenário.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     group: str
-    period: list[int]
+    # O ponto da régua: o número do período, a idade do aluno ou a coorte
+    # dele, conforme o `ruler` do eixo.
+    x: list[int]
     n: list[int]
     values: dict[str, list[tuple[float, float, float] | None]]
 
 
 class AxisBandsOut(BaseModel):
-    """Os grupos de um recorte: `overall` (um grupo só), `cohort`,
-    `performance`, `availability`, `selectivity` ou `concentration`."""
+    """Os grupos de um recorte espacial sob uma régua do eixo X.
+
+    As duas dimensões são independentes na tela, e vêm todas as combinações:
+    `ruler` é `period`, `age` ou `cohort`; `axis` é `overall` (um grupo só) ou
+    um dos quatro eixos de perfil — `performance`, `availability`,
+    `selectivity`, `concentration`.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
+    ruler: str
     axis: str
     groups: list[GroupBandsOut]
 
@@ -585,8 +598,9 @@ class ArmResultOut(BaseModel):
     mechanism: Mechanism
     credit_return: CreditReturnPolicy
     runs: list[RunSummaryOut]
-    # As séries por período, reduzidas entre as seeds: o agregado e cada
-    # recorte. A série de cada simulação não sai — só os quartis dela.
+    # As séries reduzidas entre as seeds: cada régua do eixo X cruzada com o
+    # agregado e com cada recorte. A série de cada simulação não sai — só os
+    # quartis dela.
     series: list[AxisBandsOut]
 
 
@@ -617,7 +631,7 @@ class RequestStatesOut(BaseModel):
 
     not_eligible: float  # pré-requisito pendente, ou optativa que a cota dispensou
     not_requested: float
-    refused: float
+    refused: float  # pediu e não foi atendido — "indeferida" na tela
     excluded: float  # obteve a vaga e largou
     failed: float
     approved: float

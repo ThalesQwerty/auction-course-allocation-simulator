@@ -20,14 +20,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from ..auction import AuctionInput, Bid, run_auction
-from ..comparison import ARM_BY_KEY, arm_config, arms_from_keys, run_comparison
-from ..config import Discipline, SimulationConfig
+from ..comparison import ARM_BY_KEY, arm_config
 from ..entities import Agent, Good, MutualExclusion
 from ..playground import PlaygroundClass, PlaygroundStudent, run_playground
 from ..simulation import run_simulation
+from .service import build_config, compare_scenario
 from .storage import save_result
 from .schemas import (
-    ArmResultOut,
     CompareRequest,
     CompareResponse,
     PlaygroundClosingOut,
@@ -38,9 +37,6 @@ from .schemas import (
     PlaygroundRoundStudentOut,
     RunRequest,
     RunResponse,
-    AxisBandsOut,
-    RunSummaryOut,
-    ScenarioIn,
     TracePeriodOut,
     TraceRequest,
     TraceResponse,
@@ -93,59 +89,6 @@ def run(req: RunRequest) -> RunResponse:
     return RunResponse.from_result(result)
 
 
-def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
-    """Converte o cenário recebido no `SimulationConfig` do motor.
-
-    A comparação passa cada seed da amostra, de modo que todos os braços veem
-    o mesmo cenário — que é o que a Seção 7.3 exige dela.
-    """
-    return SimulationConfig(
-        disciplines=[
-            Discipline(
-                name=d.name,
-                # `seats` é a oferta da **disciplina**; `classes` a reparte
-                # entre as turmas, que são os bens de fato alocados.
-                seats=d.classes * req.class_size,
-                classes=d.classes,
-                hours=d.hours,
-                difficulty=d.difficulty,
-                unlocks=tuple(d.unlocks),
-                entry=d.entry,
-                elective=d.elective,
-                stability=d.stability,
-                attractiveness=d.attractiveness,
-            )
-            for d in req.disciplines
-        ],
-        performance_profiles=tuple(p.to_profile() for p in req.performance_profiles),
-        availability_profiles=tuple(
-            p.to_profile() for p in req.availability_profiles
-        ),
-        selectivity_profiles=tuple(p.to_profile() for p in req.selectivity_profiles),
-        concentration_profiles=tuple(
-            p.to_profile() for p in req.concentration_profiles
-        ),
-        interest_stability=req.interest_stability,
-        class_stability=req.class_stability,
-        class_difficulty_levels=req.class_difficulty_levels,
-        resolver=req.resolver,
-        credit_memory=req.credit_memory,
-        interest_mean=req.interest_mean,
-        interest_sigma=req.interest_sigma,
-        max_hours=req.max_hours,
-        periods=req.periods,
-        entry_periods=req.entry_periods,
-        max_residence=req.max_residence,
-        students_per_profile=req.students_per_profile,
-        rounds=req.rounds,
-        min_grade=req.min_grade,
-        elective_hours=req.elective_hours,
-        base_credits=req.base_credits,
-        credit_return=req.credit_return,
-        seed=seed,
-    )
-
-
 @app.post("/compare", response_model=CompareResponse)
 def compare(req: CompareRequest) -> CompareResponse:
     """Roda o mesmo cenário nos três modelos, N vezes em cada um.
@@ -161,12 +104,7 @@ def compare(req: CompareRequest) -> CompareResponse:
     requisição leva dezenas de segundos.
     """
     try:
-        config = build_config(req)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
-        result = run_comparison(config, runs=req.runs, arms=arms_from_keys(req.arms))
+        response = compare_scenario(req)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 — reporta falha do solver/instância inviável
@@ -174,21 +112,6 @@ def compare(req: CompareRequest) -> CompareResponse:
             status_code=422, detail=f"falha ao comparar os mecanismos: {exc}"
         ) from exc
 
-    response = CompareResponse(
-        runs=result.runs,
-        interest_distribution=result.interest_distribution,
-        grade_distribution=result.grade_distribution,
-        arms=[
-            ArmResultOut(
-                key=arm.key,
-                mechanism=arm.mechanism,
-                credit_return=arm.credit_return,
-                runs=[RunSummaryOut.model_validate(r) for r in arm.runs],
-                series=[AxisBandsOut.model_validate(a) for a in arm.series],
-            )
-            for arm in result.arms
-        ],
-    )
     response.saved_to = save_result(kind="comparison", config=req, result=response)
     return response
 

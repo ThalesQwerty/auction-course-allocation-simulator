@@ -21,11 +21,9 @@ export type {
 export { formatCount, formatRatio } from "./format";
 export { SeriesTip } from "./SeriesTip";
 export {
-  REQUEST_STATES,
   STATUS,
   categoricalColors,
   inkFor,
-  requestStateColors,
   soloColor,
   usePrefersDark,
 } from "./theme";

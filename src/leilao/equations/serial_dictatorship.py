@@ -26,11 +26,10 @@ O ROTEAMENTO
 impede o aluno de levar duas turmas do mesmo grupo: a caminhada **pula** o
 que ele já atendeu em vez de conceder de novo.
 
-Como `requests` vem em **dois níveis** — disciplinas na ordem de preferência,
-e dentro de cada uma as turmas —, a caminhada entrega a melhor turma
-disponível de cada disciplina. É isso que torna o braço comparável ao
-tradicional: o conjunto e a ordem das disciplinas ficam idênticos, e só a
-turma dentro do grupo muda.
+`requests` vem com **uma turma por disciplina** (`equations.best_class`), de
+modo que dentro de uma rodada a caminhada não tem grupo repetido a pular e o
+roteamento fica como guarda — `serial_dictatorship` não checa clique nenhum
+por si. O que ele cobre de fato é o pedido que listasse irmãs.
 
 O conjunto cobre a **rodada**; entre rodadas quem cobre é o filtro por grupo
 de `equations.available_goods`.

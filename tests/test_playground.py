@@ -280,9 +280,10 @@ def test_a_negative_selectivity_is_rejected():
         )
 
 
-def test_the_auction_bets_on_one_class_and_never_takes_two():
-    """Mochila em dois níveis: o crédito da disciplina vai inteiro para a
-    turma mais útil, e na rodada seguinte a irmã já não está disponível."""
+def test_the_auction_splits_between_the_classes_and_never_takes_two():
+    """Mochila em dois níveis: a fatia da disciplina se reparte entre as
+    turmas dela, com mais na preferida — e o clique (eq. 5) concede uma só,
+    de modo que na rodada seguinte o grupo inteiro já saiu do disponível."""
     classes = turmas("Cálculo", 2) + [discipline("Física")]
     utilities = {"Cálculo T1": 3, "Cálculo T2": 2, "Física": 1}
     result = run_playground(
@@ -300,18 +301,20 @@ def test_the_auction_bets_on_one_class_and_never_takes_two():
         budget=8,
         classes=groups,
     )
-    assert "Cálculo T2" not in first.students[0].bids
+    lances = first.students[0].bids
+    assert lances["Cálculo T1"] > lances["Cálculo T2"] > 0
     assert first.students[0].won == ("Cálculo T1", "Física")
     assert second.students[0].bids == {}
     assert first.students[0].remaining_hours == 60
 
 
-def test_the_ranking_routes_the_loser_to_the_sister_class():
-    """Os dois querem a T1; o CR mais alto a leva e o outro cai na T2 na mesma
-    rodada — o pedido lista as turmas dentro da disciplina."""
+def test_the_ranking_sends_the_loser_to_the_sister_class_next_round():
+    """Os dois pedem só a T1, que é a melhor turma dos dois: o CR mais alto a
+    leva, e quem perdeu só chega à T2 na rodada seguinte, quando
+    `available_goods` devolve a irmã. O seguro é a rodada, não o pedido."""
     result = run_playground(
         mechanism="ranking",
-        rounds=1,
+        rounds=2,
         seed=11,
         classes=turmas("Cálculo", 2),
         students=[
@@ -319,9 +322,16 @@ def test_the_ranking_routes_the_loser_to_the_sister_class():
             student("baixo", utilities={"Cálculo T1": 3, "Cálculo T2": 1}, cr=5),
         ],
     )
-    by_id = {row.id: row for row in result.rounds[0].students}
-    assert list(by_id["alto"].bids) == ["Cálculo T1", "Cálculo T2"]
+    first, second = result.rounds
+    by_id = {row.id: row for row in first.students}
+    assert list(by_id["alto"].bids) == ["Cálculo T1"]
+    assert list(by_id["baixo"].bids) == ["Cálculo T1"]
     assert by_id["alto"].won == ("Cálculo T1",)
+    assert by_id["baixo"].won == ()
+
+    by_id = {row.id: row for row in second.students}
+    assert list(by_id["alto"].bids) == []
+    assert list(by_id["baixo"].bids) == ["Cálculo T2"]
     assert by_id["baixo"].won == ("Cálculo T2",)
 
 

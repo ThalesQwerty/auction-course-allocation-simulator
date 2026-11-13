@@ -115,6 +115,15 @@ class RoundReport:
     # que o cenário declara os grupos. Também particiona `overall`. A API de
     # traço não o publica: quem o lê é a comparação, que o reduz por período.
     by_profile: dict[str, list[GroupSnapshot]] = field(default_factory=dict)
+    # O mesmo instante por **célula**: cada eixo de perfil cruzado com a
+    # coorte, com a chave `"<perfil>|<t_a>"` (ver `snapshots.Axis.crossed`).
+    # É o material das réguas de idade e de coorte do eixo X, que reagrupam as
+    # células ao longo do horizonte; para a régua do período, que não
+    # reagrupa nada, os recortes acima bastam e são exatos.
+    #
+    # O "Geral" não está aqui porque já está: as células dele são `by_cohort`.
+    # E nenhuma delas sai na API — quem as lê é a comparação, que as reduz.
+    by_cell: dict[str, list[GroupSnapshot]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -174,7 +183,7 @@ class RequestRecord:
     discipline: str
     utility: float  # ũ_{a,x}^(t) — a utilidade, não o interesse
     bids: list[int]  # c_{a,x}^(t,r) por rodada; 0 = não pediu
-    won_round: int | None  # `None` = recusada; `GUARANTEED_ROUND` = garantida
+    won_round: int | None  # `None` = indeferida; `GUARANTEED_ROUND` = garantida
     paid: int  # eq. (27)
     # Obteve a vaga e não cursou: a disponibilidade do período não comportou.
     # Com ela, `attempt` e `grade` saem `None` — não houve tentativa —, e

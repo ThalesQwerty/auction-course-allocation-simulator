@@ -63,6 +63,27 @@ def test_same_seed_produces_the_same_simulation():
     assert first.periods[-1].aggregate.overall == second.periods[-1].aggregate.overall
 
 
+@pytest.mark.parametrize("mechanism", ["credits", "ranking"])
+def test_dropping_the_history_changes_nothing_but_the_history(mechanism):
+    """`keep_histories=False` é economia de memória, não outro cenário.
+
+    A comparação roda assim — o histórico é 1,1 GB por simulação no cenário
+    cheio e nenhuma métrica o lê —, e isso só vale se o que sobra for
+    idêntico, campo a campo. Se um dia alguma conta passar a depender dos
+    registros, é aqui que aparece.
+    """
+    config = make_config(mechanism=mechanism)
+    full = run_simulation(config)
+    lean = run_simulation(config, keep_histories=False)
+
+    assert lean.histories == []
+    assert full.histories != []
+    assert lean.periods == full.periods
+    assert lean.students == full.students
+    assert lean.interest_distribution == full.interest_distribution
+    assert lean.grade_distribution == full.grade_distribution
+
+
 def test_different_seeds_produce_different_students():
     first = run_simulation(make_config(seed=1))
     second = run_simulation(make_config(seed=2))

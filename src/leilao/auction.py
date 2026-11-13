@@ -17,11 +17,9 @@ from .equations import (
     consumption,
     final_preference,
     market_prices,
-    rectify_bias,
     remaining_budget,
     remaining_capacity,
     stochastic_perturbations,
-    tie_break_factor,
 )
 from .wdp_solver import solve_wdp, solve_wdp_greedy
 
@@ -43,16 +41,12 @@ class Bid:
 class AuctionInput:
     """Insumos de uma rodada.
 
-    `tie_break_order` mapeia good_id -> agentes em ordem de prioridade de
-    desempate (matriz α, eq. 20); omitido para um bem, usa-se a ordem
-    lexicográfica dos ids como padrão determinístico.
-
-    `bias` mapeia (agent_id, good_id) -> viés bruto β (eq. 21); pares ausentes
-    não têm viés.
-
     `epsilon` permite injetar a matriz de perturbações já sorteada. Numa
     simulação multi-rodada ela **precisa** ser a mesma em todas as rodadas
     (Seção 7.1.2); omitida, é sorteada a partir de `seed` para esta rodada.
+
+    Não há mais ordem de desempate (matriz α) nem viés (matriz β): as duas
+    saíram do modelo junto com as eqs. (20) e (21) — ver `final_preference`.
     """
 
     agents: list[Agent]
@@ -63,8 +57,6 @@ class AuctionInput:
     # Turma -> disciplina. Entra no preço: quem foi roteado para outra
     # turma do mesmo grupo não é perdedor nesta.
     groups: dict[str, str] = field(default_factory=dict)
-    tie_break_order: dict[str, list[str]] = field(default_factory=dict)
-    bias: dict[tuple[str, str], int] = field(default_factory=dict)
     epsilon: dict[tuple[str, str], float] | None = None
     seed: int = 0
 
@@ -95,28 +87,8 @@ class AuctionResult:
     remaining_capacity: dict[str, float]  # W_a − Σ w_x — eq. (14)
 
 
-def _tie_break_ranks(auction_input: AuctionInput) -> dict[str, dict[str, int]]:
-    """Posição de cada agente na ordem de desempate de cada bem.
-
-    A ordem pode cobrir mais agentes do que os presentes nesta rodada — numa
-    simulação multi-período α é fixo para a população inteira —, então α̂ é
-    normalizado pelo tamanho da própria ordem, e não pelo da rodada.
-    """
-    default = sorted(a.id for a in auction_input.agents)
-    return {
-        good.id: {
-            agent_id: position + 1
-            for position, agent_id in enumerate(
-                auction_input.tie_break_order.get(good.id) or default
-            )
-        }
-        for good in auction_input.goods
-    }
-
-
 def _demands(auction_input: AuctionInput, bids: dict[tuple[str, str], int]) -> list[Demand]:
-    """Os pares de demanda com a preferência final da eq. (22)."""
-    bias = rectify_bias(auction_input.bias)
+    """Os pares de demanda com a preferência final — ver `final_preference`."""
     epsilon = auction_input.epsilon
     if epsilon is None:
         epsilon = stochastic_perturbations(
@@ -125,25 +97,17 @@ def _demands(auction_input: AuctionInput, bids: dict[tuple[str, str], int]) -> l
             num_goods=len(auction_input.goods),
             seed=auction_input.seed,
         )
-    ranks = _tie_break_ranks(auction_input)
-
-    demands: list[Demand] = []
-    for (agent_id, good_id), credits in bids.items():
-        order = ranks.get(good_id) or {}
-        size = len(order) or len(auction_input.agents)
-        demands.append(
-            Demand(
-                agent_id,
-                good_id,
-                final_preference(
-                    bid=credits,
-                    rectified_bias=bias.get((agent_id, good_id), 0),
-                    tie_break=tie_break_factor(order.get(agent_id, size), size),
-                    perturbation=epsilon.get((agent_id, good_id), 0.0),
-                ),
-            )
+    return [
+        Demand(
+            agent_id,
+            good_id,
+            final_preference(
+                bid=credits,
+                perturbation=epsilon.get((agent_id, good_id), 0.0),
+            ),
         )
-    return demands
+        for (agent_id, good_id), credits in bids.items()
+    ]
 
 
 def run_auction(auction_input: AuctionInput, *, resolver: Resolver = "ilp") -> AuctionResult:

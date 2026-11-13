@@ -42,6 +42,9 @@
  *     cohortSize         |A| = exemplares × combinações de perfil
  *     entryClassLoad     o bloco da coorte que cai em cada turma de entrada
  *
+ * Solicitações
+ *     requestFunnel      as quatro frações condicionais do funil
+ *
  * A grade
  *     induct             a travessia das duas induções
  *     curriculumPeriods  o período induzido dos pré-requisitos
@@ -71,5 +74,7 @@ export { niceScale } from "./niceScale";
 export { paddedScale } from "./paddedScale";
 export type { Scale } from "./paddedScale";
 export { quantile } from "./quantile";
+export { requestFunnel } from "./requestFunnel";
+export type { RequestFunnel } from "./requestFunnel";
 export { splitNormalCdf } from "./splitNormalCdf";
 export { splitNormalMean } from "./splitNormalMean";

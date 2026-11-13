@@ -33,6 +33,11 @@ from .setup import Draws
 from .snapshots import Axis, measure, snapshot_groups
 from .state import PeriodState
 
+# Prefixo com que os eixos de célula viajam dentro de `snapshot_groups`, que
+# recebe um dicionário plano de eixos: é o que permite separá-los dos de
+# perfil na volta sem uma segunda chamada.
+CELL_AXIS = "cell:"
+
 
 @dataclass(frozen=True)
 class PeriodOutcome:
@@ -182,6 +187,13 @@ class _Reporter:
     scarcities: dict[str, float]
     contentions: dict[str, float]
 
+    @property
+    def cells(self) -> dict[str, Axis]:
+        """Os eixos de perfil cruzados com a coorte — ver `Axis.crossed`."""
+        return {
+            name: Axis.crossed(axis, self.axis) for name, axis in self.profiles.items()
+        }
+
     def at(
         self,
         *,
@@ -220,12 +232,13 @@ class _Reporter:
             excluded=excluded,
             requested=requested,
         )
+        cells = {f"{CELL_AXIS}{name}": axis for name, axis in self.cells.items()}
         overall, groups = snapshot_groups(
             config=self.config,
             active=self.active,
             students=self.draws.students,
             period=self.period,
-            axes={"cohort": self.axis, **self.profiles},
+            axes={"cohort": self.axis, **self.profiles, **cells},
             values=values,
             total_seats=self.draws.total_seats,
         )
@@ -234,7 +247,16 @@ class _Reporter:
             round=round_number,
             overall=overall,
             by_cohort=groups.pop("cohort"),
-            by_profile=groups,
+            by_cell={
+                name.removeprefix(CELL_AXIS): snapshots
+                for name, snapshots in groups.items()
+                if name.startswith(CELL_AXIS)
+            },
+            by_profile={
+                name: snapshots
+                for name, snapshots in groups.items()
+                if not name.startswith(CELL_AXIS)
+            },
             prices=prices,
         )
 
@@ -345,10 +367,15 @@ def run_period(
     period: int,
     active: list[Student],
     enrollments: dict[str, int],
+    keep_records: bool = True,
 ) -> PeriodOutcome | None:
     """Roda o período. `None` quando não há ninguém a medir — e aí a
     simulação para, porque um período sem aluno só produziria zeros
     enganosos.
+
+    Com `keep_records=False` o período devolve `records` vazio: é um
+    registro por (aluno, disciplina de utilidade positiva), que só a tela
+    individual lê — ver `run_simulation`.
     """
     utilities = {
         s.id: utility_matrix(
@@ -487,16 +514,20 @@ def run_period(
             graduated_now=closing.graduated_now,
             dismissed_now=closing.dismissed_now,
         ),
-        records=_student_records(
-            config=config,
-            draws=draws,
-            active=active,
-            state=state,
-            closing=closing,
-            period=period,
-            utilities=utilities,
-            grade_averages=grade_averages,
-            satisfactions=period_satisfaction,
+        records=(
+            _student_records(
+                config=config,
+                draws=draws,
+                active=active,
+                state=state,
+                closing=closing,
+                period=period,
+                utilities=utilities,
+                grade_averages=grade_averages,
+                satisfactions=period_satisfaction,
+            )
+            if keep_records
+            else {}
         ),
         satisfaction=period_satisfaction,
         first_grades=closing.first_grades,
