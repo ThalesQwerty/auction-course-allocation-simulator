@@ -14,6 +14,12 @@ sorteio contínuo garantiria só com probabilidade 1. A grade tem quatro vezes
 mais pontos que chaves para que a amostra não se aproxime de esgotá-la.
 
 `seed` é o que torna a matriz reprodutível, como exige a Seção 7.3.
+
+**O teto perdeu a função.** Ele existia para o objetivo somado da PLI, que
+hoje não lê o ε (ver `wdp_solver`): quem o lê é a varredura gulosa e a
+ditadura serial, e as duas só **comparam**. Medido: subir o teto de 3,3·10⁻⁸
+para 1 devolve a mesma ordem, logo a mesma alocação. O que ainda faz trabalho
+é a distinção — dois ε iguais seriam um empate de volta.
 """
 from __future__ import annotations
 
@@ -40,3 +46,24 @@ def stochastic_perturbations(
     chosen = rng.choice(grid, size=len(keys), replace=False)
     rng.shuffle(chosen)
     return {key: float(value) for key, value in zip(keys, chosen)}
+
+
+def per_agent(perturbations: dict[tuple[str, str], float]) -> dict[str, float]:
+    """Um ε por **agente**, para quem prioriza o agente e não o par.
+
+    A ditadura serial ordena alunos, não pares: o CR do aluno vale em tudo
+    que ele pediu, e o desempate também tem de ser dele. Sai desta mesma
+    matriz, pela chave lexicograficamente menor de cada agente — **nenhum
+    sorteio novo**, que deslocaria o gerador e mudaria toda a simulação.
+
+    Os valores continuam distintos entre agentes porque os da matriz são
+    distintos entre si.
+    """
+    smallest: dict[str, str] = {}
+    for agent_id, good_id in perturbations:
+        if agent_id not in smallest or good_id < smallest[agent_id]:
+            smallest[agent_id] = good_id
+    return {
+        agent_id: perturbations[(agent_id, good_id)]
+        for agent_id, good_id in smallest.items()
+    }

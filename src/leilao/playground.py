@@ -40,6 +40,7 @@ from .equations import (
     grade_for_attempt,
     grade_shape,
     retained_set,
+    per_agent,
     stochastic_perturbations,
 )
 from .ranking import allocate_by_ranking, request_set
@@ -306,11 +307,12 @@ def _ranking_round(
     # não no pedido.
     granted = allocate_by_ranking(
         requests=requests,
-        priority={s.id: s.cr + epsilon.get((s.id, s.id), 0.0) for s in students},
+        priority={s.id: s.cr for s in students},
         seats=table.seats,
         hours=table.hours,
         capacity={s.id: int(table.capacity[s.id]) for s in students},
         groups=table.groups,
+        tiebreak=per_agent(epsilon),
     )
     for student_id, name in granted:
         won_now[student_id].append(name)

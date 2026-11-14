@@ -87,6 +87,7 @@ def allocate_by_ilp(
     hours: dict[str, int],
     capacity: dict[str, int],
     groups: dict[str, str] | None = None,
+    tiebreak: dict[str, float] | None = None,
 ) -> list[tuple[str, str]]:
     """A mesma linha de base, resolvida globalmente: maximiza a soma dos CRs
     atendidos sujeito às vagas (eq. 3) e à carga de cada aluno (eq. 4).
@@ -114,7 +115,12 @@ def allocate_by_ilp(
         agents=[Agent(student_id, capacity[student_id]) for student_id in capacity],
         goods=[Good(name, seats[name], hours[name]) for name in seats],
         demands=[
-            Demand(student_id, name, priority[student_id])
+            Demand(
+                student_id,
+                name,
+                priority[student_id],
+                (tiebreak or {}).get(student_id, 0.0),
+            )
             for student_id, name in requests
         ],
         # O roteamento, deste lado, é a própria restrição de clique (eq. 5)

@@ -16,10 +16,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..availability import draw_availability
-from ..behavior import draw_interest
+from ..behavior import InterestMatrix, draw_interest
 from ..config import SimulationConfig
 from ..grading import GradeShapes, draw_base_quantiles
-from ..equations import stochastic_perturbations
+from ..equations import per_agent, stochastic_perturbations
 from ..population import Student, generate_students
 
 
@@ -44,10 +44,15 @@ class Draws:
     # O interesse u^(t): uma linha por (aluno, período), sobre a grade inteira.
     # Não é o que o aluno decide — a utilidade sai daqui a cada período, pelo
     # histórico dele (`behavior.utility_matrix`). Fora isso, só relatório lê.
-    interest_rows: dict[tuple[str, int], dict[str, float]]
+    # Lê-se como dicionário, mas é um array por dentro — ver `InterestMatrix`,
+    # que é o que mantém a simulação dentro da memória de um worker.
+    interest_rows: InterestMatrix
     # ε: sorteada uma vez para todos os pares (a, x), fixa para a simulação
     # inteira, como exige a Seção 7.1.2.
     epsilon: dict[tuple[str, str], float]
+    # O mesmo ε lido por aluno, que é o que a ditadura serial precisa — ver
+    # `equations.per_agent`. Projeção da matriz acima, não sorteio à parte.
+    student_epsilon: dict[str, float]
 
     # Derivados do cenário, calculados uma vez porque são lidos em todo laço.
     #
@@ -92,6 +97,7 @@ def prepare(config: SimulationConfig) -> Draws:
         availability=availability,
         interest_rows=interest_rows,
         epsilon=epsilon,
+        student_epsilon=per_agent(epsilon),
         hours=config.hours_by_class(),
         difficulty=config.difficulty_by_class(),
         seats=config.seats_by_class(),

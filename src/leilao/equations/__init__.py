@@ -15,7 +15,6 @@ número está na primeira linha da docstring.
 Uma rodada de leilão (Seção 7.1)
 
     stochastic_perturbation   ε ∈ (0, 1/(|A|²·|B|)), distintos    7.1.2
-    final_preference          p = c + ε                     substitui 22
     greedy_allocation         varredura por preferência           —
     market_price              π = maior lance perdedor            eq. (24)
     credit_consumption        δ = min(c, π)                       eq. (25)
@@ -127,7 +126,11 @@ Não implementadas, e por quê
     eq. (20)   α̂, o fator de desempate: em [0, 1) por par, mas somado sobre
                milhares de pares ele vira milhares de créditos no objetivo
                do WDP e passa a inverter diferenças de lance — o oposto do
-               que a eq. (22) promete. Ver `final_preference`
+               que a eq. (22) promete
+    eq. (22)   a soma `p = c + β̂ + α̂ + ε`: some com as duas acima, e o que
+               sobraria (`p = c + ε`) não se escreve como soma. A preferência
+               é o lance; o ε é camada à parte, que decide no guloso e na
+               ditadura serial e **não entra na PLI** — ver `wdp_solver`
     eq. (21)   β̂, o viés de alocação: saiu com α̂. A política universitária
                que ele expressaria entrou no cenário pela oferta de vagas e
                pelos pré-requisitos, que são anteriores ao leilão
@@ -154,7 +157,6 @@ from .effective_load import effective_load
 from .eligible_set import eligible_set
 from .exclusion_refund import exclusion_refund
 from .exclusion_rate import exclusion_rate
-from .final_preference import final_preference
 from .grade_average import grade_average
 from .grade_for_attempt import MAX_GRADE, MIN_GRADE, grade_for_attempt
 from .grade_histogram import grade_histogram
@@ -188,7 +190,7 @@ from .retained_set import retained_set
 from .satisfaction import satisfaction
 from .semestralization import semestralization
 from .serial_dictatorship import serial_dictatorship
-from .stochastic_perturbation import stochastic_perturbations
+from .stochastic_perturbation import per_agent, stochastic_perturbations
 from .time_to_graduate import time_to_graduate
 from .split_normal_cdf import split_normal_cdf
 from .split_normal_mean import split_normal_mean
@@ -225,7 +227,6 @@ __all__ = [
     "eligible_set",
     "exclusion_rate",
     "exclusion_refund",
-    "final_preference",
     "grade_average",
     "grade_for_attempt",
     "grade_histogram",
@@ -262,6 +263,7 @@ __all__ = [
     "satisfaction",
     "semestralization",
     "serial_dictatorship",
+    "per_agent",
     "stochastic_perturbations",
     "time_to_graduate",
     "utility",

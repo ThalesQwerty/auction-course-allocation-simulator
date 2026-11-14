@@ -53,6 +53,7 @@ com α/ε (eq. 20): aquilo desempata **entre alunos**, dentro do leilão; isto,
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -90,6 +91,7 @@ __all__ = [
     "NEUTRAL",
     "UNDERFLOW_GUARD",
     "Behavior",
+    "InterestMatrix",
     "compute_bids",
     "decide",
     "decision_scores",
@@ -141,9 +143,65 @@ def _attractiveness(config: SimulationConfig) -> np.ndarray:
     ).reshape(1, 1, -1)
 
 
+class InterestMatrix(Mapping[tuple[str, int], dict[str, float]]):
+    """O interesse sorteado, guardado como o array que o sorteio produz.
+
+    Lê-se como o dicionário que sempre foi — `matriz[(aluno, período)]` devolve
+    a linha sobre a grade —, mas o que está guardado é o **array**, e a linha é
+    montada na hora.
+
+    É a diferença entre caber e não caber na memória. São alunos × períodos ×
+    turmas valores, e em dicionários aninhados cada float custa ~47 bytes
+    contra os 8 do array: no cenário cheio (2.592 × 23 × 288) são 767 MB
+    contra 131 MB, de longe o maior item de `Draws`. Montar uma linha custa
+    ~10 µs, 0,14% de uma simulação — o array troca memória por um custo de
+    CPU que não se mede.
+
+    O eixo do período é 0-based, porque array é 0-based; a chave segue 1-based,
+    como o resto do motor. A conversão é a mesma que estava na saída de
+    `draw_interest` e continua acontecendo num lugar só.
+
+    **A linha é construída a cada acesso**, então duas leituras da mesma chave
+    dão dicionários iguais e distintos. Escrever num deles não altera a
+    matriz — o que é a regra de `Draws` de todo modo: nada ali muda depois do
+    sorteio.
+    """
+
+    __slots__ = ("_values", "_columns", "_row_of_student")
+
+    def __init__(
+        self,
+        values: np.ndarray,
+        columns: tuple[str, ...],
+        row_of_student: dict[str, int],
+    ) -> None:
+        self._values = values
+        self._columns = columns
+        self._row_of_student = row_of_student
+
+    @property
+    def periods(self) -> int:
+        return int(self._values.shape[1])
+
+    def __getitem__(self, key: tuple[str, int]) -> dict[str, float]:
+        student_id, period = key
+        row = self._row_of_student.get(student_id)
+        if row is None or not 1 <= period <= self.periods:
+            raise KeyError(key)
+        return dict(zip(self._columns, self._values[row, period - 1].tolist()))
+
+    def __iter__(self) -> Iterator[tuple[str, int]]:
+        for student_id in self._row_of_student:
+            for period in range(1, self.periods + 1):
+                yield (student_id, period)
+
+    def __len__(self) -> int:
+        return len(self._row_of_student) * self.periods
+
+
 def draw_interest(
     students: list["Student"], config: SimulationConfig, rng: np.random.Generator
-) -> dict[tuple[str, int], dict[str, float]]:
+) -> InterestMatrix:
     """Sorteia o interesse: uma linha por (aluno, período), sobre a grade.
 
     O interesse vem de uma **log-normal** de média logarítmica μ + A_x e
@@ -225,17 +283,15 @@ def draw_interest(
         + _attractiveness(config)[:, :, spread]
     )
     normalized = normalize_rows(np.maximum(np.exp(log), UNDERFLOW_GUARD))
-    return {
-        (student.id, period + 1): {
-            name: float(normalized[a, period, j]) for j, name in enumerate(columns)
-        }
-        for a, student in enumerate(students)
-        for period in range(config.periods)
-    }
+    return InterestMatrix(
+        values=normalized,
+        columns=tuple(columns),
+        row_of_student={student.id: a for a, student in enumerate(students)},
+    )
 
 
 def interest_distribution(
-    rows: dict[tuple[str, int], dict[str, float]], bins: int = DISTRIBUTION_BINS
+    rows: InterestMatrix, bins: int = DISTRIBUTION_BINS
 ) -> list[float]:
     """O histograma do interesse — ver `equations.interest_histogram`."""
     return interest_histogram(rows.values(), bins)

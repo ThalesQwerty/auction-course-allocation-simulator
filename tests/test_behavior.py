@@ -126,6 +126,51 @@ def test_unknown_successor_is_rejected():
         )
 
 
+# --- a matriz de interesse: array por dentro, dicionário por fora ---------
+
+
+def test_the_interest_matrix_reads_as_the_dictionary_it_replaced():
+    """`InterestMatrix` guarda o array e monta a linha no acesso — 131 MB no
+    lugar de 767 MB no cenário cheio. O contrato que isso não pode quebrar é
+    o do dicionário que ela substituiu, porque ninguém mais foi mexido."""
+    config = make_config(periods=4)
+    students = [student(id=f"a{i}") for i in range(3)]
+    rows = draw_interest(students, config, np.random.default_rng(0))
+
+    assert len(rows) == 3 * 4
+    assert set(rows) == {(s.id, p) for s in students for p in range(1, 5)}
+    assert list(rows.values()) == [rows[key] for key in rows]
+
+
+def test_the_period_of_the_interest_matrix_is_one_based():
+    """O eixo do array é 0-based e a chave é 1-based. O que não pode acontecer
+    é o período 0 virar índice −1 e devolver o último período em silêncio —
+    numpy aceitaria, e o erro não apareceria em lugar nenhum."""
+    config = make_config(periods=4)
+    rows = draw_interest([student(id="a0")], config, np.random.default_rng(0))
+
+    assert rows[("a0", 1)] and rows[("a0", 4)]
+    for ausente in [("a0", 0), ("a0", -1), ("a0", 5), ("fulano", 1)]:
+        with pytest.raises(KeyError):
+            rows[ausente]
+
+
+def test_the_interest_row_is_built_fresh_at_each_access():
+    """A linha é montada, não guardada — então escrever nela não alcança a
+    matriz. `Draws` promete ser imutável depois do sorteio, e é esta a forma
+    de a promessa continuar valendo com o array por baixo."""
+    config = make_config(periods=2)
+    rows = draw_interest([student(id="a0")], config, np.random.default_rng(0))
+
+    linha = rows[("a0", 1)]
+    assert linha == rows[("a0", 1)]
+    assert linha is not rows[("a0", 1)]
+
+    nome = next(iter(linha))
+    linha[nome] = 999.0
+    assert rows[("a0", 1)][nome] != 999.0
+
+
 def test_the_drawn_row_is_taste_alone_and_sums_to_one():
     """A invariante de altura saiu: a posição na grade **não** ordena mais o
     interesse. O valor curricular entra depois, quando `utility` converte o

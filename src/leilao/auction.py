@@ -15,7 +15,6 @@ from .config import Resolver
 from .entities import Agent, Allocation, Demand, Good, MutualExclusion, Problem
 from .equations import (
     consumption,
-    final_preference,
     market_prices,
     remaining_budget,
     remaining_capacity,
@@ -46,7 +45,7 @@ class AuctionInput:
     (Seção 7.1.2); omitida, é sorteada a partir de `seed` para esta rodada.
 
     Não há mais ordem de desempate (matriz α) nem viés (matriz β): as duas
-    saíram do modelo junto com as eqs. (20) e (21) — ver `final_preference`.
+    saíram do modelo junto com as eqs. (20) e (21) — ver `wdp_solver`.
     """
 
     agents: list[Agent]
@@ -88,7 +87,11 @@ class AuctionResult:
 
 
 def _demands(auction_input: AuctionInput, bids: dict[tuple[str, str], int]) -> list[Demand]:
-    """Os pares de demanda com a preferência final — ver `final_preference`."""
+    """Os pares de demanda: a preferência é o **lance**, e o ε vai à parte.
+
+    Somá-los seria a eq. (22) do anteprojeto, e é justamente o que não se faz
+    mais — ver `wdp_solver`.
+    """
     epsilon = auction_input.epsilon
     if epsilon is None:
         epsilon = stochastic_perturbations(
@@ -98,14 +101,7 @@ def _demands(auction_input: AuctionInput, bids: dict[tuple[str, str], int]) -> l
             seed=auction_input.seed,
         )
     return [
-        Demand(
-            agent_id,
-            good_id,
-            final_preference(
-                bid=credits,
-                perturbation=epsilon.get((agent_id, good_id), 0.0),
-            ),
-        )
+        Demand(agent_id, good_id, credits, epsilon.get((agent_id, good_id), 0.0))
         for (agent_id, good_id), credits in bids.items()
     ]
 

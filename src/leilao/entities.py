@@ -44,17 +44,35 @@ class Good:
 
 @dataclass(frozen=True)
 class Demand:
-    """Um par de demanda (a, x) in D, com nível de preferência p_{a,x} > 0 (eq. 6)."""
+    """Um par de demanda (a, x) in D, com nível de preferência p_{a,x} > 0 (eq. 6).
+
+    **Duas camadas, não uma soma.** `preference` é a grandeza do mecanismo —
+    o lance no leilão, o CR na linha de base. `tiebreak` decide **só entre
+    empates** dela, e é campo à parte justamente por isso: o WDP maximiza a
+    soma sobre milhares de pares, e uma parcela pequena somada tantas vezes
+    deixa de ser desempate e vira peso. Quem lê o desempate é a varredura
+    gulosa, que ordena por `(-preferência, -desempate)`, e a ditadura serial;
+    **a PLI o ignora**, pelo motivo que o docstring de `wdp_solver` registra.
+    """
 
     agent_id: str
     good_id: str
-    preference: float  # p_{a,x} — eq. (6): estritamente positivo por construção
+    # p_{a,x} — eq. (6). Zero é válido e não contradiz a eq. (6): quem decide
+    # o que está em D é o pedido do agente, não o peso dele. No leilão o peso
+    # é o lance e nunca é zero, porque `Bid` já exige c > 0 (eq. 18); na linha
+    # de base é o CR, e **o calouro sem histórico tem CR 0,0**.
+    preference: float
+    tiebreak: float = 0.0  # ε_{a,x}, ou 0 quando não há o que desempatar
 
     def __post_init__(self) -> None:
-        if self.preference <= 0:
+        if self.preference < 0:
             raise ValueError(
                 f"Demand ({self.agent_id!r}, {self.good_id!r}): preference (p_a,x) "
-                "must be > 0 (eq. 6) — pares sem demanda simplesmente não existem em D"
+                "must be >= 0"
+            )
+        if self.tiebreak < 0:
+            raise ValueError(
+                f"Demand ({self.agent_id!r}, {self.good_id!r}): tiebreak must be >= 0"
             )
 
 

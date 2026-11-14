@@ -168,10 +168,8 @@ def _run_ranking_round(
     # disciplinas que ele pediu. O ε desempata entre alunos; dentro de um
     # aluno quem ordena é a preferência dele, que já veio na ordem de
     # `requests`.
-    priority = {
-        s.id: grade_averages[s.id] + draws.epsilon.get((s.id, s.id), 0.0)
-        for s in active
-    }
+    priority = {s.id: grade_averages[s.id] for s in active}
+    tiebreak = draws.student_epsilon
     allocate = allocate_by_ilp if config.resolver == "ilp" else allocate_by_ranking
     for student_id, name in allocate(
         requests=requests,
@@ -180,6 +178,7 @@ def _run_ranking_round(
         hours=draws.hours,
         capacity={s.id: int(state.capacity[s.id]) for s in active},
         groups=draws.discipline_of,
+        tiebreak=tiebreak,
     ):
         won_now[student_id].append(name)
         state.grant(student_id, name, round_number=round_number, hours=draws.hours)

@@ -168,9 +168,11 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           cru: o aluno resolve uma mochila côncava em que cada crédito pesa 1 e o N-ésimo crédito
           posto numa disciplina vale ũ<sub>a,x</sub>/N. Depois o leilão resolve o WDP e vagas, carga horária e orçamento
           são descontados (eqs. 13, 14, 27).
-          A preferência que o WDP maximiza é o lance mais a perturbação da Seção 7.1.2: o fator
-          de desempate e o viés administrativo saíram, porque somados sobre milhares de pares
-          passavam a inverter diferenças de lance.
+          O que o WDP maximiza é o <strong>lance</strong>. O fator de desempate e o viés
+          administrativo saíram, porque somados sobre milhares de pares passavam a inverter
+          diferenças de lance; a perturbação da Seção 7.1.2 continua, mas como segundo estágio —
+          ela escolhe entre as alocações que já empataram no total de créditos, e não entra na
+          conta que decide quem leva a vaga.
         </li>
         <li>
           Ao fim do período saem as notas — sorteadas da normal do cenário, com a média

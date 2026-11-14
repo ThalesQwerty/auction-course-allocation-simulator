@@ -1188,21 +1188,102 @@ lance** — não é arredondamento, são vagas mudando de dono — e cobrava tr�
 vezes o tempo de solver por isso, porque a camada fracionária cria um
 contínuo de soluções quase ótimas que o ramifica-e-corta tem de varrer.
 
-Então **α̂ e β̂ saíram**, e a preferência passa a ser `p = c + ε`. Com β̂ vai
-junto a política universitária explícita no lance; ela continua expressável
-pelo cenário — oferta de vagas e pré-requisitos —, que age antes do leilão.
-A matriz α some de `simulation.setup`; como ela era o **último** sorteio da
-inicialização, tirá-la não desloca o gerador: população, notas,
-disponibilidade e interesse saem bit a bit iguais, e a diferença entre o
-antes e o depois é só do modelo.
+Então **α̂ e β̂ saíram**. Com β̂ vai junto a política universitária explícita
+no lance; ela continua expressável pelo cenário — oferta de vagas e
+pré-requisitos —, que age antes do leilão. A matriz α some de
+`simulation.setup`; como ela era o **último** sorteio da inicialização,
+tirá-la não desloca o gerador: população, notas, disponibilidade e interesse
+saem bit a bit iguais, e a diferença entre o antes e o depois é só do modelo.
 
-### O ε some na tolerância do resolvedor
+### O desempate saiu da PLI
+
+Tirar as camadas da soma deixa a pergunta de pé: o ε ainda tem de desempatar.
+A resposta é que, na PLI, ele **não** desempata — e as duas saídas possíveis
+foram implementadas e medidas antes de se chegar nisso.
+
+**Somar** é o que a eq. (22) fazia, e não tinha como funcionar. Para o
+desempate nunca inverter uma unidade da grandeza principal, a soma dele sobre
+os pares alocados precisa ficar abaixo de 1 — cada termo abaixo de `1/(total
+de vagas)`, o que no cenário cheio dá `9·10⁻⁵`. Só que **metade das demandas
+são lances de 1 crédito**: 35.684 pares exatamente empatados, de 69.033. Para
+separá-los o passo teria de ser `2,5·10⁻⁹`, uns 400× abaixo da tolerância de
+`10⁻⁶` do CBC. Não é questão de calibrar a escala — entre o teto e a
+tolerância cabem ~90 níveis distintos, e seriam precisos 35 mil.
+
+**Resolver em dois estágios** era a saída elegante, e chegou a ser o desenho
+do `wdp_solver`:
+
+```
+1.  max Σ lance·z     sujeito a vagas, carga, exclusão          → M
+2.  max Σ ε·z         sujeito a vagas, carga, exclusão
+                      e Σ lance·z ≥ M
+```
+
+Com a camada de lance presa pela restrição, a escala do ε fica livre e o
+problema numérico desaparece de fato. Só que ele troca um problema numérico
+por um combinatório pior: `Σ lance·z ≥ M` prende a região viável à **face
+ótima** do problema, e dentro dela todo nó do *branch and bound* tem
+praticamente o mesmo limitante. Nada poda, e o resolvedor enumera a face
+inteira.
+
+Medido em 14/11/2026, nos modelos extraídos dos processos travados:
+
+| variáveis binárias | restrições | tempo sem fechar |
+| --- | --- | --- |
+| **1.168** | 3.185 | **5 h 38** |
+| 9.640 | 21.896 | 3 h 10 |
+
+Mil cento e sessenta e oito variáveis binárias. Não é porte — é a
+degenerescência da face ótima, e ela é **pior justamente quando há mais
+empate**, que é o caso para o qual o estágio 2 existiria. Uma comparação de
+20 execuções por braço passou cinco horas sem produzir resultado nenhum.
+
+Por isso o ε ficou **fora da PLI**. Ele continua decidindo onde custa nada:
+na varredura gulosa, que ordena por `(-preferência, -desempate)`, e na
+ditadura serial, que compara dois a dois. `Demand` segue carregando os dois
+números em campos separados — o que mudou é que a PLI lê só o primeiro.
+
+**O que isso custa, declarado:** o ótimo da PLI não é único, e qual deles o
+CBC devolve depende do caminho de busca dele. O *valor* do objetivo é único —
+e é ele que a comparação mede —, e a alocação é reprodutível para um mesmo
+binário do CBC. Entre plataformas diferentes não há garantia: o PuLP embarca
+um binário por sistema, e nada assegura que duas compilações ramifiquem
+igual.
+
+**E isso deixa os dois braços padrão assimétricos, de propósito.**
+`ranking_greedy` resolve por ditadura serial e desempata por ε;
+`credits_return` resolve por PLI e não desempata — entre alocações de mesmo
+lance agregado, quem escolhe é a busca do CBC. Pôr o guloso também no braço
+de créditos restauraria a simetria, a unicidade e a reprodutibilidade entre
+máquinas, mas custaria a **maximização de bem-estar**, que é o que a PLI
+entrega e o guloso não: ele nunca recusa um lance de 30 para atender dois de
+20. Entre as duas perdas, preferiu-se a assimetria. O eixo do resolvedor
+segue medível em `credits_greedy` × `credits_ilp`, que é onde ele mora por
+desenho.
+
+Para a redação, afirma-se o que se tem: o **valor** alocado é único e
+reprodutível; a **alocação** é reprodutível para um mesmo binário do CBC.
+A medição que fecharia a questão — forçar dois ótimos distintos da mesma
+instância e comparar as métricas agregadas — ainda não foi feita.
+
+**Em troca, o estágio que sobrou ficou mais rápido.** Sem o ε no objetivo,
+toda preferência do braço de créditos é inteira — é o lance em créditos —,
+então o objetivo só pode melhorar de 1 em 1. O `wdp_solver` passa isso ao CBC
+(`increment 0,99`), que então poda todo nó cujo limitante não supere o
+incumbente por uma unidade inteira. A poda é exata: não existe solução entre
+o incumbente e o próximo valor possível. No braço do CR a preferência é o
+coeficiente de rendimento, que não é inteiro, e a opção não é passada.
+
+### Por que o ε nunca funcionou na PLI
+
+Fica registrado porque o diagnóstico vale e as tentativas descartadas poupam
+quem for refazê-las.
 
 A perturbação estocástica existe para tornar **única** a solução ótima: ela
-decide onde os lances empatam. O teto é `1/(|A|²·|B|)`, justo para o
-argumento que o sustenta — somados todos os ε de uma solução o total fica
-muito abaixo de um crédito, então a perturbação nunca desloca uma solução de
-lance agregado maior.
+decide onde os lances empatam. O teto do anteprojeto é `1/(|A|²·|B|)`, justo
+para o argumento que o sustenta — somados todos os ε de uma solução o total
+fica muito abaixo de um crédito, então a perturbação nunca desloca uma solução
+de lance agregado maior.
 
 O problema é o outro lado: em escala realista esse teto fica **abaixo da
 tolerância numérica do resolvedor**.
@@ -1218,17 +1299,16 @@ O CBC trabalha com tolerância de integralidade de 10⁻⁶, então em qualquer
 preset de tamanho real ele **não vê** o ε: onde o modelo diz que há
 desempate, o resolvedor vê empate e devolve um ótimo qualquer entre os
 empatados. Isso **não é novidade das turmas** — já valia com |A| = 180 e 63
-disciplinas — e a saída de α̂ não piora nem melhora: α̂ também não era quem
-decidia entre empates de lance, era quem os criava em outro lugar. O
-resolvedor guloso, que trabalha em ponto flutuante de dupla precisão e não
-tem tolerância de integralidade, enxerga o ε normalmente.
+disciplinas. O resolvedor guloso, que trabalha em ponto flutuante de dupla
+precisão e não tem tolerância de integralidade, sempre enxergou o ε
+normalmente — era uma assimetria entre os dois braços, e hoje é uma
+assimetria declarada.
 
-Em consequência prática a execução continua reprodutível, porque o CBC é
-determinístico dado o mesmo modelo; o que não vale é a afirmação de que a
-alocação é única *pelo ε*. Quem decide entre empatados é o caminho
-interno do resolvedor. Medido antes da correção abaixo: dar ao CBC um incumbente inicial — a mesma
-PLI, só com um piso conhecido — **mudava a alocação**, que é exatamente o
-sintoma de ótimos múltiplos.
+Enquanto o ε esteve no mesmo objetivo, a execução continuava reprodutível
+(o CBC é determinístico dado o mesmo modelo), mas não era o ε que decidia
+entre empatados, e sim o caminho interno do resolvedor. Medido na época: dar
+ao CBC um incumbente inicial — a mesma PLI, só com um piso conhecido —
+**mudava a alocação**, que é exatamente o sintoma de ótimos múltiplos.
 
 **A correção óbvia foi testada e não serve.** Escalar a função objetivo por
 uma constante preserva o argmax e põe o ε de volta acima da tolerância, e por
@@ -1243,13 +1323,13 @@ isso parecia resolver os dois problemas de uma vez. Medido no mesmo período:
 
 Não é monotônico — 10⁸ é pior que a escala 1 —, e **cada escala devolve uma
 alocação diferente**. O ganho de 10⁶ foi sorte da árvore de busca naquela
-instância, não condicionamento. O código fica como estava.
+instância, não condicionamento.
 
-O que o teste mostra de verdade é o tamanho do problema: enquanto o ε não
-decide, a alocação entre ótimos empatados depende de detalhes do resolvedor
-que nada no modelo controla. Fechar isso exige mexer no teto do ε — derivá-lo
-do número de termos que uma solução de fato tem, em vez do pior caso
-`|A|·|B|` —, e isso é decisão sobre a Seção 7.1.2, não sobre o código.
+O que o teste mostra é que **nenhuma escala resolve enquanto as duas camadas
+dividem um objetivo**: aumentar a escala tira o ε da tolerância e, no mesmo
+movimento, aumenta o peso dele contra o lance. Separá-las em dois estágios
+escapa disso — e esbarra na degenerescência descrita na seção anterior. As
+três saídas estão fechadas, e é por isso que a PLI não desempata.
 
 ### O que a concentração 0 custa ao resolvedor
 

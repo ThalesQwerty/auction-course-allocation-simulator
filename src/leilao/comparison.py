@@ -182,6 +182,12 @@ class Arm:
 # voz sobre o que perde) e o leilão sem sobra. As duas seguem alcançáveis por
 # `SimulationConfig` — `resolver="ilp"` com `mechanism="ranking"`, e
 # `credit_memory="none"` — se um dia forem precisas para um apêndice.
+#
+# **Os dois não usam o mesmo resolvedor, e isso é deliberado.** O CR roda por
+# ditadura serial, que desempata por ε; o leilão roda por PLI, que não lê o ε
+# (ver `wdp_solver`) e deixa a escolha entre ótimos de mesmo valor para a
+# busca do CBC. Igualar os resolvedores custaria a maximização de bem-estar,
+# que é o que a PLI entrega e o guloso não — preferiu-se a assimetria a isso.
 ARMS: tuple[Arm, ...] = (
     Arm("ranking_greedy", "ranking", "none", resolver="greedy"),
     Arm("credits_return", "credits", "ratio"),

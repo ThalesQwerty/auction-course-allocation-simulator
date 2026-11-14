@@ -47,6 +47,7 @@ def serial_dictatorship(
     hours: dict[str, int],
     capacity: dict[str, int],
     groups: dict[str, str] | None = None,
+    tiebreak: dict[str, float] | None = None,
 ) -> list[tuple[str, str]]:
     remaining = dict(seats)
     room = dict(capacity)
@@ -55,7 +56,8 @@ def serial_dictatorship(
         wanted.setdefault(student_id, []).append(name)
 
     granted: list[tuple[str, str]] = []
-    for student_id in sorted(wanted, key=lambda s: (-priority[s], s)):
+    rank = tiebreak or {}
+    for student_id in sorted(wanted, key=lambda s: (-priority[s], -rank.get(s, 0.0), s)):
         served: set[str] = set()
         for name in wanted[student_id]:
             group = groups[name] if groups else name

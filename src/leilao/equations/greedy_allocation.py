@@ -26,8 +26,16 @@ exatamente o que esta varredura faz. Os dois resolvedores só divergem,
 portanto, onde a carga aperta — e é por isso que o eixo só tem conteúdo em
 cenário com conjunto elegível maior que W_a.
 
-O desempate `(-p, agente, bem)` deixa a varredura determinística mesmo com
-preferências iguais, embora a perturbação já torne o empate improvável.
+A ordem é `(-preferência, -desempate, agente, bem)`: **lexicográfica, não
+somada**. Aqui a varredura compara dois pares de cada vez, então somar o
+desempate daria o mesmo resultado — mas escrever a ordem como ela é poupa o
+leitor de verificar isso. Os dois últimos termos garantem determinismo mesmo
+sem desempate nenhum.
+
+**É aqui que o ε decide**, e só aqui e na ditadura serial: a PLI o ignora,
+porque prender a camada de lance por restrição para maximizar o ε em seguida
+deixa a busca sem o que podar (ver `wdp_solver`). É uma assimetria entre os
+dois resolvedores, declarada e não acidental.
 """
 from __future__ import annotations
 
@@ -36,7 +44,7 @@ from collections.abc import Sequence
 
 def greedy_allocation(
     *,
-    demands: Sequence[tuple[str, str, float]],
+    demands: Sequence[tuple[str, str, float, float]],
     seats: dict[str, int],
     hours: dict[str, float],
     capacity: dict[str, float],
@@ -48,9 +56,9 @@ def greedy_allocation(
     # agente. O guloso respeita olhando o que já concedeu.
     taken: dict[str, set[str]] = {agent_id: set() for agent_id in capacity}
 
-    allocation = {(agent_id, good_id): 0 for agent_id, good_id, _ in demands}
-    for agent_id, good_id, _preference in sorted(
-        demands, key=lambda d: (-d[2], d[0], d[1])
+    allocation = {(agent_id, good_id): 0 for agent_id, good_id, _, _ in demands}
+    for agent_id, good_id, _preference, _tiebreak in sorted(
+        demands, key=lambda d: (-d[2], -d[3], d[0], d[1])
     ):
         if remaining.get(good_id, 0) <= 0:
             continue
