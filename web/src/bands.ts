@@ -95,6 +95,10 @@ function legacyBands(runs: RunSummary[]): AxisBands[] {
         fidelity: series.fidelity[i],
         fairness: series.fairness[i],
         correlation: series.correlation[i],
+        grade_average: series.grade_average?.[i] ?? null,
+        credits_supply: series.credits_supply?.[i] ?? null,
+        credits_spent: series.credits_spent?.[i] ?? null,
+        credits_returned: series.credits_returned?.[i] ?? null,
         exclusion_rate: series.exclusion_rate?.[i] ?? null,
       };
       const states = series.request_states?.[i];

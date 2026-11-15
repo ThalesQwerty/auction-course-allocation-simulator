@@ -279,6 +279,7 @@ def snapshot(
             credits_per_student=None,
             credits_per_seat=None,
             mean_bids=None,
+            mean_credits_spent=None,
             mean_credit_return=None,
         )
 
@@ -333,6 +334,13 @@ def snapshot(
             else None
         ),
         mean_bids=in_credits(mean(pick(values.bids))),
+        # O gasto não precisa de medição própria: é a oferta de abertura
+        # menos o que sobrou, que é exatamente o consumo da eq. (25)
+        # acumulado até aqui. Derivar em vez de propagar mantém as duas
+        # pontas impossíveis de divergir.
+        mean_credits_spent=in_credits(
+            (supply - sum(values.credits[i] for i in ids)) / len(ids)
+        ),
         mean_credit_return=(
             mean([values.credit_returns[i] for i in ids])
             if uses_credits and values.credit_returns is not None

@@ -579,6 +579,9 @@ class RunSummaryOut(BaseModel):
     # aula. É a quinta métrica da comparação, e a que a disponibilidade existe
     # para produzir.
     exclusion_rate: float
+    # N̄ — o CR médio. Descreve, não pontua: sobe tanto por o aluno ir melhor
+    # quanto por o mecanismo roteá-lo para turma mais fácil.
+    grade_average: float = 0.0
     # Os seis estados em média por aluno, reduzidos a um ponto cada.
     request_states: RequestStatesOut
     # Períodos do ingresso ao diploma, na média dos concluintes. Null quando
@@ -588,6 +591,31 @@ class RunSummaryOut(BaseModel):
     # |R| posições. Mede a **saturação**: o que se lê é o decaimento entre as
     # rodadas, não o nível de cada uma.
     allocations_per_round: list[float | None]
+
+
+class ClassPriceBandsOut(BaseModel):
+    """O preço médio da turma sob um recorte da **oferta**.
+
+    É a única família de recortes que não reparte alunos — ela reparte turmas
+    —, e por isso vem à parte de `series` em vez de ser mais um `axis` dela:
+    cruzar "disciplina de 2 turmas" com uma métrica por aluno não produziria
+    leitura nenhuma.
+
+    `axis` é `classes`, `hours`, `difficulty`, `attractiveness` ou
+    `curriculum_period`. Os grupos têm a forma das demais faixas, com uma
+    grandeza só (`mean_price`), e a chave de cada um é **o valor**, sem
+    idioma: `"2"`, `"60"`, `"1.4"` — e `"elective"` no recorte por período,
+    onde a optativa é grupo à parte por não ter período na grade. O rótulo em
+    português é da interface.
+
+    A régua é sempre o período: as outras duas (`age`, `cohort`) são do tempo
+    do **aluno**, e uma turma não tem idade nem coorte.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    axis: str
+    groups: list[GroupBandsOut]
 
 
 class ArmResultOut(BaseModel):
@@ -607,6 +635,17 @@ class ArmResultOut(BaseModel):
     # agregado e com cada recorte. A série de cada simulação não sai — só os
     # quartis dela.
     series: list[AxisBandsOut]
+    # Segundos médios do alocador em cada (período, rodada), entre as seeds:
+    # `allocation_seconds[p][r]` é a rodada r+1 do período p+1. Sai só a média
+    # do braço, e não a série de cada seed — quem a lê é um gráfico global, e
+    # mandar as N séries multiplicaria a resposta sem acrescentar leitura.
+    #
+    # É a única série daqui que **não** é do modelo: mede quanto custa rodar o
+    # mecanismo, não o que ele produz. Ver `comparison.allocation_seconds`.
+    allocation_seconds: list[list[float]] = []
+    # O preço médio da turma por recorte da oferta. Vazio fora do leilão —
+    # sem moeda não há preço —, e aí a seção some da tela.
+    class_prices: list[ClassPriceBandsOut] = []
 
 
 class CompareResponse(BaseModel):

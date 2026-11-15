@@ -130,7 +130,13 @@ from .config import (
 )
 from .metrics import Metrics
 from .population import generate_students
-from .simulation import CELL_SEP, GroupSnapshot, SimulationResult, run_simulation
+from .simulation import (
+    CELL_SEP,
+    DisciplineSnapshot,
+    GroupSnapshot,
+    SimulationResult,
+    run_simulation,
+)
 
 # Teto de simulações por braço. Não é limitação técnica: é que a faixa para de
 # ganhar informação muito antes disso, e cada simulação a mais custa uma
@@ -302,8 +308,22 @@ class RulerSeries:
     fidelity: list[float]
     fairness: list[float]
     correlation: list[float]
+    # N̄ — o CR médio do recorte. **Descreve, não pontua**: ele sobe tanto
+    # quando o aluno vai melhor quanto quando o mecanismo o roteia para
+    # turma mais fácil, e separar as duas coisas exige a dificuldade, que
+    # está nos gráficos por disciplina.
+    grade_average: list[float]
     # A fração das vagas obtidas que foi largada — ver `equations.exclusion_rate`.
     exclusion_rate: list[float]
+    # --- a economia de créditos, só do leilão ----------------------------
+    #
+    # As três saem `None` na linha de base por CR, e não zeradas: ali não há
+    # moeda, e zero se leria como "ninguém gastou". A redução entre seeds
+    # devolve faixa vazia nessas posições, e a linha some do gráfico em vez
+    # de virar um piso que ninguém pagou.
+    credits_supply: list[float | None]  # C_a^(t,1) por aluno
+    credits_spent: list[float | None]  # consumo da eq. (25) por aluno
+    credits_returned: list[float | None]  # Σγ da eq. (34) por aluno
     # Os seis estados de solicitação, em média por aluno. É a série da seção
     # "Solicitações de disciplinas": uma linha por estado, não empilhada, cada
     # braço no seu painel.
@@ -360,6 +380,62 @@ CUT_AXES: tuple[str, ...] = (
 )
 
 
+# Os recortes do gráfico de **preço**, e a única família de recortes que não
+# reparte gente: o que se reparte aqui é a oferta. Por isso ela não entra em
+# `CUT_AXES` — cruzá-la com as métricas por aluno não produziria leitura
+# nenhuma, já que um aluno não pertence a "disciplina de 2 turmas".
+CLASS_CUTS: tuple[str, ...] = (
+    "classes",
+    "hours",
+    "difficulty",
+    "attractiveness",
+    "curriculum_period",
+)
+
+# A optativa não tem período na grade — é elegível desde o ingresso —, então no
+# recorte por período ela é um grupo à parte, no fim da ordem.
+ELECTIVE_GROUP = "elective"
+
+
+def _number_key(value: float) -> str:
+    """O número como chave: sem zeros à direita e com ponto decimal, porque é
+    chave de dado e não texto de tela."""
+    return f"{value:g}"
+
+
+def _class_group(snapshot: DisciplineSnapshot, axis: str) -> tuple[float, str]:
+    """`(ordem, chave)` do grupo em que a turma cai, num recorte.
+
+    A chave é **estável e sem idioma** — o rótulo em português é da interface,
+    como em `COMPARISON_ARMS`. E os grupos saem dos valores que o cenário de
+    fato usa, não de uma lista fixa: grade com duas cargas horárias produz
+    duas linhas, com cinco produz cinco.
+    """
+    if axis == "classes":
+        return (snapshot.classes, str(snapshot.classes))
+    if axis == "hours":
+        return (snapshot.hours, str(snapshot.hours))
+    if axis == "difficulty":
+        return (snapshot.difficulty, _number_key(snapshot.difficulty))
+    if axis == "attractiveness":
+        return (snapshot.attractiveness, _number_key(snapshot.attractiveness))
+    if axis == "curriculum_period":
+        if snapshot.elective:
+            return (float("inf"), ELECTIVE_GROUP)
+        return (snapshot.curriculum_period, str(snapshot.curriculum_period))
+    raise ValueError(f"recorte de turma desconhecido: {axis!r}")
+
+
+@dataclass(frozen=True)
+class ClassPriceSeries:
+    """O preço médio da turma num grupo de um recorte da oferta, por período."""
+
+    axis: str
+    group: str
+    x: list[int]
+    price: list[float]
+
+
 @dataclass(frozen=True)
 class GroupBands:
     """Um grupo de um recorte reduzido **entre as seeds**, ponto a ponto.
@@ -379,6 +455,18 @@ class GroupBands:
     # Uma lista paralela a `x` por grandeza. `None` onde nenhuma seed mediu
     # aquela grandeza no ponto (uma rodada que não aconteceu).
     values: dict[str, list[tuple[float, float, float] | None]]
+
+
+@dataclass(frozen=True)
+class ClassPriceBands:
+    """Um recorte da oferta, com os grupos dele reduzidos entre as seeds.
+
+    Os grupos são `GroupBands` como os das demais séries — mesma forma, mesmo
+    gráfico do outro lado —, com uma grandeza só: `mean_price`.
+    """
+
+    axis: str
+    groups: list[GroupBands]
 
 
 @dataclass(frozen=True)
@@ -431,6 +519,9 @@ class RunSummary:
     fidelity: float
     fairness: float  # phi de Jain — eq. (55)
     correlation: float  # lambda — eq. (57)
+    # N̄ — o CR médio, na mesma média ponderada das demais. Descreve, não
+    # pontua: ver `RulerSeries.grade_average`.
+    grade_average: float
     # Desperdício: a fração das vagas obtidas que foi largada antes de virar
     # aula. É a quinta métrica da comparação — e a que a disponibilidade
     # existe para produzir. Ver `equations.exclusion_rate`.
@@ -447,6 +538,16 @@ class RunSummary:
     # o mesmo. `None` numa posição significa que nenhum período teve o que medir
     # naquela rodada.
     allocations_per_round: list[float | None]
+    # Segundos do alocador em cada (período, rodada) — ver `allocation_seconds`.
+    # É a única série da comparação que **não** é do modelo: mede o custo de
+    # rodar o mecanismo, não o que ele produz. Fora da igualdade
+    # (`compare=False`) porque é tempo de parede: há teste que exige que duas
+    # comparações da mesma configuração saiam idênticas, e elas saem — menos
+    # no relógio.
+    allocation_seconds: list[list[float]] = field(compare=False)
+    # O preço médio por recorte da **oferta**, período a período. Vazio fora
+    # do leilão: sem moeda não há preço a recortar.
+    class_prices: list[ClassPriceSeries]
     # As mesmas métricas de período, período a período — o que a média ponderada
     # resume. É o recorte por período da tela; a redução continua sendo a dos
     # campos acima, e as duas leituras saem do mesmo material.
@@ -468,6 +569,11 @@ class ArmResult:
     # As séries reduzidas entre as seeds: cada régua cruzada com cada recorte.
     # É o que os gráficos desenham — ver `bands`.
     series: list[AxisBands] = field(default_factory=list)
+    # O tempo médio do alocador em cada (período, rodada), entre as seeds.
+    # Fora da igualdade: é relógio, não resultado — ver `RunSummary`.
+    allocation_seconds: list[list[float]] = field(default_factory=list, compare=False)
+    # O preço reduzido entre as seeds, um recorte da oferta por entrada.
+    class_prices: list[ClassPriceBands] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -522,6 +628,129 @@ def allocations_per_round(result: SimulationResult) -> list[float | None]:
             )
         )
     return series
+
+
+def allocation_seconds(result: SimulationResult) -> list[list[float]]:
+    """Segundos do alocador em cada rodada, período a período.
+
+    `série[p][r]` é a rodada r+1 do período p+1. É **tempo de parede**, não
+    grandeza do modelo: muda de máquina para máquina e entre duas execuções da
+    mesma seed, e nenhuma decisão da simulação o lê.
+
+    Sem recorte por coorte ou perfil, e não por omissão: o resolvedor decide a
+    rodada inteira de uma vez, então não existe parcela do tempo atribuível a
+    um grupo de alunos.
+    """
+    return [
+        [report.allocation_seconds for report in period.rounds]
+        for period in result.periods
+    ]
+
+
+def mean_allocation_seconds(runs: list["RunSummary"]) -> list[list[float]]:
+    """A média entre as seeds, posição a posição.
+
+    Uma simulação pode publicar menos períodos que outra se a população se
+    esvaziou antes do horizonte, então cada posição é a média **das seeds que
+    chegaram até ela** — e não uma divisão por N que leria a ausência como
+    zero segundos.
+    """
+    if not runs:
+        return []
+    periods = max(len(run.allocation_seconds) for run in runs)
+    series: list[list[float]] = []
+    for index in range(periods):
+        rows = [run.allocation_seconds[index] for run in runs if index < len(run.allocation_seconds)]
+        rounds = max((len(row) for row in rows), default=0)
+        series.append(
+            [
+                sum(values) / len(values)
+                for position in range(rounds)
+                for values in [[row[position] for row in rows if position < len(row)]]
+                if values
+            ]
+        )
+    return series
+
+
+def class_prices(result: SimulationResult) -> list[ClassPriceSeries]:
+    """O preço médio da turma por recorte da oferta, período a período.
+
+    A média é **simples entre as turmas** do grupo, e não ponderada pelas
+    vagas: a pergunta é quanto custou a turma, não quanto pagou o aluno médio.
+    Turma que não chegou ao mercado no período sai `mean_price = None` e não
+    entra; grupo sem nenhuma turma com preço não publica o ponto.
+
+    Fora do leilão não há preço, e a lista sai vazia — como as demais
+    grandezas de crédito saem `None`.
+    """
+    out: list[ClassPriceSeries] = []
+    for axis in CLASS_CUTS:
+        points: dict[str, dict[int, list[float]]] = {}
+        order: dict[str, float] = {}
+        for period in result.periods:
+            for snapshot in period.disciplines:
+                if snapshot.mean_price is None:
+                    continue
+                rank, group = _class_group(snapshot, axis)
+                order[group] = rank
+                points.setdefault(group, {}).setdefault(period.period, []).append(
+                    snapshot.mean_price
+                )
+        for group in sorted(points, key=lambda name: (order[name], name)):
+            periods = sorted(points[group])
+            out.append(
+                ClassPriceSeries(
+                    axis=axis,
+                    group=group,
+                    x=periods,
+                    price=[
+                        sum(points[group][point]) / len(points[group][point])
+                        for point in periods
+                    ],
+                )
+            )
+    return out
+
+
+def class_price_bands(runs: list[RunSummary]) -> list[ClassPriceBands]:
+    """Os quartis do preço em cada ponto, grupo a grupo.
+
+    É a mesma redução das demais séries e devolve a mesma forma (`GroupBands`),
+    de modo que o gráfico do outro lado é o mesmo — muda o que a linha
+    significa, não como ela se desenha.
+    """
+    out: list[ClassPriceBands] = []
+    for axis in CLASS_CUTS:
+        order: list[str] = []
+        samples: dict[str, dict[int, list[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        for run in runs:
+            for entry in run.class_prices:
+                if entry.axis != axis:
+                    continue
+                if entry.group not in order:
+                    order.append(entry.group)
+                for point, value in zip(entry.x, entry.price):
+                    samples[entry.group][point].append(value)
+        groups = [
+            GroupBands(
+                group=group,
+                x=sorted(samples[group]),
+                n=[len(samples[group][point]) for point in sorted(samples[group])],
+                values={
+                    "mean_price": [
+                        _quartiles(samples[group][point])
+                        for point in sorted(samples[group])
+                    ]
+                },
+            )
+            for group in order
+        ]
+        if groups:
+            out.append(ClassPriceBands(axis=axis, groups=groups))
+    return out
 
 
 def weighted_states(pairs: list[tuple[Metrics, int]]) -> RequestStates:
@@ -587,6 +816,11 @@ def _period_series(
     def series(of) -> list:
         return [of(snapshot.metrics) for _, snapshot, _ in measured]
 
+    def snapshots(of) -> list:
+        """As grandezas que ficam no recorte, e não em `Metrics` — as de
+        crédito. Podem sair `None`, e saem na linha de base por CR."""
+        return [of(snapshot) for _, snapshot, _ in measured]
+
     def saturation(by_round: list[GroupSnapshot | None]) -> list[float | None]:
         """Uma posição por rodada do cenário. Período que publicou menos
         rodadas é completado com `None`, para a coluna r ser a mesma rodada em
@@ -613,7 +847,11 @@ def _period_series(
         fidelity=series(lambda m: m.fidelity),
         fairness=series(lambda m: m.fairness),
         correlation=series(lambda m: m.correlation),
+        grade_average=series(lambda m: m.mean_grade_average),
         exclusion_rate=series(lambda m: m.exclusion_rate or 0.0),
+        credits_supply=snapshots(lambda s: s.credits_per_student),
+        credits_spent=snapshots(lambda s: s.mean_credits_spent),
+        credits_returned=snapshots(lambda s: s.mean_credit_return),
         request_states=series(
             lambda m: m.request_states or RequestStates(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         ),
@@ -725,6 +963,20 @@ def _regroup(
         bag = bags[point]
         return weighted_mean(list(zip(of(bag), bag.students))) or 0.0
 
+    def optional(point: int, of) -> float | None:
+        """A mesma média ponderada, para grandeza que pode não existir.
+
+        Sem moeda no braço, toda posição é `None` e o reagrupamento devolve
+        `None` — não 0, que se leria como "gastou zero".
+        """
+        bag = bags[point]
+        pairs = [
+            (value, weight)
+            for value, weight in zip(of(bag), bag.students)
+            if value is not None
+        ]
+        return weighted_mean(pairs) if pairs else None
+
     def graduation(point: int) -> float:
         bag = bags[point]
         if ruler != "cohort":
@@ -763,7 +1015,13 @@ def _regroup(
         fidelity=[weighed(point, lambda s: s.fidelity) for point in points],
         fairness=[weighed(point, lambda s: s.fairness) for point in points],
         correlation=[weighed(point, lambda s: s.correlation) for point in points],
+        grade_average=[weighed(point, lambda s: s.grade_average) for point in points],
         exclusion_rate=[weighed(point, lambda s: s.exclusion_rate) for point in points],
+        credits_supply=[optional(point, lambda s: s.credits_supply) for point in points],
+        credits_spent=[optional(point, lambda s: s.credits_spent) for point in points],
+        credits_returned=[
+            optional(point, lambda s: s.credits_returned) for point in points
+        ],
         request_states=[states(point) for point in points],
         allocations_per_round=[saturation(point) for point in points],
     )
@@ -877,7 +1135,11 @@ def _quantities(series: RulerSeries, index: int) -> dict[str, float | None]:
         "fidelity": series.fidelity[index],
         "fairness": series.fairness[index],
         "correlation": series.correlation[index],
+        "grade_average": series.grade_average[index],
         "exclusion_rate": series.exclusion_rate[index],
+        "credits_supply": series.credits_supply[index],
+        "credits_spent": series.credits_spent[index],
+        "credits_returned": series.credits_returned[index],
     }
     for key in STATE_KEYS:
         values[key] = getattr(states, key)
@@ -1001,10 +1263,13 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         fidelity=mean(by_period.fidelity),
         fairness=mean(by_period.fairness),
         correlation=mean(by_period.correlation),
+        grade_average=mean(by_period.grade_average),
         exclusion_rate=mean(by_period.exclusion_rate),
         request_states=weighted_states(states),
         time_to_graduate=time_to_graduate(result),
         allocations_per_round=allocations_per_round(result),
+        allocation_seconds=allocation_seconds(result),
+        class_prices=class_prices(result),
         by_period=by_period,
         by_group=group_series(result, by_period=by_period),
     )
@@ -1187,6 +1452,8 @@ def run_comparison(
                 credit_return=arm.credit_return,
                 runs=summaries,
                 series=bands(summaries),
+                allocation_seconds=mean_allocation_seconds(summaries),
+                class_prices=class_price_bands(summaries),
             )
             for arm, summaries in zip(arms, jobs)
         ],

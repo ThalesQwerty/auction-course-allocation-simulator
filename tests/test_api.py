@@ -248,6 +248,7 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "fidelity",
         "fairness",
         "correlation",
+        "grade_average",
         "exclusion_rate",
         "request_states",
         "time_to_graduate",
@@ -318,7 +319,89 @@ def test_compare_ignores_the_scenario_seed_and_credit_return(client):
     # chamadas nunca compartilham arquivo, e compará-lo não diria nada sobre
     # o cenário.
     assert first.pop("saved_to") != second.pop("saved_to")
+
+    # O tempo de alocação é relógio, não resultado: a mesma configuração dá a
+    # mesma simulação e nunca os mesmos segundos. Dele se exige a **forma** —
+    # um ponto por (período, rodada), igual nos dois —, e o conteúdo sai da
+    # comparação pelo mesmo motivo que `saved_to`.
+    shapes = [
+        [[len(period) for period in arm.pop("allocation_seconds")] for arm in payload["arms"]]
+        for payload in (first, second)
+    ]
+    assert shapes[0] == shapes[1]
+    assert all(rounds > 0 for shape in shapes for arm in shape for rounds in arm)
+
     assert first == second
+
+
+def test_credit_quantities_exist_only_where_there_is_currency(client):
+    """As três grandezas da economia saem `null` na linha de base por CR.
+
+    Zero ali se leria como "ninguém gastou", e o certo é "não há o que gastar"
+    — é a mesma convenção das demais grandezas de crédito.
+    """
+    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
+    chaves = ("credits_supply", "credits_spent", "credits_returned")
+
+    for arm in payload["arms"]:
+        eixo = next(
+            a for a in arm["series"] if a["ruler"] == "period" and a["axis"] == "overall"
+        )
+        valores = eixo["groups"][0]["values"]
+        for chave in chaves:
+            faixas = valores[chave]
+            if arm["mechanism"] == "credits":
+                assert any(f is not None for f in faixas), f"{arm['key']}/{chave} vazio"
+            else:
+                assert all(f is None for f in faixas), f"{arm['key']}/{chave} tem moeda"
+
+
+def test_the_price_cuts_split_the_offer_and_only_exist_in_the_auction(client):
+    """O preço recorta **turmas**, não alunos — a única família assim.
+
+    Como o tempo de alocação, ele atravessa `service._arm_out`, que lista os
+    campos um a um: esquecer um ali devolve lista vazia sem erro nenhum.
+    """
+    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
+
+    for arm in payload["arms"]:
+        cortes = arm["class_prices"]
+        if arm["mechanism"] != "credits":
+            assert cortes == [], f"{arm['key']} tem preço sem ter moeda"
+            continue
+        assert {cut["axis"] for cut in cortes} == {
+            "classes",
+            "hours",
+            "difficulty",
+            "attractiveness",
+            "curriculum_period",
+        }
+        for cut in cortes:
+            assert cut["groups"], f"recorte {cut['axis']} sem grupo"
+            for group in cut["groups"]:
+                faixas = group["values"]["mean_price"]
+                assert len(faixas) == len(group["x"]) == len(group["n"])
+                assert any(f is not None for f in faixas)
+                # O preço é inteiro e tem piso 1 (eq. 24): quartil abaixo disso
+                # seria preço que ninguém pagou.
+                assert all(f is None or f[0] >= 1 for f in faixas)
+
+
+def test_compare_reports_the_allocation_time_of_every_round(client):
+    """O custo de rodar o mecanismo sai por braço, um ponto por (período, rodada).
+
+    Ele atravessa uma montagem que lista os campos um a um (`service._arm_out`),
+    onde um campo esquecido vira lista vazia **em silêncio** — e foi o que
+    aconteceu. Por isso o que se exige aqui é a forma, e não só a presença.
+    """
+    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
+
+    for arm in payload["arms"]:
+        series = arm["allocation_seconds"]
+        assert series, f"braço {arm['key']} saiu sem tempo de alocação"
+        for period in series:
+            assert len(period) == COMPARE_SCENARIO["rounds"]
+            assert all(value >= 0 for value in period)
 
 
 def test_compare_reports_one_allocation_figure_per_round(client):

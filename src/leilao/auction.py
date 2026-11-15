@@ -10,6 +10,7 @@ são de `simulation`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from time import perf_counter
 
 from .config import Resolver
 from .entities import Agent, Allocation, Demand, Good, MutualExclusion, Problem
@@ -84,6 +85,10 @@ class AuctionResult:
     consumption: dict[tuple[str, str], int]  # δ_{a,x} — eq. (25)
     remaining_budget: dict[str, int]  # C_a − Δ_a — eq. (27)
     remaining_capacity: dict[str, float]  # W_a − Σ w_x — eq. (14)
+    # Tempo de parede do resolvedor, em segundos. É instrumentação, não
+    # grandeza do modelo: nada no simulador a lê para decidir coisa alguma.
+    # Cobre montar o problema e resolvê-lo, que é o que `solve_wdp` faz.
+    solver_seconds: float = 0.0
 
 
 def _demands(auction_input: AuctionInput, bids: dict[tuple[str, str], int]) -> list[Demand]:
@@ -125,7 +130,9 @@ def run_auction(auction_input: AuctionInput, *, resolver: Resolver = "ilp") -> A
         demands=_demands(auction_input, bids),
         exclusions=auction_input.exclusions,
     )
+    started = perf_counter()
     allocation = (solve_wdp if resolver == "ilp" else solve_wdp_greedy)(problem)
+    solver_seconds = perf_counter() - started
 
     prices = market_prices(
         good_ids=[g.id for g in auction_input.goods],
@@ -148,4 +155,5 @@ def run_auction(auction_input: AuctionInput, *, resolver: Resolver = "ilp") -> A
             allocation={key: 1 for key in consumed},
             weights={g.id: g.weight for g in auction_input.goods},
         ),
+        solver_seconds=solver_seconds,
     )

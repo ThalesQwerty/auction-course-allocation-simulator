@@ -8,6 +8,8 @@
  * e os quantis estão em `equations/`, onde se revisam como fórmula. Aqui fica
  * o desenho.
  */
+export { AllocationTimeChart, formatSeconds } from "./AllocationTimeChart";
+export type { AllocationTimeLine } from "./AllocationTimeChart";
 export { DensityChart } from "./DensityChart";
 export type { DensitySplit } from "./DensityChart";
 export { Histogram } from "./Histogram";

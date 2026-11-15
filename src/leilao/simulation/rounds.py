@@ -11,6 +11,7 @@ mecanismo, e não à contabilidade.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 
 from ..auction import AuctionInput, Bid, run_auction
 from ..behavior import compute_bids
@@ -43,6 +44,11 @@ class RoundOutcome:
     budget: dict[str, int]
     bids: dict[str, int]  # acumulado até aqui, como o gasto
     prices: PriceStats | None
+    # Segundos de parede gastos **decidindo a alocação** desta rodada, e só
+    # isso: não entram a montagem do lance nem o preço. É o ponto em que os
+    # dois mecanismos fazem a mesma coisa — dado o que foi pedido, decidir
+    # quem leva —, e por isso o único em que o tempo deles se compara.
+    allocation_seconds: float
 
 
 def _available(
@@ -81,8 +87,11 @@ def _run_credit_round(
     available: dict[str, list[str]],
     round_number: int,
     won_now: dict[str, list[str]],
-) -> dict[str, int]:
-    """O leilão: lances, PLI (ou varredura), preço e consumo."""
+) -> tuple[dict[str, int], float]:
+    """O leilão: lances, PLI (ou varredura), preço e consumo.
+
+    Devolve os preços e os segundos que o resolvedor levou.
+    """
     bids: list[Bid] = []
     for student in active:
         posted = compute_bids(
@@ -104,7 +113,7 @@ def _run_credit_round(
         name: PRICE_FLOOR for name in draws.seats if state.seats[name] > 0
     }
     if not bids:
-        return prices
+        return prices, 0.0
 
     result = run_auction(
         AuctionInput(
@@ -133,7 +142,7 @@ def _run_credit_round(
     for name, price in result.prices.items():
         if name in prices:
             prices[name] = price
-    return prices
+    return prices, result.solver_seconds
 
 
 def _run_ranking_round(
@@ -147,11 +156,11 @@ def _run_ranking_round(
     available: dict[str, list[str]],
     round_number: int,
     won_now: dict[str, list[str]],
-) -> None:
+) -> float:
     """A linha de base: o aluno pede tudo que lhe é elegível, na própria ordem
     de preferência, e a restrição de carga (eq. 4) é resolvida pelo alocador.
 
-    Não há lance, orçamento nem preço.
+    Não há lance, orçamento nem preço. Devolve os segundos do alocador.
     """
     requests: list[tuple[str, str]] = []
     for student in active:
@@ -171,7 +180,8 @@ def _run_ranking_round(
     priority = {s.id: grade_averages[s.id] for s in active}
     tiebreak = draws.student_epsilon
     allocate = allocate_by_ilp if config.resolver == "ilp" else allocate_by_ranking
-    for student_id, name in allocate(
+    started = perf_counter()
+    allocated = allocate(
         requests=requests,
         priority=priority,
         seats=state.seats,
@@ -179,9 +189,12 @@ def _run_ranking_round(
         capacity={s.id: int(state.capacity[s.id]) for s in active},
         groups=draws.discipline_of,
         tiebreak=tiebreak,
-    ):
+    )
+    seconds = perf_counter() - started
+    for student_id, name in allocated:
         won_now[student_id].append(name)
         state.grant(student_id, name, round_number=round_number, hours=draws.hours)
+    return seconds
 
 
 def run_round(
@@ -210,7 +223,7 @@ def run_round(
 
     prices: dict[str, int] | None = None
     if config.uses_credits:
-        prices = _run_credit_round(
+        prices, allocation_seconds = _run_credit_round(
             config=config,
             draws=draws,
             active=active,
@@ -221,7 +234,7 @@ def run_round(
             won_now=won_now,
         )
     else:
-        _run_ranking_round(
+        allocation_seconds = _run_ranking_round(
             config=config,
             draws=draws,
             active=active,
@@ -256,4 +269,5 @@ def run_round(
         # `None` fora do leilão: sem lance não se forma preço, e a série some
         # do gráfico em vez de virar uma linha de piso que ninguém pagou.
         prices=PriceStats.of(list(prices.values())) if prices is not None else None,
+        allocation_seconds=allocation_seconds,
     )

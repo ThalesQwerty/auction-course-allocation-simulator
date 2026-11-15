@@ -363,6 +363,17 @@ export interface PeriodSeries {
   fidelity: number[];
   fairness: number[];
   correlation: number[];
+  /** N̄ — o CR médio do recorte. **Descreve, não pontua**: sobe tanto quando
+   * o aluno vai melhor quanto quando o mecanismo o roteia para turma mais
+   * fácil. Ausente em comparação gravada antes de 14/11/2026. */
+  grade_average?: number[];
+  /** A economia de créditos, só do leilão: oferta de abertura, consumo da
+   * eq. (25) e Σγ da eq. (34), todos por aluno. `null` na linha de base por
+   * CR — ali não há moeda, e zero se leria como "ninguém gastou".
+   * Ausentes em comparação gravada antes de 14/11/2026. */
+  credits_supply?: (number | null)[];
+  credits_spent?: (number | null)[];
+  credits_returned?: (number | null)[];
   exclusion_rate: number[];
   /** A série da seção "Solicitações de disciplinas": seis linhas **não
    * empilhadas**, em média por aluno, uma posição por período medido.
@@ -408,6 +419,9 @@ export interface RunSummary {
   fidelity: number;
   fairness: number; // φ — eq. (55)
   correlation: number; // λ — eq. (57)
+  /** N̄ — o CR médio. Descreve, não pontua: ver `PeriodSeries.grade_average`.
+   * Zero em comparação gravada antes de 14/11/2026. */
+  grade_average: number;
   /** Desperdício: a fração das vagas obtidas que foi largada antes de virar
    * aula. É a quinta métrica da comparação, e a que a disponibilidade existe
    * para produzir. */
@@ -447,7 +461,45 @@ export interface ArmResult {
    * agregado e com cada recorte. Ausente em comparação gravada antes de
    * 09/11/2026; sem `ruler` nas gravadas antes de 11/11/2026. */
   series?: AxisBands[];
+  /** Segundos médios do alocador em cada (período, rodada), entre as seeds:
+   * `allocation_seconds[p][r]` é a rodada r+1 do período p+1.
+   *
+   * É a única série daqui que não é do modelo — mede quanto custa **rodar** o
+   * mecanismo, não o que ele produz —, e por isso não tem recorte por coorte
+   * nem por perfil: o resolvedor decide a rodada inteira de uma vez, e não há
+   * parcela do tempo atribuível a um grupo. Ausente em comparação gravada
+   * antes de 14/11/2026. */
+  allocation_seconds?: number[][];
+  /** O preço médio da turma por recorte da **oferta**. Vem à parte de
+   * `series` porque é a única família de recortes que não reparte alunos —
+   * ela reparte turmas —, e cruzar "disciplina de 2 turmas" com uma métrica
+   * por aluno não produziria leitura nenhuma.
+   *
+   * Vazio fora do leilão, e ausente em comparação gravada antes de
+   * 14/11/2026. */
+  class_prices?: ClassPriceBands[];
 }
+
+/** Um recorte da oferta e os grupos dele, já reduzidos entre as seeds.
+ *
+ * A chave de cada grupo é **o valor**, sem idioma: `"2"`, `"60"`, `"1.4"` —
+ * e `"elective"` no recorte por período, onde a optativa é grupo à parte por
+ * não ter período na grade. Quem rotula em português é `classGroupLabel`.
+ *
+ * A régua é sempre o período: as outras duas são do tempo do **aluno**, e
+ * uma turma não tem idade nem coorte. */
+export interface ClassPriceBands {
+  axis: ClassCut;
+  groups: GroupBands[];
+}
+
+/** Os recortes da oferta, na ordem em que a tela os oferece. */
+export type ClassCut =
+  | "classes"
+  | "hours"
+  | "difficulty"
+  | "attractiveness"
+  | "curriculum_period";
 
 /** Os recortes **espaciais** da tela de comparação — as cores das linhas.
  * `overall` é a universidade inteira, um grupo só; os outros quatro são os

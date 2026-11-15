@@ -22,6 +22,7 @@ from ..comparison import (
 from ..config import Discipline, SimulationConfig
 from .schemas import (
     ArmResultOut,
+    ClassPriceBandsOut,
     AxisBandsOut,
     CompareRequest,
     CompareResponse,
@@ -119,4 +120,8 @@ def _arm_out(arm: ArmResult) -> ArmResultOut:
         credit_return=arm.credit_return,
         runs=[RunSummaryOut.model_validate(run) for run in arm.runs],
         series=[AxisBandsOut.model_validate(axis) for axis in arm.series],
+        allocation_seconds=arm.allocation_seconds,
+        class_prices=[
+            ClassPriceBandsOut.model_validate(cut) for cut in arm.class_prices
+        ],
     )

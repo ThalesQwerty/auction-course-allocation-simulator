@@ -568,6 +568,81 @@ São **cinco métricas**: eficiência (ψ̄), equidade (φ), correlação (λ),
 **desperdício de vaga** (ε) e **tempo de formatura**. Nada de crédito, porque
 não há contraparte do outro lado.
 
+Desde 14/11/2026 a tela traz também o **CR médio** (N̄), na mesma maquinaria de
+régua e recorte das demais. Ele **descreve, não pontua** — como λ e a saturação
+—, e por um motivo que vale escrever: o CR médio sobe tanto quando o aluno vai
+melhor quanto quando o mecanismo o roteia para turma mais fácil, e separar as
+duas coisas exige a dificuldade da turma, que está nos gráficos por disciplina
+e não aqui. Dizer qual lado "ganhou" em N̄ seria afirmar o que o número não
+mostra.
+
+**E um gráfico que não é métrica**: o *tempo de alocação*, em segundos, para
+cada (período, rodada) de cada mecanismo. Ele é o único da tela que não mede o
+que o mecanismo produziu, e sim quanto custou produzi-lo — por isso não tem
+recorte por coorte nem por perfil, e não é omissão: o resolvedor decide a
+rodada inteira de uma vez, então não existe parcela do tempo atribuível a um
+grupo de alunos. A régua é **logarítmica** porque os dois mecanismos ficam a
+ordens de grandeza um do outro (medido no cenário de teste: 203,7 ms da PLI
+contra 0,4 ms da varredura); em régua linear a linha do CR encostaria no zero.
+Rodada que não alocou nada sai como buraco na linha, não como zero — zero
+segundo se leria como "foi instantâneo", e o que houve foi não acontecer.
+
+Ele é **tempo de parede**: muda de máquina para máquina e entre duas execuções
+da mesma seed. Por isso fica fora de toda igualdade — `compare=False` nos
+relatórios e nas séries, e removido antes da comparação nos testes que exigem
+que a mesma configuração produza o mesmo resultado.
+
+### Economia de créditos — a seção que só o leilão tem
+
+Quatro gráficos, e a seção inteira some quando não há leilão na comparação. Os
+três primeiros são por aluno e usam a régua e o recorte da tela, como os
+demais:
+
+| gráfico | o que é | de onde sai |
+|---|---|---|
+| orçamento | C_a^(t,1), a oferta de abertura, antes de qualquer lance | `GroupSnapshot.credits_per_student` |
+| gastos | o consumo da eq. (25) acumulado até o instante | `GroupSnapshot.mean_credits_spent` |
+| retornados | Σγ da eq. (34) — só existe no fim do período | `GroupSnapshot.mean_credit_return` |
+
+O **gasto** não é medido à parte: é a oferta de abertura menos o saldo, que é
+exatamente o consumo somado. Derivar em vez de propagar é o que torna as duas
+pontas impossíveis de divergir. E ele é **distinto do apostado** (`mean_bids`):
+lance perdido não consome nada, então o apostado passa do gasto sempre que
+houve disputa perdida.
+
+Nenhum dos três pontua. Gastar mais não é melhor nem pior — é o que o mecanismo
+faz com o orçamento —, e por isso eles ficam fora das tabelas de comparação,
+que existem para dizer qual lado ganhou. Na linha de base por CR saem `null`, e
+a linha some do gráfico em vez de virar um piso que ninguém pagou.
+
+**O quarto é de outra natureza: o preço, recortado por turma.** É o único
+gráfico da tela cujas linhas não são grupos de gente — o que elas repartem é a
+**oferta**:
+
+| recorte | grupos |
+|---|---|
+| turmas | quantas turmas a disciplina tem: 1, 2, … |
+| carga horária | os valores de `hours` que a grade usa |
+| dificuldade | a escada de `class_difficulty_levels` — é da **turma**, então o recorte separa seções da mesma disciplina |
+| atratividade | os valores de A_x que a grade usa |
+| período | o período da grade, com a **optativa** como grupo à parte: ela não tem período, é elegível desde o ingresso |
+
+Os grupos saem dos valores que o cenário de fato usa, e não de uma lista fixa:
+grade com duas cargas horárias produz duas linhas, com cinco produz cinco. A
+média é **simples entre as turmas** do grupo, e não ponderada pelas vagas — a
+pergunta é quanto custou a turma, não quanto pagou o aluno médio. Turma que não
+chegou ao mercado no período não entra.
+
+Por que ele vem à parte de `series`, e não como mais um eixo dela: cruzar
+"disciplina de 2 turmas" com uma métrica por aluno não produziria leitura
+nenhuma, porque um aluno não pertence a esse grupo. Pelo mesmo motivo a régua é
+sempre o **período** — as outras duas (idade, coorte) são do tempo do aluno, e
+uma turma não tem idade nem coorte.
+
+A chave de cada grupo vai na API como **o valor**, sem idioma (`"2"`, `"60"`,
+`"1.4"`, `"elective"`); quem rotula em português é a interface, como em
+`COMPARISON_ARMS`.
+
 **Duas escolhas governam todos os gráficos da tela**, e são independentes: a
 **régua** do eixo X e o **recorte** das linhas. O modelo é a terceira dimensão
 e não é escolha — ele é sempre o traçado, contínuo no leilão e tracejado no CR.

@@ -203,6 +203,7 @@ class _Reporter:
         credits: dict[str, int],
         bids: dict[str, int],
         prices: PriceStats | None,
+        allocation_seconds: float,
         ages: dict[str, int],
         credit_returns: dict[str, int] | None,
         retained: dict[str, set[str]] | None = None,
@@ -258,6 +259,7 @@ class _Reporter:
                 if not name.startswith(CELL_AXIS)
             },
             prices=prices,
+            allocation_seconds=allocation_seconds,
         )
 
     def ages(self, *, closed: bool) -> dict[str, int]:
@@ -299,12 +301,17 @@ def _discipline_snapshots(
     demand: dict[str, int],
     prices: dict[str, float],
 ) -> list[DisciplineSnapshot]:
+    by_name = {d.name: d for d in config.disciplines}
     return [
         DisciplineSnapshot(
             name=name,
             discipline=draws.discipline_of[name],
             curriculum_period=draws.curriculum[draws.discipline_of[name]],
             hours=draws.hours[name],
+            difficulty=draws.difficulty[name],
+            attractiveness=by_name[draws.discipline_of[name]].attractiveness,
+            classes=by_name[draws.discipline_of[name]].classes,
+            elective=by_name[draws.discipline_of[name]].elective,
             seats=seats,
             filled=seats - state.seats[name],
             granted=state.granted[name],
@@ -455,6 +462,7 @@ def run_period(
             credits=outcome.budget,
             bids=outcome.bids,
             prices=outcome.prices,
+            allocation_seconds=outcome.allocation_seconds,
             ages=during,
             credit_returns=None,
         )
@@ -492,6 +500,7 @@ def run_period(
         credits=state.budget,
         bids=state.bid_total,
         prices=PriceStats.of(list(prices.values())),
+        allocation_seconds=sum(o.allocation_seconds for o in outcomes),
         ages=reporter.ages(closed=True),
         credit_returns=closing.credits_returned,
         retained=closing.retained,

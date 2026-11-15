@@ -91,6 +91,11 @@ class GroupSnapshot:
     # matrícula garantida entra pelo valor que o sistema lançou na conta, para
     # que lance e gasto fiquem na mesma régua.
     mean_bids: float | None
+    # Créditos **consumidos** no período por aluno, acumulados até o instante
+    # do recorte: a oferta de abertura menos o saldo. É a eq. (25) somada, e
+    # é distinta de `mean_bids` — lance perdido não consome nada, então o
+    # apostado passa do gasto sempre que houve disputa perdida.
+    mean_credits_spent: float | None
     # Σγ do período (eq. 34) por aluno. Só existe no recorte de fim de
     # período: em plena rodada as notas ainda não saíram.
     mean_credit_return: float | None
@@ -110,6 +115,19 @@ class RoundReport:
     # reproduz `overall`.
     by_cohort: list[GroupSnapshot]
     prices: PriceStats | None
+    # Segundos de parede que o alocador levou — ver `rounds.RoundOutcome`. Na
+    # linha agregada do período (`round` 0) é a **soma** das rodadas, que é o
+    # que o período custou; nas demais é o tempo daquela rodada.
+    #
+    # Não é recortada por coorte nem por perfil, e não poderia ser: o
+    # resolvedor decide a rodada inteira de uma vez, então não há parcela do
+    # tempo atribuível a um grupo.
+    #
+    # `compare=False` porque é tempo de parede: duas execuções da mesma seed
+    # produzem a mesma simulação e tempos diferentes, e há teste que exige
+    # relatórios iguais. Fora da igualdade, a instrumentação não mente sobre
+    # o que é determinístico.
+    allocation_seconds: float = field(compare=False)
     # O mesmo instante por perfil, um recorte por eixo — `performance`,
     # `availability`, `selectivity` e `concentration` —, cada um na ordem em
     # que o cenário declara os grupos. Também particiona `overall`. A API de
@@ -144,6 +162,18 @@ class DisciplineSnapshot:
     discipline: str
     curriculum_period: int
     hours: int  # w_x — repetido para o recorte por carga horária
+    # Os três atributos abaixo são da **disciplina**, repetidos em cada
+    # turma dela pelo mesmo motivo que `hours` e `curriculum_period`: o
+    # recorte do preço é por turma, e uma turma tem de saber sozinha em que
+    # grupo cai, sem consultar o cenário de volta.
+    #
+    # `difficulty` é a exceção: ela é da **turma**, pela escada do grupo
+    # (`config.difficulty_by_class`), e é justamente por isso que o recorte
+    # por dificuldade tem o que mostrar dentro de uma mesma disciplina.
+    difficulty: float
+    attractiveness: float  # A_x
+    classes: int  # em quantas turmas a disciplina foi repartida
+    elective: bool
     seats: int  # q_x no início do período
     filled: int  # vagas preenchidas, contando as garantidas
     # Vagas entregues à matrícula garantida, antes do leilão. Só é diferente

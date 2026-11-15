@@ -1,21 +1,28 @@
 import { useMemo, useState } from "react";
 import {
+  AllocationTimeChart,
   Histogram,
   LineSample,
   SeriesChart,
+  categoricalColors,
   formatCount,
   formatRatio,
   inkFor,
   soloColor,
   usePrefersDark,
 } from "./charts";
-import type { SeriesArmStyle, SeriesLine } from "./charts";
+import type {
+  AllocationTimeLine,
+  SeriesArmStyle,
+  SeriesGroupStyle,
+  SeriesLine,
+} from "./charts";
 import { CUTS, RULERS, cutGroups, pointsOf, rulerOf, seriesOf } from "./bands";
 import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
 import { Trace } from "./Trace";
 import { COMPARISON_ARMS } from "./types";
-import type { CutAxis, Ruler, RunSummary } from "./types";
+import type { ClassCut, CutAxis, Ruler, RunSummary } from "./types";
 
 /** Períodos com uma casa: o tempo de formatura anda em frações de período, e
  * duas casas sugeririam uma precisão que a amostra não tem. */
@@ -49,6 +56,79 @@ interface Metric {
 const ARM_DASH: Record<string, string> = {
   ranking_greedy: "6 4",
   credits_return: "",
+};
+
+/** A economia de créditos — **exclusiva do leilão**. Fora dele estas grandezas
+ * saem `null`, e não zeradas: não há moeda, e zero se leria como "ninguém
+ * gastou". A linha do CR, portanto, nem aparece nestes gráficos.
+ *
+ * Nenhuma delas pontua. Gastar mais não é melhor nem pior — é o que o
+ * mecanismo faz com o orçamento —, e por isso elas ficam fora das tabelas de
+ * comparação, que existem para dizer qual lado ganhou. */
+const CREDIT_METRICS: Metric[] = [
+  {
+    id: "credits_supply",
+    title: "Orçamento de créditos por aluno",
+    short: "Orçamento",
+    of: () => null,
+    band: "credits_supply",
+    // C_a^(t,1), a oferta de abertura: o que o aluno tinha para apostar antes
+    // de qualquer lance. Com Γ_max ela tem teto, mas o teto é do cenário e não
+    // da grandeza, então a régua se ajusta aos dados.
+    bounds: [0, Infinity],
+    betterWhen: null,
+    format: formatCount,
+  },
+  {
+    id: "credits_spent",
+    title: "Créditos gastos por aluno",
+    short: "Gastos",
+    of: () => null,
+    band: "credits_spent",
+    bounds: [0, Infinity],
+    betterWhen: null,
+    format: formatCount,
+  },
+  {
+    id: "credits_returned",
+    title: "Créditos retornados por aluno",
+    short: "Retornados",
+    of: () => null,
+    band: "credits_returned",
+    bounds: [0, Infinity],
+    betterWhen: null,
+    format: formatCount,
+  },
+];
+
+/** Os recortes do gráfico de preço. Eles repartem a **oferta**, e não os
+ * alunos: é o único gráfico da tela cujas linhas não são grupos de gente. */
+const CLASS_CUTS: { axis: ClassCut; label: string }[] = [
+  { axis: "classes", label: "Turmas" },
+  { axis: "hours", label: "Carga horária" },
+  { axis: "difficulty", label: "Dificuldade" },
+  { axis: "attractiveness", label: "Atratividade" },
+  { axis: "curriculum_period", label: "Período" },
+];
+
+/** O rótulo em português de um grupo da oferta. A API manda o **valor** como
+ * chave ("2", "60", "1.4"), sem idioma, e é aqui que ele vira texto. */
+const classGroupLabel = (axis: ClassCut, key: string): string => {
+  if (key === "elective") return "optativa";
+  const value = Number(key);
+  const number = Number.isFinite(value) ? value.toLocaleString("pt-BR") : key;
+  switch (axis) {
+    case "classes":
+      return value === 1 ? "1 turma" : `${number} turmas`;
+    case "hours":
+      return `${number} h`;
+    case "difficulty":
+      return `dificuldade ${number}`;
+    case "attractiveness":
+      return `atratividade ${number}`;
+    case "curriculum_period":
+      return `${number}º período`;
+  }
 };
 
 /** As métricas de alocação — as que avaliam a qualidade do que foi alocado.
@@ -126,6 +206,21 @@ const METRICS: Metric[] = [
     betterWhen: null,
     format: formatRatio,
     zeroLine: true,
+  },
+  {
+    id: "grade_average",
+    title: "CR médio (N̄)",
+    short: "CR médio",
+    of: (run) => run.grade_average,
+    band: "grade_average",
+    // A régua inteira, como manda `paddedScale`: o CR tem contradomínio, e
+    // fechá-la em torno da amostra faria um vão de 0,05 ocupar meio cartão.
+    bounds: [0, 10],
+    // Descreve, não pontua. Ele sobe tanto quando o aluno vai melhor quanto
+    // quando o mecanismo o roteia para turma mais fácil, e separar as duas
+    // exige a dificuldade, que está nos gráficos por disciplina.
+    betterWhen: null,
+    format: formatRatio,
   },
   {
     id: "graduation_rate",
@@ -234,6 +329,9 @@ export function Comparison({
    * não se quer. */
   const [rulerChoice, setRuler] = useState<Ruler>("period");
   const [cutChoice, setCut] = useState<CutAxis>("overall");
+  /** O recorte da oferta no gráfico de preço. Ele é independente do recorte
+   * das demais linhas: um reparte turmas, o outro reparte alunos. */
+  const [priceCutChoice, setPriceCut] = useState<ClassCut>("curriculum_period");
 
   /** A escada de ablação só roda quando pedida (`ARMS + ABLATION_ARMS` no
    * motor). Sem os dois braços do leilão não há o que isolar, e a tabela do
@@ -249,6 +347,75 @@ export function Comparison({
         (arm) => ({ key: arm.key, label: arm.label, dash: ARM_DASH[arm.key] ?? "2 3" })
       ),
     [result.arms]
+  );
+
+  /** O custo de **rodar** cada mecanismo, rodada a rodada. Fica de fora da
+   * maquinaria de recortes de propósito: é tempo de parede, e não há parcela
+   * dele que pertença a uma coorte ou a um perfil. Vazio em comparação gravada
+   * antes de 14/11/2026, e aí a seção inteira não aparece. */
+  const allocationTimes: AllocationTimeLine[] = useMemo(
+    () =>
+      arms
+        .map((arm) => ({
+          ...arm,
+          seconds:
+            result.arms.find((entry) => entry.key === arm.key)?.allocation_seconds ?? [],
+        }))
+        .filter((line) => line.seconds.length > 0),
+    [arms, result.arms]
+  );
+
+  /** Os recortes da oferta que esta comparação traz. Comparação sem leilão —
+   * ou gravada antes de 14/11/2026 — não traz nenhum, e a seção some. */
+  const priceCuts = CLASS_CUTS.filter((option) =>
+    result.arms.some((arm) =>
+      arm.class_prices?.some((cut) => cut.axis === option.axis && cut.groups.length)
+    )
+  );
+  const priceCut: ClassCut =
+    priceCuts.some((option) => option.axis === priceCutChoice)
+      ? priceCutChoice
+      : (priceCuts[0]?.axis ?? "curriculum_period");
+
+  /** As cores do recorte da oferta. Elas saem da paleta categórica, e não de
+   * `cutGroups`, porque os grupos aqui são da grade e não da população. */
+  const priceGroups: SeriesGroupStyle[] = useMemo(() => {
+    const present = [
+      ...new Set(
+        result.arms.flatMap(
+          (arm) =>
+            arm.class_prices
+              ?.find((cut) => cut.axis === priceCut)
+              ?.groups.map((group) => group.group) ?? []
+        )
+      ),
+    ];
+    const labels = present.map((key) => classGroupLabel(priceCut, key));
+    const colors = categoricalColors(labels, dark);
+    return present.map((key, index) => ({
+      key,
+      label: labels[index],
+      color: colors[labels[index]],
+    }));
+  }, [result.arms, priceCut, dark]);
+
+  /** As linhas do preço: um grupo da oferta sob um modelo. Mesma forma das
+   * demais séries, então o mesmo `SeriesChart` as desenha. */
+  const priceLines: SeriesLine[] = arms.flatMap((arm) =>
+    (
+      result.arms
+        .find((entry) => entry.key === arm.key)
+        ?.class_prices?.find((cut) => cut.axis === priceCut)?.groups ?? []
+    ).map((group) => ({
+      arm: arm.key,
+      group: group.group,
+      points: pointsOf(group).flatMap((x, i) => {
+        const band = group.values.mean_price?.[i];
+        return band
+          ? [{ x, q1: band[0], median: band[1], q3: band[2], n: group.n[i] }]
+          : [];
+      }),
+    }))
   );
 
   /** As séries de cada braço, por recorte. */
@@ -306,6 +473,17 @@ export function Comparison({
     ];
     return cutGroups(cut, run.config, present, { solo: soloColor(dark) });
   }, [series, ruler, cut, run.config, dark]);
+
+  /** A seção da economia só aparece com leilão na comparação **e** com dado
+   * dela: as gravadas antes de 14/11/2026 não a têm, e um gráfico vazio diria
+   * menos que seção nenhuma. */
+  const hasCredits = Object.values(series).some((axes) =>
+    axes.some((axis) =>
+      axis.groups.some((group) =>
+        group.values.credits_supply?.some((band) => band !== null)
+      )
+    )
+  );
 
   /** As linhas de uma grandeza: um grupo do recorte sob um modelo. */
   const linesOf = (key: string): SeriesLine[] =>
@@ -629,6 +807,64 @@ export function Comparison({
             <h2>As distribuições do cenário</h2>
           </header>
           <div className="chart-grid">{scenarioHistograms}</div>
+        </section>
+      )}
+
+      {allocationTimes.length > 0 && (
+        <section className="chart-section">
+          <header className="chart-section-head">
+            <h2>O custo de rodar o mecanismo</h2>
+          </header>
+          <div className="chart-grid">
+            <AllocationTimeChart
+              title="Tempo de alocação por rodada (escala log)"
+              lines={allocationTimes}
+            />
+          </div>
+        </section>
+      )}
+
+      {hasCredits && (
+        <section className="chart-section">
+          <header className="chart-section-head">
+            <h2>Economia de créditos</h2>
+          </header>
+          <div className="chart-grid">{CREDIT_METRICS.map(metricChart)}</div>
+
+          {priceCuts.length > 0 && (
+            <>
+              {priceCuts.length > 1 && (
+                <div className="switch-group" role="group" aria-label="Linhas do preço">
+                  <span>Linhas</span>
+                  <div className="view-switch">
+                    {priceCuts.map((option) => (
+                      <button
+                        key={option.axis}
+                        type="button"
+                        className={priceCut === option.axis ? "on" : ""}
+                        aria-pressed={priceCut === option.axis}
+                        onClick={() => setPriceCut(option.axis)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="chart-grid">
+                <SeriesChart
+                  title="Preço das disciplinas"
+                  lines={priceLines}
+                  groups={priceGroups}
+                  arms={arms}
+                  runs={result.runs}
+                  xLabel={RULERS[0].point}
+                  bounds={[0, Infinity]}
+                  format={formatCount}
+                />
+              </div>
+            </>
+          )}
         </section>
       )}
 
