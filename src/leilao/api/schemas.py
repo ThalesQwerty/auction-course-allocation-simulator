@@ -465,7 +465,12 @@ class ScenarioIn(BaseModel):
         ge=0,
         description="X — carga horária optativa exigida para concluir",
     )
-    base_credits: int = Field(default=10, ge=1, description="Gamma_min — créditos base")
+    base_credits: int = Field(default=12, ge=1, description="Gamma_min — créditos base")
+    max_credits: int | None = Field(
+        default=30,
+        ge=1,
+        description="Gamma_max — teto do saldo acumulado; nulo desliga o teto",
+    )
     # f_gamma — eq. (34); as políticas estão em `grading.credit_return`.
     # Este e o `base_credits` acima são do leilão por créditos e não têm efeito
     # na linha de base por CR, que não tem orçamento nem preço pago.

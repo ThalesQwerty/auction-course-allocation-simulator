@@ -77,7 +77,7 @@ Notas, créditos e saída (Seção 7.2.2)
     credit_return             γ = f_γ(preço, nota)                eq. (34)
     guaranteed_share          ⌊C / |entrada|⌋                     —
     period_return             Γ = Γ_min + Σγ                      eq. (35)
-    next_budget               C − gasto + Γ, ou Γ_min          eqs. (36)-(37)
+    next_budget               min(C − gasto + Γ, Γ_max)        eqs. (36)-(37)
     graduation                obrigatórias ⊆ aprovadas ∧ X        eq. (40)
     grade_average             N_a ponderado por carga             eq. (49)
 

@@ -139,11 +139,13 @@ MAX_RUNS = 100
 
 # Quantas simulações correm ao mesmo tempo. Quatro não é o número de núcleos:
 # é quanta memória cabe. No cenário cheio (63 disciplinas, 288 turmas, 2592
-# alunos, 23 períodos) cada worker pede **dois** picos ao mesmo tempo — 1,5 GB
-# do processo Python e 811 MB do `cbc.exe` que ele está esperando —, e como as
+# alunos, 23 períodos) cada worker pede **dois** picos ao mesmo tempo — 738 MB
+# do processo Python e 526 MB do `cbc.exe` que ele está esperando —, e como as
 # simulações são o mesmo trabalho começado junto, elas picam juntas. A conta é
-# a memória **livre** dividida por uns 2 GB, não o número de núcleos: acima
+# a memória **livre** dividida por uns 1,3 GB, não o número de núcleos: acima
 # disso o lote pagina e deixa de terminar, que foi o que motivou isto tudo.
+# (Medido em 14/11/2026. Era o dobro antes de o estágio 2 sair do
+# `wdp_solver` e de `behavior.InterestMatrix` guardar o interesse como array.)
 DEFAULT_WORKERS = min(4, os.cpu_count() or 1)
 
 # Chamado a cada simulação concluída: (braço, seed).

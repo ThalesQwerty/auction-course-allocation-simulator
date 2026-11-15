@@ -4,6 +4,7 @@ import pytest
 from profiles import single_axis
 from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig, horizon_for_lifecycle
+from leilao.equations import next_budget
 from leilao.grading import credit_return
 from leilao.metrics import demand_per_seat, jain_index, pearson, semestralization
 from leilao.population import generate_students
@@ -848,14 +849,14 @@ def test_credit_return_policies_follow_their_definitions():
 
 
 def test_credit_return_is_added_to_the_budget_of_the_next_period():
-    """eq. (36): C_a^(t+1,1) = C_a^(t,1) - gasto + Gamma_min + soma gamma_{a,x}.
+    """eq. (36): C_a^(t+1,1) = min(C_a^(t,1) - gasto + Gamma_min + soma gamma, Gamma_max).
 
     O histórico individual é a única tela em que essa conta aparece aberta,
     então ela tem de fechar exatamente — em todas as políticas, inclusive no
     período de ingresso, em que o gasto é o que o sistema lançou.
     """
     for policy in ("none", "unit", "full", "ratio"):
-        config = make_config(credit_return=policy)
+        config = make_config(credit_return=policy, max_credits=None)
         result = run_simulation(config)
         for history in result.histories:
             for record in history.periods:
@@ -873,6 +874,59 @@ def test_credit_return_is_added_to_the_budget_of_the_next_period():
                     for q in record.requests
                     if q.attempt is None and not q.excluded
                 )
+
+
+def test_the_budget_cap_is_the_same_equation_with_a_ceiling():
+    """Γ_max corta o saldo **depois** da conta — ver `equations.next_budget`.
+
+    Gasto e retorno continuam creditados por inteiro; o que se perde é só o
+    que passaria do teto. É o que faz do teto um parâmetro, e não outra
+    equação.
+    """
+    config = make_config(credit_return="ratio", base_credits=4, max_credits=6)
+    result = run_simulation(config)
+    visto_cortando = False
+    for history in result.histories:
+        for record in history.periods:
+            sem_teto = (
+                record.credits_start
+                - record.credits_spent
+                + config.base_credits
+                + record.credits_returned
+            )
+            assert record.credits_end == min(sem_teto, config.max_credits)
+            visto_cortando |= sem_teto > config.max_credits
+    assert visto_cortando, "o teto não chegou a cortar — o cenário não exercita a regra"
+
+
+def test_the_cap_never_lets_the_budget_pass_gamma_max():
+    """O teto vale em todo período e todo aluno, não só na transição."""
+    config = make_config(credit_return="ratio", base_credits=4, max_credits=6)
+    result = run_simulation(config)
+    for history in result.histories:
+        for record in history.periods:
+            assert record.credits_start <= config.max_credits
+            assert record.credits_end <= config.max_credits
+
+
+def test_a_cap_below_the_base_credits_is_refused():
+    """Γ_max < Γ_min seria um saldo que a própria base do período estoura."""
+    with pytest.raises(ValueError, match="Gamma_max"):
+        make_config(base_credits=10, max_credits=9)
+
+
+def test_the_cap_applies_only_to_the_accumulated_balance():
+    """A conta pura da eq. (36) com teto — fronteira a fronteira."""
+    conta = dict(started_with=20, spent=5, period_return=12, base_credits=12)
+
+    assert next_budget("carry", **conta) == 27  # 20 - 5 + 12, sem teto
+    assert next_budget("carry", **conta, max_credits=None) == 27
+    assert next_budget("carry", **conta, max_credits=30) == 27  # teto não alcançado
+    assert next_budget("carry", **conta, max_credits=27) == 27  # exatamente no teto
+    assert next_budget("carry", **conta, max_credits=20) == 20  # cortado
+
+    # Com memória "none" o saldo recomeça em Γ_min e o teto não tem o que fazer.
+    assert next_budget("none", **conta, max_credits=5) == 12
 
 
 def test_each_policy_returns_what_it_promises_inside_a_full_simulation():

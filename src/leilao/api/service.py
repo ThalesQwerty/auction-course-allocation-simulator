@@ -80,6 +80,7 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
         min_grade=req.min_grade,
         elective_hours=req.elective_hours,
         base_credits=req.base_credits,
+        max_credits=req.max_credits,
         credit_return=req.credit_return,
         seed=seed,
     )

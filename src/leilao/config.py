@@ -562,7 +562,10 @@ class SimulationConfig:
     # com `mechanism="ranking"`: ali não há orçamento a repor nem preço pago a
     # devolver. Ficam no cenário assim mesmo porque a comparação entre os dois
     # mecanismos roda a mesma configuração nos dois lados.
-    base_credits: int = 10  # Gamma_min — créditos base por período, eq. (35)/(37)
+    base_credits: int = 12  # Gamma_min — créditos base por período, eq. (35)/(37)
+    # Gamma_max — teto do saldo acumulado pela eq. (36). `None` desliga o teto
+    # e devolve o acúmulo irrestrito do anteprojeto. Ver `equations.next_budget`.
+    max_credits: int | None = 30
     credit_return: CreditReturnPolicy = "none"
     credit_memory: CreditMemory = "carry"
     mechanism: Mechanism = "credits"
@@ -613,6 +616,11 @@ class SimulationConfig:
             raise ValueError("nota mínima deve estar em [5, 10]")
         if self.base_credits < 1:
             raise ValueError("créditos base (Gamma_min) deve ser >= 1")
+        if self.max_credits is not None and self.max_credits < self.base_credits:
+            raise ValueError(
+                "teto de créditos (Gamma_max) não pode ser menor que os créditos "
+                f"base (Gamma_min = {self.base_credits})"
+            )
         if self.max_hours < 1:
             raise ValueError("carga horária máxima (W_a) deve ser >= 1")
         if self.max_residence is not None and self.max_residence < 1:

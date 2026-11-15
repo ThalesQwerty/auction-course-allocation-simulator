@@ -934,11 +934,39 @@ sozinho.
 
   A única entrada de crédito fora disso é o `Gamma_min` do período (eq. 35), de
   modo que o saldo de um período é
-  `C_a^(t,1) - gasto + Gamma_min + soma gamma_{a,x}` — conta que o histórico
-  individual mostra aberta e que os testes travam. Em `ratio`, o
+  `min(C_a^(t,1) - gasto + Gamma_min + soma gamma_{a,x}, Gamma_max)` — conta que
+  o histórico individual mostra aberta e que os testes travam. Em `ratio`, o
   arredondamento do Python desempata para o par (`round(2,5) == 2`); o empate
   exato é frequente porque as notas andam de 0,1 em 0,1 e os preços são
   inteiros pequenos, mas o viés é o mesmo para todo aluno.
+
+  **O teto de acúmulo (`Gamma_max`).** Não está no anteprojeto. A eq. (36)
+  acumula sem limite, e medido no cenário cheio com `Gamma_min = 60` o saldo
+  chegava a **900 créditos** — quinze vezes a base — em quem é seletivo o
+  bastante para não gastar. Isso é poder de compra vindo da abstenção, e não do
+  desempenho: o contrário do que o retorno da eq. (34) existe para premiar. O
+  teto corta o saldo **depois** da conta do período, de modo que gasto e retorno
+  continuam creditados por inteiro e o que se perde é só o excedente. Com
+  `credit_memory = "none"` ele é inerte, porque ali o saldo nunca passa de
+  `Gamma_min`. `max_credits = None` desliga o teto e devolve a eq. (36) original.
+
+  O padrão passou de `Gamma_min = 60` sem teto para **12 com teto em 30**, e o
+  troco está medido no cenário cheio (63 disciplinas, 288 turmas, 23 períodos):
+
+  | | 60 / sem teto | 12 / 30 |
+  | --- | --- | --- |
+  | pares (aluno, turma) pedidos | 1.185.127 | 713.083 |
+  | lances de 1 crédito | 53,4% | 88,1% |
+  | turmas pedidas por aluno (média / p95 / max) | 28,5 / 72 / 102 | 15,2 / 30 / 30 |
+  | disciplinas pedidas por aluno (média / max) | 12,7 / 33 | 9,1 / 30 |
+  | saldo (média / max) | 372 / 900 | 23 / 30 |
+
+  O teto corta 40% das variáveis da PLI e prende o p95 de pedidos em 30, mas
+  **sobe o empate de 53% para 88%**: com o orçamento abaixo do conjunto
+  disponível, a mochila côncava não chega a dar um segundo crédito a quase
+  ninguém, e quase todo lance fica em 1. Os dois efeitos puxam o custo da PLI em
+  sentidos opostos — ver "O que custa caro na PLI".
+
 - **Semestralização** (`sigma_a`): carga horária aprovada dividida por
   `W_a x idade_a`, onde a idade é quantos períodos o aluno completou desde
   `t_a`. Mede o atraso na progressão — 1 é quem nunca deixou de encher a carga
@@ -1373,6 +1401,82 @@ eixo (2,6 s, mas perde dois controles), rodar o braço guloso para explorar
 (linear e previsível: 0,8 s para a coorte cheia em dois períodos), ou dar ao
 CBC um limite de nós — determinístico, mas aí a PLI deixa de ser exata.
 
+### O que custa caro na PLI
+
+Medido em 14/11/2026 sobre instâncias reais do cenário cheio, extraídas de uma
+comparação que não fechava.
+
+**Não é a grade não pedida.** O modelo é dimensionado pelo conjunto de
+demandas, não pelo produto aluno × turma: `wdp_solver._model` cria uma variável
+por par **que recebeu lance**, e pula a linha de vaga da turma sem lance
+(`if by_good.get`), a de carga horária do aluno sem lance (`if terms`) e a de
+conflito de quem não pediu duas turmas da mesma disciplina (`if len(clique) >
+1`). A restrição de elegibilidade já está inteiramente aproveitada — o par que
+ninguém pediu é 0 por definição (eq. 2) e não chega ao CBC.
+
+**Não é o tamanho.** É o **empate**. Nas duas instâncias que ficaram 2h24 sem
+fechar, metade ou mais das variáveis tinha coeficiente 1:
+
+| instância | variáveis | coeficiente 1 |
+| --- | --- | --- |
+| menor | 24.633 | 14.957 (60,7%) |
+| maior | 85.600 | 40.871 (47,7%) |
+
+Com dezenas de milhares de variáveis valendo o mesmo, trocar duas delas não
+muda o objetivo, a face ótima é enorme e o limitante da relaxação não cai ao
+ramificar. É a mesma degenerescência que derrubou o segundo estágio do
+desempate (ver "O desempate saiu da PLI"), agora no primeiro.
+
+**O caro é provar, não achar.** Rodando a menor com 90 s de limite, o CBC chega
+ao incumbente **6.224** com limitante **6.226,33** em segundos e depois fica:
+6.500 → 6.700 nós com 1.376 nós abertos, estáveis. Falta fechar **2 unidades**
+em 6.224 — 0,03% — e é isso que não termina.
+
+Medido o atalho, para registro:
+
+| instância | objetivo | exata | `allowableGap 3` |
+| --- | --- | --- | --- |
+| 12.136 vars | 6.224 (limite 6.226,33) | não fechou | **4,3 s**, 116 nós |
+| 85.600 vars | 54.843 (limite 54.845) | não fechou em 2h24 | **45,6 s**, 128 nós |
+
+Com `allowableGap 1` não fecha (300 s, árvore aberta). **A folga não foi
+adotada**: a PLI do trabalho é exata, e o custo disso está aqui declarado em
+vez de contornado. O que se faz pelo lado do modelo é reduzir o pedido — ver o
+teto de acúmulo `Gamma_max`, que corta 40% das variáveis.
+
+### Onde a memória de uma simulação está
+
+Medido em 14/11/2026, cenário cheio, um worker:
+
+| | pico |
+| --- | --- |
+| processo Python | 738 MB |
+| `cbc.exe` que ele espera | 526 MB |
+| **por worker** | **~1,3 GB** |
+
+Os dois picam **juntos**, porque o Python segura tudo enquanto espera o
+solver — por isso somam, e por isso o teto de `--workers` é a memória livre
+dividida por 1,3 GB, e não o número de núcleos.
+
+Do lado do Python, quase tudo é **uma estrutura só**: o interesse, que é uma
+linha por (aluno, período) sobre a grade inteira. No cenário cheio são
+2.592 × 23 × 288 = 17,2 milhões de valores, e em dicionários aninhados cada
+float custava ~47 bytes contra os 8 do array — 767 MB dos 817 MB que o
+`prepare()` alocava.
+
+`behavior.InterestMatrix` guarda o array que o sorteio **já produzia** e monta
+a linha no acesso. Como ela é um `Mapping`, lê-se igual ao dicionário que
+substituiu (`matriz[(aluno, período)]`, `.values()`, `set(matriz)`) e nenhum
+chamador mudou. O `prepare()` caiu de 817 para 175 MB, e o custo é 10 µs por
+linha — 0,62 s numa simulação de 7,2 min, 0,14%. Os valores são bit a bit os
+mesmos: a troca foi verificada comparando o SHA-256 dos 17,2 milhões antes e
+depois, que bateu.
+
+A matriz existe inteira na memória porque **nada é sorteado dentro do laço** —
+é o preço da propriedade de que mexer numa vaga não desloca as preferências de
+todo mundo. E ela escala com alunos × períodos × turmas: dobrar a coorte e a
+grade multiplica por quatro.
+
 ### Por que não há algoritmo genético
 
 Houve um, sobre quatro genes, com as coortes evoluindo independentes. Saiu em
@@ -1449,9 +1553,9 @@ módulo que a rota usa — não há duas implementações da comparação.
 
 `--workers` é quantas simulações correm ao mesmo tempo, e o teto é a **memória
 livre, não o número de núcleos**. No cenário cheio cada worker pede dois picos
-ao mesmo tempo — 1,5 GB do processo Python e 811 MB do `cbc.exe` que ele está
+ao mesmo tempo — 738 MB do processo Python e 526 MB do `cbc.exe` que ele está
 esperando —, e como as simulações são o mesmo trabalho começado junto, elas
-picam juntas: a conta é a memória livre dividida por uns 2 GB. Se a máquina
+picam juntas: a conta é a memória livre dividida por uns 1,3 GB. Se a máquina
 começar a paginar, o lote deixa de terminar. `--workers 1` roda em linha, sem
 paralelismo, e é como se depura uma simulação que falha.
 

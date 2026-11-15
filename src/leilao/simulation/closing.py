@@ -201,6 +201,7 @@ def close_period(
                     base_credits=config.base_credits, returns=gammas
                 ),
                 base_credits=config.base_credits,
+                max_credits=config.max_credits,
             )
 
         if has_graduated(

@@ -85,7 +85,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         metavar="N",
         help=(
             f"Quantas simulações ao mesmo tempo (padrão: {DEFAULT_WORKERS}). "
-            "No cenário cheio cada uma pede uns 2 GB (Python mais o CBC) e "
+            "No cenário cheio cada uma pede uns 1,3 GB (Python mais o CBC) e "
             "elas picam juntas: o teto é a memória livre, não os núcleos. "
             "1 roda em linha, sem paralelismo."
         ),

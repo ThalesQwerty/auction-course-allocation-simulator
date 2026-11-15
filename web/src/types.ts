@@ -235,6 +235,7 @@ export interface Scenario {
    * a este total; o aluno escolhe *quais* optativas. */
   elective_hours: number;
   base_credits: number; // Γ_min
+  max_credits: number | null; // Γ_max — teto do saldo acumulado
   credit_return: CreditReturnPolicy;
   seed: number;
 }

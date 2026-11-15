@@ -281,6 +281,17 @@ export function Config({
                 onChange={(e) => patch({ base_credits: Number(e.target.value) })}
               />
             </div>
+            <div className="field">
+              <label>
+                Teto do saldo acumulado (Γ<sub>max</sub>)
+              </label>
+              <input
+                type="number"
+                min={config.base_credits}
+                value={config.max_credits ?? config.base_credits}
+                onChange={(e) => patch({ max_credits: Number(e.target.value) })}
+              />
+            </div>
           </div>
 
           <p className="note">

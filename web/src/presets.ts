@@ -368,12 +368,20 @@ export const defaultScenario = (): Scenario => ({
   credit_return: "none",
   seed: 42,
   ...POPULATION,
-  // Γ_min alto porque o conjunto elegível é grande: ~8 obrigatórias do período
-  // mais as 24 optativas, que não têm pré-requisito e estão sempre abertas. Com
-  // poucos créditos o lance quantiza — o aluno não consegue sequer diferenciar
-  // o que quer — e a mensagem vira um conjunto, que é justamente o que a linha
-  // de base por CR já envia.
-  base_credits: 60,
+  // Γ_min e Γ_max são um par, e a escolha entre eles é um troco conhecido.
+  // Sem teto, a eq. (36) acumulava até 900 créditos — quinze vezes a base de
+  // 60 — em quem é seletivo o bastante para não gastar, e poder de compra
+  // vindo da abstenção é o contrário do que o retorno da eq. (34) premia.
+  // Com teto, a base pode cair, e cai: 12 por período, 30 de saldo máximo.
+  //
+  // O custo é a quantização do lance, e ele é real. O conjunto elegível é
+  // grande — ~8 obrigatórias do período mais as 24 optativas, sempre abertas —,
+  // e com 12 créditos o aluno não cobre o que quer sem empatar quase tudo em 1
+  // (medido: a fração de lances de 1 crédito sobe de 53% em Γ_min = 60 para
+  // 68% em Γ_min = 20). A mensagem se aproxima de um conjunto, que é o que a
+  // linha de base por CR já envia. É escolha deliberada: o teto importa mais.
+  base_credits: 12,
+  max_credits: 30,
 });
 
 /** Estado da escolha de cenário na tela de configuração. `presetId` null
