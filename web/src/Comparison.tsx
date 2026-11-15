@@ -73,7 +73,7 @@ const CREDIT_METRICS: Metric[] = [
     of: () => null,
     band: "credits_supply",
     // C_a^(t,1), a oferta de abertura: o que o aluno tinha para apostar antes
-    // de qualquer lance. Com Γ_max ela tem teto, mas o teto é do cenário e não
+    // de qualquer lance. Com C_max ela tem teto, mas o teto é do cenário e não
     // da grandeza, então a régua se ajusta aos dados.
     bounds: [0, Infinity],
     betterWhen: null,
@@ -293,9 +293,9 @@ const roundMetrics = (rounds: number): Metric[] =>
   });
 
 /** Os dois braços do leilão que isolam o retorno: eles diferem em **uma**
- * coisa só — `credits_ilp` é o leilão com PLI e sem retorno, `credits_return`
- * é o mesmo com a política proporcional. Comparar qualquer outro par mediria
- * o retorno somado a outra diferença. */
+ * coisa só — `credits_ilp` é o leilão com PLI e o retorno desligado (k = 0),
+ * `credits_return` é o mesmo com o k do cenário. Comparar qualquer outro par
+ * mediria o retorno somado a outra diferença. */
 const WITH_RETURN = "credits_return";
 const WITHOUT_RETURN = "credits_ilp";
 

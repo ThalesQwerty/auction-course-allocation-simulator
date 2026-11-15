@@ -222,12 +222,12 @@ def test_the_two_mechanisms_allocate_differently():
     )
 
 
-def test_the_credit_return_policy_has_no_effect_on_the_baseline():
+def test_the_return_multiplier_has_no_effect_on_the_baseline():
     """f_γ devolve parte do preço pago, e na linha de base não houve preço."""
-    none = run_simulation(make_config(credit_return="none"))
-    full = run_simulation(make_config(credit_return="full"))
-    assert [s.graduated_at for s in none.students] == [s.graduated_at for s in full.students]
-    assert none.periods[-1].aggregate.overall == full.periods[-1].aggregate.overall
+    sem = run_simulation(make_config(return_multiplier=0))
+    com = run_simulation(make_config(return_multiplier=3))
+    assert [s.graduated_at for s in sem.students] == [s.graduated_at for s in com.students]
+    assert sem.periods[-1].aggregate.overall == com.periods[-1].aggregate.overall
 
 
 # --- a comparação ----------------------------------------------------------
@@ -241,14 +241,18 @@ def test_the_comparison_pairs_the_seeds_across_every_arm():
         assert [r.seed for r in arm.runs] == [1, 2, 3]
 
 
-def test_the_comparison_fixes_the_credit_return_per_arm():
-    """O retorno deixa de ser parâmetro do cenário e vira o eixo do
-    experimento: um braço o usa proporcional, os outros dois não o usam."""
-    result = run_comparison(make_config(credit_return="unit"), runs=2)
+def test_the_comparison_fixes_the_return_per_arm():
+    """O retorno é o eixo do experimento. O braço que o tem herda o k do
+    cenário; o que não o tem o impõe em 0, e é assim que a ablação desliga o
+    retorno sem deixar de ser o mesmo modelo."""
+    config = make_config(return_multiplier=3)
+    result = run_comparison(config, runs=2, arms=ARMS + ABLATION_ARMS)
+    efetivo = {arm.key: arm.return_multiplier for arm in result.arms}
 
-    assert [a.credit_return for a in result.arms].count("ratio") == 1
-    # O `unit` do cenário não chegou a lugar nenhum.
-    assert all(arm.credit_return != "unit" for arm in result.arms)
+    assert efetivo["credits_return"] == 3  # o k do cenário chegou ao braço
+    assert efetivo["credits_ilp"] == 0
+    assert efetivo["credits_greedy"] == 0
+    assert efetivo["ranking_greedy"] == 0
 
 
 def test_the_two_credit_arms_differ_only_by_the_return():

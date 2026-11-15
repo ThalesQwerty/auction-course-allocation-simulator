@@ -50,13 +50,14 @@ qual pesou. A escada que as separava continua aqui, em `ABLATION_ARMS`:
    retorno não faz de jeito nenhum.
 
 **Por que o retorno leva ablação e a sobra não.** A sobra é a eq. (36), dada
-pelo anteprojeto; a política de retorno a Seção 7.3.2 deixa explicitamente em
-aberto, como eixo de experimentação. Escolher `ratio` como canônico é decisão
-de quem escreve, e o passo 3 é onde ela se paga.
+pelo anteprojeto; a forma do retorno a Seção 7.3.2 deixa explicitamente em
+aberto, como eixo de experimentação. Ligá-lo é decisão de quem escreve, e o
+passo 3 é onde ela se paga.
 
-Por isso a política de retorno e o resolvedor **não são parâmetros do cenário
-aqui**: são eixos do experimento, e o que vier na configuração é ignorado,
-como a seed. Cada braço impõe o seu.
+Por isso o retorno e o resolvedor **não são do cenário aqui**: são eixos do
+experimento. O resolvedor que vier na configuração é ignorado, como a seed; o
+multiplicador do retorno vale onde o braço não o fixa, e os de ablação o fixam
+em 0 — ver `Arm.multiplier_over`.
 
 **Uma simulação vira um número por métrica**, que é a linha das tabelas. Para as
 três métricas de período a redução é a média **ponderada pelos alunos medidos**:
@@ -123,7 +124,6 @@ from .equations import time_to_graduate as mean_span
 from .grading import GradeShapes, draw_base_quantiles
 from .config import (
     CreditMemory,
-    CreditReturnPolicy,
     Mechanism,
     Resolver,
     SimulationConfig,
@@ -164,8 +164,13 @@ class Arm:
 
     Um modelo é a combinação de quatro escolhas: a **moeda** (ordenação por CR
     ou lance em créditos), o **resolvedor** (varredura gulosa ou PLI global),
-    a **memória do orçamento** (se a sobra atravessa o período) e a **política
-    de retorno**.
+    a **memória do orçamento** (se a sobra atravessa o período) e o
+    **retorno de créditos**.
+
+    `return_multiplier` é o k da eq. (34) que o braço impõe ao cenário; `None`
+    quer dizer "o do cenário", e é como o braço que **tem** retorno não fixa
+    quanto. Zero desliga o retorno, e é assim que um braço vira o degrau sem
+    ele sem deixar de ser o mesmo modelo — ver `multiplier_over`.
 
     `key` é o identificador estável que a interface usa para rotular a série —
     o rótulo em si é dela, não daqui.
@@ -173,9 +178,15 @@ class Arm:
 
     key: str
     mechanism: Mechanism
-    credit_return: CreditReturnPolicy
+    return_multiplier: float | None
     resolver: Resolver = "ilp"
     credit_memory: CreditMemory = "carry"
+
+    def multiplier_over(self, config: SimulationConfig) -> float:
+        """O k que este braço roda sobre este cenário."""
+        if self.return_multiplier is None:
+            return config.return_multiplier
+        return self.return_multiplier
 
 
 # Os braços na ordem do caminho — é também a ordem do eixo, da legenda e das
@@ -197,8 +208,8 @@ class Arm:
 # busca do CBC. Igualar os resolvedores custaria a maximização de bem-estar,
 # que é o que a PLI entrega e o guloso não — preferiu-se a assimetria a isso.
 ARMS: tuple[Arm, ...] = (
-    Arm("ranking_greedy", "ranking", "none", resolver="greedy"),
-    Arm("credits_return", "credits", "ratio"),
+    Arm("ranking_greedy", "ranking", 0.0, resolver="greedy"),
+    Arm("credits_return", "credits", None),
 )
 
 # Os dois degraus do meio do caminho, que **não** rodam por padrão.
@@ -219,8 +230,8 @@ ARMS: tuple[Arm, ...] = (
 # aproximadamente iguais e preços de equilíbrio, não lance pago a segundo
 # preço. É trabalho relacionado, não célula deste desenho.
 ABLATION_ARMS: tuple[Arm, ...] = (
-    Arm("credits_greedy", "credits", "none", resolver="greedy"),
-    Arm("credits_ilp", "credits", "none", resolver="ilp"),
+    Arm("credits_greedy", "credits", 0.0, resolver="greedy"),
+    Arm("credits_ilp", "credits", 0.0, resolver="ilp"),
 )
 
 
@@ -564,7 +575,9 @@ class ArmResult:
 
     key: str
     mechanism: Mechanism
-    credit_return: CreditReturnPolicy
+    # O k efetivamente rodado, já resolvido contra o cenário — e não o `None`
+    # que o braço carrega. Quem lê um resultado quer saber o que rodou.
+    return_multiplier: float
     runs: list[RunSummary]
     # As séries reduzidas entre as seeds: cada régua cruzada com cada recorte.
     # É o que os gráficos desenham — ver `bands`.
@@ -1337,7 +1350,7 @@ def arm_config(config: SimulationConfig, *, arm: Arm, seed: int) -> SimulationCo
     return dataclasses.replace(
         config,
         mechanism=arm.mechanism,
-        credit_return=arm.credit_return,
+        return_multiplier=arm.multiplier_over(config),
         resolver=arm.resolver,
         credit_memory=arm.credit_memory,
         seed=seed,
@@ -1408,12 +1421,12 @@ def run_comparison(
     `arms=ARMS + ABLATION_ARMS` — custa uma simulação a mais por braço e por
     seed, e nada mais.
 
-    Três campos do cenário recebido são ignorados de propósito. A **seed**,
+    Dois campos do cenário recebido são ignorados de propósito. A **seed**,
     porque numa comparação ela deixa de ser parâmetro e passa a ser o eixo da
-    amostra. E o **resolvedor** e a **política de retorno**, porque são eixos
-    do experimento: os braços os impõem. O resto — disciplinas, população,
-    horizonte, rodadas — vale igual em todos, que é o que torna a diferença
-    atribuível ao modelo.
+    amostra. E o **resolvedor**, porque é eixo do experimento: os braços o
+    impõem. O **multiplicador do retorno** vale, mas só onde o braço não o
+    fixa. O resto — disciplinas, população, horizonte, rodadas — vale igual em
+    todos, que é o que torna a diferença atribuível ao modelo.
 
     As simulações saem em paralelo por `ProcessPoolExecutor`. O tempo do
     leilão está quase todo dentro do CBC, que já roda como processo externo e
@@ -1449,7 +1462,7 @@ def run_comparison(
             ArmResult(
                 key=arm.key,
                 mechanism=arm.mechanism,
-                credit_return=arm.credit_return,
+                return_multiplier=arm.multiplier_over(config),
                 runs=summaries,
                 series=bands(summaries),
                 allocation_seconds=mean_allocation_seconds(summaries),

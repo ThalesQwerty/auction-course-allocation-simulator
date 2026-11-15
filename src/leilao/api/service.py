@@ -80,9 +80,10 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
         rounds=req.rounds,
         min_grade=req.min_grade,
         elective_hours=req.elective_hours,
-        base_credits=req.base_credits,
+        min_credits=req.min_credits,
         max_credits=req.max_credits,
-        credit_return=req.credit_return,
+        return_multiplier=req.return_multiplier,
+        exclusion_refund_rate=req.exclusion_refund_rate,
         seed=seed,
     )
 
@@ -117,7 +118,7 @@ def _arm_out(arm: ArmResult) -> ArmResultOut:
     return ArmResultOut(
         key=arm.key,
         mechanism=arm.mechanism,
-        credit_return=arm.credit_return,
+        return_multiplier=arm.return_multiplier,
         runs=[RunSummaryOut.model_validate(run) for run in arm.runs],
         series=[AxisBandsOut.model_validate(axis) for axis in arm.series],
         allocation_seconds=arm.allocation_seconds,

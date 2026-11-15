@@ -74,10 +74,10 @@ Notas, créditos e saída (Seção 7.2.2)
     grade_shape               (moda, P₀, P₁₀) → forma       substitui 32
     attempt_rates             P₀^(t/d) e P₁₀^(d/t)                —
     grade_for_attempt         quantil → nota, censurada     substitui 33
-    credit_return             γ = f_γ(preço, nota)                eq. (34)
+    credit_return             γ = ⌊nota/10 · k · preço⌋            eq. (34)
     guaranteed_share          ⌊C / |entrada|⌋                     —
-    period_return             Γ = Γ_min + Σγ                      eq. (35)
-    next_budget               min(C − gasto + Γ, Γ_max)        eqs. (36)-(37)
+    period_return             Γ = Σγ                        substitui 35
+    next_budget               clamp(C − gasto + Γ, C_min, C_max) eqs. (36)-(37)
     graduation                obrigatórias ⊆ aprovadas ∧ X        eq. (40)
     grade_average             N_a ponderado por carga             eq. (49)
 
@@ -87,7 +87,7 @@ Disponibilidade e exclusão
     lognormal_cdf             F da log-normal                     —
     effective_load            Ŵ_a = round(δ), sem teto            —
     retained_set              mochila 0-1 do que ele leva         —
-    exclusion_refund          γ = paid // 2, só sob `ratio`       —
+    exclusion_refund          γ = round(fração · preço)            —
     exclusion_rate            ε = excluídas / obtidas             —
     request_states            os seis estados de uma solicitação  —
     request_funnel            as quatro frações condicionais      —
@@ -118,6 +118,14 @@ Agregação de uma simulação (Seção 7.3)
 Não implementadas, e por quê
 
     eq. (31)   t_a: o ingresso é escalonado por construção, em `population`
+    eq. (34)   as quatro políticas discretas (`none`, `unit`, `full`,
+               `ratio`) saíram: `unit` e `full` não liam a nota, e com elas o
+               retorno não separava dois aprovados. Ficou uma forma só, com o
+               multiplicador `k` como parâmetro contínuo — e `none` é `k = 0`
+    eq. (35)   o crédito base Γ_min, somado ao retorno todo período, saiu: o
+               parâmetro virou `C_min`, o **piso** do orçamento da eq. (36).
+               Com isso a eq. (34) é a única entrada de crédito novo, e a
+               (35) fica sendo só o somatório — ver `next_budget`
     eq. (41)   a invariante de altura saiu: punha valor curricular dentro do
                gosto. `utility` a substitui redistribuindo o interesse
                do inelegível sobre o que destrava
@@ -146,7 +154,7 @@ from .class_difficulty import class_difficulty
 from .entry_class import entry_class, entry_class_load
 from .concave_bids import concave_bids
 from .credit_consumption import consumption
-from .credit_return import credit_return
+from .credit_return import DEFAULT_MULTIPLIER, credit_return
 from .credits_per_seat import credits_per_seat
 from .curriculum_height import curriculum_heights
 from .curriculum_period import curriculum_periods
@@ -155,7 +163,7 @@ from .decision_score import NEUTRAL, Behavior, decision_scores
 from .demand_per_seat import demand_per_seat
 from .effective_load import effective_load
 from .eligible_set import eligible_set
-from .exclusion_refund import exclusion_refund
+from .exclusion_refund import DEFAULT_RATE, exclusion_refund
 from .exclusion_rate import exclusion_rate
 from .grade_average import grade_average
 from .grade_for_attempt import MAX_GRADE, MIN_GRADE, grade_for_attempt
@@ -216,6 +224,7 @@ __all__ = [
     "entry_class_load",
     "concave_bids",
     "consumption",
+    "DEFAULT_MULTIPLIER",
     "credit_return",
     "credits_per_seat",
     "curriculum_heights",
@@ -226,6 +235,7 @@ __all__ = [
     "effective_load",
     "eligible_set",
     "exclusion_rate",
+    "DEFAULT_RATE",
     "exclusion_refund",
     "grade_average",
     "grade_for_attempt",

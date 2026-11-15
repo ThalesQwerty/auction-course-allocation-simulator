@@ -105,7 +105,7 @@ class Student:
 def generate_students(
     config: SimulationConfig, rng: np.random.Generator
 ) -> list[Student]:
-    """Cria a população inteira a partir da seed. Todos começam em Γ_min
+    """Cria a população inteira a partir da seed. Todos começam em C_min
     (eq. 37).
 
     O ingresso (t_a, eq. 31) é escalonado: entra uma coorte nova a cada
@@ -135,7 +135,7 @@ def generate_students(
             Student(
                 id=f"a{index:05d}",
                 name=names[index],
-                credits=config.base_credits,
+                credits=config.min_credits,
                 entry_period=1 + index // config.students_per_period,
                 performance=config.performance_profiles[performance],
                 availability=config.availability_profiles[availability],

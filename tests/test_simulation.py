@@ -608,35 +608,38 @@ def test_entrants_get_every_entry_discipline_without_bidding():
 
 def test_the_system_charges_the_entrant_an_equal_share_of_the_budget():
     """"Gastaram seus créditos igualmente", com o resto da divisão no saldo."""
-    config = make_config(periods=4, base_credits=10)
+    config = make_config(periods=4, min_credits=10)
     result = run_simulation(config)
     first = config.entry_disciplines()
-    share = config.base_credits // len(first)  # 10 // 2 = 5
+    share = config.min_credits // len(first)  # 10 // 2 = 5
 
     for _, record in entry_records(result, result.students):
-        assert record.credits_start == config.base_credits
+        assert record.credits_start == config.min_credits
         assert all(r.paid == share for r in record.requests)
         assert record.credits_spent == share * len(first)
-        # O remanescente continua no saldo, somado ao Gamma_min do período.
-        remainder = config.base_credits - share * len(first)
-        assert record.credits_end == remainder + config.base_credits + record.credits_returned
+        # O remanescente atravessa o período com o retorno, e o piso o levanta
+        # se os dois juntos não chegarem a C_min.
+        remainder = config.min_credits - share * len(first)
+        assert record.credits_end == max(
+            remainder + record.credits_returned, config.min_credits
+        )
 
 
 def test_an_indivisible_budget_leaves_the_remainder_with_the_entrant():
     """Divisão inteira: com 7 créditos e 2 disciplinas, 3 em cada e 1 de sobra."""
-    config = make_config(periods=2, base_credits=7)
+    config = make_config(periods=2, min_credits=7)
     result = run_simulation(config)
     for _, record in entry_records(result, result.students):
         assert record.credits_spent == 6
-        assert record.credits_end == 1 + 7 + record.credits_returned
+        assert record.credits_end == max(1 + record.credits_returned, 7)
 
 
 def test_the_entrant_share_feeds_the_credit_return():
     """O que a matrícula garantida entrega ao f_gamma da eq. (34): o valor
-    lançado é o `paid` da disciplina, e é sobre ele que a política trabalha."""
-    config = make_config(periods=4, credit_return="full", base_credits=10)
+    lançado é o `paid` da disciplina, e é sobre ele que o retorno trabalha."""
+    config = make_config(periods=4, min_credits=10)
     result = run_simulation(config)
-    share = config.base_credits // len(config.entry_disciplines())
+    share = config.min_credits // len(config.entry_disciplines())
     returned = [
         r
         for _, record in entry_records(result, result.students)
@@ -644,7 +647,12 @@ def test_the_entrant_share_feeds_the_credit_return():
         if r.approved
     ]
     assert returned, "alguém deveria aprovar na matrícula garantida"
-    assert all(r.returned == share for r in returned)
+    assert all(
+        r.returned == credit_return(
+            paid=share, grade=r.grade, multiplier=config.return_multiplier
+        )
+        for r in returned
+    )
 
 
 def test_a_root_that_is_not_entry_is_not_granted():
@@ -822,49 +830,87 @@ def test_graduates_are_counted_in_the_cohort_they_entered():
 # --- retorno de créditos ---------------------------------------------------
 
 
-def test_credit_return_policies_follow_their_definitions():
-    """f_gamma — eq. (34). Nota de corte 5: 4,9 reprova e 5,0 aprova."""
-    cases = {
-        # (reprovado, aprovado raspando, aprovado com folga)
-        "none": (0, 0, 0),
-        "unit": (0, 1, 1),
-        "full": (0, 10, 10),
-        # round(4,9/10 x 10), round(5,0/10 x 10), round(9,0/10 x 10)
-        "ratio": (5, 5, 9),
-    }
-    for policy, expected in cases.items():
-        got = tuple(
-            credit_return(policy, paid=10, grade=grade, min_grade=5.0)
-            for grade in (4.9, 5.0, 9.0)
-        )
-        assert got == expected, f"política {policy}"
+def test_the_return_follows_the_grade_and_the_multiplier():
+    """f_gamma — eq. (34): γ = ⌊nota/10 · k · preço⌋, com k = 2 por padrão.
 
-    # Só `ratio` devolve a quem reprovou, e nenhuma devolve mais do que o pago.
-    for policy in cases:
-        for grade in (0.0, 3.3, 7.7, 10.0):
-            assert 0 <= credit_return(policy, paid=4, grade=grade, min_grade=5.0) <= 4
+    A nota de corte **não entra na conta**: o retorno é contínuo na nota, e
+    quem reprova com 4,9 recebe quase tanto quanto quem passa com 5,0.
+    """
+    # ⌊4,9/10 · 2 · 10⌋, ⌊5,0/10 · 2 · 10⌋, ⌊9,0/10 · 2 · 10⌋
+    esperado = (9, 10, 18)
+    got = tuple(credit_return(paid=10, grade=grade) for grade in (4.9, 5.0, 9.0))
+    assert got == esperado
 
-    with pytest.raises(ValueError, match="desconhecida"):
-        credit_return("metade", paid=1, grade=10.0, min_grade=5.0)
+    for grade in (0.0, 3.3, 7.7, 10.0):
+        assert credit_return(paid=0, grade=grade) == 0
+
+    with pytest.raises(ValueError, match="negativo"):
+        credit_return(paid=-1, grade=10.0)
+
+
+def test_the_cut_grade_is_the_neutral_point_of_the_return():
+    """A calibragem que justifica o multiplicador 2: aprovar com a nota de
+    corte devolve exatamente o preço pago. Acima disso o aluno sai ganhando
+    crédito, abaixo sai perdendo — e é o que faz o retorno medir desempenho em
+    vez de devolver troco.
+    """
+    for paid in (1, 2, 5, 10, 17):
+        assert credit_return(paid=paid, grade=5.0) == paid
+        assert credit_return(paid=paid, grade=0.0) == 0
+        # A nota de corte é o último ponto em que não se perde: logo abaixo
+        # dela o aluno já recebe menos do que pagou.
+        assert credit_return(paid=paid, grade=4.9) < paid
+
+
+def test_only_the_maximum_grade_doubles_what_was_invested():
+    """O retorno **trunca**, e é o que faz de `k · paid` um teto que só a nota
+    máxima alcança. Arredondar daria o dobro a quem tirou 9,8 num lance de 5,
+    e o prêmio máximo deixaria de distinguir a nota máxima.
+    """
+    for paid in (1, 2, 5, 10, 17):
+        assert credit_return(paid=paid, grade=10.0) == 2 * paid
+        assert credit_return(paid=paid, grade=9.9) < 2 * paid
+
+    # A conta é inteira de propósito: em ponto flutuante `4,9/10 · 2 · 10` e
+    # `1,4/10 · 2 · 25` caem um ulp abaixo do inteiro e truncariam errado.
+    assert credit_return(paid=25, grade=1.4) == 7
+    assert credit_return(paid=25, grade=2.8, multiplier=3) == 21
+
+
+def test_the_multiplier_scales_the_whole_return():
+    """Zero desliga o retorno — é como um braço da comparação vira o degrau sem
+    ele —, e com 1 ele nunca supera o preço pago, que é o caso em que o
+    orçamento trava em `C_min`."""
+    for grade in (0.0, 3.3, 7.7, 10.0):
+        assert credit_return(paid=10, grade=grade, multiplier=0) == 0
+        assert credit_return(paid=4, grade=grade, multiplier=1) <= 4
+
+    assert credit_return(paid=10, grade=10.0, multiplier=0.5) == 5
+    assert credit_return(paid=10, grade=10.0, multiplier=3) == 30
+
+    assert make_config(return_multiplier=0).return_multiplier == 0
+    with pytest.raises(ValueError, match="multiplicador"):
+        make_config(return_multiplier=-1)
 
 
 def test_credit_return_is_added_to_the_budget_of_the_next_period():
-    """eq. (36): C_a^(t+1,1) = min(C_a^(t,1) - gasto + Gamma_min + soma gamma, Gamma_max).
+    """eq. (36): C_a^(t+1,1) = clamp(C_a^(t,1) - gasto + soma gamma, C_min, C_max).
 
     O histórico individual é a única tela em que essa conta aparece aberta,
-    então ela tem de fechar exatamente — em todas as políticas, inclusive no
-    período de ingresso, em que o gasto é o que o sistema lançou.
+    então ela tem de fechar exatamente — em todo multiplicador, inclusive no
+    período de ingresso, em que o gasto é o que o sistema lançou. Aqui só o
+    piso está ligado: o teto tem teste próprio.
     """
-    for policy in ("none", "unit", "full", "ratio"):
-        config = make_config(credit_return=policy, max_credits=None)
+    for multiplicador in (0, 1, 2, 3.5):
+        config = make_config(return_multiplier=multiplicador, max_credits=None)
         result = run_simulation(config)
         for history in result.histories:
             for record in history.periods:
-                assert record.credits_end == (
+                assert record.credits_end == max(
                     record.credits_start
                     - record.credits_spent
-                    + config.base_credits
-                    + record.credits_returned
+                    + record.credits_returned,
+                    config.min_credits,
                 )
                 # O total do período é a soma do gamma de cada disciplina, e só
                 # devolve crédito quem obteve a vaga — cursando ou excluindo.
@@ -876,64 +922,78 @@ def test_credit_return_is_added_to_the_budget_of_the_next_period():
                 )
 
 
-def test_the_budget_cap_is_the_same_equation_with_a_ceiling():
-    """Γ_max corta o saldo **depois** da conta — ver `equations.next_budget`.
+def test_the_budget_never_leaves_the_credit_band():
+    """A faixa vale em todo período e todo aluno, não só na transição."""
+    config = make_config(min_credits=4, max_credits=6)
+    result = run_simulation(config)
+    for history in result.histories:
+        for record in history.periods:
+            assert config.min_credits <= record.credits_start <= config.max_credits
+            assert config.min_credits <= record.credits_end <= config.max_credits
 
-    Gasto e retorno continuam creditados por inteiro; o que se perde é só o
-    que passaria do teto. É o que faz do teto um parâmetro, e não outra
-    equação.
+
+def test_the_multiplier_is_what_lets_the_balance_grow():
+    """Sem crédito base somado, o retorno é a única entrada de crédito novo, e
+    com multiplicador 1 ele nunca supera o gasto: o orçamento desce até `C_min`
+    e fica lá, e `C_max` vira letra morta. Com 2 o saldo volta a subir e o teto
+    volta a cortar. É o que justifica o padrão.
     """
-    config = make_config(credit_return="ratio", base_credits=4, max_credits=6)
-    result = run_simulation(config)
-    visto_cortando = False
-    for history in result.histories:
+    neutro = run_simulation(
+        make_config(return_multiplier=1, min_credits=4, max_credits=6)
+    )
+    for history in neutro.histories:
         for record in history.periods:
-            sem_teto = (
-                record.credits_start
-                - record.credits_spent
-                + config.base_credits
-                + record.credits_returned
+            assert record.credits_returned <= record.credits_spent
+            assert record.credits_start == 4
+
+    generoso = run_simulation(
+        make_config(return_multiplier=2, min_credits=4, max_credits=5)
+    )
+    cortou = False
+    subiu = False
+    for history in generoso.histories:
+        for record in history.periods:
+            bruto = (
+                record.credits_start - record.credits_spent + record.credits_returned
             )
-            assert record.credits_end == min(sem_teto, config.max_credits)
-            visto_cortando |= sem_teto > config.max_credits
-    assert visto_cortando, "o teto não chegou a cortar — o cenário não exercita a regra"
+            assert record.credits_end == min(max(bruto, 4), 5)
+            cortou |= bruto > 5
+            subiu |= bruto > 4
+    assert subiu, "o saldo não chegou a subir — o cenário não exercita a regra"
+    assert cortou, "o teto não chegou a cortar — o cenário não exercita a regra"
 
 
-def test_the_cap_never_lets_the_budget_pass_gamma_max():
-    """O teto vale em todo período e todo aluno, não só na transição."""
-    config = make_config(credit_return="ratio", base_credits=4, max_credits=6)
-    result = run_simulation(config)
-    for history in result.histories:
-        for record in history.periods:
-            assert record.credits_start <= config.max_credits
-            assert record.credits_end <= config.max_credits
+def test_a_maximum_below_the_minimum_is_refused():
+    """C_max < C_min seria uma faixa vazia: o piso estoura o próprio teto."""
+    with pytest.raises(ValueError, match="C_max"):
+        make_config(min_credits=10, max_credits=9)
 
 
-def test_a_cap_below_the_base_credits_is_refused():
-    """Γ_max < Γ_min seria um saldo que a própria base do período estoura."""
-    with pytest.raises(ValueError, match="Gamma_max"):
-        make_config(base_credits=10, max_credits=9)
+def test_the_band_clamps_the_accumulated_balance_on_both_sides():
+    """A conta pura da eq. (36) — fronteira a fronteira, nos dois extremos."""
+    conta = dict(started_with=20, spent=5, period_return=12)
+
+    assert next_budget("carry", **conta, min_credits=12) == 27  # 20 - 5 + 12
+    assert next_budget("carry", **conta, min_credits=12, max_credits=None) == 27
+    assert next_budget("carry", **conta, min_credits=12, max_credits=30) == 27
+    assert next_budget("carry", **conta, min_credits=12, max_credits=27) == 27
+    assert next_budget("carry", **conta, min_credits=12, max_credits=20) == 20
+
+    # O piso levanta o que a conta deixou abaixo dele, e vale até sem teto.
+    gastou_tudo = dict(started_with=20, spent=20, period_return=3)
+    assert next_budget("carry", **gastou_tudo, min_credits=12) == 12
+    assert next_budget("carry", **gastou_tudo, min_credits=3, max_credits=30) == 3
+    assert next_budget("carry", **gastou_tudo, min_credits=1) == 3  # piso não alcançado
+
+    # Com memória "none" o orçamento é o piso, e o teto não tem o que fazer.
+    assert next_budget("none", **conta, min_credits=12, max_credits=5) == 12
 
 
-def test_the_cap_applies_only_to_the_accumulated_balance():
-    """A conta pura da eq. (36) com teto — fronteira a fronteira."""
-    conta = dict(started_with=20, spent=5, period_return=12, base_credits=12)
-
-    assert next_budget("carry", **conta) == 27  # 20 - 5 + 12, sem teto
-    assert next_budget("carry", **conta, max_credits=None) == 27
-    assert next_budget("carry", **conta, max_credits=30) == 27  # teto não alcançado
-    assert next_budget("carry", **conta, max_credits=27) == 27  # exatamente no teto
-    assert next_budget("carry", **conta, max_credits=20) == 20  # cortado
-
-    # Com memória "none" o saldo recomeça em Γ_min e o teto não tem o que fazer.
-    assert next_budget("none", **conta, max_credits=5) == 12
-
-
-def test_each_policy_returns_what_it_promises_inside_a_full_simulation():
-    """O gamma registrado por disciplina tem de bater com a política escolhida
-    rodando a simulação inteira — é o que a coluna da tela do aluno mostra."""
-    for policy in ("none", "unit", "full", "ratio"):
-        config = make_config(credit_return=policy)
+def test_the_return_matches_the_equation_inside_a_full_simulation():
+    """O gamma registrado por disciplina tem de bater com a eq. (34) rodando a
+    simulação inteira — é o que a coluna da tela do aluno mostra."""
+    for multiplicador in (0, 1, 2, 3.5):
+        config = make_config(return_multiplier=multiplicador)
         result = run_simulation(config)
         taken = [
             request
@@ -945,25 +1005,27 @@ def test_each_policy_returns_what_it_promises_inside_a_full_simulation():
         assert taken, "o cenário deveria ter disciplinas cursadas"
         for request in taken:
             assert request.returned == credit_return(
-                policy,
                 paid=request.paid,
                 grade=request.grade,
-                min_grade=config.min_grade,
+                multiplier=config.return_multiplier,
             )
 
-    # As políticas precisam se separar de fato, senão não há o que comparar.
+    # O multiplicador precisa separar os cenários de fato, senão não há o que
+    # comparar: com 0 o retorno está desligado e todo aluno trava no piso, e
+    # com 1 ele nunca supera o gasto — o saldo também não sai de lá.
     saldos = {
-        policy: [s.credits for s in run_simulation(make_config(credit_return=policy)).students]
-        for policy in ("none", "unit", "full", "ratio")
+        k: [s.credits for s in run_simulation(make_config(return_multiplier=k)).students]
+        for k in (0, 1, 2, 3.5)
     }
-    assert sum(saldos["none"]) < sum(saldos["unit"]) < sum(saldos["full"])
-    assert sum(saldos["none"]) < sum(saldos["ratio"])
+    assert all(c == 12 for c in saldos[0])
+    assert all(c == 12 for c in saldos[1])
+    assert sum(saldos[1]) < sum(saldos[2]) < sum(saldos[3.5])
 
 
 def test_credit_return_is_reported_only_at_the_end_of_the_period():
     """Durante as rodadas as notas ainda não saíram: o recorte traz `None`, não
-    0,0 — zero ali se leria como 'a política não devolveu nada'."""
-    config = make_config(credit_return="full")
+    0,0 — zero ali se leria como 'o retorno não devolveu nada'."""
+    config = make_config()
     result = run_simulation(config)
     for period in result.periods:
         for report in period.rounds:

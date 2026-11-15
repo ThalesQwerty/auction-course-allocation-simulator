@@ -30,7 +30,7 @@ A **mensagem** é um número por *aluno* (o CR) contra um por *par* aluno-discip
 (o lance). A **resolução** é ordinal (só a ordem dos lances importa; qualquer
 transformação monótona dá a mesma alocação) contra cardinal (a PLI usa as
 magnitudes e derruba um lance alto para acomodar dois médios). O **retorno** é
-a política proporcional de f_γ, a única fonte de mérito do leilão.
+o f_γ da eq. (34) ligado (`k > 0`), a única fonte de mérito do leilão.
 
 Os dois degraus do meio continuam no motor, em `comparison.ABLATION_ARMS`, e
 rodam por `run_comparison(..., arms=ARMS + ABLATION_ARMS)`: custam tempo de
@@ -413,7 +413,7 @@ diferença entre eles se lê como efeito do mecanismo.
 | **A exclusão mútua entre turmas (eq. 5)** | restrição de clique dentro da PLI, sobre as apostas repartidas | o pedido já é de uma turma por disciplina; o roteamento da caminhada é a guarda |
 | **Preço** | 2º preço, eq. (24) | não existe |
 | **Retorno de créditos** | `f_γ`, eq. (34) | não existe — não houve preço a devolver |
-| **Custo de excluir** | metade do preço pago volta (`paid // 2`) | nenhum — não há moeda a perder |
+| **Custo de excluir** | o preço pago se perde por inteiro (`exclusion_refund_rate`, padrão 0) | nenhum — não há moeda a perder |
 
 Em **empate de utilidade**, as duas mochilas preferem a disciplina **listada
 primeiro** no cenário — ver abaixo. A perda de expressividade é o ponto da
@@ -482,7 +482,7 @@ como há na mochila 0-1 da linha de base.
 
 Como ali não há crédito, as grandezas de crédito saem **nulas** dos relatórios
 (orçamento, saldo, lances, retorno e preço), não zeradas: zero se leria como
-"ninguém gastou", e o certo é "não há o que gastar". `base_credits` e
+"ninguém gastou", e o certo é "não há o que gastar". `min_credits` e
 `credit_return` continuam no cenário — a comparação roda a mesma configuração
 dos dois lados — mas não têm efeito em `ranking`.
 
@@ -538,22 +538,23 @@ Duas consequências visíveis:
 `run_comparison` roda o mesmo cenário em cada braço (`ARMS`), `N` vezes em
 cada um, com as **seeds de 1 a N**:
 
-| Braço | Moeda | Resolvedor | Memória | `f_γ` | Roda |
+| Braço | Moeda | Resolvedor | Memória | `k` da eq. (34) | Roda |
 |---|---|---|---|---|---|
-| `ranking_greedy` | CR | varredura | — | — | **sempre** |
-| `credits_greedy` | lance | varredura | sobra | `none` | ablação |
-| `credits_ilp` | lance | PLI | sobra | `none` | ablação |
-| `credits_return` | lance | PLI | sobra | `ratio` | **sempre** |
+| `ranking_greedy` | CR | varredura | — | 0 (inerte: não há crédito) | **sempre** |
+| `credits_greedy` | lance | varredura | sobra | 0 | ablação |
+| `credits_ilp` | lance | PLI | sobra | 0 | ablação |
+| `credits_return` | lance | PLI | sobra | o do cenário (padrão 2) | **sempre** |
 
 Os dois do meio estão em `ABLATION_ARMS` e não rodam por padrão. Eles separam
 o vão em três parcelas — mensagem, resolução e retorno —, e são a resposta
 pronta para "o ganho vem da moeda ou do resolvedor?". `credits_ilp` e
-`credits_return` diferem em **uma única coisa**, a política de retorno, de modo
-que a diferença entre eles *é* o efeito do retorno, isolado. A política
-proporcional é a única que premia desempenho acima da nota de corte, e portanto
-a única com chance de recriar o incentivo que o CR dá de graça. Por isso o
-`credit_return` e o `resolver` que vierem na configuração são ignorados, como a
-seed: aqui eles são eixos do experimento, e cada braço impõe o seu.
+`credits_return` diferem em **uma única coisa**, o multiplicador do retorno,
+de modo que a diferença entre eles *é* o efeito do retorno, isolado. O retorno
+é a única parte do leilão que premia desempenho, e portanto a única com chance
+de recriar o incentivo que o CR dá de graça. Por isso o `resolver` que vier na
+configuração é ignorado, como a seed; o `return_multiplier` vale onde o braço
+não o fixa, e os braços de ablação o fixam em 0 para desligar o retorno sem
+deixar de ser o mesmo modelo.
 
 As duas condições da Seção 7.3 saem daí:
 
@@ -975,60 +976,112 @@ sozinho.
   Nada disso está no anteprojeto.
 
 - **Retorno de créditos** (`f_gamma`, eq. 34): o anteprojeto deixa a forma
-  concreta em aberto — é o eixo de experimentação da Seção 7.3.2. São quatro
-  políticas, escolhidas na configuração e aplicadas ao fim de cada período
-  sobre o preço pago (`paid`) e a nota obtida:
+  concreta em aberto — é o eixo de experimentação da Seção 7.3.2. Aqui ela tem
+  **uma forma só**, aplicada ao fim de cada período sobre o preço pago
+  (`paid`) e a nota obtida:
 
-  | Política | `gamma_{a,x}` | O que ela premia |
-  | --- | --- | --- |
-  | `none` (nenhum) | 0 | nada — linha de base, o crédito gasto sai do sistema |
-  | `unit` (unitário) | 1 se aprovado, 0 se não | aprovar, independente do preço |
-  | `full` (integral) | `paid` se aprovado, 0 se não | aprovar; o crédito só se perde na reprovação |
-  | `ratio` (proporcional) | `round(nota / 10 x paid)` | desempenho acima da nota de corte, e devolve algo mesmo a quem reprova |
+      gamma_{a,x} = ⌊ nota / 10 · k · paid ⌋
 
-  A **exclusão** tem regra própria (`equations.exclusion_refund`): sob `ratio`
-  devolve `paid // 2`, e 0 nas outras três. A metade é o meio-termo exato entre
-  perder com 0 e passar com 10 — a âncora certa porque `ratio` não conhece
-  `n_min`, e excluir não é reprovar bem: é abstenção, fora da dicotomia. A
-  divisão **inteira** é o que garante que excluir custe: ancorar na maior nota
-  que reprova devolveria o crédito inteiro de um lance de 1 quando `n_min ≥ 6`
-  (`round(0,59 · 1) = 1`), e lance de 1 é o caso mais frequente, porque o
-  orçamento limita o aluno a lances em no máximo `C_a` disciplinas. Aqui a
-  perda é `⌈paid/2⌉ ≥ 1` sempre.
+  O que o retorno devolve é o preço pago corrigido por dois fatores: a nota,
+  que diz quão bem o aluno usou a vaga, e o multiplicador `k`
+  (`return_multiplier`, padrão 2), que diz quanto o sistema devolve no total.
 
-  Nas outras três devolve 0 porque as três só pagam por aprovação, e excluir
-  não aprova — sem essa cláusula, sob `none` excluir seria o melhor resultado
-  possível do sistema. E `n_min` passa a ser validado em `[5, 10]`: abaixo de 5
-  a metade renderia mais que a aprovação raspada.
+  **Quatro políticas discretas ocupavam este lugar** — `none` (nada volta),
+  `unit` (1 crédito por aprovação), `full` (o preço inteiro a quem aprova) e
+  `ratio` (a fatia correspondente à nota). Saíram em 15/11/2026: `unit` e
+  `full` não liam a nota, e com elas o retorno não separava dois aprovados —
+  que é justamente o que a comparação precisa demonstrar que o lance consegue e
+  a ordenação por CR dá de graça. E `none` não precisa de nome próprio: é
+  `k = 0`, que é também como um braço da comparação desliga o retorno sem
+  deixar de ser o mesmo modelo.
 
-  Uma ressalva de leitura: a perda proporcional **não é constante** — 100% em
-  `paid = 1`, 50% em 2, 67% em 3. Lance pequeno é punido proporcionalmente
-  mais, e lance pequeno é de quem tem pouco orçamento, de modo que a penalidade
-  é levemente regressiva. É a única forma de cobrar algo de 1 crédito em
-  aritmética inteira, mas parte do efeito por perfil vem da quantização.
+  **A calibragem de `k = 2`.** Sem multiplicador o sistema não injeta crédito
+  nenhum: com `k = 1` o retorno devolve no máximo o preço pago, o gasto é esse
+  mesmo preço, e o saldo nunca cresce — ver a consequência medida logo abaixo.
+  Com 2, a **nota de corte vira o ponto neutro**: nota 5 devolve exatamente o
+  que se pagou, acima disso o aluno sai ganhando e abaixo sai perdendo.
 
-  A única entrada de crédito fora disso é o `Gamma_min` do período (eq. 35), de
-  modo que o saldo de um período é
-  `min(C_a^(t,1) - gasto + Gamma_min + soma gamma_{a,x}, Gamma_max)` — conta que
-  o histórico individual mostra aberta e que os testes travam. Em `ratio`, o
+  **A conta trunca**, e é o que faz de `k · paid` um teto que só a nota máxima
+  alcança: com `k = 2` o aluno dobra o que investiu se tirar 10, e só se tirar
+  10 — com 9,9 ele leva `⌊1,98 · paid⌋`, que fica abaixo. Arredondar daria o
+  dobro a quem tirou 9,8 num lance de 5, e o prêmio máximo deixaria de
+  distinguir a nota máxima. O piso também garante que a nota de corte seja o
+  **último** ponto em que o aluno não perde: em 4,9 ele já recebe menos do que
+  pagou, sempre. A conta é feita em **aritmética inteira** porque o piso em
+  ponto flutuante erra por um crédito nos casos em que o produto deveria cair
+  exatamente sobre um inteiro e cai um ulp abaixo — medido, 30 combinações em
+  18.876 de (nota, preço, `k`), entre elas nota 1,4 com preço 25 e `k = 2`.
+
+  **A nota de corte `n_min` não entra na conta.** O retorno é contínuo na nota:
+  quem reprova com 4,9 recebe quase tanto quanto quem passa com 5,0. Aprovar é
+  o que decide a grade (eq. 40); o retorno decide o poder de compra, e são
+  perguntas diferentes — amarrá-las faria o degrau da aprovação aparecer duas
+  vezes.
+
+  A **exclusão** tem regra própria (`equations.exclusion_refund`): devolve
+  `round(fração · paid)`, e a **fração é zero por padrão**
+  (`exclusion_refund_rate`). Excluir não devolve
+  nada — é o que torna a exclusão socialmente cara, e ela precisa ser, porque a
+  vaga não volta para a oferta. Sem isso, sob `none` — em que nada volta
+  nunca — excluir seria o melhor resultado possível do sistema. Excluir também
+  não é reprovar: é abstenção, fora da dicotomia aprovado/reprovado, e por isso
+  a regra é própria em vez de um caso particular de `f_gamma`. Em especial, o
+  multiplicador **não entra aqui**: ele premia desempenho em disciplina
+  cursada, e excluir não cursa.
+
+  A fração existe para quem quiser medir o degrau entre punir a exclusão por
+  inteiro e amortecê-la, e é validada em `[0, 1]`. Ela arredonda, e não
+  trunca: o teto de `k · paid` que justifica o piso no retorno não existe aqui. Uma ressalva de leitura:
+  frações pequenas **zeram em lance pequeno** — com 0,25 um lance de 1 crédito
+  devolve 0 —, e lance de 1 é o caso mais frequente, porque o orçamento limita
+  o aluno a lances em no máximo `C_a` disciplinas. A penalidade é, nesse
+  sentido, levemente regressiva: lance pequeno é punido proporcionalmente mais,
+  e lance pequeno é de quem tem pouco orçamento.
+
+  `n_min` continua validado em `[5, 10]`, agora porque é o piso que segura a
+  ordem entre aprovar e excluir: com `k = 2`, aprovar raspando devolve
+  `n_min/10 · 2 · paid`, que em `n_min = 5` é o preço inteiro — acima de
+  qualquer fração de exclusão em `[0, 1]`.
+
+  **O retorno é a única entrada de crédito novo.** O `Gamma_min` do anteprojeto
+  — um crédito base somado a todo aluno todo período, eq. (35) — saiu. O
+  parâmetro continua, com outro papel: virou `C_min`, o **piso** do orçamento.
+  O saldo de um período é
+  `clamp(C_a^(t,1) - gasto + soma gamma_{a,x}, C_min, C_max)` — conta que o
+  histórico individual mostra aberta e que os testes travam. Em `ratio`, o
   arredondamento do Python desempata para o par (`round(2,5) == 2`); o empate
   exato é frequente porque as notas andam de 0,1 em 0,1 e os preços são
   inteiros pequenos, mas o viés é o mesmo para todo aluno.
 
-  **O teto de acúmulo (`Gamma_max`).** Não está no anteprojeto. A eq. (36)
-  acumula sem limite, e medido no cenário cheio com `Gamma_min = 60` o saldo
-  chegava a **900 créditos** — quinze vezes a base — em quem é seletivo o
-  bastante para não gastar. Isso é poder de compra vindo da abstenção, e não do
-  desempenho: o contrário do que o retorno da eq. (34) existe para premiar. O
-  teto corta o saldo **depois** da conta do período, de modo que gasto e retorno
-  continuam creditados por inteiro e o que se perde é só o excedente. Com
-  `credit_memory = "none"` ele é inerte, porque ali o saldo nunca passa de
-  `Gamma_min`. `max_credits = None` desliga o teto e devolve a eq. (36) original.
+  **A faixa do orçamento (`C_min`, `C_max`).** Não está no anteprojeto, que
+  somava Γ_min todo período e não tinha teto. Os dois parâmetros delimitam a
+  mesma grandeza — o orçamento com que o aluno abre o período —, e a conta do
+  meio é livre para passar dos dois lados. O piso **não é ganho**: quem termina
+  acima dele não recebe nada por existir, e quem gasta tudo sem aprovar reabre
+  em `C_min`, não em zero. O teto corta o acúmulo: sem ele a eq. (36) acumula
+  sem limite, e medido no cenário cheio com um ganho base de 60 o saldo chegava
+  a **900 créditos** — quinze vezes a base — em quem é seletivo o bastante para
+  não gastar, que é poder de compra vindo da abstenção e não do desempenho. Os
+  dois cortam **depois** da conta, de modo que gasto e retorno continuam
+  creditados por inteiro. Com `credit_memory = "none"` ambos são inertes,
+  porque ali o orçamento é `C_min` por construção. `max_credits = None`
+  desliga o teto; o piso não se desliga.
 
-  O padrão passou de `Gamma_min = 60` sem teto para **12 com teto em 30**, e o
-  troco está medido no cenário cheio (63 disciplinas, 288 turmas, 23 períodos):
+  **É isso que obriga o multiplicador a existir.** Com `k = 1` o retorno
+  devolve no máximo o preço pago, e como o gasto é esse mesmo preço tem-se
+  `restante + soma gamma <= C_a^(t,1)`: o saldo nunca cresce, e como o aluno
+  entra em `C_min` o orçamento fica em `C_min` para sempre. Medido no cenário
+  dos testes antes do multiplicador: os 15 alunos terminavam com 12 créditos
+  nas quatro políticas de então, o teto nunca cortava e o braço
+  `credits_return` saía idêntico ao `credits_ilp` em eficiência, seed a seed —
+  o eixo de experimentação da Seção 7.3.2 desaparecia. Com `k = 2` o saldo
+  volta a subir, e com 3,5 sobe mais; há teste que guarda os dois lados.
 
-  | | 60 / sem teto | 12 / 30 |
+  O padrão passou de um ganho base de 60 sem teto para **piso 12 e teto 30**, e
+  o troco está medido no cenário cheio (63 disciplinas, 288 turmas, 23
+  períodos), ainda com o ganho base no lugar:
+
+  | | base 60 / sem teto | base 12 / teto 30 |
   | --- | --- | --- |
   | pares (aluno, turma) pedidos | 1.185.127 | 713.083 |
   | lances de 1 crédito | 53,4% | 88,1% |
@@ -1517,7 +1570,7 @@ Medido o atalho, para registro:
 Com `allowableGap 1` não fecha (300 s, árvore aberta). **A folga não foi
 adotada**: a PLI do trabalho é exata, e o custo disso está aqui declarado em
 vez de contornado. O que se faz pelo lado do modelo é reduzir o pedido — ver o
-teto de acúmulo `Gamma_max`, que corta 40% das variáveis.
+teto do orçamento `C_max`, que corta 40% das variáveis.
 
 ### Onde a memória de uma simulação está
 
@@ -1658,10 +1711,10 @@ ponta pelo mesmo motivo: a grade corre num sentido só.
 
 O botão de "Configurar" faz uma coisa só: **comparar os modelos** — o mesmo
 cenário roda em cada braço, `N` vezes, com as seeds de 1 a `N`. Três campos do
-cenário não vão para lá: a **seed** (ali ela vira o eixo da amostra), o
-**retorno de créditos** e o **resolvedor** (ali eles viram eixos do
-experimento, e cada braço impõe o seu). No lugar entra **simulações por modelo
-(N)**.
+cenário não vão para lá: a **seed** (ali ela vira o eixo da amostra) e o
+**resolvedor** (ali ele vira eixo do experimento, e cada braço impõe o seu). O
+**multiplicador do retorno** vai, mas só vale no braço que o tem — os de
+ablação o zeram. No lugar entra **simulações por modelo (N)**.
 
 O **tamanho da coorte não se digita**: ele sai de *exemplares por perfil* vezes
 o número de combinações, e o painel mostra o número derivado. É a conta que
@@ -1694,7 +1747,8 @@ contra os megabytes de uma execução —, e por isso cabem muito mais aqui.
 
 **A grade não vai junto.** Ela é a mesma para todos os cenários, e o formulário
 não a edita, então um salvo guarda só os parâmetros: população, horizonte,
-rodadas, Γ_min, perfis e σ. Guardar uma cópia da oferta seria guardar algo que
+rodadas, a faixa de crédito, perfis e σ. Guardar uma cópia da oferta seria
+guardar algo que
 pode divergir da única que existe — recarregar um salvo pega a grade corrente,
 e mexer nela muda todos os cenários de uma vez. É também por isso que a lista
 não mostra contagem de disciplinas: ela seria a mesma em toda linha e não
@@ -1775,7 +1829,8 @@ esquerda, que a Beta sobre (0, 1) não conseguia produzir sem derrubar a média
 junto.
 
 Ou monte o seu: a tela de configuração tem **Configurações gerais** (o N da
-comparação, o horizonte e o ritmo de ingresso, as rodadas e o Γ_min),
+comparação, o horizonte e o ritmo de ingresso, as rodadas e a faixa de
+crédito),
 **Interesse**, **Notas** e **Disponibilidade**, cada uma destas ao lado da
 prévia da distribuição que seus parâmetros produzem. As duas últimas editam
 listas de **perfis**, e as duas editam coisas diferentes porque as

@@ -99,7 +99,7 @@ export default function App() {
     setRunning(true);
     setError(null);
     try {
-      const { seed: _seed, credit_return: _return, ...scenario } = config;
+      const { seed: _seed, ...scenario } = config;
       const request = { ...scenario, runs, arms };
       const entry = newComparison(request, await compare(request));
       setHistory((current) => [entry, ...current].slice(0, MAX_RUNS));

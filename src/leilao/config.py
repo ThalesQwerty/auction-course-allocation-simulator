@@ -39,6 +39,8 @@ from typing import Literal
 
 from .equations import (
     Behavior,
+    DEFAULT_MULTIPLIER,
+    DEFAULT_RATE,
     availability_shape,
     class_difficulty,
     curriculum_heights,
@@ -75,25 +77,20 @@ Mechanism = Literal["credits", "ranking"]
 # tem conteúdo em cenário com conjunto elegível maior que W_a.
 Resolver = Literal["ilp", "greedy"]
 
-# Política de retorno de créditos f_gamma — eq. (34). O anteprojeto deixa a
-# forma concreta em aberto e trata as políticas como eixo de experimentação
-# (Seção 7.3.2) — as quatro comparadas estão em `grading.credit_return`.
-CreditReturnPolicy = Literal["none", "unit", "full", "ratio"]
-
 # Quanta memória o orçamento tem de um período para o outro — o eixo da ideia 1.
 #
-# `"none"`: o período começa sempre em Gamma_min. O leilão não tem memória
+# `"none"`: o período começa sempre em C_min. O leilão não tem memória
 # nenhuma, e é o único braço em que o passado do aluno não entra no poder de
 # compra dele por via alguma.
 # `"carry"`: a eq. (36) — o que sobrou é carregado. Note que isso **não** é
 # poupança: o aluno aposta o orçamento inteiro e paga o segundo preço, então o
 # que sobra é o que ele não foi cobrado, não o que ele guardou.
 #
-# Cruzado com `credit_return`, dá a escada de três degraus: sem acúmulo
-# ("none"), só sobra ("carry" + retorno "none") e sobra + retorno ("carry" +
-# "ratio"). O degrau do meio separa as duas fontes de memória, que têm sinais
-# opostos de incentivo: a sobra premia quem pagou barato, o retorno premia quem
-# aprovou.
+# Cruzado com `return_multiplier`, dá a escada de três degraus: sem acúmulo
+# ("none"), só sobra ("carry" + multiplicador 0) e sobra + retorno ("carry" +
+# multiplicador > 0). O degrau do meio separa as duas fontes de memória, que
+# têm sinais opostos de incentivo: a sobra premia quem pagou barato, o retorno
+# premia quem foi bem.
 CreditMemory = Literal["none", "carry"]
 
 
@@ -465,8 +462,8 @@ class SimulationConfig:
     # que é uma só para o curso inteiro. Depois da última rodada ele descarta
     # o que não couber nessa fração (`equations.retained_set`), e o descartado
     # vira solicitação **excluída**: não conta carga, não conta tentativa, não
-    # mexe no CR, e no leilão devolve metade do preço pago
-    # (`equations.exclusion_refund`).
+    # mexe no CR, e no leilão não devolve crédito nenhum, a menos que
+    # `exclusion_refund_rate` diga o contrário (`equations.exclusion_refund`).
     #
     # A vaga excluída **não volta para a oferta** — exclui-se depois de
     # encerradas as alocações do período. É o que torna a exclusão socialmente
@@ -562,11 +559,21 @@ class SimulationConfig:
     # com `mechanism="ranking"`: ali não há orçamento a repor nem preço pago a
     # devolver. Ficam no cenário assim mesmo porque a comparação entre os dois
     # mecanismos roda a mesma configuração nos dois lados.
-    base_credits: int = 12  # Gamma_min — créditos base por período, eq. (35)/(37)
-    # Gamma_max — teto do saldo acumulado pela eq. (36). `None` desliga o teto
-    # e devolve o acúmulo irrestrito do anteprojeto. Ver `equations.next_budget`.
-    max_credits: int | None = 30
-    credit_return: CreditReturnPolicy = "none"
+    # C_min e C_max delimitam o orçamento com que o aluno abre cada período:
+    # a conta da eq. (36) roda livre e o resultado é cortado nos dois extremos.
+    # O piso não é ganho — ele só impede que o saldo caia abaixo dele, e é o
+    # que torna o retorno da eq. (34) a única entrada de crédito novo.
+    # `max_credits=None` desliga o teto. Ver `equations.next_budget`.
+    min_credits: int = 12  # C_min — orçamento mínimo do período, eq. (36)/(37)
+    max_credits: int | None = 30  # C_max — orçamento máximo do período
+    # k — o multiplicador do retorno, eq. (34): γ = round(nota/10 · k · preço).
+    # Zero desliga o retorno; com 1 ele nunca supera o gasto e o orçamento
+    # trava em C_min; com o padrão 2 a nota de corte vira o ponto neutro.
+    # Ver `equations.credit_return`.
+    return_multiplier: float = DEFAULT_MULTIPLIER
+    # A fração do preço pago que uma disciplina **excluída** devolve. Zero —
+    # o padrão — é "excluir não devolve nada". Ver `equations.exclusion_refund`.
+    exclusion_refund_rate: float = DEFAULT_RATE
     credit_memory: CreditMemory = "carry"
     mechanism: Mechanism = "credits"
     resolver: Resolver = "ilp"
@@ -609,17 +616,24 @@ class SimulationConfig:
             )
         if self.rounds < 1:
             raise ValueError("é preciso simular ao menos 1 rodada por período")
-        # O piso em 5 é do retorno por exclusão: ele devolve metade do preço
-        # pago, e abaixo de 5 a metade passaria a render mais que a aprovação
-        # raspada — excluir bateria passar. Ver `equations.exclusion_refund`.
+        # O piso em 5 segura a ordem entre aprovar e excluir. Com o
+        # multiplicador padrão 2, aprovar raspando devolve n_min/10 · 2 · preço,
+        # que em n_min = 5 é o preço inteiro — acima de qualquer fração de
+        # exclusão em [0, 1]. Abaixo de 5 a exclusão amortecida passaria a
+        # render mais que a aprovação raspada, e excluir bateria passar.
+        # Ver `equations.exclusion_refund`.
         if not 5 <= self.min_grade <= 10:
             raise ValueError("nota mínima deve estar em [5, 10]")
-        if self.base_credits < 1:
-            raise ValueError("créditos base (Gamma_min) deve ser >= 1")
-        if self.max_credits is not None and self.max_credits < self.base_credits:
+        if self.return_multiplier < 0:
+            raise ValueError("o multiplicador do retorno deve ser >= 0")
+        if not 0 <= self.exclusion_refund_rate <= 1:
+            raise ValueError("a fração de retorno da exclusão deve estar em [0, 1]")
+        if self.min_credits < 1:
+            raise ValueError("orçamento mínimo (C_min) deve ser >= 1")
+        if self.max_credits is not None and self.max_credits < self.min_credits:
             raise ValueError(
-                "teto de créditos (Gamma_max) não pode ser menor que os créditos "
-                f"base (Gamma_min = {self.base_credits})"
+                "orçamento máximo (C_max) não pode ser menor que o mínimo "
+                f"(C_min = {self.min_credits})"
             )
         if self.max_hours < 1:
             raise ValueError("carga horária máxima (W_a) deve ser >= 1")

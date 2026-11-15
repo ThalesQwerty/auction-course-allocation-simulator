@@ -9,9 +9,10 @@ jubilamentos. É a única parte da simulação que escreve no `Student`.
 A **exclusão vem primeiro** e é o que define o escopo de todo o resto: a
 disciplina excluída não recebe nota, não entra no CR, não soma carga cursada e
 não gasta tentativa — quem exclui e refaz no semestre seguinte volta como
-primeira tentativa, sem o ganho de recursada. No leilão ela devolve metade do
-preço pago (`equations.exclusion_refund`); a vaga, essa não volta para a
-oferta, porque a esta altura as alocações do período já se encerraram.
+primeira tentativa, sem o ganho de recursada. No leilão ela não devolve crédito
+nenhum, a menos que o cenário fixe uma fração
+(`equations.exclusion_refund`); a vaga, essa não volta para a oferta, porque a
+esta altura as alocações do período já se encerraram.
 
 As duas saídas são exclusivas e **nesta ordem**: quem fecha a grade no último
 período de residência conta como concluinte, não como jubilado.
@@ -133,8 +134,8 @@ def close_period(
             closing.exclusions[name] += 1
             gamma = (
                 exclusion_refund(
-                    config.credit_return,
                     paid=state.paid.get((student.id, name), 0),
+                    rate=config.exclusion_refund_rate,
                 )
                 if config.uses_credits
                 else 0
@@ -174,13 +175,12 @@ def close_period(
 
             # f_γ é do leilão: devolve parte do *preço pago*. Na linha de base
             # não houve preço nem pagamento, então não há o que devolver,
-            # qualquer que seja a política escolhida.
+            # qualquer que seja o multiplicador.
             gamma = (
                 credit_return(
-                    config.credit_return,
                     paid=state.paid.get((student.id, name), 0),
                     grade=student.grades[discipline],
-                    min_grade=config.min_grade,
+                    multiplier=config.return_multiplier,
                 )
                 if config.uses_credits
                 else 0
@@ -190,17 +190,15 @@ def close_period(
 
         closing.credits_returned[student.id] = sum(gammas)
 
-        # Fora do leilão o saldo não se move: nada foi gasto, e inflá-lo com
-        # Γ_min a cada período daria um número sem significado.
+        # Fora do leilão o saldo não se move: nada foi gasto, e fixá-lo em
+        # C_min a cada período daria um número sem significado.
         if config.uses_credits:
             student.credits = next_budget(
                 config.credit_memory,
                 started_with=student.credits,
                 spent=state.spent[student.id],
-                period_return=period_return(
-                    base_credits=config.base_credits, returns=gammas
-                ),
-                base_credits=config.base_credits,
+                period_return=period_return(returns=gammas),
+                min_credits=config.min_credits,
                 max_credits=config.max_credits,
             )
 

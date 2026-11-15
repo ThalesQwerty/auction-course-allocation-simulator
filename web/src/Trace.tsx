@@ -139,7 +139,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
    * quando o traço novo chega. */
   const loadedArm = data ? result.arms.find((arm) => arm.key === data.arm) : undefined;
   const usesCredits = loadedArm ? loadedArm.mechanism === "credits" : true;
-  const hasReturn = loadedArm ? loadedArm.credit_return !== "none" : false;
+  const hasReturn = loadedArm ? (loadedArm.return_multiplier ?? 0) > 0 : false;
   const rounds = run.config.rounds;
 
   /** O sujeito sai do que está carregado: se o escolhido não existe mais —

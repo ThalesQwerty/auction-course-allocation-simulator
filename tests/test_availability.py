@@ -61,7 +61,6 @@ def make_config(**overrides) -> SimulationConfig:
         ),
         rounds=2,
         max_hours=240,
-        credit_return="ratio",
         seed=7,
     )
     return SimulationConfig(**{**base, **overrides})
@@ -150,23 +149,53 @@ def test_the_knapsack_returns_nothing_when_the_load_is_zero():
 # --- o retorno da exclusão -------------------------------------------------
 
 
-def test_excluding_always_costs_at_least_one_credit():
-    """A divisão inteira é o que garante custo. Ancorar na maior nota que
-    reprova devolveria o crédito inteiro de um lance de 1 com n_min >= 6, que
-    é justamente o lance mais frequente."""
+def test_excluding_refunds_nothing_by_default():
+    """O padrão é o crédito gasto se perder por inteiro. Sem isso, com o
+    retorno desligado (k = 0) excluir seria o melhor resultado possível do
+    sistema: nada se perderia e a vaga ainda assim não voltaria à oferta."""
+    for paid in range(0, 21):
+        assert exclusion_refund(paid=paid) == 0
+
+
+def test_the_exclusion_rate_scales_the_price_paid():
+    """A fração é do cenário e é a única coisa que devolve crédito à excluída."""
+    assert exclusion_refund(paid=10, rate=0.5) == 5
+    assert exclusion_refund(paid=10, rate=1.0) == 10
+    assert exclusion_refund(paid=7, rate=0.5) == 4
+    # Fração pequena zera em lance pequeno, que é o lance mais frequente.
+    assert exclusion_refund(paid=1, rate=0.25) == 0
+    assert exclusion_refund(paid=4, rate=0.25) == 1
+    # Excluir nunca devolve mais do que se pagou: a fração é limitada a [0, 1]
+    # na configuração, e aqui a conta respeita o limite.
     for paid in range(1, 21):
-        refund = exclusion_refund("ratio", paid=paid)
-        assert refund < paid
-        assert paid - refund >= 1
+        assert exclusion_refund(paid=paid, rate=1.0) == paid
+
+    with pytest.raises(ValueError, match="negativo"):
+        exclusion_refund(paid=-1)
 
 
-def test_only_the_proportional_policy_refunds_an_exclusion():
-    """As outras três só pagam por aprovação, e excluir não aprova. Sem isso,
-    sob `none` — em que nada volta nunca — excluir seria o melhor resultado
-    possível do sistema."""
-    assert exclusion_refund("ratio", paid=10) == 5
-    for policy in ("none", "unit", "full"):
-        assert exclusion_refund(policy, paid=10) == 0
+def test_the_scenario_refuses_an_exclusion_rate_outside_the_unit_interval():
+    """Acima de 1 excluir renderia mais que o lance; abaixo de 0 não é fração."""
+    for rate in (-0.1, 1.5):
+        with pytest.raises(ValueError, match="fração de retorno da exclusão"):
+            make_config(exclusion_refund_rate=rate)
+
+
+def test_the_exclusion_rate_reaches_the_simulation():
+    """A fração do cenário é a que o fechamento do período aplica."""
+    sem = run_simulation(make_config(exclusion_refund_rate=0.0))
+    com = run_simulation(make_config(exclusion_refund_rate=1.0))
+
+    excluidos = [
+        (sem_req, com_req)
+        for sem_h, com_h in zip(sem.histories, com.histories)
+        for sem_p, com_p in zip(sem_h.periods, com_h.periods)
+        for sem_req, com_req in zip(sem_p.requests, com_p.requests)
+        if sem_req.excluded
+    ]
+    assert excluidos, "o cenário deveria ter exclusões"
+    assert all(s.returned == 0 for s, _ in excluidos)
+    assert all(c.returned == c.paid for _, c in excluidos)
 
 
 # --- o desperdício ---------------------------------------------------------

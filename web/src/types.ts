@@ -31,32 +31,6 @@ export interface DisciplineInput {
   stability?: number;
 }
 
-/** Política de retorno de créditos f_γ — eq. (34). Espelha
- * `leilao.config.CreditReturnPolicy`; o que cada uma faz está em
- * `CREDIT_RETURN_POLICIES`. */
-export type CreditReturnPolicy = "none" | "unit" | "full" | "ratio";
-
-/** As políticas na ordem em que aparecem no formulário, da mais restritiva à
- * mais generosa. Vive aqui, junto do tipo, para que acrescentar uma política
- * no motor quebre a compilação enquanto o rótulo não existir. */
-export const CREDIT_RETURN_POLICIES: {
-  value: CreditReturnPolicy;
-  label: string;
-  hint: string;
-}[] = [
-  { value: "none", label: "nenhum", hint: "o crédito gasto não volta — linha de base" },
-  { value: "unit", label: "unitário", hint: "1 crédito por aprovação, qualquer que tenha sido o preço" },
-  { value: "full", label: "integral", hint: "devolve o preço inteiro a quem aprova" },
-  {
-    value: "ratio",
-    label: "proporcional",
-    hint: "devolve a fatia do preço correspondente à nota, mesmo sem aprovação",
-  },
-];
-
-export const creditReturnLabel = (policy: CreditReturnPolicy): string =>
-  CREDIT_RETURN_POLICIES.find((option) => option.value === policy)?.label ?? policy;
-
 /** Nome de uma coorte — o grupo que ingressou naquele período (coorte 3 =
  * quem entrou no período 3, esteja ele hoje em que semestre estiver). O aluno
  * nasce numa coorte e fica nela até o fim, que é o que mantém cada série
@@ -228,15 +202,22 @@ export interface Scenario {
    * mecanismo dá as quatro células; os dois resolvedores só divergem onde a
    * carga horária aperta. */
   resolver: "ilp" | "greedy";
-  /** Se o orçamento carrega entre períodos (eq. 36) ou recomeça em Γ_min. */
+  /** Se o orçamento carrega entre períodos (eq. 36) ou recomeça em C_min. */
   credit_memory: "none" | "carry";
   /** X — carga horária optativa exigida para concluir, somada entre as
    * optativas aprovadas. Concluir é aprovar em todas as obrigatórias e chegar
    * a este total; o aluno escolhe *quais* optativas. */
   elective_hours: number;
-  base_credits: number; // Γ_min
-  max_credits: number | null; // Γ_max — teto do saldo acumulado
-  credit_return: CreditReturnPolicy;
+  min_credits: number; // C_min — orçamento mínimo do período
+  max_credits: number | null; // C_max — orçamento máximo do período
+  /** k — o multiplicador do retorno, eq. (34): γ = ⌊nota/10 · k · preço⌋.
+   * Zero desliga o retorno; com 1 ele nunca supera o gasto e o orçamento trava
+   * em C_min; com 2 a nota de corte é o ponto neutro e só a nota 10 dobra o
+   * que se investiu. */
+  return_multiplier: number;
+  /** Fração do preço pago que a disciplina excluída devolve. Zero — o padrão —
+   * é "excluir não devolve nada", qualquer que seja a política de retorno. */
+  exclusion_refund_rate: number;
   seed: number;
 }
 
@@ -295,7 +276,7 @@ export const COMPARISON_ARMS: ArmDescription[] = [
     key: "credits_return",
     label: "Leilão",
     short: "Leilão",
-    hint: "o modelo proposto (Seção 7.1): o aluno reparte um orçamento de créditos em lances por disciplina, um PLI resolve a alocação e o segundo preço cobra. Com a política proporcional de f_γ (eq. 34), quem aprova recupera a fatia do preço correspondente à nota — e quem exclui recupera metade, de modo que largar vaga custa",
+    hint: "o modelo proposto (Seção 7.1): o aluno reparte um orçamento de créditos em lances por disciplina, um PLI resolve a alocação e o segundo preço cobra. Pelo f_γ da eq. (34) ele recupera ⌊nota/10 · k · preço⌋ do que pagou, de modo que só a nota 10 dobra o investido — e quem exclui não recupera nada, de modo que largar vaga custa",
   },
 ];
 
@@ -315,7 +296,7 @@ export const ABLATION_ARMS: ArmDescription[] = [
     key: "credits_ilp",
     label: "Leilão sem retorno",
     short: "Sem retorno",
-    hint: "o mesmo leilão resolvido por PLI, mas sem devolver crédito nenhum. Cardinal — a alocação usa as magnitudes e derruba um lance alto para acomodar dois médios. O que muda em relação ao bidding points é só a resolução",
+    hint: "o mesmo leilão resolvido por PLI, mas com o retorno desligado (k = 0): nada do que se gasta volta. Cardinal — a alocação usa as magnitudes e derruba um lance alto para acomodar dois médios. O que muda em relação ao bidding points é só a resolução",
   },
 ];
 
@@ -324,13 +305,13 @@ export const armLabel = (key: string): string =>
 
 /** Uma comparação: o mesmo cenário rodado em cada modelo, N vezes.
  *
- * Dois campos do cenário não entram. A **seed**, porque as seeds são 1..N e são
- * pareadas, de modo que a i-ésima simulação de cada braço parte da mesma
- * população, das mesmas utilidades e das mesmas notas (condição metodológica da
- * Seção 7.3). E o **retorno de créditos**, porque ele é o eixo do experimento:
- * cada braço impõe o seu. */
-export interface CompareRequest
-  extends Omit<Scenario, "seed" | "credit_return"> {
+ * A **seed** do cenário não entra, porque as seeds são 1..N e são pareadas, de
+ * modo que a i-ésima simulação de cada braço parte da mesma população, das
+ * mesmas utilidades e das mesmas notas (condição metodológica da Seção 7.3).
+ *
+ * O `return_multiplier` entra e vale — mas só onde o braço não o fixa. O
+ * retorno é o eixo do experimento, e o braço de ablação o desliga impondo 0. */
+export interface CompareRequest extends Omit<Scenario, "seed"> {
   runs: number; // N
   /** Quais braços rodar, pelas chaves de `COMPARISON_ARMS`. Rodar um só custa
    * metade do tempo: os painéis que comparam os dois lados somem, o resto da
@@ -455,7 +436,10 @@ export interface RunSummary {
 export interface ArmResult {
   key: string;
   mechanism: Mechanism;
-  credit_return: CreditReturnPolicy;
+  /** O k efetivamente rodado neste braço, e não o do cenário: o braço de
+   * ablação o impõe em 0 para desligar o retorno. Ausente em comparação
+   * gravada antes de 15/11/2026, que trazia a política por nome. */
+  return_multiplier?: number;
   runs: RunSummary[];
   /** As séries reduzidas entre as seeds: cada régua do eixo X cruzada com o
    * agregado e com cada recorte. Ausente em comparação gravada antes de
@@ -822,7 +806,7 @@ export interface StudentPeriodRecord {
   period: number;
   credits_start: number;
   credits_spent: number;
-  credits_returned: number; // Σγ do período — eq. (35), sem o Γ_min
+  credits_returned: number; // Σγ do período — eq. (35)
   credits_end: number;
   satisfaction: number; // psi_a^(t) — eq. (51)
   grade_average: number; // CR no início do período — eq. (49)
@@ -846,10 +830,10 @@ export interface StudentHistory {
 /** O pedido do traço de **uma** simulação da comparação: o cenário dela mais o
  * par `(braço, seed)` que endereça a simulação.
  *
- * Aqui a seed não é ignorada como em `/compare` — ela é o que se pede. E o
- * retorno de créditos e o resolvedor continuam de fora: quem os impõe é o
- * braço, que é o que faz o traço ser a mesma simulação que a comparação resumiu. */
-export interface TraceRequest extends Omit<Scenario, "seed" | "credit_return"> {
+ * Aqui a seed não é ignorada como em `/compare` — ela é o que se pede. O
+ * resolvedor e o retorno continuam sendo do braço onde ele os fixa, que é o
+ * que faz o traço ser a mesma simulação que a comparação resumiu. */
+export interface TraceRequest extends Omit<Scenario, "seed"> {
   arm: string;
   seed: number;
 }

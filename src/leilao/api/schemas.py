@@ -20,7 +20,6 @@ from ..config import (
     AvailabilityProfile,
     ConcentrationProfile,
     CreditMemory,
-    CreditReturnPolicy,
     Mechanism,
     PerformanceProfile,
     Resolver,
@@ -457,7 +456,7 @@ class ScenarioIn(BaseModel):
     credit_memory: CreditMemory = Field(
         default="carry",
         description=(
-            "se o orçamento carrega entre períodos (eq. 36) ou recomeça em Gamma_min"
+            "se o orçamento carrega entre períodos (eq. 36) ou recomeça em C_min"
         ),
     )
     elective_hours: int = Field(
@@ -465,26 +464,40 @@ class ScenarioIn(BaseModel):
         ge=0,
         description="X — carga horária optativa exigida para concluir",
     )
-    base_credits: int = Field(default=12, ge=1, description="Gamma_min — créditos base")
+    min_credits: int = Field(
+        default=12, ge=1, description="C_min — orçamento mínimo do período"
+    )
     max_credits: int | None = Field(
         default=30,
         ge=1,
-        description="Gamma_max — teto do saldo acumulado; nulo desliga o teto",
+        description="C_max — orçamento máximo do período; nulo desliga o teto",
     )
-    # f_gamma — eq. (34); as políticas estão em `grading.credit_return`.
-    # Este e o `base_credits` acima são do leilão por créditos e não têm efeito
-    # na linha de base por CR, que não tem orçamento nem preço pago.
-    credit_return: CreditReturnPolicy = "none"
+    # f_gamma — eq. (34): γ = ⌊nota/10 · k · preço⌋. Este e o `min_credits`
+    # acima são do leilão por créditos e não têm efeito na linha de base por
+    # CR, que não tem orçamento nem preço pago.
+    return_multiplier: float = Field(
+        default=2.0,
+        ge=0,
+        description="k — multiplica o preço pago no retorno; 0 desliga",
+    )
+    exclusion_refund_rate: float = Field(
+        default=0.0,
+        ge=0,
+        le=1,
+        description="fração do preço pago que a disciplina excluída devolve",
+    )
 
 
 class CompareRequest(ScenarioIn):
     """Uma comparação entre os três modelos sobre o mesmo cenário.
 
-    Dois campos do cenário não têm efeito aqui. A **seed**, porque as seeds são
-    1..`runs` e cada uma roda nos três braços: fixar uma só mediria aquela
-    população, e não parear mediria a variação entre populações junto da
-    variação entre modelos. E o **retorno de créditos**, porque ele é o eixo do
-    experimento — um braço o usa proporcional e o outro não o usa.
+    A **seed** do cenário não tem efeito aqui, porque as seeds são 1..`runs` e
+    cada uma roda nos três braços: fixar uma só mediria aquela população, e não
+    parear mediria a variação entre populações junto da variação entre modelos.
+
+    O `return_multiplier`, ao contrário, vale — mas só onde o braço não o
+    fixa. O retorno é o eixo do experimento: o braço de ablação o desliga
+    impondo 0, e o braço do trabalho roda com o do cenário.
     """
 
     runs: int = Field(
@@ -629,7 +642,9 @@ class ArmResultOut(BaseModel):
 
     key: str
     mechanism: Mechanism
-    credit_return: CreditReturnPolicy
+    # O k efetivamente rodado neste braço, e não o do cenário: o braço de
+    # ablação o impõe em 0 para desligar o retorno.
+    return_multiplier: float
     runs: list[RunSummaryOut]
     # As séries reduzidas entre as seeds: cada régua do eixo X cruzada com o
     # agregado e com cada recorte. A série de cada simulação não sai — só os

@@ -71,7 +71,7 @@ function newStudent(id: string, label: string, config: Scenario): PlaygroundStud
   return {
     id,
     label,
-    credits: config.base_credits,
+    credits: config.min_credits,
     cr: 7,
     maxHours: config.max_hours,
     // Disponibilidade que cobre a carga e os dois valores neutros: o aluno

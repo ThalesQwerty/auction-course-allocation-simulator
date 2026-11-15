@@ -233,13 +233,14 @@ class StudentPeriodRecord:
     """A linha do histórico de um aluno num período letivo.
 
     As quatro grandezas de crédito fecham a conta da eq. (36):
-    `credits_end = credits_start − credits_spent + Γ_min + credits_returned`.
+    `credits_end = clamp(credits_start − credits_spent + credits_returned,
+    C_min, C_max)`.
     """
 
     period: int
     credits_start: int
     credits_spent: int
-    credits_returned: int  # Σγ, sem o Γ_min
+    credits_returned: int  # Σγ
     credits_end: int
     satisfaction: float  # ψ_a^(t)
     grade_average: float  # N_a no início do período

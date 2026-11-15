@@ -272,24 +272,49 @@ export function Config({
             </div>
             <div className="field">
               <label>
-                Créditos base por período (Γ<sub>min</sub>)
+                Orçamento mínimo (C<sub>min</sub>)
               </label>
               <input
                 type="number"
                 min={1}
-                value={config.base_credits}
-                onChange={(e) => patch({ base_credits: Number(e.target.value) })}
+                value={config.min_credits}
+                onChange={(e) => patch({ min_credits: Number(e.target.value) })}
               />
             </div>
             <div className="field">
               <label>
-                Teto do saldo acumulado (Γ<sub>max</sub>)
+                Orçamento máximo (C<sub>max</sub>)
               </label>
               <input
                 type="number"
-                min={config.base_credits}
-                value={config.max_credits ?? config.base_credits}
+                min={config.min_credits}
+                value={config.max_credits ?? config.min_credits}
                 onChange={(e) => patch({ max_credits: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Multiplicador do retorno (k)</label>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={config.return_multiplier}
+                onChange={(e) =>
+                  patch({ return_multiplier: Number(e.target.value) })
+                }
+              />
+            </div>
+            <div className="field">
+              <label>Retorno da excluída (%)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={5}
+                value={Math.round(config.exclusion_refund_rate * 100)}
+                onChange={(e) =>
+                  patch({ exclusion_refund_rate: Number(e.target.value) / 100 })
+                }
               />
             </div>
           </div>

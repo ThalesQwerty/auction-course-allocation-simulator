@@ -305,14 +305,14 @@ def test_compare_reports_the_time_to_graduate_with_its_denominator(client):
             assert 1 <= run["time_to_graduate"] <= run["periods"]
 
 
-def test_compare_ignores_the_scenario_seed_and_credit_return(client):
-    """Nenhum dos dois entra: a seed vira o eixo da amostra e o retorno vira o
-    eixo do experimento, imposto por cada braço."""
+def test_compare_ignores_the_scenario_seed(client):
+    """A seed do cenário não entra: ali ela vira o eixo da amostra, e as seeds
+    são 1..N pareadas entre os braços."""
     first = client.post(
-        "/compare", json={**COMPARE_SCENARIO, "seed": 1, "credit_return": "none", "runs": 2}
+        "/compare", json={**COMPARE_SCENARIO, "seed": 1, "runs": 2}
     ).json()
     second = client.post(
-        "/compare", json={**COMPARE_SCENARIO, "seed": 77, "credit_return": "unit", "runs": 2}
+        "/compare", json={**COMPARE_SCENARIO, "seed": 77, "runs": 2}
     ).json()
 
     # `saved_to` é onde a execução foi gravada, não o que ela calculou: duas
@@ -332,6 +332,40 @@ def test_compare_ignores_the_scenario_seed_and_credit_return(client):
     assert all(rounds > 0 for shape in shapes for arm in shape for rounds in arm)
 
     assert first == second
+
+
+def test_compare_lets_the_scenario_set_the_return_but_the_arm_overrides_it(client):
+    """O multiplicador do cenário chega ao braço que **tem** retorno; o de
+    ablação o impõe em 0, e é assim que ele vira o degrau sem retorno."""
+    payload = client.post(
+        "/compare",
+        json={
+            **COMPARE_SCENARIO,
+            "return_multiplier": 3,
+            "runs": 2,
+            "arms": ["credits_return", "credits_ilp"],
+        },
+    ).json()
+    efetivo = {arm["key"]: arm["return_multiplier"] for arm in payload["arms"]}
+
+    assert efetivo["credits_return"] == 3
+    assert efetivo["credits_ilp"] == 0
+
+    # E o k do cenário move o resultado de quem o herda.
+    outro = client.post(
+        "/compare",
+        json={
+            **COMPARE_SCENARIO,
+            "return_multiplier": 1,
+            "runs": 2,
+            "arms": ["credits_return"],
+        },
+    ).json()
+    com_tres = next(a for a in payload["arms"] if a["key"] == "credits_return")
+    com_um = next(a for a in outro["arms"] if a["key"] == "credits_return")
+    assert [r["efficiency"] for r in com_tres["runs"]] != [
+        r["efficiency"] for r in com_um["runs"]
+    ]
 
 
 def test_credit_quantities_exist_only_where_there_is_currency(client):

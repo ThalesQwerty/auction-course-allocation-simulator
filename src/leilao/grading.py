@@ -4,7 +4,7 @@ A nota não sai de uma normal comum, nem da aptidão elevada à demanda que a
 disciplina faz — sai do **quantil** do aluno naquela matéria, lido na normal
 dividida daquela tentativa (`equations.grade_for_attempt`). Aqui fica só o
 sorteio, porque é a única parte que não é pura; a forma da distribuição, a
-transformação por dificuldade e as políticas de retorno estão em `equations/`.
+transformação por dificuldade e o retorno de créditos estão em `equations/`.
 
 Nada é sorteado dentro do laço: o quantil sai da seed na inicialização, como
 exige a Seção 7.3.

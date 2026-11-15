@@ -1,7 +1,7 @@
 import { withUnlocks } from "./curriculum";
 import { cohortSize } from "./equations";
 import { readEntries, requestPersistence, writeEntries } from "./historyStore";
-import { COMPARISON_ARMS, creditReturnLabel, horizonFor } from "./types";
+import { COMPARISON_ARMS, horizonFor } from "./types";
 import type { PerformanceProfile, Profile } from "./types";
 import type { CompareRequest, CompareResponse, Scenario } from "./types";
 
@@ -114,6 +114,20 @@ export function migrateInterest<T extends object>(config: T): T {
  * praticamente cheia — para que reexecutar reproduza o resultado antigo, que é
  * o que a lista promete.
  *
+ * **Crédito**: `base_credits` era o Γ_min somado todo período; ele virou
+ * `min_credits`, o piso do orçamento. O número é o mesmo e o nome é o que
+ * muda, mas a regra não: uma execução gravada antes de 15/11/2026 rodou com o
+ * ganho base, e reexecutá-la dará outro resultado.
+ *
+ * O **multiplicador** entra em 1, que é o `ratio` de então — o braço com
+ * retorno rodava `round(nota/10 · preço)`, e hoje isso é `k = 1` (com piso no
+ * lugar do arredondamento). As outras três políticas não se traduzem em `k`
+ * nenhum, e também nunca chegaram a rodar: numa comparação o retorno do
+ * cenário era ignorado e cada braço impunha o seu.
+ *
+ * A **fração da exclusão** entra em 0. Ela valia `preço // 2` só sob `ratio`,
+ * o que não se escreve como fração única do cenário.
+ *
  * O eixo de desempenho não aparece aqui: a chave de armazenamento sobe quando
  * ele muda de família, porque traduzir média de Beta em nota média seria
  * inventar um cenário que ninguém rodou. */
@@ -128,6 +142,16 @@ function migrateScenario<
     migrated.availability_profiles = [
       { name: "cheia", mode_hours: 1, full_load_rate: 0.999 },
     ];
+  }
+  const campos = migrated as Record<string, unknown>;
+  if (typeof campos.min_credits !== "number") {
+    campos.min_credits =
+      typeof campos.base_credits === "number" ? campos.base_credits : 12;
+    delete campos.base_credits;
+  }
+  if (typeof campos.return_multiplier !== "number") campos.return_multiplier = 1;
+  if (typeof campos.exclusion_refund_rate !== "number") {
+    campos.exclusion_refund_rate = 0;
   }
   return migrated;
 }
@@ -265,10 +289,7 @@ export function formatRunDate(at: string): string {
 }
 
 /** Resumo de uma linha do cenário, para distinguir execuções do mesmo minuto. */
-function describeScenario(
-  config: Scenario | CompareRequest,
-  { withCreditReturn }: { withCreditReturn: boolean }
-): string {
+function describeScenario(config: Scenario | CompareRequest): string {
   const { rounds, disciplines } = config;
   const periods = horizonFor(config.entry_periods, config.max_residence);
   // Uma coorte por período *com ingresso*: a população é a coorte vezes a
@@ -297,12 +318,7 @@ function describeScenario(
   ];
   return (
     `${horizonte} × ${rodadas} · ${disciplines.length} disciplinas · ${students} alunos` +
-    ` · ${populacao.join(", ")}` +
-    // Numa comparação o retorno não é do cenário: é o eixo do experimento, e
-    // dizer "retorno nenhum" ali descreveria só um dos três braços.
-    (withCreditReturn && "credit_return" in config
-      ? ` · retorno ${creditReturnLabel(config.credit_return)}`
-      : "")
+    ` · ${populacao.join(", ")}`
   );
 }
 
@@ -314,7 +330,7 @@ export function describeComparison(run: ComparisonRun): string {
   const arms = run.config.arms?.length ?? COMPARISON_ARMS.length;
   return `${run.config.runs} seeds × ${arms} ${
     arms === 1 ? "modelo" : "modelos"
-  } · ${describeScenario(run.config, { withCreditReturn: false })}`;
+  } · ${describeScenario(run.config)}`;
 }
 
 export const describeEntry = (entry: HistoryEntry): string =>

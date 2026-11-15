@@ -365,22 +365,24 @@ export const defaultScenario = (): Scenario => ({
   // entre 1 e 2 — a calibragem da aprovação não muda, só muda de camada. A
   // razão entre as pontas é 2, que é a intensidade do tratamento.
   class_difficulty_levels: [1, 1.4, 2],
-  credit_return: "none",
+  return_multiplier: 2,
+  exclusion_refund_rate: 0,
   seed: 42,
   ...POPULATION,
-  // Γ_min e Γ_max são um par, e a escolha entre eles é um troco conhecido.
-  // Sem teto, a eq. (36) acumulava até 900 créditos — quinze vezes a base de
+  // C_min e C_max são um par, e a escolha entre eles é um troco conhecido.
+  // Sem teto, a eq. (36) acumulava até 900 créditos — quinze vezes o piso de
   // 60 — em quem é seletivo o bastante para não gastar, e poder de compra
   // vindo da abstenção é o contrário do que o retorno da eq. (34) premia.
-  // Com teto, a base pode cair, e cai: 12 por período, 30 de saldo máximo.
+  // Com teto, o piso pode cair, e cai: 12 de orçamento mínimo, 30 de máximo.
   //
   // O custo é a quantização do lance, e ele é real. O conjunto elegível é
   // grande — ~8 obrigatórias do período mais as 24 optativas, sempre abertas —,
   // e com 12 créditos o aluno não cobre o que quer sem empatar quase tudo em 1
-  // (medido: a fração de lances de 1 crédito sobe de 53% em Γ_min = 60 para
-  // 68% em Γ_min = 20). A mensagem se aproxima de um conjunto, que é o que a
-  // linha de base por CR já envia. É escolha deliberada: o teto importa mais.
-  base_credits: 12,
+  // (medido com o ganho base do anteprojeto: a fração de lances de 1 crédito
+  // sobe de 53% com 60 para 68% com 20). A mensagem se aproxima de um
+  // conjunto, que é o que a linha de base por CR já envia. É escolha
+  // deliberada: o teto importa mais.
+  min_credits: 12,
   max_credits: 30,
 });
 
