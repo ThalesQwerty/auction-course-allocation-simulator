@@ -1273,6 +1273,23 @@ td.failed {
   padding-bottom: 5px;
 }
 
+/* A escolha dos modelos no formulário. Cada linha leva o traçado com que o
+   modelo aparece nos gráficos, que é a única coisa que os distingue lá. */
+.checkbox-set {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.checkbox-set .checkbox {
+  padding-bottom: 0;
+  white-space: nowrap;
+}
+
+.checkbox-set .checkbox:has(input:disabled) {
+  cursor: default;
+}
+
 .checkbox input {
   width: auto;
 }

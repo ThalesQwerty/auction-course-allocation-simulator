@@ -4,7 +4,7 @@ import pytest
 from profiles import single_axis
 from disciplines import disciplines_from_predecessors
 from leilao.config import Discipline, SimulationConfig, horizon_for_lifecycle
-from leilao.equations import next_budget
+from leilao.equations import next_budget, progress
 from leilao.grading import credit_return
 from leilao.metrics import demand_per_seat, jain_index, pearson, semestralization
 from leilao.population import generate_students
@@ -989,6 +989,37 @@ def test_the_band_clamps_the_accumulated_balance_on_both_sides():
     assert next_budget("none", **conta, min_credits=12, max_credits=5) == 12
 
 
+def test_without_the_return_the_carry_has_nothing_to_carry():
+    """Com k = 0, `"carry"` é o mesmo modelo que `"none"` — e isso é o que faz
+    do leilão igualitário **um** braço, e não dois.
+
+    O orçamento abre em `C_min` (eq. 37) e, sem retorno, `started - spent`
+    nunca passa dele: o piso o devolve a `C_min` todo período. A sobra só tem
+    o que carregar depois de o retorno erguer o saldo acima do piso.
+
+    O cenário precisa ser **apertado** para a prova dizer alguma coisa: sem
+    disputa ninguém gasta nada e as duas memórias coincidem por falta de
+    movimento, não por identidade.
+    """
+    conta = dict(started_with=12, spent=7, period_return=0)
+    assert next_budget("carry", **conta, min_credits=12) == 12
+    assert next_budget("none", **conta, min_credits=12) == 12
+
+    apertado = dict(students_per_profile=5, return_multiplier=0, periods=8)
+    sem_memoria = run_simulation(make_config(credit_memory="none", **apertado))
+    com_sobra = run_simulation(make_config(credit_memory="carry", **apertado))
+
+    assert [s.graduated_at for s in sem_memoria.students] == [
+        s.graduated_at for s in com_sobra.students
+    ]
+    assert [p.aggregate.overall for p in sem_memoria.periods] == [
+        p.aggregate.overall for p in com_sobra.periods
+    ]
+    assert [h.periods for h in sem_memoria.histories] == [
+        h.periods for h in com_sobra.histories
+    ]
+
+
 def test_the_return_matches_the_equation_inside_a_full_simulation():
     """O gamma registrado por disciplina tem de bater com a eq. (34) rodando a
     simulação inteira — é o que a coluna da tela do aluno mostra."""
@@ -1356,6 +1387,51 @@ def test_utilization_is_the_share_of_the_workload_cap_that_was_filled():
         metrics = reported[(period, None)]
         assert metrics is not None
         assert metrics.utilization == pytest.approx(sum(shares) / len(shares))
+
+
+def test_progress_is_the_approved_hours_over_the_hours_to_graduate():
+    """Progresso = carga aprovada ÷ carga que conclui o curso (S).
+
+    Vem do **histórico**, e não do período: é a única métrica de recorte que
+    acumula. Com isso ela sobe ao longo do horizonte em qualquer mecanismo, e
+    o que separa os braços é a inclinação, não o nível.
+
+    Não se confunde com a semestralização, que divide pelo que o aluno poderia
+    ter aprovado desde que entrou e mede ritmo.
+    """
+    config = make_config(periods=6)
+    result = run_simulation(config)
+    total = config.hours_to_graduate()
+    assert total == sum(d.hours for d in GRADE)
+
+    entry = {s.id: s.entry_period for s in result.students}
+    by_period: dict[int, list[float]] = {}
+    for history in result.histories:
+        for record in history.periods:
+            if record.period == entry[history.student_id]:
+                continue
+            by_period.setdefault(record.period, []).append(
+                record.approved_hours / total
+            )
+
+    medidos = 0
+    for report in result.periods:
+        metrics = report.aggregate.overall.metrics
+        if metrics is None:
+            continue
+        medidos += 1
+        shares = by_period[report.period]
+        assert metrics.progress == pytest.approx(sum(shares) / len(shares))
+        assert 0.0 <= metrics.progress <= 1.0
+    assert medidos, "nenhum período publicou métrica — o cenário não exercita a regra"
+
+
+def test_progress_without_a_curriculum_to_close_is_zero_not_a_division():
+    """S = 0 não é cenário do simulador — a validação exige grade —, mas a
+    equação é pura e responde sozinha: sem curso a fechar não há fração."""
+    assert progress(approved_hours=0, hours_to_graduate=0) == 0.0
+    assert progress(approved_hours=30, hours_to_graduate=0) == 0.0
+    assert progress(approved_hours=30, hours_to_graduate=120) == 0.25
 
 
 # --- o jubilamento ---------------------------------------------------------

@@ -149,10 +149,11 @@ def test_compare_returns_one_summary_per_seed_in_every_arm(client):
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 3}).json()
 
     assert payload["runs"] == 3
-    # Os dois modelos comparados, na ordem do eixo. Não há braço que rode
+    # Os três modelos comparados, na ordem do eixo. Não há braço que rode
     # sem aparecer nos resultados — a ablação não roda por padrão.
     assert [a["key"] for a in payload["arms"]] == [
         "ranking_greedy",
+        "credits_ilp",
         "credits_return",
     ]
     # As seeds vão de 1 a N e são pareadas: a i-ésima execução de cada braço
@@ -162,7 +163,7 @@ def test_compare_returns_one_summary_per_seed_in_every_arm(client):
 
 
 def test_compare_runs_only_the_arms_asked_for(client):
-    """Um braço só é o caso de quem está calibrando cenário: metade do tempo.
+    """Um braço só é o caso de quem está calibrando cenário: um terço do tempo.
 
     A seed continua sendo o eixo da amostra, e o que muda é só quantos braços
     a percorrem — nada no resumo de um braço depende do outro ter rodado.
@@ -245,6 +246,7 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "population",
         "efficiency",
         "utilization",
+        "progress",
         "fidelity",
         "fairness",
         "correlation",
@@ -276,6 +278,7 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "graduation_rate",
         "efficiency",
         "utilization",
+        "progress",
         "fidelity",
         "fairness",
         "correlation",

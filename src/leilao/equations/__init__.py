@@ -107,6 +107,7 @@ Métricas de um recorte (Seção 7.3.3)
     utilization               carga obtida / W_a                  —
     message_fidelity          cosseno(mensagem, preferência)      —
     semestralization          σ_a = H̃/(W·idade)                   —
+    progress                  H̃_a / S — quanto da grade já fechou  —
     demand_per_seat           escassez e concorrência             —
     credits_per_seat          oferta de crédito / vagas           —
     mean_price                π̄ sobre as rodadas com vaga         —
@@ -198,6 +199,7 @@ from .mean_satisfaction import mean_satisfaction
 from .message_fidelity import message_fidelity
 from .next_budget import next_budget
 from .occupancy import occupancy
+from .progress import progress
 from .pearson_correlation import pearson
 from .period_return import period_return
 from .preference_split import preference_split
@@ -281,6 +283,7 @@ __all__ = [
     "next_budget",
     "normalize_rows",
     "occupancy",
+    "progress",
     "pearson",
     "period_return",
     "preference_split",

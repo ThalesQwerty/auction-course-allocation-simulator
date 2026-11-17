@@ -231,18 +231,18 @@ export type Mechanism = "credits" | "ranking";
  * da legenda e das cores.
  *
  * O eixo é um **caminho**, e cada seta muda **uma** coisa só. É o que torna o
- * vão atribuível: comparar o CR direto com o leilão mediria mensagem e
- * resolução somadas, sem dizer qual pesou.
+ * vão atribuível: comparar o CR direto com o leilão acumulativo mediria
+ * mensagem, resolução e acúmulo somados, sem dizer qual pesou.
  *
- *     CR ──mensagem──▶ Bidding points ──resolução──▶ sem retorno ──retorno──▶ com retorno
+ *     CR ──mensagem──▶ Bidding points ──resolução──▶ igualitário ──acúmulo──▶ acumulativo
  *
  * 1. **Mensagem**: o CR dá um número por *aluno*, o lance dá um número por
  *    *par* (aluno, disciplina). Os dois resolvem ordinalmente.
  * 2. **Resolução**: ordinal usa só a *ordem* dos lances — qualquer
  *    transformação monótona dá a mesma alocação —, cardinal usa as
  *    *magnitudes* e derruba um lance alto para acomodar dois médios.
- * 3. **Retorno**: quem aprova recupera a fatia do preço correspondente à
- *    nota. É a única fonte de mérito do leilão.
+ * 3. **Acúmulo**: o saldo atravessa o período (eq. 36) e o retorno da eq. (34)
+ *    o alimenta. É a única fonte de mérito do leilão.
  *
  * **Só entra aqui o que sai nos resultados**: cada braço é um traçado dos
  * gráficos e uma linha das tabelas, e nada roda para não ser mostrado.
@@ -254,49 +254,61 @@ interface ArmDescription {
   /** Rótulo curto: em espaço apertado cabe pouco, e o nome inteiro
    * fica na legenda. */
   short: string;
+  /** `strokeDasharray` do traçado — a dimensão que separa os modelos em todo
+   * gráfico, já que a cor pertence ao recorte. Vazio é contínuo. */
+  dash: string;
   hint: string;
 }
 
-/** Os dois modelos comparados, na ordem do eixo.
+/** Os três modelos comparados, na ordem do eixo.
  *
- * A complexidade do trabalho foi para os parâmetros — os perfis de aluno e a
- * disponibilidade —, e por equilíbrio saiu dos modelos. O preço é que o vão
- * medido soma três mudanças ao mesmo tempo (mensagem, resolução e retorno) e
- * não diz qual pesou; a escada que as separava está em `ABLATION_ARMS`.
+ * Os dois leilões são o **mesmo** mecanismo — mesma moeda, mesmo resolvedor,
+ * mesmo segundo preço — e diferem em de onde vem o orçamento. Com os três o
+ * vão se lê em duas parcelas: CR × igualitário diz o que a moeda compra,
+ * igualitário × acumulativo diz o que o acúmulo compra. Fora deles fica a
+ * mensagem, em `ABLATION_ARMS`.
  *
- * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas. */
+ * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas, e
+ * `credits_ilp` é **histórico** — nomeia o resolvedor porque nasceu para
+ * isolá-lo, e hoje nomeia o leilão igualitário. A chave ficou para que
+ * comparação gravada antes disto continue casando com o braço. */
 export const COMPARISON_ARMS: ArmDescription[] = [
   {
     key: "ranking_greedy",
-    label: "CR",
+    label: "Ordenação por CR",
     short: "CR",
+    dash: "2 3",
     hint: "a linha de base: matrícula por histórico. Os alunos entram em ordem decrescente de CR e cada um leva o que quer, na própria ordem de preferência, enquanto houver vaga e carga — eqs. (49)-(50). Ordinal: a alocação usa só a ordem, nunca a magnitude. Excluir não custa nada aqui — não há moeda a perder",
   },
   {
+    key: "credits_ilp",
+    label: "Leilão igualitário",
+    short: "Igualitário",
+    dash: "7 4",
+    hint: "o mesmo leilão, com o orçamento fixo: todo aluno abre todo período com C_min, nada atravessa o período e o f_γ da eq. (34) fica desligado (k = 0). Sem acúmulo, o poder de compra não guarda traço nenhum do passado do aluno — o lance diz só o quanto ele quer aquela disciplina agora",
+  },
+  {
     key: "credits_return",
-    label: "Leilão",
-    short: "Leilão",
-    hint: "o modelo proposto (Seção 7.1): o aluno reparte um orçamento de créditos em lances por disciplina, um PLI resolve a alocação e o segundo preço cobra. Pelo f_γ da eq. (34) ele recupera ⌊nota/10 · k · preço⌋ do que pagou, de modo que só a nota 10 dobra o investido — e quem exclui não recupera nada, de modo que largar vaga custa",
+    label: "Leilão acumulativo",
+    short: "Acumulativo",
+    dash: "",
+    hint: "o modelo proposto (Seção 7.1): o aluno reparte um orçamento de créditos em lances por disciplina, um PLI resolve a alocação e o segundo preço cobra. O saldo atravessa o período (eq. 36) e o f_γ da eq. (34) o alimenta — ⌊nota/10 · k · preço⌋ do que pagou, de modo que só a nota 10 dobra o investido. É a única fonte de mérito do leilão, e quem exclui não recupera nada",
   },
 ];
 
-/** Os dois degraus do meio do caminho, que **não** rodam por padrão.
+/** O degrau que sobrou do caminho, e que **não** roda por padrão.
  *
- * Separam o vão em três parcelas, e o motor os alcança por
- * `run_comparison(..., arms=ARMS + ABLATION_ARMS)`. Ficam aqui só para que o
- * traço de uma simulação antiga continue com rótulo legível. */
+ * Separa a mensagem da resolução entre o CR e o leilão igualitário, e o motor
+ * o alcança por `run_comparison(..., arms=ARMS + ABLATION_ARMS)`. Fica aqui
+ * também para que o traço de uma simulação antiga continue com rótulo
+ * legível. */
 export const ABLATION_ARMS: ArmDescription[] = [
   {
     key: "credits_greedy",
     label: "Bidding points",
     short: "Bidding points",
+    dash: "1 3",
     hint: "o mecanismo de pontos das business schools (Sönmez & Ünver 2010): lances repartidos de um orçamento, atendidos em ordem decrescente. Ordinal como o CR — o que muda é só a mensagem, que passa a ser um número por disciplina em vez de um por aluno",
-  },
-  {
-    key: "credits_ilp",
-    label: "Leilão sem retorno",
-    short: "Sem retorno",
-    hint: "o mesmo leilão resolvido por PLI, mas com o retorno desligado (k = 0): nada do que se gasta volta. Cardinal — a alocação usa as magnitudes e derruba um lance alto para acomodar dois médios. O que muda em relação ao bidding points é só a resolução",
   },
 ];
 
@@ -391,10 +403,14 @@ export interface RunSummary {
   /** Quantos ingressaram ao todo — o denominador das duas frações. */
   population: number;
   efficiency: number; // ψ̄ — eq. (53)
-  /** Aproveitamento: carga horária obtida ÷ W_a. A contraparte em carga do ψ,
+  /** Ocupação (θ): carga horária obtida ÷ W_a. A contraparte em carga do ψ,
    * que é em utilidade — as duas se separam onde está a patologia que
    * interessa. */
   utilization: number;
+  /** Progresso: carga aprovada ÷ carga que conclui o curso, na média
+   * ponderada dos períodos. Lê-se com `graduates` ao lado: quem fecha a grade
+   * sai da medida, e a média dos que ficam para de subir na drenagem. */
+  progress: number;
   /** Fidelidade da mensagem: quanto da preferência sobrevive à tradução para
    * o que o mecanismo de fato recebe. **Descreve, não pontua.** */
   fidelity: number;
@@ -516,7 +532,7 @@ export type Band = [number, number, number];
  * nenhuma seed a mediu. `n[i]` é quantas seeds mediram o grupo ali.
  *
  * As grandezas: `students`, `graduation_rate` (acumulada), `efficiency`,
- * `utilization`, `fidelity`, `fairness`, `correlation`, `exclusion_rate`, os
+ * `utilization`, `progress`, `fidelity`, `fairness`, `correlation`, `exclusion_rate`, os
  * seis estados de solicitação pelo nome, as quatro frações do funil
  * (`requested_share`, `granted_share`, `attended_share`, `approved_share`) e
  * `round_<r>` para a saturação.
@@ -593,11 +609,17 @@ export interface Metrics {
    * **total** do aluno que foi servida — não do que estava ao alcance dele.
    * ψ = 1 exigiria cursar a grade inteira num período. */
   efficiency: number;
-  /** Aproveitamento — carga horária obtida no período ÷ W_a, média dos alunos
-   * medidos. É a contraparte em **carga** do ψ, que é em **utilidade**: o
-   * aluno que concentra o lance, ganha a disciplina que amava e deixa o resto
-   * de W_a ocioso pontua ψ alto e aproveitamento baixo. Em [0, 1]. */
+  /** Ocupação (θ) — carga horária obtida no período ÷ W_a, média dos alunos
+   * medidos. Conta a vaga **obtida**, tenha ela sido excluída depois ou não.
+   * É a contraparte em **carga** do ψ, que é em **utilidade**: o aluno que
+   * concentra o lance, ganha a disciplina que amava e deixa o resto de W_a
+   * ocioso pontua ψ alto e ocupação baixa. Em [0, 1]. */
   utilization: number;
+  /** Progresso — carga aprovada do histórico ÷ carga mínima para concluir (as
+   * obrigatórias inteiras mais a exigência optativa). A única métrica daqui
+   * que **acumula**: sobe ao longo do horizonte em qualquer mecanismo, e o
+   * que separa os braços é a inclinação. Em [0, 1]. */
+  progress: number;
   /** Fidelidade da mensagem — o cosseno entre o vetor de lances normalizado e
    * o de utilidades, sobre o elegível. O mecanismo nunca vê `u`: vê a
    * mensagem, e isto mede quanto da preferência sobrevive à tradução. A linha

@@ -254,9 +254,9 @@ def test_the_comparison_fixes_the_return_per_arm():
     assert efetivo["ranking_greedy"] == 0
 
 
-def test_the_two_credit_arms_differ_only_by_the_return():
+def test_the_two_credit_arms_differ_only_by_the_accumulation():
     """Mesma seed, mesmo mecanismo, mesma população: o que separa os dois é só
-    a política de retorno — e ela precisa separar, senão o braço é redundante.
+    o acúmulo de créditos — e ele precisa separar, senão o braço é redundante.
 
     Precisa de um cenário **apertado** para a prova fazer sentido: o retorno só
     muda alguma coisa onde o crédito é escasso. Com os 3 alunos por período do

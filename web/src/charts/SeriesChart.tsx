@@ -31,14 +31,22 @@ const HEIGHT = 220;
 /** Folga da régua quando a métrica não tem contradomínio — ver `paddedScale`. */
 const PADDING = 0.1;
 
-/** Um período de uma linha: a faixa entre as seeds e quantas a mediram. */
+/** Um período de uma linha: a faixa entre as seeds e quantas a mediram.
+ *
+ * Os quartis são opcionais porque nem toda linha é uma redução de amostra: a
+ * amplitude entre os grupos de um eixo é um número só, e ali a faixa some em
+ * vez de virar uma faixa de altura zero. */
 export interface BandPoint {
   x: number;
-  q1: number;
+  q1?: number;
   median: number;
-  q3: number;
+  q3?: number;
   n: number;
 }
+
+/** A faixa de um ponto, ou `null` quando a linha não tem faixa. */
+const spanOf = (point: BandPoint): [number, number] | null =>
+  point.q1 === undefined || point.q3 === undefined ? null : [point.q1, point.q3];
 
 /** Uma linha do gráfico: um grupo do recorte sob um modelo. */
 export interface SeriesLine {
@@ -94,6 +102,7 @@ export function SeriesChart({
   zeroLine = false,
   runs,
   xLabel = (x) => String(x),
+  foot = "mediana · intervalo interquartil",
 }: {
   title: string;
   /** Cor do quadrado ao lado do título, quando o que o gráfico mostra é um
@@ -112,6 +121,8 @@ export function SeriesChart({
    * medido sobre menos que todas. */
   runs: number;
   xLabel?: (x: number) => string;
+  /** O que a linha é, no rodapé do tooltip. */
+  foot?: string;
 }) {
   const dark = usePrefersDark();
   const ink = inkFor(dark);
@@ -164,14 +175,16 @@ export function SeriesChart({
           const key = lineKey(line);
           const point = byX.get(key)?.get(x);
           row[key] = point ? point.median : null;
-          row[bandKey(key)] = point ? [point.q1, point.q3] : null;
+          row[bandKey(key)] = point ? spanOf(point) : null;
         });
         return row;
       }),
     [xs, visible, byX]
   );
 
-  const spread = visible.flatMap((line) => line.points.flatMap((p) => [p.q1, p.q3]));
+  const spread = visible.flatMap((line) =>
+    line.points.flatMap((point) => spanOf(point) ?? [point.median])
+  );
   const scale = paddedScale(spread, { bounds, zeroLine, padding: PADDING });
   // Com muitas linhas as faixas se somam e viram névoa; mais leves, elas
   // continuam dizendo onde a amostra se espalha sem cobrir as medianas.
@@ -260,6 +273,7 @@ export function SeriesChart({
                 runs={runs}
                 dark={dark}
                 xLabel={xLabel}
+                foot={foot}
               />
             }
           />
@@ -312,6 +326,7 @@ function PeriodTip({
   runs,
   dark,
   xLabel,
+  foot,
 }: {
   active?: boolean;
   label?: number;
@@ -326,19 +341,21 @@ function PeriodTip({
   runs: number;
   dark: boolean;
   xLabel: (x: number) => string;
+  foot: string;
 }) {
   if (!active || label === undefined) return null;
   const ink = inkFor(dark);
   const rows = lines
     .map((line) => ({ line, point: byX.get(lineKey(line))?.get(label) }))
     .filter((row): row is { line: SeriesLine; point: BandPoint } => !!row.point)
-    .sort((a, b) => b.point.median - a.point.median);
+    .sort((a, b) => b.point.median - a.point.median)
+    .map((row) => ({ ...row, span: spanOf(row.point) }));
   if (!rows.length) return null;
 
   return (
     <div className="tooltip">
       <div className="tooltip-title">{xLabel(label)}</div>
-      {rows.map(({ line, point }) => (
+      {rows.map(({ line, point, span }) => (
         <div className="tooltip-row" key={lineKey(line)}>
           <LineSample dash={dashOf[line.arm]} color={colorOf[line.group]} />
           <span className="tooltip-label">
@@ -349,13 +366,13 @@ function PeriodTip({
           <span className="tooltip-value" style={{ color: ink.secondary }}>
             {format(point.median)}
             <span className="tooltip-aside">
-              {` ${format(point.q1)}–${format(point.q3)}`}
+              {span ? ` ${format(span[0])}–${format(span[1])}` : ""}
               {point.n < runs ? ` · n=${point.n}` : ""}
             </span>
           </span>
         </div>
       ))}
-      <div className="tooltip-foot">mediana · intervalo interquartil</div>
+      <div className="tooltip-foot">{foot}</div>
     </div>
   );
 }

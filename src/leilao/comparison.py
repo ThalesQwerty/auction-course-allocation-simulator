@@ -20,15 +20,18 @@ Juntas, as duas isolam o nexo causal no mecanismo. Uma simulação só não diri
 nada — a diferença poderia ser daquela população; e N simulações sem parear as
 seeds mediriam a variação entre populações junto da variação entre mecanismos.
 
-**São dois braços** (`ARMS`): a ordenação por CR e o leilão com retorno. A
-complexidade do trabalho foi para os parâmetros — os perfis de aluno e a
-disponibilidade —, e por equilíbrio saiu dos modelos comparados.
+**São três braços** (`ARMS`): a ordenação por CR, o leilão igualitário e o
+leilão acumulativo. Os dois leilões são o mesmo mecanismo — mesma moeda, mesmo
+resolvedor, mesmo segundo preço — e diferem em **de onde vem o orçamento**: no
+igualitário todo aluno abre todo período com `C_min`, e no acumulativo o saldo
+atravessa o período e o retorno da eq. (34) o alimenta.
 
-O preço disso é que o vão medido soma três mudanças ao mesmo tempo, e não diz
-qual pesou. A escada que as separava continua aqui, em `ABLATION_ARMS`:
+Com eles o vão se lê em duas parcelas em vez de uma: CR × igualitário diz o
+que a **moeda** compra, igualitário × acumulativo diz o que o **acúmulo**
+compra. Sobra um degrau fora dos três, em `ABLATION_ARMS`:
 
-    CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão sem retorno
-                                                   ──retorno──▶  Leilão com retorno
+    CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão igualitário
+                                                   ──acúmulo──▶  Leilão acumulativo
 
 1. **A mensagem.** O CR dá um número por *aluno*; o lance dá um número por
    *par* (aluno, disciplina). É a intensidade entrando no que o mecanismo
@@ -43,21 +46,31 @@ qual pesou. A escada que as separava continua aqui, em `ABLATION_ARMS`:
    varredura nunca faz. Os dois só divergem onde a carga horária aperta — sem
    ela o problema se separa por disciplina e a varredura é ótima —, então o
    passo só tem conteúdo em cenário com conjunto elegível maior que W_a.
-3. **O retorno.** `f_γ` proporcional (eq. 34): quem aprova recupera a fatia
-   do preço correspondente à nota, de modo que ir bem compra poder de compra
-   no período seguinte. É a única fonte de mérito do leilão — a ordenação por
-   CR faz isso por construção, o histórico *é* o critério, e o leilão sem
-   retorno não faz de jeito nenhum.
+3. **O acúmulo.** A eq. (36) carrega o saldo de um período para o outro e o
+   `f_γ` da eq. (34) o alimenta: quem aprova recupera a fatia do preço
+   correspondente à nota, de modo que ir bem compra poder de compra no período
+   seguinte. É a única fonte de mérito do leilão — a ordenação por CR faz isso
+   por construção, o histórico *é* o critério, e o leilão igualitário não faz
+   de jeito nenhum.
 
-**Por que o retorno leva ablação e a sobra não.** A sobra é a eq. (36), dada
+**Memória e retorno são um canal só, não dois.** O braço igualitário fixa os
+dois (`credit_memory="none"` e `k = 0`), e os dois campos dizem a mesma coisa:
+medido, `carry` com `k = 0` sai **idêntico** a `none` — relatório por
+relatório, em todas as seeds —, porque o orçamento abre em `C_min` (eq. 37) e,
+sem retorno, só pode cair; o piso o traz de volta. Não há sobra a carregar
+enquanto não houver retorno que erga o saldo acima do piso. Fixar os dois é,
+então, redundância deliberada: o braço fica dizendo o que é em vez de depender
+dessa prova.
+
+**Por que o acúmulo virou braço e não ablação.** A sobra é a eq. (36), dada
 pelo anteprojeto; a forma do retorno a Seção 7.3.2 deixa explicitamente em
 aberto, como eixo de experimentação. Ligá-lo é decisão de quem escreve, e o
-passo 3 é onde ela se paga.
+passo 3 é onde ela se paga — cara demais para ficar fora do padrão.
 
-Por isso o retorno e o resolvedor **não são do cenário aqui**: são eixos do
+Por isso o acúmulo e o resolvedor **não são do cenário aqui**: são eixos do
 experimento. O resolvedor que vier na configuração é ignorado, como a seed; o
-multiplicador do retorno vale onde o braço não o fixa, e os de ablação o fixam
-em 0 — ver `Arm.multiplier_over`.
+multiplicador do retorno vale onde o braço não o fixa, e os demais o fixam em
+0 — ver `Arm.multiplier_over`.
 
 **Uma simulação vira um número por métrica**, que é a linha das tabelas. Para as
 três métricas de período a redução é a média **ponderada pelos alunos medidos**:
@@ -166,12 +179,13 @@ class Arm:
     Um modelo é a combinação de quatro escolhas: a **moeda** (ordenação por CR
     ou lance em créditos), o **resolvedor** (varredura gulosa ou PLI global),
     a **memória do orçamento** (se a sobra atravessa o período) e o
-    **retorno de créditos**.
+    **retorno de créditos**. As duas últimas andam juntas: desligar uma torna
+    a outra inerte, e por isso o braço igualitário desliga as duas.
 
     `return_multiplier` é o k da eq. (34) que o braço impõe ao cenário; `None`
-    quer dizer "o do cenário", e é como o braço que **tem** retorno não fixa
-    quanto. Zero desliga o retorno, e é assim que um braço vira o degrau sem
-    ele sem deixar de ser o mesmo modelo — ver `multiplier_over`.
+    quer dizer "o do cenário", e é como o braço que **acumula** não fixa
+    quanto. Zero desliga o retorno, e é assim que um braço fica sem acúmulo
+    sem deixar de ser o mesmo modelo — ver `multiplier_over`.
 
     `key` é o identificador estável que a interface usa para rotular a série —
     o rótulo em si é dela, não daqui.
@@ -195,13 +209,18 @@ class Arm:
 # CR é o próprio critério ao que o ignora por completo.
 #
 # **Só entra aqui o que sai nos resultados**: cada braço é um traçado dos
-# gráficos e uma linha das tabelas, e nada roda para não ser mostrado. Duas
-# células que já foram braços saíram por não serem passos do caminho — o CR
-# resolvido por PLI (que tem defeito declarado: como todo pedido do aluno tem
-# o mesmo peso N_a, a PLI é indiferente sobre qual cortar, e o aluno não tem
-# voz sobre o que perde) e o leilão sem sobra. As duas seguem alcançáveis por
-# `SimulationConfig` — `resolver="ilp"` com `mechanism="ranking"`, e
-# `credit_memory="none"` — se um dia forem precisas para um apêndice.
+# gráficos e uma linha das tabelas, e nada roda para não ser mostrado. Uma
+# célula que já foi braço saiu por não ser passo do caminho — o CR resolvido
+# por PLI, que tem defeito declarado: como todo pedido do aluno tem o mesmo
+# peso N_a, a PLI é indiferente sobre qual cortar, e o aluno não tem voz sobre
+# o que perde. Ela segue alcançável por `SimulationConfig` (`resolver="ilp"`
+# com `mechanism="ranking"`) se um dia for precisa para um apêndice.
+#
+# A chave `credits_ilp` é **histórica**: nasceu nomeando o resolvedor, quando
+# o braço existia para isolá-lo da varredura. Hoje ela nomeia o leilão
+# igualitário, e o resolvedor dele é o mesmo do acumulativo. O nome ficou
+# porque a chave é identificador estável — comparação gravada antes disto
+# continua casando com o braço.
 #
 # **Os dois não usam o mesmo resolvedor, e isso é deliberado.** O CR roda por
 # ditadura serial, que desempata por ε; o leilão roda por PLI, que não lê o ε
@@ -210,18 +229,19 @@ class Arm:
 # que é o que a PLI entrega e o guloso não — preferiu-se a assimetria a isso.
 ARMS: tuple[Arm, ...] = (
     Arm("ranking_greedy", "ranking", 0.0, resolver="greedy"),
+    Arm("credits_ilp", "credits", 0.0, resolver="ilp", credit_memory="none"),
     Arm("credits_return", "credits", None),
 )
 
-# Os dois degraus do meio do caminho, que **não** rodam por padrão.
+# O degrau que sobrou do caminho, e que **não** roda por padrão.
 #
-# Eles separam o vão em três parcelas — mensagem (CR → lance), resolução
-# (varredura → PLI) e retorno —, e sem eles o que a comparação mede é a soma
-# das três, sem dizer qual pesou. Saíram do padrão porque o trabalho passou a
-# comparar dois modelos, e a escada inteira não cabe no texto; ficam aqui
-# porque custam tempo de execução e não complexidade conceitual — são a mesma
-# simulação com dois campos trocados. Para a ablação, `run_comparison(...,
-# arms=ARMS + ABLATION_ARMS)`.
+# Entre o CR e o leilão igualitário há duas mudanças de uma vez — a mensagem
+# (um número por aluno vira um por par) e a resolução (ordinal vira cardinal)
+# —, e este braço as separa: ele tem a mensagem do leilão e a resolução do CR.
+# Fica fora do padrão porque o trabalho compara três modelos e a escada
+# inteira não cabe no texto; fica aqui porque custa tempo de execução e não
+# complexidade conceitual — é a mesma simulação com um campo trocado. Para a
+# ablação, `run_comparison(..., arms=ARMS + ABLATION_ARMS)`.
 #
 # `credits_greedy` é o *bidding points* clássico — orçamento de pontos, lances
 # por disciplina, disciplina fechando no menor lance atendido (Sönmez & Ünver
@@ -231,8 +251,7 @@ ARMS: tuple[Arm, ...] = (
 # aproximadamente iguais e preços de equilíbrio, não lance pago a segundo
 # preço. É trabalho relacionado, não célula deste desenho.
 ABLATION_ARMS: tuple[Arm, ...] = (
-    Arm("credits_greedy", "credits", 0.0, resolver="greedy"),
-    Arm("credits_ilp", "credits", 0.0, resolver="ilp"),
+    Arm("credits_greedy", "credits", 0.0, resolver="greedy", credit_memory="none"),
 )
 
 
@@ -317,6 +336,11 @@ class RulerSeries:
     graduation_rate: list[float]
     efficiency: list[float]
     utilization: list[float]
+    # Quanto da grade o recorte já fechou — carga aprovada sobre a carga que
+    # conclui. **Acumula**: é a única série aqui que olha o histórico inteiro
+    # e não o período, e por isso sobe ao longo do horizonte em qualquer
+    # mecanismo. O que se compara entre braços é a inclinação, não o nível.
+    progress: list[float]
     fidelity: list[float]
     fairness: list[float]
     correlation: list[float]
@@ -525,6 +549,11 @@ class RunSummary:
     # lance, ganha a disciplina que amava e deixa o resto de W_a ocioso pontua
     # psi alto e aproveitamento baixo.
     utilization: float
+    # Progresso na grade: carga aprovada sobre a carga que conclui, na média
+    # ponderada dos períodos. Lê-se com `graduates` ao lado, pela mesma razão
+    # do tempo de formatura — quem fecha a grade sai da medida, de modo que a
+    # média dos que ficam para de subir na drenagem.
+    progress: float
     # Fidelidade da mensagem: quanto da preferência sobrevive à tradução para
     # o que o mecanismo de fato recebe. **Descreve, não pontua** — como a
     # correlação, ela não ganha "seeds a favor": dizer qual lado é melhor
@@ -859,6 +888,7 @@ def _period_series(
         ],
         efficiency=series(lambda m: m.efficiency),
         utilization=series(lambda m: m.utilization),
+        progress=series(lambda m: m.progress),
         fidelity=series(lambda m: m.fidelity),
         fairness=series(lambda m: m.fairness),
         correlation=series(lambda m: m.correlation),
@@ -1027,6 +1057,7 @@ def _regroup(
         graduation_rate=[graduation(point) for point in points],
         efficiency=[weighed(point, lambda s: s.efficiency) for point in points],
         utilization=[weighed(point, lambda s: s.utilization) for point in points],
+        progress=[weighed(point, lambda s: s.progress) for point in points],
         fidelity=[weighed(point, lambda s: s.fidelity) for point in points],
         fairness=[weighed(point, lambda s: s.fairness) for point in points],
         correlation=[weighed(point, lambda s: s.correlation) for point in points],
@@ -1147,6 +1178,7 @@ def _quantities(series: RulerSeries, index: int) -> dict[str, float | None]:
         "graduation_rate": series.graduation_rate[index],
         "efficiency": series.efficiency[index],
         "utilization": series.utilization[index],
+        "progress": series.progress[index],
         "fidelity": series.fidelity[index],
         "fairness": series.fairness[index],
         "correlation": series.correlation[index],
@@ -1275,6 +1307,7 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         population=len(result.students),
         efficiency=mean(by_period.efficiency),
         utilization=mean(by_period.utilization),
+        progress=mean(by_period.progress),
         fidelity=mean(by_period.fidelity),
         fairness=mean(by_period.fairness),
         correlation=mean(by_period.correlation),

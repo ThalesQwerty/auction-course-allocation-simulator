@@ -513,11 +513,13 @@ class CompareRequest(ScenarioIn):
         default_factory=lambda: [arm.key for arm in ARMS],
         min_length=1,
         description=(
-            "Quais braços rodar. O padrão são os dois do trabalho — "
-            "`ranking_greedy` e `credits_return`. Rodar um só custa metade do "
-            "tempo e serve para calibrar cenário; os painéis que comparam os "
-            "dois lados simplesmente não aparecem. Também aceita os braços de "
-            "ablação, `credits_greedy` e `credits_ilp`."
+            "Quais braços rodar. O padrão são os três do trabalho — "
+            "`ranking_greedy` (ordenação por CR), `credits_ilp` (leilão "
+            "igualitário, orçamento fixo em C_min) e `credits_return` "
+            "(leilão acumulativo). Rodar menos braços custa proporcionalmente "
+            "menos tempo e serve para calibrar cenário; os painéis que "
+            "comparam os ausentes simplesmente não aparecem. Também aceita o "
+            "braço de ablação `credits_greedy`."
         ),
     )
 
@@ -581,8 +583,11 @@ class RunSummaryOut(BaseModel):
     dismissed: int
     population: int
     efficiency: float  # eq. (53)
-    # Aproveitamento: a contraparte em carga do psi, que é em utilidade.
+    # Ocupação: a contraparte em carga do psi, que é em utilidade.
     utilization: float
+    # Progresso: carga aprovada sobre a carga que conclui o curso. Acumula ao
+    # longo do horizonte, e lê-se com `graduates` ao lado.
+    progress: float
     # Fidelidade da mensagem: quanto da preferência sobrevive à tradução.
     # Descreve, não pontua — como a correlação.
     fidelity: float
@@ -703,9 +708,12 @@ class MetricsOut(BaseModel):
     allocated: int
     allocations_per_student: float
     efficiency: float  # eq. (53)
-    # Aproveitamento: carga horária obtida no período ÷ W_a, média dos medidos.
-    # A contraparte em carga do psi, que é em utilidade.
+    # Ocupação: carga horária obtida no período ÷ W_a, média dos medidos. A
+    # contraparte em carga do psi, que é em utilidade.
     utilization: float
+    # Progresso: carga aprovada do histórico ÷ carga mínima para concluir,
+    # média dos medidos. A única métrica daqui que acumula entre períodos.
+    progress: float
     # Fidelidade da mensagem: cosseno entre o lance normalizado e a utilidade.
     # Mede quanto da preferência sobrevive à tradução. Descreve, não pontua.
     fidelity: float

@@ -88,11 +88,13 @@ Resolver = Literal["ilp", "greedy"]
 # poupança: o aluno aposta o orçamento inteiro e paga o segundo preço, então o
 # que sobra é o que ele não foi cobrado, não o que ele guardou.
 #
-# Cruzado com `return_multiplier`, dá a escada de três degraus: sem acúmulo
-# ("none"), só sobra ("carry" + multiplicador 0) e sobra + retorno ("carry" +
-# multiplicador > 0). O degrau do meio separa as duas fontes de memória, que
-# têm sinais opostos de incentivo: a sobra premia quem pagou barato, o retorno
-# premia quem foi bem.
+# Cruzado com `return_multiplier` **não** dá quatro casos, nem três: dá dois.
+# Com multiplicador 0 a sobra não existe — o orçamento abre em C_min (eq. 37)
+# e sem retorno só pode cair, de modo que o piso o devolve a C_min todo
+# período. Medido: `"carry"` com k = 0 sai idêntico a `"none"`, relatório por
+# relatório, em todas as seeds. A sobra só tem o que carregar depois de o
+# retorno erguer o saldo acima do piso, e por isso os dois campos nomeiam um
+# canal só — ver `equations.next_budget`.
 CreditMemory = Literal["none", "carry"]
 
 

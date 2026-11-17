@@ -17,12 +17,23 @@ import type {
   SeriesGroupStyle,
   SeriesLine,
 } from "./charts";
-import { CUTS, RULERS, cutGroups, pointsOf, rulerOf, seriesOf } from "./bands";
+import {
+  AMPLITUDE,
+  CUTS,
+  RULERS,
+  amplitudeGroups,
+  amplitudeLines,
+  cutGroups,
+  pointsOf,
+  rulerOf,
+  seriesOf,
+} from "./bands";
+import type { CutChoice } from "./bands";
 import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
 import { Trace } from "./Trace";
 import { COMPARISON_ARMS } from "./types";
-import type { ClassCut, CutAxis, Ruler, RunSummary } from "./types";
+import type { ClassCut, Ruler, RunSummary } from "./types";
 
 /** Períodos com uma casa: o tempo de formatura anda em frações de período, e
  * duas casas sugeririam uma precisão que a amostra não tem. */
@@ -50,13 +61,6 @@ interface Metric {
   format: (value: number) => string;
   zeroLine?: boolean;
 }
-
-/** O traçado de cada modelo: contínuo para o leilão, tracejado para o CR. A
- * cor fica livre para o grupo do recorte. */
-const ARM_DASH: Record<string, string> = {
-  ranking_greedy: "6 4",
-  credits_return: "",
-};
 
 /** A economia de créditos — **exclusiva do leilão**. Fora dele estas grandezas
  * saem `null`, e não zeradas: não há moeda, e zero se leria como "ninguém
@@ -145,8 +149,8 @@ const classGroupLabel = (axis: ClassCut, key: string): string => {
 const METRICS: Metric[] = [
   {
     id: "efficiency",
-    title: "Eficiência de alocação (ψ̄)",
-    short: "Eficiência (ψ̄)",
+    title: "Satisfação (ψ̄)",
+    short: "Satisfação (ψ̄)",
     of: (run) => run.efficiency,
     band: "efficiency",
     bounds: [0, 1],
@@ -155,11 +159,25 @@ const METRICS: Metric[] = [
   },
   {
     id: "utilization",
-    title: "Aproveitamento da carga",
-    short: "Aproveitamento",
+    title: "Ocupação (θ)",
+    short: "Ocupação (θ)",
     of: (run) => run.utilization,
     band: "utilization",
     bounds: [0, 1],
+    betterWhen: "higher",
+    format: formatRatio,
+  },
+  {
+    id: "progress",
+    title: "Progresso",
+    short: "Progresso",
+    of: (run) => run.progress,
+    band: "progress",
+    bounds: [0, 1],
+    // Pontua, mas com a mesma ressalva do tempo de formatura: quem fecha a
+    // grade sai da medida, de modo que um mecanismo que forma mais gente pode
+    // exibir progresso *menor* entre os que ficaram. Lê-se com a fração de
+    // concluintes ao lado.
     betterWhen: "higher",
     format: formatRatio,
   },
@@ -292,17 +310,29 @@ const roundMetrics = (rounds: number): Metric[] =>
     };
   });
 
-/** Os dois braços do leilão que isolam o retorno: eles diferem em **uma**
- * coisa só — `credits_ilp` é o leilão com PLI e o retorno desligado (k = 0),
- * `credits_return` é o mesmo com o k do cenário. Comparar qualquer outro par
- * mediria o retorno somado a outra diferença. */
-const WITH_RETURN = "credits_return";
-const WITHOUT_RETURN = "credits_ilp";
+/** Os dois braços do leilão que isolam o acúmulo: eles diferem em **uma**
+ * coisa só — `credits_ilp` abre todo período em C_min e não tem retorno,
+ * `credits_return` carrega o saldo e o alimenta com o k do cenário. Comparar
+ * qualquer outro par mediria o acúmulo somado a outra diferença. */
+const WITH_ACCUMULATION = "credits_return";
+const WITHOUT_ACCUMULATION = "credits_ilp";
 
 /** A linha de base, contra a qual as diferenças da tabela de resumo são
  * medidas: a matrícula por CR com varredura, que é o mecanismo real das
  * universidades brasileiras. */
 const BASELINE = "ranking_greedy";
+
+/** O que a amplitude muda em todo gráfico da tela.
+ *
+ * A régua passa a se ajustar aos dados: o vão entre perfis é pequeno perto do
+ * contradomínio da grandeza, e desenhá-lo em [0, 1] o colaria no eixo. Ele
+ * também não tem sinal — é uma distância —, então a marca do zero sai mesmo
+ * onde a grandeza a pedia. */
+const AMPLITUDE_CHART = {
+  bounds: [0, Infinity] as [number, number],
+  zeroLine: false,
+  foot: "vão entre os grupos do eixo",
+};
 
 /** Sinal explícito: numa coluna de diferenças, "+0,04" e "−0,04" se distinguem
  * de relance e "0,04" não. */
@@ -328,15 +358,14 @@ export function Comparison({
    * todos os gráficos, e lê-los com recortes diferentes lado a lado é o que
    * não se quer. */
   const [rulerChoice, setRuler] = useState<Ruler>("period");
-  const [cutChoice, setCut] = useState<CutAxis>("overall");
+  const [cutChoice, setCut] = useState<CutChoice>("overall");
   /** O recorte da oferta no gráfico de preço. Ele é independente do recorte
    * das demais linhas: um reparte turmas, o outro reparte alunos. */
   const [priceCutChoice, setPriceCut] = useState<ClassCut>("curriculum_period");
 
-  /** A escada de ablação só roda quando pedida (`ARMS + ABLATION_ARMS` no
-   * motor). Sem os dois braços do leilão não há o que isolar, e a tabela do
-   * retorno sairia inteira em traços. */
-  const hasAblation = [WITH_RETURN, WITHOUT_RETURN].every((key) =>
+  /** Os dois leilões são escolha de quem configura a comparação. Sem os dois
+   * não há o que isolar, e a tabela do acúmulo sairia inteira em traços. */
+  const hasBothAuctions = [WITH_ACCUMULATION, WITHOUT_ACCUMULATION].every((key) =>
     result.arms.some((arm) => arm.key === key)
   );
 
@@ -344,7 +373,7 @@ export function Comparison({
   const arms: SeriesArmStyle[] = useMemo(
     () =>
       COMPARISON_ARMS.filter((arm) => result.arms.some((a) => a.key === arm.key)).map(
-        (arm) => ({ key: arm.key, label: arm.label, dash: ARM_DASH[arm.key] ?? "2 3" })
+        (arm) => ({ key: arm.key, label: arm.label, dash: arm.dash })
       ),
     [result.arms]
   );
@@ -442,16 +471,25 @@ export function Comparison({
     : (rulers[0]?.ruler ?? "period");
   const scale = RULERS.find((option) => option.ruler === ruler) ?? RULERS[0];
 
+  /** Os eixos de todos os braços nesta régua — o material de que saem os
+   * recortes disponíveis e as linhas da amplitude. */
+  const rulerAxes = useMemo(
+    () => Object.values(series).flat().filter((a) => rulerOf(a) === ruler),
+    [series, ruler]
+  );
+
+  /** Os eixos de perfil que a amplitude mede nesta régua. Vazio, o botão
+   * "Amplitude" some: sem dois grupos não há vão. */
+  const amplitudeStyles = useMemo(() => amplitudeGroups(rulerAxes), [rulerAxes]);
+
   /** Os recortes que esta comparação traz **nesta régua**. Uma gravada antes
    * dos recortes por perfil só tem o "Geral", e os outros botões somem. */
   const cuts = CUTS.filter((option) =>
-    Object.values(series).some((axes) =>
-      axes.some(
-        (a) => rulerOf(a) === ruler && a.axis === option.axis && a.groups.length
-      )
-    )
+    option.axis === AMPLITUDE
+      ? amplitudeStyles.length > 0
+      : rulerAxes.some((a) => a.axis === option.axis && a.groups.length)
   );
-  const cut: CutAxis = cuts.some((c) => c.axis === cutChoice)
+  const cut: CutChoice = cuts.some((c) => c.axis === cutChoice)
     ? cutChoice
     : (cuts[0]?.axis ?? "overall");
 
@@ -459,20 +497,19 @@ export function Comparison({
   const axisOf = (armKey: string) =>
     series[armKey]?.find((a) => rulerOf(a) === ruler && a.axis === cut);
 
-  /** Os grupos do recorte, com cor e rótulo. */
+  /** Os grupos do recorte, com cor e rótulo. Na amplitude eles são os eixos,
+   * e a cor é do eixo. */
   const groups = useMemo(() => {
+    if (cut === AMPLITUDE) return amplitudeStyles;
     const present = [
       ...new Set(
-        Object.values(series).flatMap(
-          (axes) =>
-            axes
-              .find((a) => rulerOf(a) === ruler && a.axis === cut)
-              ?.groups.map((g) => g.group) ?? []
+        rulerAxes.flatMap(
+          (axis) => (axis.axis === cut ? axis.groups.map((g) => g.group) : [])
         )
       ),
     ];
     return cutGroups(cut, run.config, present, { solo: soloColor(dark) });
-  }, [series, ruler, cut, run.config, dark]);
+  }, [rulerAxes, amplitudeStyles, cut, run.config, dark]);
 
   /** A seção da economia só aparece com leilão na comparação **e** com dado
    * dela: as gravadas antes de 14/11/2026 não a têm, e um gráfico vazio diria
@@ -485,20 +522,29 @@ export function Comparison({
     )
   );
 
-  /** As linhas de uma grandeza: um grupo do recorte sob um modelo. */
+  /** As linhas de uma grandeza: um grupo do recorte sob um modelo — ou, na
+   * amplitude, um eixo de perfil sob um modelo. */
   const linesOf = (key: string): SeriesLine[] =>
-    arms.flatMap((arm) =>
-      (axisOf(arm.key)?.groups ?? []).map((group) => ({
-        arm: arm.key,
-        group: group.group,
-        points: pointsOf(group).flatMap((x, i) => {
-          const band = group.values[key]?.[i];
-          return band
-            ? [{ x, q1: band[0], median: band[1], q3: band[2], n: group.n[i] }]
-            : [];
-        }),
-      }))
-    );
+    cut === AMPLITUDE
+      ? arms.flatMap((arm) =>
+          amplitudeLines(
+            series[arm.key]?.filter((a) => rulerOf(a) === ruler) ?? [],
+            arm.key,
+            key
+          )
+        )
+      : arms.flatMap((arm) =>
+          (axisOf(arm.key)?.groups ?? []).map((group) => ({
+            arm: arm.key,
+            group: group.group,
+            points: pointsOf(group).flatMap((x, i) => {
+              const band = group.values[key]?.[i];
+              return band
+                ? [{ x, q1: band[0], median: band[1], q3: band[2], n: group.n[i] }]
+                : [];
+            }),
+          }))
+        );
 
   /** As execuções de um braço, na ordem das seeds. Execuções gravadas antes de
    * um braço existir simplesmente não o trazem, e o braço sai vazio em vez de
@@ -571,11 +617,11 @@ export function Comparison({
     return { favour, comparable };
   };
 
-  /** Quantas seeds o retorno fez *subir* — contagem descritiva, sem juízo de
+  /** Quantas seeds o acúmulo fez *subir* — contagem descritiva, sem juízo de
    * melhor ou pior, porque para λ e para a saturação não há um lado bom. */
-  const raisedByReturn = (metric: Metric) => {
-    const a = runsOf(WITH_RETURN);
-    const b = runsOf(WITHOUT_RETURN);
+  const raisedByAccumulation = (metric: Metric) => {
+    const a = runsOf(WITH_ACCUMULATION);
+    const b = runsOf(WITHOUT_ACCUMULATION);
     let up = 0;
     let comparable = 0;
     a.forEach((left, i) => {
@@ -593,20 +639,22 @@ export function Comparison({
   const medianOf = (key: string, metric: Metric) =>
     boxStats(valuesOf(key, metric))?.median ?? null;
 
-  /** Uma linha por braço na tabela de resumo. */
+  /** Uma linha por braço na tabela de resumo — só os que rodaram, porque uma
+   * linha inteira em traços não diz nada sobre o modelo que ficou de fora. */
   const summaryRows = (metric: Metric) =>
-    COMPARISON_ARMS.map((arm, index) => {
+    COMPARISON_ARMS.filter((arm) =>
+      result.arms.some((entry) => entry.key === arm.key)
+    ).map((arm, index) => {
       const box = boxStats(valuesOf(arm.key, metric));
       const baseline = medianOf(BASELINE, metric);
       const pairing = arm.key === BASELINE ? null : paired(metric, arm.key, BASELINE);
       return (
         <tr key={`${metric.id}-${arm.key}`}>
-          {/* O nome da métrica só na primeira das três linhas: repetido ele
+          {/* O nome da métrica só na primeira linha do bloco: repetido ele
               viraria ruído entre números que se comparam. */}
           <td>{index === 0 ? metric.short : ""}</td>
           <td>
-            <LineSample dash={ARM_DASH[arm.key] ?? "2 3"} color={ink.secondary} />{" "}
-            {arm.label}
+            <LineSample dash={arm.dash} color={ink.secondary} /> {arm.label}
           </td>
           <td>{box ? metric.format(box.min) : "—"}</td>
           <td>{box ? metric.format(box.q1) : "—"}</td>
@@ -631,21 +679,21 @@ export function Comparison({
       );
     });
 
-  /** Uma linha por métrica na tabela do efeito do retorno. */
-  const returnRow = (metric: Metric) => {
-    const without = medianOf(WITHOUT_RETURN, metric);
-    const withReturn = medianOf(WITH_RETURN, metric);
+  /** Uma linha por métrica na tabela do efeito do acúmulo. */
+  const accumulationRow = (metric: Metric) => {
+    const flat = medianOf(WITHOUT_ACCUMULATION, metric);
+    const accumulated = medianOf(WITH_ACCUMULATION, metric);
     const baseline = medianOf(BASELINE, metric);
-    const { up, comparable } = raisedByReturn(metric);
+    const { up, comparable } = raisedByAccumulation(metric);
     return (
       <tr key={metric.id}>
         <td>{metric.short}</td>
-        <td>{without === null ? "—" : metric.format(without)}</td>
-        <td>{withReturn === null ? "—" : metric.format(withReturn)}</td>
+        <td>{flat === null ? "—" : metric.format(flat)}</td>
+        <td>{accumulated === null ? "—" : metric.format(accumulated)}</td>
         <td>
-          {without === null || withReturn === null
+          {flat === null || accumulated === null
             ? "—"
-            : formatDelta(withReturn - without, metric.format)}
+            : formatDelta(accumulated - flat, metric.format)}
         </td>
         <td>{`${up}/${comparable}`}</td>
         <td className="muted-cell">{baseline === null ? "—" : metric.format(baseline)}</td>
@@ -674,6 +722,7 @@ export function Comparison({
       runs={result.runs}
       xLabel={scale.point}
       {...extra}
+      {...(cut === AMPLITUDE ? AMPLITUDE_CHART : {})}
     />
   );
 
@@ -747,9 +796,11 @@ export function Comparison({
         <header className="chart-section-head">
           <h2>Métricas de alocação</h2>
           <p>
-            A mediana entre as simulações em cada ponto do eixo, com o
-            intervalo interquartil em faixa. O tempo de formatura não entra: é
-            da simulação inteira, não de um ponto dela.
+            {cut === AMPLITUDE
+              ? "O vão entre o grupo que mais colheu e o que menos colheu em cada eixo de perfil, ponto a ponto. "
+              : "A mediana entre as simulações em cada ponto do eixo, com o intervalo interquartil em faixa. "}
+            O tempo de formatura não entra: é da simulação inteira, não de um
+            ponto dela.
           </p>
         </header>
         <div className="chart-grid">
@@ -868,21 +919,21 @@ export function Comparison({
         </section>
       )}
 
-      {hasAblation && (
+      {hasBothAuctions && (
       <div className="panel">
-        <h2>O que o retorno de créditos muda</h2>
+        <h2>O que o acúmulo de créditos muda</h2>
         <table>
           <thead>
             <tr>
               <th>Métrica</th>
-              <th>Sem retorno</th>
-              <th>Com retorno</th>
-              <th>Efeito do retorno</th>
+              <th>Igualitário</th>
+              <th>Acumulativo</th>
+              <th>Efeito do acúmulo</th>
               <th>Subiu em</th>
               <th>CR (referência)</th>
             </tr>
           </thead>
-          <tbody>{[...METRICS, ...saturation].map(returnRow)}</tbody>
+          <tbody>{[...METRICS, ...saturation].map(accumulationRow)}</tbody>
         </table>
       </div>
       )}
@@ -922,7 +973,7 @@ export function Comparison({
           </thead>
           <tbody>
             {Array.from({ length: result.runs }, (_, i) => {
-              const row = COMPARISON_ARMS.map((arm) => runsOf(arm.key)[i]).filter(Boolean);
+              const row = arms.map((arm) => runsOf(arm.key)[i]).filter(Boolean);
               if (!row.length) return null;
               const join = (
                 of: (run: RunSummary) => number | null,

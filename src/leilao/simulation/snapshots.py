@@ -18,6 +18,7 @@ from ..equations import (
     RequestStates,
     credits_per_seat,
     message_fidelity,
+    progress,
     request_states,
     semestralization,
     utilization,
@@ -119,6 +120,7 @@ class Measurements:
 
     satisfactions: dict[str, float]
     utilizations: dict[str, float]
+    progresses: dict[str, float]
     fidelities: dict[str, float]
     grade_averages: dict[str, float]
     semestralizations: dict[str, float]
@@ -174,6 +176,8 @@ def measure(
     approved_hours = {
         s.id: s.approved_hours(discipline_hours, config.min_grade) for s in active
     }
+    # S e do cenario, nao do aluno: uma conta so para todo mundo.
+    hours_to_graduate = config.hours_to_graduate()
     # Turma → disciplina, uma vez: os seis estados são por disciplina.
     discipline_of = config.discipline_by_class()
     return Measurements(
@@ -183,6 +187,16 @@ def measure(
         # obtida, reprove o aluno nela ou não.
         utilizations={
             s.id: utilization(won=won[s.id], hours=hours, max_hours=config.max_hours)
+            for s in active
+        },
+        # O progresso, ao contrario, sai do **historico**: e a carga aprovada
+        # desde o ingresso sobre a carga que fecha a grade, e por isso e a
+        # unica grandeza por aluno daqui que nao zera no comeco do periodo.
+        progresses={
+            s.id: progress(
+                approved_hours=approved_hours[s.id],
+                hours_to_graduate=hours_to_graduate,
+            )
             for s in active
         },
         fidelities={
@@ -298,6 +312,7 @@ def snapshot(
         metrics=compute_metrics(
             satisfactions=pick(values.satisfactions),
             utilizations=pick(values.utilizations),
+            progresses=pick(values.progresses),
             fidelities=pick(values.fidelities),
             grade_averages=pick(values.grade_averages),
             semestralizations=pick(values.semestralizations),

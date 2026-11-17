@@ -16,6 +16,7 @@ from .equations import (
     mean_satisfaction,
     occupancy,
     pearson,
+    progress,
     semestralization,
 )
 from .equations._mean import mean
@@ -27,6 +28,7 @@ __all__ = [
     "exclusion_rate",
     "jain_index",
     "pearson",
+    "progress",
     "semestralization",
 ]
 
@@ -43,7 +45,11 @@ class Metrics:
     allocated: int  # vagas obtidas pelo recorte
     allocations_per_student: float
     efficiency: float  # ψ̄ — `mean_satisfaction`
-    utilization: float  # aproveitamento de carga — `utilization`
+    utilization: float  # ocupação da carga do período — `utilization`
+    # Quanto da grade o recorte já fechou, em horas aprovadas sobre a carga
+    # mínima para concluir. Ao contrário das demais, **acumula**: é a única
+    # métrica de período que olha o histórico inteiro e não o período.
+    progress: float  # — `progress`
     fidelity: float  # cosseno da mensagem — `message_fidelity`
     fairness: float  # φ — `jain_index`
     occupancy: float  # θ — `occupancy`
@@ -76,6 +82,7 @@ def compute_metrics(
     *,
     satisfactions: list[float],
     utilizations: list[float],
+    progresses: list[float],
     fidelities: list[float],
     grade_averages: list[float],
     semestralizations: list[float],
@@ -100,6 +107,7 @@ def compute_metrics(
         allocations_per_student=allocated / len(satisfactions) if satisfactions else 0.0,
         efficiency=mean_satisfaction(satisfactions),
         utilization=mean(utilizations),
+        progress=mean(progresses),
         fidelity=mean(fidelities),
         fairness=jain_index(satisfactions),
         occupancy=occupancy(allocated=allocated, total_seats=total_seats),

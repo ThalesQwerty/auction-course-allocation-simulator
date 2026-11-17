@@ -18,24 +18,36 @@ de linha de base (Seção 7.3.1, eqs. 49-50). A **comparação** roda o mesmo
 cenário em cada **braço**, N vezes, e mostra as métricas de alocação período a
 período, recortadas por coorte ou por um dos quatro eixos de perfil.
 
-São **dois braços**, e só. A complexidade do trabalho foi para os parâmetros —
-os quatro eixos de perfil, o turno e o horário —, e por equilíbrio saiu dos
-modelos comparados. O preço é que o vão medido soma três mudanças ao mesmo
-tempo e não diz qual pesou:
+São **três braços**, e o leilão entra em dois deles:
 
-    CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão sem retorno
-                                                   ──retorno──▶  Leilão com retorno
+    CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão igualitário
+                                                   ──acúmulo──▶  Leilão acumulativo
+
+- **Ordenação por CR** — a linha de base. Traçado **pontilhado** nos gráficos.
+- **Leilão igualitário** — o leilão com orçamento fixo: todo aluno abre todo
+  período com `C_min`, nada atravessa o período e o retorno fica desligado
+  (`k = 0`). Traçado **tracejado**.
+- **Leilão acumulativo** — o modelo proposto: o saldo atravessa o período
+  (eq. 36) e o f_γ da eq. (34) o alimenta. Traçado **contínuo**.
+
+Os dois leilões são o **mesmo** mecanismo — mesma moeda, mesmo resolvedor,
+mesmo segundo preço — e diferem só em de onde vem o orçamento. Com eles o vão
+se lê em duas parcelas em vez de uma: CR × igualitário diz o que a **moeda**
+compra, igualitário × acumulativo diz o que o **acúmulo** compra.
 
 A **mensagem** é um número por *aluno* (o CR) contra um por *par* aluno-disciplina
 (o lance). A **resolução** é ordinal (só a ordem dos lances importa; qualquer
 transformação monótona dá a mesma alocação) contra cardinal (a PLI usa as
-magnitudes e derruba um lance alto para acomodar dois médios). O **retorno** é
-o f_γ da eq. (34) ligado (`k > 0`), a única fonte de mérito do leilão.
+magnitudes e derruba um lance alto para acomodar dois médios). O **acúmulo** é
+a memória do orçamento com o f_γ que a alimenta, a única fonte de mérito do
+leilão.
 
-Os dois degraus do meio continuam no motor, em `comparison.ABLATION_ARMS`, e
-rodam por `run_comparison(..., arms=ARMS + ABLATION_ARMS)`: custam tempo de
-execução e não complexidade conceitual — são a mesma simulação com dois campos
-trocados. O do meio é o *bidding points* clássico das business schools —
+Entre o CR e o leilão igualitário ainda há duas mudanças somadas — a mensagem
+e a resolução —, e o degrau que as separa continua no motor, em
+`comparison.ABLATION_ARMS`, rodando por `run_comparison(..., arms=ARMS +
+ABLATION_ARMS)`: custa tempo de execução e não complexidade conceitual — é a
+mesma simulação com um campo trocado. Ele é o *bidding points* clássico das
+business schools —
 orçamento de pontos, lances por disciplina, disciplina fechando no menor lance
 atendido (Sönmez & Ünver 2010, sobre Michigan e Yale SOM). Não confundir com o
 **Course Match** de Wharton, que substituiu o bidding points de lá: aquele
@@ -539,23 +551,37 @@ Duas consequências visíveis:
 `run_comparison` roda o mesmo cenário em cada braço (`ARMS`), `N` vezes em
 cada um, com as **seeds de 1 a N**:
 
-| Braço | Moeda | Resolvedor | Memória | `k` da eq. (34) | Roda |
-|---|---|---|---|---|---|
-| `ranking_greedy` | CR | varredura | — | 0 (inerte: não há crédito) | **sempre** |
-| `credits_greedy` | lance | varredura | sobra | 0 | ablação |
-| `credits_ilp` | lance | PLI | sobra | 0 | ablação |
-| `credits_return` | lance | PLI | sobra | o do cenário (padrão 2) | **sempre** |
+| Braço | Interface | Moeda | Resolvedor | Memória | `k` da eq. (34) | Roda |
+|---|---|---|---|---|---|---|
+| `ranking_greedy` | Ordenação por CR | CR | varredura | — | 0 (inerte: não há crédito) | **sempre** |
+| `credits_greedy` | Bidding points | lance | varredura | `none` | 0 | ablação |
+| `credits_ilp` | Leilão igualitário | lance | PLI | `none` | 0 | **sempre** |
+| `credits_return` | Leilão acumulativo | lance | PLI | `carry` | o do cenário (padrão 2) | **sempre** |
 
-Os dois do meio estão em `ABLATION_ARMS` e não rodam por padrão. Eles separam
-o vão em três parcelas — mensagem, resolução e retorno —, e são a resposta
-pronta para "o ganho vem da moeda ou do resolvedor?". `credits_ilp` e
-`credits_return` diferem em **uma única coisa**, o multiplicador do retorno,
-de modo que a diferença entre eles *é* o efeito do retorno, isolado. O retorno
-é a única parte do leilão que premia desempenho, e portanto a única com chance
-de recriar o incentivo que o CR dá de graça. Por isso o `resolver` que vier na
-configuração é ignorado, como a seed; o `return_multiplier` vale onde o braço
-não o fixa, e os braços de ablação o fixam em 0 para desligar o retorno sem
-deixar de ser o mesmo modelo.
+A chave `credits_ilp` é **histórica** — nasceu nomeando o resolvedor, quando o
+braço existia para isolá-lo da varredura, e hoje nomeia o leilão igualitário.
+Ficou porque a chave é identificador estável: comparação gravada antes disto
+continua casando com o braço.
+
+`credits_greedy` está em `ABLATION_ARMS` e não roda por padrão. Ele separa as
+duas mudanças que há entre o CR e o leilão igualitário — mensagem e resolução
+—, e é a resposta pronta para "o ganho vem da moeda ou do resolvedor?".
+
+`credits_ilp` e `credits_return` diferem em **uma única coisa**, o acúmulo de
+créditos, de modo que a diferença entre eles *é* o efeito do acúmulo, isolado.
+Ele é a única parte do leilão que premia desempenho, e portanto a única com
+chance de recriar o incentivo que o CR dá de graça. Por isso o `resolver` que
+vier na configuração é ignorado, como a seed; o `return_multiplier` vale onde
+o braço não o fixa, e os demais o fixam em 0.
+
+**Memória e retorno são um canal só.** O braço igualitário fixa os dois
+(`credit_memory = "none"` e `k = 0`), e os dois campos dizem a mesma coisa:
+medido, `"carry"` com `k = 0` sai idêntico a `"none"` — relatório por
+relatório, em todas as seeds —, porque o orçamento abre em `C_min` (eq. 37) e,
+sem retorno, só pode cair; o piso o traz de volta. A sobra só tem o que
+carregar depois de o retorno erguer o saldo acima do piso. Fixar os dois é
+redundância deliberada: o braço fica dizendo o que é em vez de depender dessa
+prova. Há teste que guarda.
 
 As duas condições da Seção 7.3 saem daí:
 
@@ -566,9 +592,30 @@ As duas condições da Seção 7.3 saem daí:
 2. **Múltiplas configurações de entrada.** As N seeds são essas configurações.
    Uma simulação só não diria nada — a diferença poderia ser daquela população.
 
-São **cinco métricas**: eficiência (ψ̄), equidade (φ), correlação (λ),
-**desperdício de vaga** (ε) e **tempo de formatura**. Nada de crédito, porque
-não há contraparte do outro lado.
+São **sete métricas**: satisfação (ψ̄), **ocupação** (θ), **progresso**,
+equidade (φ), correlação (λ), **desperdício de vaga** (ε) e **tempo de
+formatura**. Nada de crédito, porque não há contraparte do outro lado.
+
+Três delas mudaram de nome em 17/11/2026, e vale saber o que é o quê. A
+**satisfação** é o que se chamava "eficiência de alocação" — mesmo ψ̄ da
+eq. (53), mesmo campo `efficiency` na API. A **ocupação** é o que se chamava
+"aproveitamento da carga" — mesma conta (carga obtida no período ÷ W_a,
+contando a vaga obtida tenha ela sido excluída depois ou não) e mesmo campo
+`utilization`. O símbolo θ veio junto, e com ele uma colisão a declarar: no
+anteprojeto θ é a eq. (54), a fração das vagas ofertadas que encheu. Essa
+grandeza continua existindo e continua se chamando `occupancy` na API, mas
+não é desenhada em lugar nenhum da tela e, na interface, passou a ser o
+**preenchimento das vagas**.
+
+O **progresso** é novo: a carga aprovada do histórico sobre a carga que fecha
+o curso (`config.hours_to_graduate()` — todas as obrigatórias mais a exigência
+optativa X). É a única métrica de recorte que **acumula**, de modo que sobe ao
+longo do horizonte em qualquer mecanismo e o que separa os braços é a
+inclinação. Tem o mesmo viés de seleção do tempo de formatura, e pela mesma
+razão: quem fecha a grade sai da simulação, então a média dos que ficam para
+de subir na drenagem — lê-se com a fração de concluintes ao lado. Não é a
+semestralização, que divide pelo que o aluno *poderia* ter aprovado desde que
+entrou e mede ritmo.
 
 Desde 14/11/2026 a tela traz também o **CR médio** (N̄), na mesma maquinaria de
 régua e recorte das demais. Ele **descreve, não pontua** — como λ e a saturação
@@ -647,7 +694,8 @@ A chave de cada grupo vai na API como **o valor**, sem idioma (`"2"`, `"60"`,
 
 **Duas escolhas governam todos os gráficos da tela**, e são independentes: a
 **régua** do eixo X e o **recorte** das linhas. O modelo é a terceira dimensão
-e não é escolha — ele é sempre o traçado, contínuo no leilão e tracejado no CR.
+e não é escolha — ele é sempre o traçado: pontilhado no CR, tracejado no
+leilão igualitário, contínuo no acumulativo.
 
 | Régua (eixo X) | Um ponto é | Para que serve |
 |---|---|---|
@@ -657,6 +705,19 @@ e não é escolha — ele é sempre o traçado, contínuo no leilão e tracejado
 
 O recorte é o **Geral** (uma linha por modelo) ou um dos quatro eixos de perfil
 — desempenho, disponibilidade, seletividade, rotina.
+
+A **Amplitude** é o recorte que a API não manda — a interface o calcula sobre os
+outros. Em vez de uma linha por grupo, uma linha por **eixo**, e o valor é o vão
+entre a maior e a menor mediana dos grupos daquele eixo naquele ponto
+(`equations/amplitude.ts`): desempenho em verde, disponibilidade em azul,
+seletividade em amarelo, rotina em vermelho. Ela responde outra pergunta — não
+"quanto cada perfil colheu" mas "quanto o perfil importou" —, e é onde se vê de
+relance qual eixo o mecanismo separa e qual ele ignora. Três consequências: a
+linha não tem faixa, porque a amplitude é um número só e não uma redução entre
+as seeds; a régua se ajusta aos dados em vez de ser o contradomínio da grandeza,
+porque o vão é pequeno perto dele e em [0, 1] ficaria colado no eixo; e o ponto
+medido num grupo só sai da linha em vez de valer zero, que se leria como
+"os perfis empataram".
 
 A coorte era recorte até 11/11/2026 e virou régua: ela é um corte do **tempo**,
 e tê-la como cor obrigava a ler duas dimensões temporais no mesmo gráfico.
@@ -675,7 +736,7 @@ O **desperdício** é a quinta, e é a que a disponibilidade existe para produzi
 as vagas obtidas e largadas sobre as obtidas. É o vão entre as duas leituras de
 ocupação — a vaga saiu da oferta de qualquer jeito, mas só a parte retida virou
 carga cursada. Daí a divisão de trabalho nas métricas de recorte: as grandezas
-de **contagem** (vagas alocadas, θ, aproveitamento) ficam no alocado, as de
+de **contagem** (vagas alocadas, preenchimento, ocupação) ficam no alocado, as de
 **valor** (ψ, φ, λ) ficam no retido, porque o aluno não consumiu a utilidade do
 que largou.
 
@@ -1467,10 +1528,10 @@ binário do CBC. Entre plataformas diferentes não há garantia: o PuLP embarca
 um binário por sistema, e nada assegura que duas compilações ramifiquem
 igual.
 
-**E isso deixa os dois braços padrão assimétricos, de propósito.**
-`ranking_greedy` resolve por ditadura serial e desempata por ε;
-`credits_return` resolve por PLI e não desempata — entre alocações de mesmo
-lance agregado, quem escolhe é a busca do CBC. Pôr o guloso também no braço
+**E isso deixa o CR assimétrico em relação aos dois leilões, de propósito.**
+`ranking_greedy` resolve por ditadura serial e desempata por ε; os dois
+leilões resolvem por PLI e não desempatam — entre alocações de mesmo lance
+agregado, quem escolhe é a busca do CBC. Pôr o guloso também no braço
 de créditos restauraria a simetria, a unicidade e a reprodutibilidade entre
 máquinas, mas custaria a **maximização de bem-estar**, que é o que a PLI
 entrega e o guloso não: ele nunca recusa um lance de 30 para atender dois de
@@ -1778,8 +1839,21 @@ O botão de "Configurar" faz uma coisa só: **comparar os modelos** — o mesmo
 cenário roda em cada braço, `N` vezes, com as seeds de 1 a `N`. Três campos do
 cenário não vão para lá: a **seed** (ali ela vira o eixo da amostra) e o
 **resolvedor** (ali ele vira eixo do experimento, e cada braço impõe o seu). O
-**multiplicador do retorno** vai, mas só vale no braço que o tem — os de
-ablação o zeram. No lugar entra **simulações por modelo (N)**.
+**multiplicador do retorno** vai, mas só vale no braço que acumula — os outros
+o zeram. No lugar entram **quais modelos rodar** e **simulações por modelo
+(N)**.
+
+Os modelos são **caixas de seleção**, uma por braço, cada uma com o traçado
+com que o modelo aparece nos gráficos. Rodar menos modelos custa
+proporcionalmente menos tempo, e é o que se faz enquanto se calibra o cenário;
+os painéis que comparam os ausentes simplesmente não aparecem. A última caixa
+marcada não se desmarca: sem braço nenhum não há o que rodar.
+
+A **carga de optativas para concluir** (X) entrou no formulário em 17/11/2026,
+junto com o gráfico de progresso — ela é o que separa o denominador dele da
+carga das obrigatórias. O campo recusa exigir mais do que o catálogo oferta:
+a folga entre os dois é o que dá ao aluno o que escolher, e sem ela ninguém
+concluiria.
 
 O **tamanho da coorte não se digita**: ele sai de *exemplares por perfil* vezes
 o número de combinações, e o painel mostra o número derivado. É a conta que
@@ -1979,7 +2053,7 @@ Os gráficos são a representação principal e saem em **dois lados do mercado*
 
 Os **gráficos por aluno** perguntam quem foi bem servido. Uma linha por
 recorte, com eixo por período ou por rodada, em três blocos: **métricas
-principais** (eficiência, equidade, correlação, ocupação e semestralização),
+principais** (satisfação, ocupação, progresso, equidade e correlação),
 **progressão** (vagas por aluno, CR, ativos, formados e carga aprovada) e
 **economia de créditos** (créditos por aluno e fração gasta). O recorte de aluno
 é a **coorte**, que parte a mesma população do agregado — somá-la reproduz a
@@ -2024,12 +2098,12 @@ O que se lê é a **sobreposição** das faixas: faixas que não se tocam separa
 modelos; faixas sobrepostas dizem que a diferença entre as medianas cabe dentro
 da variação entre populações. Abaixo vêm três tabelas.
 
-**O que o retorno de créditos muda** isola a pergunta que motivou o terceiro
-braço: os dois braços do leilão lado a lado, a diferença entre as medianas e a
-contagem pareada de em quantas seeds a métrica **subiu** com o retorno — uma
-contagem descritiva, que não diz se subir é bom. A mediana da linha de base fica
-ao lado, para localizar os dois no caminho entre ignorar o histórico e deixá-lo
-decidir tudo.
+**O que o acúmulo de créditos muda** isola a pergunta que motivou o terceiro
+braço: os dois leilões lado a lado, a diferença entre as medianas e a contagem
+pareada de em quantas seeds a métrica **subiu** com o acúmulo — uma contagem
+descritiva, que não diz se subir é bom. A mediana da linha de base fica ao
+lado, para localizar os dois no caminho entre ignorar o histórico e deixá-lo
+decidir tudo. A tabela só aparece quando os dois leilões rodaram.
 
 **Resumo das distribuições** traz os cinco números de cada uma, com a diferença
 e a contagem de **seeds a favor** medidas contra a linha de base (em quantas

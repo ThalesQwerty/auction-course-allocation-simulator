@@ -18,6 +18,14 @@ relatórios iguais, período a período). O retorno só existe onde há acúmulo
 é por isso que memória e retorno **não formam um cruzamento 2x2**: o segundo é
 aninhado no primeiro.
 
+**E a volta também vale**: com `k = 0`, `"carry"` é idêntico a `"none"`. O
+orçamento abre em `C_min` (eq. 37) e, sem retorno, `started_with - spent`
+nunca passa dele — o piso o traz de volta a `C_min` todo período. Medido
+também: relatórios iguais, período a período, em todas as seeds. As duas
+inércias juntas dizem que a escada tem **dois** degraus, não três ou quatro:
+ou o orçamento recomeça em `C_min`, ou o retorno o ergue acima do piso e a
+sobra passa a ter o que carregar.
+
 A FAIXA DO ORÇAMENTO (C_min, C_max)
 ------------------------------------
 

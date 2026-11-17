@@ -35,6 +35,7 @@
  *     densityCurve       área 1, acumulada e moda
  *     quantile           método 7 (R e numpy)
  *     boxStats           cinco números e as cercas de Tukey
+ *     amplitude          max − min, o vão entre os extremos
  *     niceScale          domínio e marcas legíveis
  *     paddedScale        a régua de um gráfico: o contradomínio, ou os dados
  *
@@ -52,6 +53,7 @@
  *     classShifts        N = ⌊k/3⌋ noturnas, D = k − N
  *     schedulePressure   quantas turmas caem em cada horário
  */
+export { amplitude } from "./amplitude";
 export { approvalShare } from "./approvalShare";
 export { availabilityShape, fullLoadThreshold } from "./availabilityShape";
 export { boxStats } from "./boxStats";

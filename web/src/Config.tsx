@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { DensityChart, STATUS } from "./charts";
+import { DensityChart, LineSample, STATUS } from "./charts";
 import { entryDisciplines } from "./curriculum";
 import { availabilityCurve, gradeCurve, interestCurve } from "./distributions";
 import {
@@ -168,6 +168,15 @@ export function Config({
   const performanceShare = axisShare(config.performance_profiles.length);
   const availabilityShare = axisShare(config.availability_profiles.length);
 
+  // O catálogo de optativas é maior que a exigência de propósito — é a folga
+  // que dá ao aluno o que escolher —, e exigir mais do que se oferta deixaria
+  // o curso sem saída. É o mesmo limite que `SimulationConfig` impõe.
+  const electiveOffer = config.disciplines.reduce(
+    (total, discipline) => total + (discipline.elective ? discipline.hours : 0),
+    0
+  );
+  const electiveTooLarge = config.elective_hours > electiveOffer;
+
   // A nota sai do motor arredondada a um décimo; o rodapé a mostra assim.
   const grade = (value: number) =>
     value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -185,23 +194,31 @@ export function Config({
           <div className="field-row">
             <div className="field">
               <label>Modelos</label>
-              <select
-                value={arms.length === 1 ? arms[0] : "both"}
-                onChange={(e) =>
-                  setArms(
-                    e.target.value === "both"
-                      ? COMPARISON_ARMS.map((arm) => arm.key)
-                      : [e.target.value]
-                  )
-                }
-              >
-                <option value="both">ambos</option>
-                {COMPARISON_ARMS.map((arm) => (
-                  <option key={arm.key} value={arm.key}>
-                    só {arm.label}
-                  </option>
-                ))}
-              </select>
+              <div className="checkbox-set">
+                {COMPARISON_ARMS.map((arm) => {
+                  const on = arms.includes(arm.key);
+                  return (
+                    <label className="checkbox" key={arm.key}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        /* O último marcado não se desmarca: sem braço nenhum
+                           não há o que rodar, e o motor recusaria o pedido. */
+                        disabled={on && arms.length === 1}
+                        onChange={() =>
+                          setArms(
+                            COMPARISON_ARMS.filter((other) =>
+                              other.key === arm.key ? !on : arms.includes(other.key)
+                            ).map((other) => other.key)
+                          )
+                        }
+                      />
+                      <LineSample dash={arm.dash} color="currentColor" />
+                      {arm.label}
+                    </label>
+                  );
+                })}
+              </div>
             </div>
             <div className="field">
               <label>Simulações por modelo</label>
@@ -235,6 +252,24 @@ export function Config({
                 value={config.max_residence}
                 onChange={(e) => patch({ max_residence: Number(e.target.value) })}
               />
+            </div>
+            <div className="field">
+              <label>
+                Carga de optativas para concluir (X)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                className={electiveTooLarge ? "invalid" : undefined}
+                value={config.elective_hours}
+                onChange={(e) => patch({ elective_hours: Number(e.target.value) })}
+              />
+              {electiveTooLarge && (
+                <span className="field-hint invalid-text">
+                  O catálogo oferta {electiveOffer} h em optativas.
+                </span>
+              )}
             </div>
             <div className="field">
               <label>Exemplares por perfil</label>
@@ -625,7 +660,7 @@ export function Config({
               ? `Comparando — ${runs * arms.length} simulações...`
               : arms.length === 1
                 ? "Rodar modelo"
-                : "Comparar modelos"}
+                : `Comparar ${arms.length} modelos`}
           </button>
           <div className="actions-right">
             <SaveScenario

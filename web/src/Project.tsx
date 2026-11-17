@@ -30,9 +30,11 @@ export function Project() {
         universidade, e é essa a razão de existir do modo de <strong>comparação</strong>: a
         hipótese não se verifica olhando um mecanismo isolado, só na diferença entre ele e a linha
         de base rodando o mesmo cenário. A comparação põe <strong>três modelos</strong> lado a
-        lado, porque o leilão entra duas vezes — com e sem retorno de créditos. O retorno é o que
-        pode devolver ao mecanismo algum senso meritocrático, e os dois braços rodando a mesma
-        população isolam exatamente o quanto.
+        lado, porque o leilão entra duas vezes — <strong>igualitário</strong>, com todo aluno
+        abrindo todo período no mesmo orçamento, e <strong>acumulativo</strong>, em que o saldo
+        atravessa o período e o retorno de créditos o alimenta. O acúmulo é o que pode devolver ao
+        mecanismo algum senso meritocrático, e os dois leilões rodando a mesma população isolam
+        exatamente o quanto.
       </p>
 
       <h2>A formalização</h2>
@@ -198,25 +200,27 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
       <h2>As métricas</h2>
       <p>
         O resultado de cada período é medido pelas métricas da Seção 7.3.3, e elas se dividem
-        pelos dois lados do mercado. As <strong>do aluno</strong> — eficiência, equidade,
-        correlação, semestralização, progressão, créditos — são agregadas pelo recorte da{" "}
+        pelos dois lados do mercado. As <strong>do aluno</strong> — satisfação, ocupação,
+        progresso, equidade, correlação, créditos — são agregadas pelo recorte da{" "}
         <strong>coorte</strong>, que parte a mesma população do agregado: somá-la reproduz a
         universidade. Com dezenas de alunos, qualquer recorte mais granular vira ruído.
       </p>
       <p>
-        As <strong>da disciplina</strong> — concorrência, preço, ocupação e taxa de aprovação —
+        As <strong>da disciplina</strong> — concorrência, preço, preenchimento das vagas e taxa
+        de aprovação —
         pedem o recorte oposto: as disciplinas se agrupam por uma propriedade que compartilham, e
         disciplinas com o mesmo valor caem no mesmo grupo. São três eixos: o período na grade (que
         vem dos sucessores), o número de vagas e a carga horária. É assim que se vê, por
         exemplo, que as disciplinas de turma pequena formam preço e as de turma grande ficam no
         piso — uma média sobre a universidade inteira esconderia a gradação. Concorrência e preço
-        são do bem, então o grupo é a média delas; ocupação e aprovação são razões de contagens,
+        são do bem, então o grupo é a média delas; preenchimento e aprovação são razões de
+        contagens,
         então o grupo é a razão das somas, senão uma disciplina de 40 vagas pesaria o mesmo que uma
         de 120.
       </p>
       <dl className="metric-list">
         <div>
-          <dt>Eficiência de alocação (ψ̄) — eq. (53)</dt>
+          <dt>Satisfação (ψ̄) — eq. (53)</dt>
           <dd>
             Satisfação média dos alunos que disputaram: a soma das utilidades atendidas. O
             interesse é normalizado sobre a grade e a redistribuição conserva a massa, então a
@@ -227,14 +231,27 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           </dd>
         </div>
         <div>
-          <dt>Aproveitamento da carga — fora do anteprojeto</dt>
+          <dt>Ocupação (θ) — fora do anteprojeto</dt>
           <dd>
-            Carga horária obtida no período dividida por W<sub>a</sub>, na média de quem disputou.
-            É a contraparte em <em>carga</em> do ψ, que é em <em>utilidade</em>, e as duas se
-            separam exatamente onde está a patologia que interessa: quem concentra o lance numa
-            disciplina que ama, ganha só ela e deixa o resto de W<sub>a</sub> ocioso pontua ψ alto
-            e aproveitamento baixo. Sozinho o ψ não distingue "consegui o que amava" de "consegui
-            pouco".
+            Carga horária obtida no período dividida pela carga máxima institucional
+            W<sub>a</sub>, na média de quem disputou. Conta a vaga <em>obtida</em>, tenha ela sido
+            excluída depois ou não: mede alocação, não desempenho. É a contraparte em{" "}
+            <em>carga</em> do ψ, que é em <em>utilidade</em>, e as duas se separam exatamente onde
+            está a patologia que interessa: quem concentra o lance numa disciplina que ama, ganha
+            só ela e deixa o resto de W<sub>a</sub> ocioso pontua ψ alto e ocupação baixa. Sozinho
+            o ψ não distingue "consegui o que amava" de "consegui pouco".
+          </dd>
+        </div>
+        <div>
+          <dt>Progresso — fora do anteprojeto</dt>
+          <dd>
+            Carga aprovada do histórico dividida pela carga que fecha o curso — todas as
+            obrigatórias mais a exigência optativa X —, na média de quem disputou. É a única
+            métrica que <em>acumula</em>: as outras medem o período, esta mede o quanto do curso
+            já ficou para trás, e por isso sobe ao longo do horizonte em qualquer mecanismo. O que
+            separa os modelos é a <em>inclinação</em>. Lê-se com a fração de concluintes ao lado,
+            porque quem fecha a grade sai da simulação: um mecanismo que forma mais gente pode
+            exibir progresso menor entre os que ficaram.
           </dd>
         </div>
         <div>
@@ -245,9 +262,11 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           </dd>
         </div>
         <div>
-          <dt>Ocupação (θ) — eq. (54)</dt>
+          <dt>Preenchimento das vagas — eq. (54)</dt>
           <dd>
-            Fração das vagas ofertadas que foi efetivamente preenchida. Aparece dos dois lados:
+            O θ do anteprojeto, que aqui cedeu o nome e o símbolo à ocupação de carga do aluno —
+            a API ainda o publica como <code>occupancy</code>. Fração das vagas ofertadas que foi
+            efetivamente preenchida. Aparece dos dois lados:
             por aluno é a <em>fatia</em> das vagas da universidade que cada recorte levou, e os
             parciais somam o total; por disciplina é a <em>taxa</em> com que cada tipo de oferta
             encheu, que não é fatia de nada.
@@ -423,8 +442,9 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         Uma <strong>comparação</strong> desenha cada métrica ao longo do horizonte, período a
         período. A linha é a mediana entre as simulações e a faixa é o intervalo interquartil.
         A cor é o grupo do <strong>recorte</strong> escolhido — a universidade inteira, a
-        coorte ou um dos quatro eixos de perfil — e o traçado é o modelo: contínuo para o
-        leilão, tracejado para o CR. A legenda esconde cores e traçados separadamente. O que se
+        coorte ou um dos quatro eixos de perfil — e o traçado é o modelo: pontilhado para o CR,
+        tracejado para o leilão igualitário, contínuo para o acumulativo. A legenda esconde cores
+        e traçados separadamente. O que se
         lê é a sobreposição das faixas: faixas que não se tocam separam os mecanismos; faixas
         sobrepostas dizem que a diferença cabe dentro da variação entre populações. As tabelas
         reduzem cada simulação à média dos períodos ponderada pelos alunos medidos e, como as
