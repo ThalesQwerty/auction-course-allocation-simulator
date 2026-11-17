@@ -17,7 +17,7 @@ from ..auction import AuctionInput, Bid, run_auction
 from ..behavior import compute_bids
 from ..config import SimulationConfig
 from ..entities import Agent, Good, MutualExclusion
-from ..equations import available_goods, reachable_utility, satisfaction
+from ..equations import available_goods, satisfaction
 from ..population import Student
 from ..ranking import allocate_by_ilp, allocate_by_ranking, request_set
 from .reports import PriceStats
@@ -57,7 +57,7 @@ def _available(
     utilities: dict[str, dict[str, float]],
     state: PeriodState,
     hours: dict[str, int],
-    groups: dict[str, str],
+    conflicts: dict[str, tuple[str, ...]],
 ) -> dict[str, list[str]]:
     """B_a^(t,r) de cada aluno — ver `equations.available_goods`.
 
@@ -71,7 +71,7 @@ def _available(
             hours=hours,
             capacity=state.capacity[s.id],
             already_won=state.won[s.id],
-            groups=groups,
+            conflicts=conflicts,
         )
         for s in active
     }
@@ -122,10 +122,10 @@ def _run_credit_round(
                 Good(name, state.seats[name], draws.hours[name])
                 for name in draws.seats
             ],
-            # X — os cliques da eq. (5): ninguém leva duas turmas da mesma
-            # disciplina. Vazio quando toda disciplina é de turma única.
-            exclusions=[MutualExclusion(group) for group in draws.exclusions],
-            groups=draws.discipline_of,
+            # E = M ∪ G — os cliques da eq. (5): ninguém leva duas turmas da
+            # mesma disciplina nem duas no mesmo horário.
+            exclusions=[MutualExclusion(clique) for clique in draws.exclusions],
+            conflicts=draws.conflicts,
             budgets=state.budget,
             bids=bids,
             epsilon=draws.epsilon,
@@ -169,6 +169,7 @@ def _run_ranking_round(
             available=available[student.id],
             behavior=student.behavior,
             classes=draws.classes,
+            conflicts=draws.conflicts,
         ):
             state.record_bid(student.id, name, round_number, 1)
             requests.append((student.id, name))
@@ -187,7 +188,7 @@ def _run_ranking_round(
         seats=state.seats,
         hours=draws.hours,
         capacity={s.id: int(state.capacity[s.id]) for s in active},
-        groups=draws.discipline_of,
+        conflicts=draws.conflicts,
         tiebreak=tiebreak,
     )
     seconds = perf_counter() - started
@@ -212,7 +213,7 @@ def run_round(
         utilities=utilities,
         state=state,
         hours=draws.hours,
-        groups=draws.discipline_of,
+        conflicts=draws.conflicts,
     )
     # A vaga garantida entra como conquista da rodada 1: é ali que ela passa a
     # valer, e sem isso o ingressante apareceria com satisfação zero na
@@ -255,11 +256,7 @@ def run_round(
         number=round_number,
         satisfaction={
             s.id: satisfaction(
-                utilities=utilities[s.id],
-                allocated=won_now[s.id],
-                reachable=reachable_utility(
-                    utilities=utilities[s.id], classes=draws.classes
-                ),
+                utilities=utilities[s.id], allocated=won_now[s.id]
             )
             for s in active
         },

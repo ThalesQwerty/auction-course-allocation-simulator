@@ -5,18 +5,16 @@ e a simulação deriva o resto (alunos, nomes, interesse, notas)
 aleatoriamente a partir da `seed`.
 
 **Os perfis de aluno descrevem o comportamento fora do mecanismo.** São dois
-eixos independentes — `performance_profiles`, que governa a Beta da aptidão e
-portanto a frequência com que o aluno reprova, e `availability_profiles`, que
-governa a Beta da disponibilidade e portanto a frequência com que ele exclui.
-Cada eixo é uma lista de grupos, e o aluno carrega **dois escalares** sorteados
-das Betas dos grupos que lhe couberam.
+eixos de traço — `performance_profiles`, que governa a normal dividida da nota
+e portanto a frequência com que o aluno reprova, e `availability_profiles`,
+que governa a log-normal da disponibilidade e portanto a frequência com que
+ele exclui. Cada eixo é uma lista de grupos, e o aluno carrega **dois
+escalares** sorteados das distribuições dos grupos que lhe couberam.
 
-O perfil é **traço imutável**: não evolui, não responde a sinal, não entra no
-genoma e o aluno não o conhece. Ele age *depois* da vaga — se o aluno vai bem
-na disciplina ou se a larga. A estratégia (`equations.decision_score`) age
-*dentro* do mecanismo, ao pedir. Não há eixo de perfil para interesse: o β do
-score já é o parâmetro de o quanto o aluno diferencia as disciplinas, e dois
-botões para a mesma coisa tornariam qualquer resultado ambíguo de ler.
+O traço é **imutável**: não evolui, não responde a sinal e o aluno não o
+conhece. Ele age *depois* da vaga — se o aluno vai bem na disciplina ou se a
+larga. A estratégia (`equations.reserve_threshold`) age *dentro* do
+mecanismo, ao pedir.
 
 A repartição é **igualitária entre as combinações** — ver `profile_index`.
 
@@ -42,13 +40,17 @@ from .equations import (
     DEFAULT_MULTIPLIER,
     DEFAULT_RATE,
     availability_shape,
-    class_difficulty,
+    class_schedules,
+    class_shifts,
     curriculum_heights,
     curriculum_periods,
     curriculum_reach,
     eligible_set,
     entry_class_load,
+    rotated_index,
     grade_shape,
+    schedule_cliques,
+    schedule_names,
 )
 
 # Mecanismo de alocação. `credits` é o leilão por créditos proposto (Seção 7.1),
@@ -258,8 +260,10 @@ NEUTRAL_AVAILABILITY = AvailabilityProfile(
 class SelectivityProfile:
     """Um grupo da população no eixo de **seletividade**.
 
-    O valor é um múltiplo do score médio: o aluno não pede — nem financia —
-    nada abaixo de `valor × média`. Ver `equations.reserve_threshold`.
+    `S_a`: a exigência do aluno, repartida entre as disciplinas elegíveis do
+    período. Ele não pede — nem financia — nada abaixo de `S_a / |M_a|`. Como
+    a utilidade das elegíveis soma 1, o valor se lê em múltiplos da
+    disciplina média. Ver `equations.reserve_threshold`.
 
     Em 0 não há corte: ele pede tudo que é elegível e gasta o orçamento
     inteiro. É o especulador, e é o perfil que a Seção 2.2 do anteprojeto diz
@@ -274,45 +278,54 @@ class SelectivityProfile:
             raise ValueError(f"seletividade {self.name!r}: o valor deve ser >= 0")
 
 
-@dataclass(frozen=True)
-class ConcentrationProfile:
-    """Um grupo da população no eixo de **concentração**.
-
-    O valor é o expoente do score sobre a utilidade. 1 é o lance sincero — o
-    ótimo da relaxação contínua da mochila côncava —, e os extremos existem
-    para mostrar o que acontece fora dele. Ver `equations.decision_score`.
-    """
-
-    name: str
-    value: float
-
-
-# Seis níveis em cada eixo novo, e com os três de cada eixo antigo dão
-# 3 · 3 · 6 · 6 = 324 combinações. Elas é que fixam o tamanho da coorte: ver
-# `students_per_period`.
+# Cinco níveis, **com os próprios valores como nome**: o eixo não tem
+# patamar qualitativo a batizar — o que separa os grupos é literalmente
+# quantas disciplinas cada um pede, e o número diz isso melhor que um
+# rótulo. Na grade padrão, com 33 elegíveis por período, eles pedem 33;
+# 20,5; 11,7; 6,7 e 4,0 disciplinas em média.
 DEFAULT_SELECTIVITY: tuple[SelectivityProfile, ...] = (
-    SelectivityProfile(name="Neutra", value=0.0),
-    SelectivityProfile(name="Baixíssima", value=0.125),
-    SelectivityProfile(name="Baixa", value=0.25),
-    SelectivityProfile(name="Média", value=0.5),
-    SelectivityProfile(name="Alta", value=1.0),
-    SelectivityProfile(name="Altíssima", value=2.0),
-)
-
-# O Invertido e o Homogêneo são controles: um demonstra o absurdo de reportar
-# torto, o outro testa a premissa da Seção 2.2 sobre revelação de preferência.
-# Acima de 2 o expoente satura e deixa de graduar — o 3 mostra a saturação.
-DEFAULT_CONCENTRATION: tuple[ConcentrationProfile, ...] = (
-    ConcentrationProfile(name="Invertida", value=-1.0),
-    ConcentrationProfile(name="Homogênea", value=0.0),
-    ConcentrationProfile(name="Diluída", value=0.5),
-    ConcentrationProfile(name="Neutra", value=1.0),
-    ConcentrationProfile(name="Concentrada", value=2.0),
-    ConcentrationProfile(name="Muito concentrada", value=3.0),
+    SelectivityProfile(name="0", value=0.0),
+    SelectivityProfile(name="0,5", value=0.5),
+    SelectivityProfile(name="1", value=1.0),
+    SelectivityProfile(name="1,5", value=1.5),
+    SelectivityProfile(name="2", value=2.0),
 )
 
 NEUTRAL_SELECTIVITY = SelectivityProfile(name="—", value=0.0)
-NEUTRAL_CONCENTRATION = ConcentrationProfile(name="—", value=1.0)
+
+
+@dataclass(frozen=True)
+class RoutineProfile:
+    """Um grupo da população no eixo de **rotina** — a vida fora da grade.
+
+    Os dois valores são multiplicadores do interesse por turma, conforme o
+    turno dela: `day` para as diurnas, `night` para as noturnas. Ver
+    `equations.routine_weight`.
+
+    É **traço**, não estratégia: o aluno não escolhe trabalhar de dia, e o
+    turno não entra em decisão de lance — entra antes, no quanto cada turma
+    vale para ele.
+    """
+
+    name: str
+    day: float
+    night: float
+
+    def __post_init__(self) -> None:
+        if self.day <= 0 or self.night <= 0:
+            raise ValueError(f"rotina {self.name!r}: os pesos devem ser > 0")
+
+
+# O indiferente é o neutro, e os outros dois **dobram** o lado que lhes
+# convém em vez de penalizar o outro: depois da normalização da linha as duas
+# formas dão a mesma preferência, e dobrar é a que se lê sem decimal.
+DEFAULT_ROUTINE: tuple[RoutineProfile, ...] = (
+    RoutineProfile(name="Diurno", day=2.0, night=1.0),
+    RoutineProfile(name="Noturno", day=1.0, night=2.0),
+    RoutineProfile(name="Indiferente", day=1.0, night=1.0),
+)
+
+NEUTRAL_ROUTINE = RoutineProfile(name="—", day=1.0, night=1.0)
 
 
 @dataclass(frozen=True)
@@ -354,6 +367,11 @@ class Discipline:
     # equivale a dificuldade 1 na 1ª. Ela não precisa ser pública: o que o
     # aluno lê é a taxa de aprovação do período anterior, que é a dificuldade
     # filtrada pela população.
+    #
+    # É atributo da **disciplina**, e toda turma dela a herda inteira. Houve
+    # uma escada por turma (`class_difficulty_levels`) até 16/11/2026; ela
+    # saiu junto com a atratividade, e o que distingue as turmas entre si
+    # passou a ser o **turno** (`equations.class_shift`).
     difficulty: float = 1.0
     unlocks: tuple[str, ...] = ()
     entry: bool = False
@@ -365,21 +383,6 @@ class Discipline:
     # vez de girar, e é essa sincronia (e não a persistência em si) que trava a
     # fila. Por aluno ou por célula o efeito se dilui.
     stability: float | None = None
-    # A_x — a **atratividade**: o multiplicador do interesse sorteado, comum a
-    # toda a população. Em 1 a disciplina é a média; 2 vale o dobro dela, 0,5
-    # a metade. Entra como ln(A) somado ao expoente da log-normal, que é a
-    # mesma conta dita na unidade em que se lê.
-    #
-    # É a componente do gosto **comum a toda a população**, enquanto sigma é a
-    # privada de cada aluno, e as duas estão na mesma unidade — por isso A/σ se
-    # lê direto como a correlação de preferência entre alunos. Com A uniforme as
-    # linhas são independentes e ninguém pode prever a disputa pelo próprio
-    # gosto; com A espalhado, querer muito uma disciplina passa a ser sinal de
-    # que os colegas também a querem.
-    #
-    # Ela é a irmã estática de `stability`: aquela sincroniza a persistência
-    # entre concorrentes no *tempo*, esta sincroniza o *nível*.
-    attractiveness: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -472,11 +475,10 @@ class SimulationConfig:
     # são absolutas, e uma constante dimensionada para 360 h recusaria todo
     # cenário de teto menor. Declarar explicitamente desliga a derivação.
     availability_profiles: tuple[AvailabilityProfile, ...] = ()
-    # Os dois eixos de **estratégia**. Ao contrário dos dois de cima, que
-    # são traço e entram só no sorteio, estes viram o `Behavior` do aluno e
-    # entram na decisão: a seletividade corta o pedido e para o gasto, a
-    # concentração reparte o crédito. Ver `equations.reserve_threshold` e
-    # `equations.decision_score`.
+    # O eixo de **estratégia**. Ao contrário dos dois de cima, que são traço
+    # e entram só no sorteio, este vira o `Behavior` do aluno e entra na
+    # decisão: a seletividade corta o pedido e para o gasto. Ver
+    # `equations.reserve_threshold`.
     # **Estabilidade entre turmas**: quanto da variância do interesse fica no
     # nível da disciplina, de 0 a 1. É a irmã espacial da estabilidade entre
     # períodos — uma reparte a variância no tempo, a outra no espaço —, e as
@@ -493,15 +495,21 @@ class SimulationConfig:
     # seção**: em 1 a turma não existe como objeto de preferência, em 0 a
     # disciplina não existe.
     class_stability: float = 1.0
-    # Os multiplicadores (baixa, média, alta) da escada de dificuldade entre
-    # turmas do mesmo grupo. Iguais a 1 — o padrão — desligam a escada.
-    #
-    # A escada preserva a **média geométrica** da disciplina em todo `k`,
-    # então mexer nela é mexer na amplitude, não no centro: o cenário não
-    # fica mais difícil nem mais fácil por abrir mais turmas.
-    class_difficulty_levels: tuple[float, float, float] = (1.0, 1.0, 1.0)
     selectivity_profiles: tuple[SelectivityProfile, ...] = DEFAULT_SELECTIVITY
-    concentration_profiles: tuple[ConcentrationProfile, ...] = DEFAULT_CONCENTRATION
+    # **Rotina**: o terceiro eixo de traço. Multiplica o interesse das turmas
+    # de cada turno (`equations.routine_weight`), de modo que quem trabalha de
+    # dia prefere as noturnas sem ficar proibido das diurnas.
+    routine_profiles: tuple[RoutineProfile, ...] = DEFAULT_ROUTINE
+    # Quantos **horários** existem em cada turno. Cada horário é um grupo de
+    # exclusão mútua entre turmas (eq. 5), e as turmas da grade são repartidas
+    # entre eles circularmente — ver `equations.class_schedule`.
+    #
+    # São o botão de aperto do choque: menos horários é mais turma por
+    # horário, e mais escolha do aluno travada por conflito. O par 12 × 6 é o
+    # que a grade padrão comporta mantendo a garantia de que todo período tem
+    # uma grade sem choque, inclusive só num dos turnos.
+    day_slots: int = 12
+    night_slots: int = 6
     # Quanto do gosto do aluno é **permanente**, de 0 a 1 — a fração da
     # variância que não é resorteada a cada período.
     #
@@ -653,7 +661,7 @@ class SimulationConfig:
             ("desempenho", self.performance_profiles),
             ("disponibilidade", self.availability_profiles),
             ("seletividade", self.selectivity_profiles),
-            ("concentração", self.concentration_profiles),
+            ("rotina", self.routine_profiles),
         ):
             if not perfis:
                 raise ValueError(f"o eixo de {eixo} precisa de pelo menos um perfil")
@@ -682,11 +690,8 @@ class SimulationConfig:
             raise ValueError("a estabilidade entre períodos deve estar em [0, 1]")
         if not 0.0 <= self.class_stability <= 1.0:
             raise ValueError("a estabilidade entre turmas deve estar em [0, 1]")
-        for nivel in self.class_difficulty_levels:
-            if nivel <= 0:
-                raise ValueError(
-                    "os níveis da escada de dificuldade devem ser > 0"
-                )
+        if self.day_slots < 1 or self.night_slots < 1:
+            raise ValueError("é preciso ao menos um horário em cada turno")
         if self.interest_sigma <= 0:
             raise ValueError("desvio do interesse (sigma) deve ser > 0")
         if not math.isfinite(self.interest_mean):
@@ -744,14 +749,33 @@ class SimulationConfig:
         if not entry:
             raise ValueError("o cenário precisa de pelo menos uma disciplina de entrada")
 
+        # O pacote garantido é entregue inteiro e fora do mecanismo, então
+        # ele precisa respeitar a eq. (5) por construção. `entry_offsets`
+        # procura o giro que o deixa sem choque; não havendo, o cenário é
+        # recusado em vez de alocar um pacote impossível de cursar.
+        offsets = self.entry_offsets()
+        if offsets is None:
+            raise ValueError(
+                "a matrícula garantida põe duas turmas no mesmo horário para o "
+                "mesmo ingressante, e giro nenhum do bloco de entrada desfaz o "
+                "choque: o pacote de entrada é entregue inteiro e não pode "
+                "chocar consigo mesmo — mude o número de turmas das disciplinas "
+                "de entrada ou o número de horários"
+            )
+
         # Por **turma**, não por disciplina: é a turma que tem vaga, e a
-        # coorte é repartida entre elas em blocos (`equations.entry_class`).
-        # Quando a disciplina de entrada tem turma única os dois conferem.
+        # coorte é repartida entre elas em blocos girados
+        # (`equations.entry_class`). Quando a disciplina de entrada tem turma
+        # única os dois conferem.
         seats = self.seats_by_class()
         classes = self.classes_by_discipline()
         cohort = self.students_per_period
         for discipline in entry:
-            load = entry_class_load(cohort=cohort, classes=classes[discipline])
+            load = entry_class_load(
+                cohort=cohort,
+                classes=classes[discipline],
+                offset=offsets[discipline],
+            )
             for name, newcomers in load.items():
                 if newcomers > seats[name]:
                     raise ValueError(
@@ -768,6 +792,56 @@ class SimulationConfig:
                 f"cabem na carga horária máxima (W_a = {self.max_hours}) — eq. (4); o "
                 "ingressante cursa todas elas de uma vez"
             )
+
+    def entry_offsets(self) -> dict[str, int] | None:
+        """O giro do bloco de entrada de cada disciplina — ver
+        `equations.entry_class`.
+
+        O pacote garantido é entregue inteiro e fora do mecanismo, então ele
+        tem de respeitar a eq. (5) sozinho: nenhum bloco da coorte pode
+        receber duas turmas no mesmo horário. Como o horário é atribuído
+        varrendo a grade disciplina a disciplina, sem giro as primeiras turmas
+        de disciplinas distintas voltam a cair no mesmo horário assim que a
+        varredura dá a volta.
+
+        O giro é uma **progressão aritmética**: a j-ésima disciplina de
+        entrada gira `j · passo` posições. Procura-se o menor passo que deixe
+        todos os blocos sem choque, e **o passo 0 é tentado primeiro** — a
+        grade que já saía sem choque não é girada, e continua bit a bit igual.
+        `None` quando passo nenhum resolve, e aí o cenário é recusado.
+
+        É função pura do cenário: a mesma grade dá sempre o mesmo giro.
+        """
+        entry = self.entry_disciplines()
+        if not entry:
+            return None
+        classes = self.classes_by_discipline()
+        schedule = self.schedule_by_class()
+        blocks = max(len(classes[name]) for name in entry)
+
+        def clash_free(step: int) -> bool:
+            for block in range(blocks):
+                taken: set[str] = set()
+                for position, discipline in enumerate(entry):
+                    names = classes[discipline]
+                    index = rotated_index(
+                        block=min(block, len(names) - 1),
+                        offset=position * step,
+                        classes=len(names),
+                    )
+                    slot = schedule[names[index]]
+                    if slot in taken:
+                        return False
+                    taken.add(slot)
+            return True
+
+        for step in range(blocks):
+            if clash_free(step):
+                return {
+                    discipline: position * step
+                    for position, discipline in enumerate(entry)
+                }
+        return None
 
     def dismissal_period(self, entry_period: int) -> int | None:
         """O último período em que o aluno que entrou em `entry_period` ainda
@@ -805,12 +879,12 @@ class SimulationConfig:
             len(self.performance_profiles)
             * len(self.availability_profiles)
             * len(self.selectivity_profiles)
-            * len(self.concentration_profiles)
+            * len(self.routine_profiles)
         )
 
     def profile_index(self, student_index: int) -> tuple[int, int, int, int]:
-        """A combinação (desempenho, disponibilidade, seletividade,
-        concentração) do aluno de índice global.
+        """A combinação (desempenho, disponibilidade, seletividade, rotina)
+        do aluno de índice global.
 
         A repartição é **igualitária entre as combinações**, e exata: como a
         coorte é `students_per_profile × combinações`, cada perfil recebe o
@@ -821,10 +895,10 @@ class SimulationConfig:
         resposta; o global é o que continua valendo se alguém construir um
         cenário à mão com outro tamanho.
 
-        Os dois primeiros eixos são **traço**: o aluno não os escolhe nem os
-        conhece, e eles governam o sorteio da aptidão e da disponibilidade.
-        Os dois últimos são **estratégia**: viram o `Behavior` dele e entram
-        na decisão de lance e de pedido.
+        Três eixos são **traço**: o aluno não os escolhe nem os conhece, e
+        eles governam o sorteio da aptidão, o da disponibilidade e o do
+        interesse por turno. A seletividade é **estratégia**: vira o
+        `Behavior` dele e entra na decisão de lance e de pedido.
 
         O perfil **não sai da seed**, pelo mesmo motivo que o período de
         ingresso não sai: duas simulações com seeds diferentes têm a mesma
@@ -832,13 +906,22 @@ class SimulationConfig:
         ser frágil nem quem calhou de ser especulador.
         """
         combination = student_index % self.profile_combinations()
-        concentration = combination % len(self.concentration_profiles)
-        combination //= len(self.concentration_profiles)
+        routine = combination % len(self.routine_profiles)
+        combination //= len(self.routine_profiles)
         selectivity = combination % len(self.selectivity_profiles)
         combination //= len(self.selectivity_profiles)
         availability = combination % len(self.availability_profiles)
         performance = combination // len(self.availability_profiles)
-        return performance, availability, selectivity, concentration
+        return performance, availability, selectivity, routine
+
+    def successors_by_discipline(self) -> dict[str, tuple[str, ...]]:
+        """seq(X) — o que cada disciplina desbloqueia **imediatamente**.
+
+        É a `unlocks` do cenário, indexada por nome e completa: disciplina
+        terminal aparece com tupla vazia. É dela que sai a herança de um nível
+        de `equations.utility`.
+        """
+        return {d.name: d.unlocks for d in self.disciplines}
 
     def prerequisites_by_discipline(self) -> dict[str, tuple[str, ...]]:
         """Aresta inversa dos sucessores: quem precisa estar aprovado para
@@ -942,23 +1025,50 @@ class SimulationConfig:
         }
 
     def difficulty_by_class(self) -> dict[str, float]:
-        """A dificuldade da disciplina vezes o multiplicador da escada.
+        """A dificuldade da disciplina, replicada em cada turma dela.
 
-        Com os três níveis em 1 — o padrão — a escada some e toda turma herda
-        a dificuldade do grupo. Ver `equations.class_difficulty`.
+        É atributo do grupo: a escada por turma saiu, e o que distingue as
+        turmas é o **turno**.
         """
-        result: dict[str, float] = {}
+        return {
+            name: d.difficulty
+            for d in self.disciplines
+            for name in self.classes_of(d)
+        }
+
+    def shift_by_class(self) -> dict[str, str]:
+        """Turma → turno — ver `equations.class_shift`."""
+        result: dict[str, str] = {}
         for discipline in self.disciplines:
             names = self.classes_of(discipline)
-            ladder = class_difficulty(
-                count=len(names), levels=self.class_difficulty_levels
-            )
-            for name, factor in zip(names, ladder):
-                result[name] = discipline.difficulty * factor
+            for name, shift in zip(names, class_shifts(len(names))):
+                result[name] = shift
         return result
 
-    def class_exclusions(self) -> tuple[frozenset[str], ...]:
-        """Os cliques de `X` (eq. 5): um por disciplina com mais de uma turma.
+    def schedule_by_class(self) -> dict[str, str]:
+        """Turma → horário — ver `equations.class_schedule`.
+
+        A varredura é na ordem da grade, que é a ordem em que o cenário
+        declara as disciplinas: é dela que sai o equilíbrio entre horários e
+        a garantia de que todo período tem uma grade sem choque.
+        """
+        shifts = self.shift_by_class()
+        names = list(shifts)
+        schedules = class_schedules(
+            shifts=(shifts[name] for name in names),
+            day_slots=self.day_slots,
+            night_slots=self.night_slots,
+        )
+        return dict(zip(names, schedules))
+
+    def schedules(self) -> tuple[str, ...]:
+        """`G` — todos os horários do cenário, na ordem da tela."""
+        return schedule_names(
+            day_slots=self.day_slots, night_slots=self.night_slots
+        )
+
+    def discipline_cliques(self) -> tuple[frozenset[str], ...]:
+        """`M` — um clique por disciplina com mais de uma turma.
 
         Disciplina de turma única não gera clique — a restrição
         `Σ z ≤ 1` sobre um bem só já é a restrição binária dele.
@@ -968,6 +1078,34 @@ class SimulationConfig:
             for d in self.disciplines
             if len(names := self.classes_of(d)) > 1
         )
+
+    def schedule_cliques(self) -> tuple[frozenset[str], ...]:
+        """`G` — um clique por horário com mais de uma turma."""
+        return schedule_cliques(self.schedule_by_class(), self.schedules())
+
+    def exclusion_cliques(self) -> tuple[frozenset[str], ...]:
+        """`E = M ∪ G` — o que a eq. (5) proíbe levar junto.
+
+        São duas famílias e a mesma restrição: ninguém leva duas turmas da
+        mesma disciplina, nem duas turmas no mesmo horário.
+        """
+        return self.discipline_cliques() + self.schedule_cliques()
+
+    def conflict_groups(self) -> dict[str, tuple[str, ...]]:
+        """Turma → os grupos de `E` a que ela pertence: a disciplina e o
+        horário.
+
+        É a forma que a varredura usa — `available_goods`,
+        `serial_dictatorship` e o preço —, porque ali a pergunta é "este aluno
+        já levou algo que conflita com isto?", e não "quais bens formam um
+        clique".
+        """
+        schedule = self.schedule_by_class()
+        return {
+            name: (d.name, schedule[name])
+            for d in self.disciplines
+            for name in self.classes_of(d)
+        }
 
     def required_disciplines(self) -> set[str]:
         """As obrigatórias — o que a eq. (40) exige aprovar uma a uma."""

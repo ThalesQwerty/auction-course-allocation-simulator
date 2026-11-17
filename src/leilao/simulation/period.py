@@ -309,8 +309,9 @@ def _discipline_snapshots(
             curriculum_period=draws.curriculum[draws.discipline_of[name]],
             hours=draws.hours[name],
             difficulty=draws.difficulty[name],
-            attractiveness=by_name[draws.discipline_of[name]].attractiveness,
             classes=by_name[draws.discipline_of[name]].classes,
+            shift=draws.shift_of[name],
+            schedule=draws.schedule_of[name],
             elective=by_name[draws.discipline_of[name]].elective,
             seats=seats,
             filled=seats - state.seats[name],
@@ -406,7 +407,9 @@ def run_period(
 
     # A coorte é repartida entre as turmas de cada disciplina de entrada em
     # blocos contíguos (`equations.entry_class`): o calouro não escolhe turma
-    # porque a matrícula garantida não passa pelo mecanismo.
+    # porque a matrícula garantida não passa pelo mecanismo. O bloco **gira**
+    # uma posição por disciplina de entrada, e é esse giro que impede o pacote
+    # garantido de chocar consigo mesmo no horário.
     newcomers = [s for s in active if s.entry_period == period]
     for ordinal, student in enumerate(newcomers):
         state.enroll_newcomer(
@@ -416,6 +419,7 @@ def run_period(
                     ordinal=ordinal,
                     cohort=len(newcomers),
                     classes=draws.classes[discipline],
+                    offset=draws.entry_offsets.get(discipline, 0),
                 )
                 for discipline in draws.entry_courses
             ],

@@ -83,7 +83,7 @@ class Axis:
 
     @classmethod
     def profiles(cls, config: SimulationConfig) -> dict[str, "Axis"]:
-        """Os quatro eixos de perfil, na ordem em que o cenário os declara.
+        """Os eixos de perfil, na ordem em que o cenário os declara.
 
         Ao contrário da coorte, a lista não depende do período: o grupo existe
         desde o primeiro ingresso, e um recorte vazio sai com métrica `None`,
@@ -102,9 +102,9 @@ class Axis:
                 key=lambda s: s.selectivity.name,
                 order=[p.name for p in config.selectivity_profiles],
             ),
-            "concentration": cls(
-                key=lambda s: s.concentration.name,
-                order=[p.name for p in config.concentration_profiles],
+            "routine": cls(
+                key=lambda s: s.routine.name,
+                order=[p.name for p in config.routine_profiles],
             ),
         }
 

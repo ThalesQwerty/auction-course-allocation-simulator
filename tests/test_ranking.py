@@ -21,7 +21,6 @@ from leilao.equations import weighted_mean
 from profiles import single_axis
 from disciplines import disciplines_from_predecessors
 from leilao.config import (
-    DEFAULT_CONCENTRATION,
     DEFAULT_SELECTIVITY,
     Discipline,
     SimulationConfig,
@@ -358,12 +357,11 @@ def test_the_series_by_period_is_the_material_of_the_weighted_mean():
 MIXED = dict(
     students_per_profile=1,
     selectivity_profiles=DEFAULT_SELECTIVITY[:2],
-    concentration_profiles=DEFAULT_CONCENTRATION[2:4],
 )
 
 
 @pytest.mark.parametrize(
-    "axis", ["performance", "availability", "selectivity", "concentration"]
+    "axis", ["performance", "availability", "selectivity"]
 )
 def test_each_cut_partitions_the_aggregate_period_by_period(axis):
     """Em cada período, os grupos de um recorte somados com o peso deles
@@ -470,8 +468,8 @@ def test_the_profile_cuts_follow_the_scenario_order():
         assert [g.group for g in summary.by_group[ruler]["selectivity"]] == [
             p.name for p in config.selectivity_profiles
         ]
-        assert [g.group for g in summary.by_group[ruler]["concentration"]] == [
-            p.name for p in config.concentration_profiles
+        assert [g.group for g in summary.by_group[ruler]["selectivity"]] == [
+            p.name for p in config.selectivity_profiles
         ]
 
 
@@ -524,7 +522,7 @@ def test_the_bands_reduce_the_seeds_to_quartiles():
     assert [(a.ruler, a.axis) for a in axes] == [
         (ruler, axis)
         for ruler in ("period", "age", "cohort")
-        for axis in ("overall", "performance", "availability", "selectivity", "concentration")
+        for axis in ("overall", "performance", "availability", "selectivity", "routine")
     ]
     overall = axes[0].groups[0]
     for index, period in enumerate(overall.x):

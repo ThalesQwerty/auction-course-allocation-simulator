@@ -24,7 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { gradeShape } from "./equations";
 import { PRESET_COLORS, nextColor, profileColor } from "./profileColors";
-import type { PerformanceProfile, Profile } from "./types";
+import type { PerformanceProfile, Profile, RoutineProfile } from "./types";
 
 /** O quadrado da cor do grupo, como o da legenda do gráfico. O clique abre a
  * paleta; escolher fecha, e clicar fora também. */
@@ -382,18 +382,17 @@ export function AvailabilityProfileList({
   );
 }
 
-/** Um grupo de um dos dois eixos de **estratégia** — seletividade ou
- * concentração. Os dois têm a mesma forma: um nome e um número. */
+/** Um grupo do eixo de **estratégia**: um nome e um número. */
 interface StrategyProfile {
   name: string;
   value: number;
   color?: string;
 }
 
-/** O editor dos eixos de estratégia. Um só componente para os dois porque a
- * linha é a mesma — nome e valor —, e o que muda é o intervalo aceito e o
- * rótulo do campo. Não há prévia ao lado: o valor não descreve distribuição
- * nenhuma, e sim uma regra de decisão, então não há curva a desenhar.
+/** O editor do eixo de estratégia. A linha é nome e valor, e o que o
+ * chamador escolhe é o intervalo aceito e o rótulo do campo. Não há prévia ao
+ * lado: o valor não descreve distribuição nenhuma, e sim uma regra de
+ * decisão, então não há curva a desenhar.
  *
  * Sem seleção de linha, pelo mesmo motivo — a linha selecionada só serve para
  * dizer qual curva a prévia mostra. */
@@ -482,6 +481,91 @@ export function StrategyProfileList<T extends StrategyProfile>({
                 onChange={(e) =>
                   replace(index, { value: Number(e.target.value) })
                 }
+              />
+            </div>
+          </Row>
+        );
+      })}
+      <AddButton onClick={add} />
+    </div>
+  );
+}
+
+/** O editor do eixo de **rotina**. A linha é nome e dois multiplicadores —
+ * um por turno —, e o neutro é o par (1, 1): peso igual nos dois lados vira
+ * constante da linha, e a normalização desfaz constante.
+ *
+ * Sem prévia, como o de estratégia: o par não descreve distribuição nenhuma.
+ */
+export function RoutineProfileList({
+  profiles,
+  onChange,
+}: {
+  profiles: RoutineProfile[];
+  onChange: (profiles: RoutineProfile[]) => void;
+}) {
+  const replace = (index: number, values: Partial<RoutineProfile>) =>
+    onChange(profiles.map((p, i) => (i === index ? { ...p, ...values } : p)));
+
+  const add = () =>
+    onChange([
+      ...profiles,
+      {
+        name: nextName(
+          profiles.map((p) => p.name),
+          "rotina"
+        ),
+        color: nextColor(profiles),
+        day: 1,
+        night: 1,
+      },
+    ]);
+
+  const counts = new Map<string, number>();
+  for (const p of profiles) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
+
+  return (
+    <div className="profile-list">
+      {profiles.map((profile, index) => {
+        const invalid = !(profile.day > 0) || !(profile.night > 0);
+        const warning = !profile.name.trim()
+          ? "o nome não pode ficar vazio"
+          : (counts.get(profile.name) ?? 0) > 1
+            ? "nome repetido neste eixo"
+            : invalid
+              ? "os pesos devem ser maiores que zero"
+              : undefined;
+        return (
+          <Row
+            key={index}
+            selected={false}
+            onSelect={() => {}}
+            name={profile.name}
+            onName={(name) => replace(index, { name })}
+            color={profileColor(profile, index)}
+            onColor={(color) => replace(index, { color })}
+            removable={profiles.length > 1}
+            onRemove={() => onChange(profiles.filter((_, i) => i !== index))}
+            warning={warning}
+          >
+            <div className="field">
+              <label>Diurnas</label>
+              <input
+                type="number"
+                min={0.25}
+                step={0.25}
+                value={profile.day}
+                onChange={(e) => replace(index, { day: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Noturnas</label>
+              <input
+                type="number"
+                min={0.25}
+                step={0.25}
+                value={profile.night}
+                onChange={(e) => replace(index, { night: Number(e.target.value) })}
               />
             </div>
           </Row>

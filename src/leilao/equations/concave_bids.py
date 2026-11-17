@@ -25,18 +25,14 @@ que a fila de prioridade faz. Não há tabela de programação dinâmica a monta
 O CRITÉRIO DE PARADA
 --------------------
 
-O aluno **não gasta necessariamente tudo**. Ele para quando o ganho marginal
-do próximo crédito cai abaixo do limiar da seletividade
-(`equations.reserve_threshold`), e o que sobra fica no saldo — disponível nas
+O aluno **não gasta necessariamente tudo**. Ele investe o k-ésimo crédito em
+X enquanto `U_{a,X}/k ≥ s_a^(t)` — o limiar de
+`equations.reserve_threshold` —, e o que sobra fica no saldo: disponível nas
 rodadas seguintes do período e, com `credit_memory = "carry"`, no período
 seguinte.
 
 O `break` é correto porque a comparação é contra a **própria chave do heap**:
-se o topo não passa do limiar, nada passa. Uma versão anterior comparava o
-ganho marginal contra a utilidade crua enquanto a fila ordenava por score —
-a sequência não era monótona no critério, e parar na primeira reprovada
-excluía disciplinas que ainda passariam. Com score dos dois lados o problema
-não existe.
+se o topo não passa do limiar, nada passa.
 
 **Onde a sobra aparece.** Não diluída ao longo das rodadas: a mochila é
 chamada nova a cada rodada e o ganho marginal reseta, então o aluno volta a

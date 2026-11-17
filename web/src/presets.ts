@@ -4,14 +4,14 @@ import type { DisciplineInput, Scenario } from "./types";
 
 /** A população: os quatro eixos de perfil mais o sigma do interesse.
  *
- * Dois deles são **traço** — desempenho e disponibilidade governam sorteios, e
- * o aluno não os conhece. Os outros dois são **estratégia**: seletividade e
- * concentração entram na decisão dele, e é por isso que valem valor fixo em
- * vez de distribuição. Um perfil de estratégia é tratamento, não descrição.
+ * Três são **traço** — desempenho, disponibilidade e rotina governam
+ * sorteios, e o aluno não os conhece. O outro é **estratégia**: a
+ * seletividade entra na decisão dele, e é por isso que vale valor fixo em vez
+ * de distribuição. Um perfil de estratégia é tratamento, não descrição.
  *
- * A repartição entre as combinações é **igualitária** — 3 × 3 × 6 × 6 = 324
- * combinações, um exemplar de cada —, de modo que o que o cenário escolhe é
- * quantos grupos existem, não que fatia cada um leva.
+ * A repartição entre as combinações é **igualitária** — 3 × 3 × 5 × 3 = 135
+ * combinações —, de modo que o que o cenário escolhe é quantos grupos
+ * existem, não que fatia cada um leva.
  *
  * `max_hours` não está aqui: é do cenário, porque é a soma de um período da
  * grade. */
@@ -20,7 +20,7 @@ const POPULATION: Pick<
   | "performance_profiles"
   | "availability_profiles"
   | "selectivity_profiles"
-  | "concentration_profiles"
+  | "routine_profiles"
   | "interest_mean"
   | "interest_sigma"
 > = {
@@ -51,31 +51,31 @@ const POPULATION: Pick<
     { name: "Média disponibilidade", color: PALETTE.yellow, mode_hours: 16, full_load_rate: 0.05 },
     { name: "Baixa disponibilidade", color: PALETTE.red, mode_hours: 8, full_load_rate: 0.001 },
   ],
-  // O múltiplo do score médio abaixo do qual o aluno não pede nem financia.
-  // Em 0 não há corte — é o **especulador**, que pede tudo e gasta o
-  // orçamento inteiro; acima de 1 ele poupa, e o crédito não investido fica
-  // para o período seguinte. É o eixo que torna observável se especular
-  // compensa, que é metade da pergunta que o algoritmo genético existia para
-  // responder.
+  // S_a, repartido entre as elegíveis do período: o aluno não pede nem
+  // financia nada abaixo de `S_a / |M_a|`. Em 0 não há corte — é o
+  // **especulador**, que pede tudo e gasta o orçamento inteiro; acima de 1
+  // ele poupa, e o crédito não investido fica para o período seguinte. É o
+  // eixo que torna observável se especular compensa.
+  //
+  // Os nomes **são** os valores: o que separa os grupos é quantas
+  // disciplinas cada um pede, e na grade padrão (33 elegíveis por período)
+  // isso dá 33; 20,5; 11,7; 6,7 e 4,0.
   selectivity_profiles: [
-    { name: "Neutra", color: PALETTE.gray, value: 0 },
-    { name: "Baixíssima", color: PALETTE.red, value: 0.125 },
-    { name: "Baixa", color: PALETTE.yellow, value: 0.25 },
-    { name: "Média", color: PALETTE.green, value: 0.5 },
-    { name: "Alta", color: PALETTE.blue, value: 1 },
-    { name: "Altíssima", color: PALETTE.violet, value: 2 },
+    { name: "0", color: PALETTE.gray, value: 0 },
+    { name: "0,5", color: PALETTE.red, value: 0.5 },
+    { name: "1", color: PALETTE.yellow, value: 1 },
+    { name: "1,5", color: PALETTE.green, value: 1.5 },
+    { name: "2", color: PALETTE.blue, value: 2 },
   ],
-  // O expoente do score sobre a utilidade: 1 é o lance sincero, abaixo achata
-  // e acima concentra. A **invertida** é o controle do absurdo — aposta mais
-  // no que quer menos —, a **homogênea** testa a premissa da Seção 2.2 sobre
-  // revelação de preferência, e a de 3 mostra a saturação.
-  concentration_profiles: [
-    { name: "Invertida", color: PALETTE.violet, value: -1 },
-    { name: "Homogênea", color: PALETTE.blue, value: 0 },
-    { name: "Diluída", color: PALETTE.green, value: 0.5 },
-    { name: "Neutra", color: PALETTE.gray, value: 1 },
-    { name: "Concentrada", color: PALETTE.yellow, value: 2 },
-    { name: "Muito concentrada", color: PALETTE.red, value: 3 },
+  // A vida fora da grade: quem trabalha de dia prefere as turmas noturnas,
+  // e vice-versa. Os pesos **dobram** o lado conveniente em vez de penalizar
+  // o outro — depois da normalização da linha as duas formas dão a mesma
+  // preferência, e dobrar é a que se lê sem decimal. O indiferente é o
+  // neutro, e é o grupo de controle do eixo.
+  routine_profiles: [
+    { name: "Diurno", color: PALETTE.yellow, day: 2, night: 1 },
+    { name: "Noturno", color: PALETTE.blue, day: 1, night: 2 },
+    { name: "Indiferente", color: PALETTE.gray, day: 1, night: 1 },
   ],
   // μ = 1 põe a moda da fonte em e^{μ−σ²} = 1, e a prévia se lê; ele não mexe
   // em alocação, porque some na normalização. σ = 1 dá coeficiente de variação
@@ -84,24 +84,24 @@ const POPULATION: Pick<
   interest_sigma: 1,
 };
 
-/** Os seis níveis de cada eixo de estratégia, para completar um cenário salvo
- * antes de os eixos existirem. É o que a API já assumia quando o campo vinha
- * ausente, então preencher aqui não muda o que aquele cenário rodava. */
+/** Os eixos de perfil que um cenário salvo antes deles pode não trazer. É o
+ * que a API já assume quando o campo vem ausente, então preencher aqui não
+ * muda o que aquele cenário rodava. */
 export const strategyDefaults = (): Pick<
   Scenario,
-  "selectivity_profiles" | "concentration_profiles"
+  "selectivity_profiles" | "routine_profiles"
 > => ({
   selectivity_profiles: POPULATION.selectivity_profiles.map((p) => ({ ...p })),
-  concentration_profiles: POPULATION.concentration_profiles.map((p) => ({ ...p })),
+  routine_profiles: POPULATION.routine_profiles.map((p) => ({ ...p })),
 });
 
 // ---------------------------------------------------------------------------
 // O fatorial — a grade como instrumento, não como retrato
 // ---------------------------------------------------------------------------
 //
-// Não imita um currículo real: é um delineamento experimental. Três eixos binários cruzados, **todas as oito
-// combinações presentes em todo período da grade**, de modo que carga,
-// dificuldade e atratividade ficam balanceadas dentro de cada período e,
+// Não imita um currículo real: é um delineamento experimental. Carga e
+// dificuldade cruzadas, **todas as seis combinações presentes em todo período
+// da grade**, de modo que as duas ficam balanceadas dentro de cada período e,
 // portanto, ortogonais tanto ao período quanto às vagas. Uma diferença entre
 // grupos é da grandeza em tela, nunca de composição.
 //
@@ -113,33 +113,31 @@ export const strategyDefaults = (): Pick<
 
 interface Cell {
   hours: number;
-  /** Multiplicador do interesse, não deslocamento: ver `CELLS`. */
-  attractiveness: number;
+  /** Em quantas tentativas a disciplina custa o que uma de dificuldade 1
+   * rende de primeira. */
+  difficulty: number;
 }
 
-/** **A dificuldade saiu das células.** Ela deixou de ser eixo da disciplina e
- * virou eixo da **turma**: a escada de `class_difficulty_levels` reparte as
- * turmas de cada disciplina entre fáceis, médias e difíceis, com tantas de um
- * lado quantas do outro. Toda disciplina passa a ter as três, de modo que o
- * aluno escolhe o professor em vez de herdá-lo com a matéria — e é essa
- * escolha que o leilão precifica e o CR não.
+/** **A dificuldade voltou para a disciplina.** Ela foi eixo da turma
+ * enquanto existiu a escada de `class_difficulty_levels`; com a escada e a
+ * atratividade fora, o que distingue as turmas de uma disciplina passou a ser
+ * o **turno** — e o que distingue as disciplinas entre si voltou a ser carga
+ * e dificuldade.
  *
- * O que o fatorial perde com isso é um eixo entre disciplinas; o que ganha é
- * um eixo **dentro** de cada uma, cruzado com todos os outros por construção. */
+ * O centro geométrico de (1 · 1,4 · 2) é 1,41, o **mesmo** da escada que
+ * saiu: a calibragem da aprovação não muda, só muda de camada. */
 const CELL_HOURS = [2, 3];
-const CELL_ATTRACTIVENESS = [0.6, 1, 1.65];
+const CELL_DIFFICULTY = [1, 1.4, 2];
 
-/** As seis células, em ordem fixa — 2 cargas × 3 atratividades. A ordem é o
+/** As seis células, em ordem fixa — 2 cargas × 3 dificuldades. A ordem é o
  * que faz a rotação por período funcionar, então mexer nela muda o cenário.
  *
  * Os dois eixos não estão na mesma unidade, e é preciso ter isso em conta ao
- * comparar a grandeza dos efeitos: carga é **múltiplo** (1,5×), a
- * atratividade é multiplicador do interesse, com razão 2,75× entre as pontas.
- * Os níveis 0,6 e 1,65 abrem 1,0 em logaritmo, que é exatamente o que o par
- * (0, 1) abria quando a atratividade era deslocamento do expoente — a forma
- * mudou, a calibragem não. */
+ * comparar a grandeza dos efeitos: carga é **múltiplo** (1,5× entre as
+ * pontas), dificuldade é o expoente recíproco de `attempt_rates` (2× entre as
+ * pontas). */
 const CELLS: Cell[] = CELL_HOURS.flatMap((hours) =>
-  CELL_ATTRACTIVENESS.map((attractiveness) => ({ hours, attractiveness }))
+  CELL_DIFFICULTY.map((difficulty) => ({ hours, difficulty }))
 );
 
 /** Alunos por turma do cenário padrão.
@@ -200,10 +198,9 @@ const CLASSES_BY_PERIOD = [9, 8, 7, 6, 5, 4];
  * difícil, na mesma linhagem, e os atrasos se compunham.
  *
  * O que **não** muda: todo nó de um período continua tendo seus sucessores no
- * período seguinte, então a altura segue uniforme dentro de cada período e a
- * invariante da eq. (41) continua fora do fatorial — os três eixos operam numa
- * única camada, que é onde sigma e a atratividade agem. Era essa a condição a
- * preservar, e a triangular a preserva. */
+ * período seguinte, então a altura segue uniforme dentro de cada período —
+ * os eixos operam numa única camada, que é onde sigma age. Era essa a
+ * condição a preservar, e a triangular a preserva. */
 const shiftSuffix = (suffix: number, by: number) =>
   ((suffix - 1 + by) % CELLS.length) + 1;
 
@@ -220,7 +217,7 @@ const FACTORIAL_REQUIRED: DisciplineInput[] = Array.from(
       name: requiredName(period, suffix),
       hours: cell.hours,
       classes: CLASSES_BY_PERIOD[period - 1],
-      attractiveness: cell.attractiveness,
+      difficulty: cell.difficulty,
       unlocks:
         period < FACTORIAL_PERIODS
           ? [
@@ -249,7 +246,7 @@ const ELECTIVE_CLASSES = [3, 2, 1];
 const ELECTIVE_HOURS = [1, 2, 3];
 
 const ELECTIVE_CELLS: Cell[] = ELECTIVE_HOURS.flatMap((hours) =>
-  CELL_ATTRACTIVENESS.map((attractiveness) => ({ hours, attractiveness }))
+  CELL_DIFFICULTY.map((difficulty) => ({ hours, difficulty }))
 );
 
 const FACTORIAL_ELECTIVES: DisciplineInput[] = ELECTIVE_CLASSES.flatMap(
@@ -258,7 +255,7 @@ const FACTORIAL_ELECTIVES: DisciplineInput[] = ELECTIVE_CLASSES.flatMap(
       name: `Optativa ${group + 1}.${index + 1}`,
       hours: cell.hours,
       classes,
-      attractiveness: cell.attractiveness,
+      difficulty: cell.difficulty,
       unlocks: [] as string[],
       entry: false,
       elective: true,
@@ -274,12 +271,12 @@ const FACTORIAL_ELECTIVES: DisciplineInput[] = ELECTIVE_CLASSES.flatMap(
  * exclusão passa a ser escolha visível desde o 1º período.
  *
  * Caiu de 30 com o pacote de entrada, que foi de 20 h para 15 quando a
- * dificuldade saiu das células e elas passaram de oito para seis. A razão
+ * atratividade saiu das células e elas passaram de oito para seis. A razão
  * folga/piso é a mesma de antes: 1,6. */
 const FACTORIAL_MAX_HOURS = 24;
 
 /** X — exigência optativa, contra 54 h ofertadas no catálogo (três grupos de
- * 1+2+3 h em cada nível de atratividade). A folga é o que dá o que escolher.
+ * 1+2+3 h em cada nível de dificuldade). A folga é o que dá o que escolher.
  *
  * O teto real é de **capacidade**, não de catálogo: o catálogo entrega
  * `Σ turmas × class_size × carga` vaga-hora por período, e em regime a coorte
@@ -290,15 +287,13 @@ const FACTORIAL_ELECTIVE_HOURS = 24;
 /** Exemplares de cada combinação de perfil em cada coorte.
  *
  * A coorte **não é digitada**: ela é isto vezes o número de combinações, que
- * nos padrões são 3 desempenhos × 3 disponibilidades × 6 seletividades ×
- * 6 concentrações = 324. Um exemplar de cada já dá 324 alunos por período, e
- * é por isso que o padrão é 1: dobrar aqui dobra a população inteira.
+ * nos padrões são 3 desempenhos × 3 disponibilidades × 5 seletividades ×
+ * 3 rotinas = 135. Com 2 exemplares de cada, 270 alunos por período.
  *
  * É o que dimensiona `class_size`. As 9 turmas de cada disciplina de entrada
- * precisam comportar a coorte repartida entre elas — 324/9 = 36 por turma —,
- * e a 45 sobram 9 por turma para quem recursa. A 40 a ponta estreita do funil
- * passava de 100% de ocupação; a 45 ela volta à folga de antes. */
-const FACTORIAL_STUDENTS_PER_PROFILE = 1;
+ * precisam comportar a coorte repartida entre elas — 270/9 = 30 por turma —,
+ * e a 45 sobram 15 por turma para quem recursa. */
+const FACTORIAL_STUDENTS_PER_PROFILE = 2;
 
 /** **A grade, única para todo o aplicativo.**
  *
@@ -360,11 +355,13 @@ export const defaultScenario = (): Scenario => ({
   // turma deixa de ser decisão —, mas a disciplina continua mandando: é dela
   // que vem a maior parte do valor.
   class_stability: 0.7,
-  // A escada de dificuldade das turmas. O centro geométrico é 1,41, o **mesmo**
-  // da grade de antes, quando a dificuldade era eixo da disciplina e alternava
-  // entre 1 e 2 — a calibragem da aprovação não muda, só muda de camada. A
-  // razão entre as pontas é 2, que é a intensidade do tratamento.
-  class_difficulty_levels: [1, 1.4, 2],
+  // Os horários: 12 diurnos e 6 noturnos. Cada um é um grupo de exclusão
+  // mútua, e as turmas da grade caem neles em círculo — 17 a 18 por horário
+  // diurno, 12 a 13 por noturno. O par é o maior que ainda garante uma grade
+  // sem choque em todo período, inclusive só num dos turnos; reduzi-lo é o
+  // botão para o conflito pesar mais.
+  day_slots: 12,
+  night_slots: 6,
   return_multiplier: 2,
   exclusion_refund_rate: 0,
   seed: 42,

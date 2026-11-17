@@ -128,7 +128,7 @@ def run_simulation(
                 performance=s.performance.name,
                 availability=s.availability.name,
                 selectivity=s.selectivity.name,
-                concentration=s.concentration.name,
+                routine=s.routine.name,
                 grade_average=s.grade_average(draws.discipline_hours),
                 approved_hours=s.approved_hours(
                     draws.discipline_hours, config.min_grade

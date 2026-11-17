@@ -18,7 +18,12 @@ from leilao.behavior import (
 )
 from profiles import single_axis
 from disciplines import disciplines_from_predecessors
-from leilao.config import DEFAULT_PERFORMANCE, Discipline, SimulationConfig
+from leilao.config import (
+    DEFAULT_PERFORMANCE,
+    Discipline,
+    RoutineProfile,
+    SimulationConfig,
+)
 from leilao.equations import (
     attempt_rates,
     grade_shape,
@@ -58,8 +63,10 @@ def _grade_config(disciplines, **overrides):
     return SimulationConfig(
         disciplines=disciplines,
         # As 40 disciplinas são todas de entrada: o ingressante cursaria as 40
-        # de uma vez, e a eq. (4) tem de caber.
+        # de uma vez, e a eq. (4) tem de caber. E um horário para cada, senão
+        # o pacote garantido choca consigo mesmo.
         max_hours=40 * 60,
+        day_slots=40,
         **single_axis(40 * 60),
         **overrides,
     )
@@ -463,6 +470,9 @@ def _rows(stability, periods=8, **overrides):
         periods=periods,
         max_hours=20 * 60,
         interest_stability=stability,
+        # 20 disciplinas de entrada, de turma única: o pacote garantido só
+        # cabe se houver um horário diurno para cada uma.
+        day_slots=20,
         **single_axis(20 * 60),
         **overrides,
     )
@@ -527,6 +537,7 @@ def test_a_discipline_can_carry_its_own_stability():
         periods=4,
         max_hours=20 * 60,
         interest_stability=0.0,
+        day_slots=20,
         **single_axis(20 * 60),
     )
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(400)]
@@ -543,78 +554,73 @@ def test_a_discipline_can_carry_its_own_stability():
     assert abs(lag_correlation("SOLTA")) < 0.2
 
 
-# --- a atratividade --------------------------------------------------------
+# --- a rotina e o turno ----------------------------------------------------
 
 
-def _rows_for(disciplines, **overrides):
-    config = SimulationConfig(
+def _config_for(disciplines, **overrides):
+    base = dict(
         disciplines=disciplines,
         periods=3,
         students_per_profile=12,
         max_hours=240,
-        **single_axis(240),
         seed=11,
-        **overrides,
+        **single_axis(240),
     )
+    return SimulationConfig(**{**base, **overrides})
+
+
+def _rows_for(disciplines, **overrides):
+    config = _config_for(disciplines, **overrides)
     rng = np.random.default_rng(config.seed)
     return draw_interest(generate_students(config, rng), config, rng)
 
 
-def _pair(attractiveness):
-    """Duas disciplinas de mesma altura — a única diferença é o A de X."""
-    return [
-        Discipline(name="X", seats=20, hours=60, entry=True,
-                   attractiveness=attractiveness),
-        Discipline(name="Y", seats=20, hours=60, entry=True),
-    ]
+def _shifted(classes=3):
+    """Uma disciplina com turmas nos dois turnos: 3 turmas são 2 diurnas e 1
+    noturna."""
+    return [Discipline(name="X", seats=600, hours=60, classes=classes, entry=True)]
 
 
-def test_attractiveness_moves_the_whole_population_the_same_way():
-    """A_x é a parte do gosto **comum**: ela desloca a média da população, e é
-    isso que a distingue de sigma, que só espalha cada aluno em torno dela.
-
-    É essa componente comum que torna a própria preferência um sinal sobre a
-    preferência alheia — sem ela as linhas são independentes e ninguém pode
-    antecipar a disputa a partir do que gosta."""
-    mean_of = lambda a: np.mean([row["X"] for row in _rows_for(_pair(a)).values()])
-    assert mean_of(2.0) > mean_of(1.0) > mean_of(0.5)
-
-
-def test_attractiveness_one_is_the_neutral():
-    """1 é a disciplina média, e declarar 1 tem de dar exatamente o que dá não
-    declarar nada — é a regressão que garante que o eixo não mexeu nos
-    cenários que não o usam."""
-    assert _rows_for(_pair(1.0)) == _rows_for(
-        [Discipline(name="X", seats=20, hours=60, entry=True),
-         Discipline(name="Y", seats=20, hours=60, entry=True)]
+def test_the_routine_moves_the_interest_between_the_shifts():
+    """O perfil de rotina multiplica o interesse das turmas de um turno, e é
+    isso que o distingue de μ: ele varia **dentro** da linha, então não se
+    cancela na normalização."""
+    diurno = RoutineProfile(name="Diurno", day=2.0, night=1.0)
+    noturno = RoutineProfile(name="Noturno", day=1.0, night=2.0)
+    rows = _rows_for(
+        _shifted(), routine_profiles=(diurno, noturno), students_per_profile=20
     )
+    config = _config_for(_shifted(), routine_profiles=(diurno, noturno))
+    students = generate_students(config, np.random.default_rng(config.seed))
+    por_rotina = {"Diurno": [], "Noturno": []}
+    for student in students:
+        row = rows[(student.id, 1)]
+        por_rotina[student.routine.name].append(row["X T3"] / row["X T1"])
+    assert np.mean(por_rotina["Noturno"]) > 2 * np.mean(por_rotina["Diurno"])
 
 
-def test_attractiveness_now_outranks_the_position_in_the_curriculum():
-    """A invariante de altura saiu, e com ela a regra de que obrigatória vence
-    optativa por construção. Uma optativa muito atraente **passa à frente** no
-    sorteio — o que a faz valer menos na decisão é a redistribuição, que dá à
-    porteira o valor de tudo que ela destrava, e não uma desigualdade imposta
-    sobre o gosto."""
-    rows = _rows_for([
-        Discipline(name="OBR", seats=20, hours=60, entry=True, unlocks=("SEG",)),
-        Discipline(name="SEG", seats=20, hours=60),
-        Discipline(name="OPT", seats=20, hours=60, elective=True,
-                   attractiveness=1000.0),
-    ], elective_hours=60)
-    assert all(row["OPT"] > row["OBR"] for row in rows.values())
+def test_the_indifferent_routine_is_the_neutral():
+    """Peso igual nos dois turnos não move nada: ele vira constante da linha,
+    e a normalização desfaz constante — como faz com μ."""
+    indiferente = _rows_for(
+        _shifted(), routine_profiles=(RoutineProfile(name="R", day=1.0, night=1.0),)
+    )
+    gemeo = _rows_for(
+        _shifted(), routine_profiles=(RoutineProfile(name="R", day=3.0, night=3.0),)
+    )
+    assert set(indiferente) == set(gemeo)
+    for key, row in indiferente.items():
+        assert row == pytest.approx(gemeo[key])
 
 
-def test_attractiveness_below_one_is_a_discipline_below_the_average():
-    """O eixo é (0, ∞): a atratividade é **multiplicador**, então abaixo de 1
-    é a disciplina que a população quer menos que a média, e a linha continua
-    estritamente positiva porque multiplicar por A > 0 não zera nada.
-
-    σ fica em 0,25: o que se testa é o lado de A, e com σ = 1 a distância de
-    ln(20) no log ainda perde para o ruído em ~2% das linhas."""
-    rows = _rows_for(_pair(0.05), interest_sigma=0.25)
-    assert all(row["X"] > 0 for row in rows.values())
-    assert all(row["X"] < row["Y"] for row in rows.values())
+def test_the_routine_weight_does_not_zero_anything():
+    """O peso é multiplicador positivo: ele reordena os turnos e não tira
+    turma nenhuma do conjunto de escolha."""
+    rows = _rows_for(
+        _shifted(), routine_profiles=(RoutineProfile(name="D", day=50.0, night=1.0),)
+    )
+    assert all(row["X T3"] > 0 for row in rows.values())
+    assert all(row["X T3"] < row["X T1"] for row in rows.values())
 
 
 def test_the_performance_profile_does_not_move_anyone_elses_draw():

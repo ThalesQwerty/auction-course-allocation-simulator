@@ -5,7 +5,7 @@ quer, na **própria ordem de preferência**, enquanto houver vaga e carga:
 
     para a em ordem decrescente de N_a:
         para x na ordem de preferência de a:
-            se q_x > 0 e w_x ≤ W_a:  concede, q_x −= 1, W_a −= w_x
+            se q_x > 0 e w_x <= W_a:  concede, q_x −= 1, W_a −= w_x
 
 `requests` vem já na ordem de preferência de cada aluno, e `priority` é por
 **aluno** (N_a da eq. 49 mais a perturbação de desempate), não por par. Essa
@@ -22,14 +22,16 @@ mensagem e só diferem em quem decide.
 O ROTEAMENTO
 ------------
 
-`groups` mapeia cada turma na disciplina dela, e o conjunto `served` é o que
-impede o aluno de levar duas turmas do mesmo grupo: a caminhada **pula** o
-que ele já atendeu em vez de conceder de novo.
+`conflicts` mapeia cada turma nos grupos de `E = M ∪ G` a que ela pertence —
+a disciplina e o horário —, e o conjunto `served` é o que impede o aluno de
+levar duas turmas do mesmo grupo: a caminhada **pula** o que conflita com o
+que ele já levou, em vez de conceder de novo.
 
-`requests` vem com **uma turma por disciplina** (`equations.best_class`), de
-modo que dentro de uma rodada a caminhada não tem grupo repetido a pular e o
-roteamento fica como guarda — `serial_dictatorship` não checa clique nenhum
-por si. O que ele cobre de fato é o pedido que listasse irmãs.
+`requests` vem com **uma turma por disciplina e sem choque de horário**
+(`equations.best_class`), de modo que dentro de uma rodada a caminhada não
+tem o que pular e o roteamento fica como **guarda**: `serial_dictatorship`
+não checa clique nenhum por si, e o braço precisa dela se o pedido voltar a
+listar irmãs ou turmas que colidem.
 
 O conjunto cobre a **rodada**; entre rodadas quem cobre é o filtro por grupo
 de `equations.available_goods`.
@@ -37,6 +39,8 @@ de `equations.available_goods`.
 `seats` e `capacity` não são modificados: a concessão é descontada em cópias.
 """
 from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 
 
 def serial_dictatorship(
@@ -46,7 +50,7 @@ def serial_dictatorship(
     seats: dict[str, int],
     hours: dict[str, int],
     capacity: dict[str, int],
-    groups: dict[str, str] | None = None,
+    conflicts: Mapping[str, Sequence[str]] | None = None,
     tiebreak: dict[str, float] | None = None,
 ) -> list[tuple[str, str]]:
     remaining = dict(seats)
@@ -60,12 +64,12 @@ def serial_dictatorship(
     for student_id in sorted(wanted, key=lambda s: (-priority[s], -rank.get(s, 0.0), s)):
         served: set[str] = set()
         for name in wanted[student_id]:
-            group = groups[name] if groups else name
-            if group in served:
+            groups = conflicts[name] if conflicts else (name,)
+            if not served.isdisjoint(groups):
                 continue
             if remaining.get(name, 0) > 0 and room.get(student_id, 0) >= hours[name]:
                 remaining[name] -= 1
                 room[student_id] -= hours[name]
-                served.add(group)
+                served.update(groups)
                 granted.append((student_id, name))
     return granted

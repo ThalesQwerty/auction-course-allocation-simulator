@@ -51,9 +51,9 @@ function withStrategy(config: Scenario): Scenario {
     selectivity_profiles: Array.isArray(config.selectivity_profiles)
       ? config.selectivity_profiles
       : defaults.selectivity_profiles,
-    concentration_profiles: Array.isArray(config.concentration_profiles)
-      ? config.concentration_profiles
-      : defaults.concentration_profiles,
+    routine_profiles: Array.isArray(config.routine_profiles)
+      ? config.routine_profiles
+      : defaults.routine_profiles,
   };
 }
 

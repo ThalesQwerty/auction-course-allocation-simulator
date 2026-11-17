@@ -186,7 +186,6 @@ def playground(req: PlaygroundRequest) -> PlaygroundResponse:
                     tuple(s.eligible),
                     availability=s.availability,
                     selectivity=s.selectivity,
-                    concentration=s.concentration,
                 )
                 for s in req.students
             ],

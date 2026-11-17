@@ -17,7 +17,6 @@ from leilao.config import (
     DEFAULT_AVAILABILITY,
     DEFAULT_PERFORMANCE,
     AvailabilityProfile,
-    ConcentrationProfile,
     PerformanceProfile,
     SelectivityProfile,
     SimulationConfig,
@@ -37,10 +36,10 @@ from leilao.population import Student, generate_students
 from leilao.simulation import run_simulation
 
 GRADE = disciplines_from_predecessors(
-    ("D1", 80, 60),
-    ("D2", 80, 60),
-    ("D3", 48, 90, ("D1",)),
-    ("D4", 48, 90, ("D2",)),
+    ("D1", 160, 60),
+    ("D2", 160, 60),
+    ("D3", 96, 90, ("D1",)),
+    ("D4", 96, 90, ("D2",)),
 )
 
 
@@ -54,10 +53,6 @@ def make_config(**overrides) -> SimulationConfig:
         selectivity_profiles=(
             SelectivityProfile(name="Nenhuma", value=0.0),
             SelectivityProfile(name="Alta", value=1.0),
-        ),
-        concentration_profiles=(
-            ConcentrationProfile(name="Sincera", value=1.0),
-            ConcentrationProfile(name="Concentrada", value=2.0),
         ),
         rounds=2,
         max_hours=240,
@@ -322,24 +317,24 @@ def test_the_attended_share_is_the_complement_of_the_exclusion_rate():
 
 
 def test_the_combinations_split_the_generation_equally():
-    """Com 3 · 3 · 2 · 2 = 36 combinações e 2 exemplares de cada, a coorte tem
-    72 alunos e cada combinação aparece exatamente duas vezes. Não há
+    """Com 3 · 3 · 2 · 3 = 54 combinações e 2 exemplares de cada, a coorte tem
+    108 alunos e cada combinação aparece exatamente duas vezes. Não há
     porcentagem a configurar nem sobra a distribuir."""
     config = make_config(students_per_profile=2)
     students = generate_students(config, np.random.default_rng(0))
     first = [s for s in students if s.entry_period == 1]
-    assert len(first) == 72
+    assert len(first) == 108
 
     combinations = [
         (
             s.performance.name,
             s.availability.name,
             s.selectivity.name,
-            s.concentration.name,
+            s.routine.name,
         )
         for s in first
     ]
-    assert len(set(combinations)) == 36
+    assert len(set(combinations)) == 54
     assert all(combinations.count(c) == 2 for c in set(combinations))
 
 
@@ -347,18 +342,17 @@ def test_the_cohort_is_derived_from_the_profile_grid():
     """O tamanho não é digitado: é exemplares × combinações. É isso que faz a
     repartição ser exata por construção, sem sobra a girar entre coortes."""
     config = make_config(students_per_profile=2)
-    assert config.profile_combinations() == 36
-    assert config.students_per_period == 72
+    assert config.profile_combinations() == 54
+    assert config.students_per_period == 108
 
 
-def test_the_strategy_axes_become_the_behaviour():
-    """Desempenho e disponibilidade são traço e ficam no sorteio;
-    seletividade e concentração **são** a decisão do aluno."""
+def test_the_strategy_axis_becomes_the_behaviour():
+    """Desempenho e disponibilidade são traço e ficam no sorteio; a
+    seletividade **é** a decisão do aluno."""
     config = make_config(students_per_profile=1)
     students = generate_students(config, np.random.default_rng(0))
     for student in students:
         assert student.behavior.selectivity == student.selectivity.value
-        assert student.behavior.concentration == student.concentration.value
 
 
 def test_the_profile_does_not_come_from_the_seed():
@@ -419,16 +413,18 @@ def test_the_summary_carries_both_profiles_of_the_student():
     desempenho = {p.name for p in config.performance_profiles}
     disponibilidade = {p.name for p in config.availability_profiles}
     seletividade = {p.name for p in config.selectivity_profiles}
+    rotina = {p.name for p in config.routine_profiles}
 
     assert result.students
     for summary in result.students:
         assert summary.performance in desempenho
         assert summary.availability in disponibilidade
         assert summary.selectivity in seletividade
+        assert summary.routine in rotina
     # A repartição igualitária aparece no resumo, não só na população — e
     # nos quatro eixos, que é o que o relatório recorta.
     combinacoes = {
-        (s.performance, s.availability, s.selectivity, s.concentration)
+        (s.performance, s.availability, s.selectivity, s.routine)
         for s in result.students
     }
     assert len(combinacoes) == config.profile_combinations()

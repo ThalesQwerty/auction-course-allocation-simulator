@@ -8,7 +8,6 @@ from leilao.behavior import (
     Behavior,
     compute_bids,
     decide,
-    decision_scores,
     draw_interest,
     utility_matrix,
 )
@@ -240,10 +239,10 @@ def test_utility_matrix_is_a_pure_function_of_the_row():
     assert utility_matrix(interest=row, student=student(), config=config) == first
 
 
-def test_approving_a_discipline_spreads_its_utility_over_what_is_left():
-    """Aprovar tira a disciplina da matriz e **distribui a utilidade dela
-    igualmente entre as elegíveis** — é o que impede o veterano de ficar com
-    pouca massa e perder todo leilão. A massa total não se mexe."""
+def test_approving_a_discipline_concentrates_the_inheritance_on_who_is_left():
+    """Aprovar D3 tira a disciplina da matriz e deixa D5 — que ela e D2
+    travavam juntas — herdada só por D2. A soma continua 1, e é sempre 1:
+    não há massa a conservar, há uma linha que se renormaliza."""
     config = make_config()
     row = draw_interest([student()], config, np.random.default_rng(9))[("a1", 1)]
 
@@ -251,10 +250,10 @@ def test_approving_a_discipline_spreads_its_utility_over_what_is_left():
     # D3 aprovada: D1 e D2 continuam elegíveis, e D5 não entra (falta D2).
     after = utility_matrix(interest=row, student=student(grades={"D3": 8.0}), config=config)
     assert "D3" in before and "D3" not in after
-    assert sum(after.values()) == pytest.approx(sum(before.values()))
-    # D1 recebe exatamente metade de D3, que é a divisão igual entre as duas
-    # elegíveis. D2 recebe essa metade e mais a parte de D5 que D3 segurava.
-    assert after["D1"] - before["D1"] == pytest.approx(row["D3"] / 2)
+    assert sum(before.values()) == pytest.approx(1.0)
+    assert sum(after.values()) == pytest.approx(1.0)
+    # D1 segue herdando D4 sozinha; D2 passa de meia D5 para D5 inteira.
+    assert after["D2"] / after["D1"] > before["D2"] / before["D1"]
 
 
 def test_an_empty_eligible_set_gives_no_utility():
@@ -440,9 +439,10 @@ def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
 # --- os genes de comportamento --------------------------------------------
 
 
-def test_the_baseline_profile_asks_in_proportion_to_utility():
-    """β_u = 1 com os outros dois em 0 é a linha de base: o score **é** a
-    utilidade, e as duas mochilas decidem o que decidiriam sem genoma."""
+def test_the_message_is_the_utility_itself():
+    """Não há expoente a aplicar: a mensagem do aluno **é** a utilidade dele,
+    e o lance sai proporcional a ela — que é o ótimo da relaxação contínua da
+    mochila côncava."""
     utilities = {"D1": 0.4, "D2": 0.3, "D3": 0.2, "D4": 0.1}
     pool = list(utilities)
     assert compute_bids(
@@ -450,43 +450,21 @@ def test_the_baseline_profile_asks_in_proportion_to_utility():
     ) == compute_bids(
         utilities=utilities, available=pool, budget=10, behavior=NEUTRAL
     )
-    scores = decision_scores(utilities=utilities)
-    ratios = [scores[n] / utilities[n] for n in utilities]
-    assert max(ratios) == pytest.approx(min(ratios))
+    _admitted, scores, _reserve = decide(utilities=utilities)
+    assert scores == utilities
 
 
-def test_concentration_at_zero_flattens_the_students_own_preference():
-    """Zero quer dizer "ignora": `u^0 = 1` para todas, e o aluno reparte igual."""
-    flat = decision_scores(
-        utilities={"D1": 0.6, "D2": 0.4}, behavior=Behavior(concentration=0.0)
-    )
-    assert flat["D1"] == pytest.approx(flat["D2"])
-
-
-def test_concentration_concentrates_and_inverts():
-    """O expoente: acima de 1 concentra nas mais uteis, negativo inverte e
-    poe o orcamento na que o aluno menos quer."""
+def test_the_bid_is_proportional_to_the_utility():
+    """Com orçamento que acomode o arredondamento, os créditos saem na razão
+    das utilidades — o lance sincero."""
     utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
-    pool = list(utilities)
-
-    def bids(concentration):
-        return compute_bids(
-            utilities=utilities,
-            available=pool,
-            budget=20,
-            behavior=Behavior(concentration=concentration),
-        )
-
-    assert bids(3.0)["D1"] > bids(1.0)["D1"] > bids(0.2)["D1"]
-    flat = bids(0.0)
-    assert max(flat.values()) - min(flat.values()) <= 1
-    inverted = bids(-2.0)
-    assert inverted["D3"] > inverted["D1"]
+    bids = compute_bids(utilities=utilities, available=list(utilities), budget=20)
+    assert bids == {"D1": 10, "D2": 6, "D3": 4}
 
 
-def test_selectivity_is_a_multiple_of_the_mean_score():
-    """Com scores 0,6 e 0,4 a media e 0,5: seletividade 1 corta a segunda,
-    seletividade 0,5 nao corta nenhuma."""
+def test_selectivity_is_shared_between_the_eligible_disciplines():
+    """Com duas elegiveis, S = 1 da reserva 0,5 e corta a segunda; S = 0,5
+    da 0,25 e nao corta nenhuma."""
     utilities = {"D1": 0.6, "D2": 0.4}
 
     admitted, _scores, reserve = decide(

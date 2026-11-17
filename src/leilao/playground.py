@@ -10,10 +10,18 @@ mochila em dois níveis de `behavior.compute_bids` e o pedido por CR lista as
 turmas dentro da disciplina, exatamente como lá.
 
 As contas são as mesmas da simulação (`equations/`); o que muda é que aqui não
-há grade, histórico nem conclusão.
+há grade, histórico nem conclusão. **Nem horário**: o horário sai da varredura
+circular sobre a grade inteira (`equations.class_schedule`), e sem grade a
+única exclusão mútua que resta é a disciplina.
 
-Cada aluno traz os dois eixos de **estratégia** — seletividade e concentração,
-que são o `Behavior` com que ele decide — e a **disponibilidade**, que na
+As utilidades chegam **na escala do motor**: lá `equations.utility` faz a
+melhor turma de cada disciplina somar 1 sobre o elegível, e é nessa escala que
+a reserva `S_a / |M_a|` se lê. Digitar utilidades numa escala própria muda o
+que a seletividade corta — o lance e o pedido, que só leem a ordem e as
+razões, não se mexem.
+
+Cada aluno traz o eixo de **estratégia** — a seletividade, que é o
+`Behavior` com que ele decide — e a **disponibilidade**, que na
 simulação é sorteada do perfil e aqui chega já realizada, em horas. Com ela o
 fim do período é o mesmo: a mochila do que ele leva (`retained_set`) e a
 exclusão do resto. É o que deixa ver a especulação em escala micro: quem pede
@@ -24,7 +32,6 @@ do período seguinte não têm onde aparecer.
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -77,13 +84,10 @@ class PlaygroundStudent:
     # `None` é disponibilidade sem teto — ele leva tudo o que obteve.
     availability: float | None = None
     selectivity: float = 0.0
-    concentration: float = 1.0
 
     @property
     def behavior(self) -> Behavior:
-        return Behavior(
-            concentration=self.concentration, selectivity=self.selectivity
-        )
+        return Behavior(selectivity=self.selectivity)
 
 
 @dataclass(frozen=True)
@@ -174,8 +178,6 @@ def _validate(
             raise ValueError(f"aluno {student.id!r}: CH disponível deve ser >= 0")
         if not student.selectivity >= 0:
             raise ValueError(f"aluno {student.id!r}: seletividade deve ser >= 0")
-        if not math.isfinite(student.concentration):
-            raise ValueError(f"aluno {student.id!r}: concentração deve ser finita")
         for name in student.eligible:
             if name not in known:
                 raise ValueError(
@@ -198,8 +200,9 @@ class _Table:
     budget: dict[str, int]
     won: dict[str, set[str]]
     utilities: dict[str, dict[str, float]]
-    # Turma -> disciplina, e o inverso, na ordem da oferta.
-    groups: dict[str, str]
+    # Turma -> os grupos de exclusão dela. Sem grade não há horário, então o
+    # único grupo é a disciplina.
+    conflicts: dict[str, tuple[str, ...]]
     classes: dict[str, tuple[str, ...]]
 
     def available(self, student_id: str) -> list[str]:
@@ -211,7 +214,7 @@ class _Table:
             hours=self.hours,
             capacity=self.capacity[student_id],
             already_won=self.won[student_id],
-            groups=self.groups,
+            conflicts=self.conflicts,
         )
 
     def exclusions(self) -> list[MutualExclusion]:
@@ -263,7 +266,7 @@ def _auction_round(
             agents=[Agent(s.id, float(table.capacity[s.id])) for s in students],
             goods=[Good(c.name, table.seats[c.name], c.hours) for c in classes],
             exclusions=table.exclusions(),
-            groups=table.groups,
+            conflicts=table.conflicts,
             budgets=dict(table.budget),
             bids=bids,
             epsilon=epsilon,
@@ -297,6 +300,7 @@ def _ranking_round(
             available=table.available(student.id),
             behavior=student.behavior,
             classes=table.classes,
+            conflicts=table.conflicts,
         )
         posted[student.id] = {name: 1 for name in asked}
         requests.extend((student.id, name) for name in asked)
@@ -311,7 +315,7 @@ def _ranking_round(
         seats=table.seats,
         hours=table.hours,
         capacity={s.id: int(table.capacity[s.id]) for s in students},
-        groups=table.groups,
+        conflicts=table.conflicts,
         tiebreak=per_agent(epsilon),
     )
     for student_id, name in granted:
@@ -446,7 +450,7 @@ def run_playground(
             }
             for student in students
         },
-        groups=groups,
+        conflicts={name: (group,) for name, group in groups.items()},
         classes={group: tuple(names) for group, names in by_discipline.items()},
     )
     normalized = {

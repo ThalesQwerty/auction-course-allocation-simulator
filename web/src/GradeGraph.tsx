@@ -15,13 +15,10 @@ interface Arrow {
 
 const formatHours = (hours: number) => hours.toLocaleString("pt-BR");
 
-/** Dificuldade e atratividade do cartão. **Cada uma tem o seu neutro**, e por
- * isso ele é argumento: a dificuldade se lê em múltiplos da disciplina média,
- * onde o neutro é 1, e a atratividade é deslocamento do expoente do interesse,
- * onde o neutro é 0. É o neutro que não merece destaque — o que a vista
- * precisa achar numa grade de dezenas de cartões é quem foge dele. Daí o peso
- * só acima e o recuo abaixo: a escala é a mesma, a ênfase é que é
- * assimétrica. */
+/** A dificuldade do cartão. O **neutro é argumento** porque é ele que não
+ * merece destaque — o que a vista precisa achar numa grade de dezenas de
+ * cartões é quem foge dele. Daí o peso só acima e o recuo abaixo: a escala é
+ * a mesma, a ênfase é que é assimétrica. */
 const trait = (value: number | undefined, neutral: number) => {
   const amount = value ?? neutral;
   const level =
@@ -212,7 +209,7 @@ export function GradeGraph({
       </p>
       <p className="grade-traits">
         {discipline.classes > 1 && <>{discipline.classes} turmas · </>}
-        atr. {trait(discipline.attractiveness, 1)}
+        dific. {trait(discipline.difficulty, 1)}
       </p>
     </article>
   );

@@ -16,11 +16,6 @@ export interface DisciplineInput {
    * pré-requisito não faz a disciplina ser de entrada — a optativa também não
    * tem e fica fora da garantia. */
   entry: boolean;
-  /** A_x — atratividade: o **multiplicador** do interesse sorteado, comum a
-   * toda a população. 1 é a disciplina média, 2 vale o dobro dela e 0,5 a
-   * metade. É a parte do gosto comum a todos, enquanto `interest_sigma` é a
-   * privada de cada aluno. Opcional: ausente é 1. */
-  attractiveness?: number;
   /** Optativa: não desbloqueia nada, não é de entrada, e concluir não exige
    * aprovar em cada uma — exige somar `elective_hours` entre as aprovadas. É
    * isso que as torna substituíveis entre si. Ortogonal a `entry`. */
@@ -99,17 +94,19 @@ export interface SelectivityProfile {
   value: number; // >= 0
 }
 
-/** Um grupo da população no eixo de **concentração**.
+/** Um grupo da população no eixo de **rotina** — a vida fora da grade.
  *
- * O expoente do score sobre a utilidade: 1 é o lance sincero, abaixo achata,
- * acima concentra, e negativo inverte — aposta mais no que ele quer menos, que
- * é o controle do absurdo.
+ * Os dois valores multiplicam o interesse das turmas de cada turno. O
+ * indiferente é o neutro (1 e 1); quem tem rotina diurna dobra o peso das
+ * turmas diurnas, e vice-versa. É **traço**: o aluno não escolhe trabalhar de
+ * dia, e o turno não entra em decisão de lance.
  *
- * Espelha `api.schemas.ConcentrationProfileIn`. */
-export interface ConcentrationProfile {
+ * Espelha `api.schemas.RoutineProfileIn`. */
+export interface RoutineProfile {
   name: string;
   color?: string;
-  value: number; // entre -3 e 5
+  day: number; // > 0
+  night: number; // > 0
 }
 
 export interface Scenario {
@@ -138,11 +135,14 @@ export interface Scenario {
    * tentativa, não mexe no CR, e no leilão devolve metade do preço pago. A
    * vaga não volta para a oferta. */
   availability_profiles: Profile[];
-  /** Perfis de **seletividade** e de **concentração**: os dois eixos de
-   * estratégia. Com os de traço eles dão as combinações de perfil, e a coorte
-   * é `students_per_profile` vezes esse número. */
+  /** Perfis de **seletividade**: o eixo de estratégia. Com os de traço ele
+   * dá as combinações de perfil, e a coorte é `students_per_profile` vezes
+   * esse número. */
   selectivity_profiles: SelectivityProfile[];
-  concentration_profiles: ConcentrationProfile[];
+  /** Perfis de **rotina**: o terceiro eixo de traço. Multiplicam o interesse
+   * das turmas de cada turno, de modo que quem trabalha de dia prefere as
+   * noturnas sem ficar proibido das diurnas. */
+  routine_profiles: RoutineProfile[];
   /** Quanto do interesse do aluno é permanente, de 0 a 1 — a fração da
    * variância que não é resorteada a cada período. 0 reproduz o modelo
    * anterior; 1 congela o interesse. Ortogonal ao σ: a divisão preserva a dispersão de
@@ -154,17 +154,17 @@ export interface Scenario {
    * disciplina, de modo que estabilidade entre períodos igual a 1 congela
    * também as turmas. */
   class_stability: number;
-  /** Os três níveis da escada de dificuldade das turmas — baixa, média e
-   * alta —, multiplicadores da dificuldade declarada pela disciplina. A
-   * escada reparte as turmas com tantas fáceis quantas difíceis, de modo que
-   * a média geométrica fica no nível do meio. Iguais entre si, a escada está
-   * desligada. */
-  class_difficulty_levels: [number, number, number];
+  /** Quantos **horários** existem em cada turno. Cada horário é um grupo de
+   * exclusão mútua entre turmas — ninguém cursa duas disciplinas no mesmo
+   * horário —, e as turmas da grade são repartidas entre eles circularmente.
+   * Menos horários é mais turma por horário, e mais escolha travada por
+   * conflito. */
+  day_slots: number;
+  night_slots: number;
   /** μ — média do logaritmo da log-normal de onde sai o **interesse**. Não
    * mexe em alocação nenhuma: soma-se ao log de toda a linha, o que a
    * multiplica por e^μ, e a normalização desfaz o fator. Existe para a prévia
-   * da log-normal fonte, que em μ = 0 se espreme entre 0 e 1. A atratividade
-   * A_x de cada disciplina soma-se a ele. */
+   * da log-normal fonte, que em μ = 0 se espreme entre 0 e 1. */
   interest_mean: number;
   /** σ — desvio do logaritmo da log-normal de onde sai o **interesse** — o
    * sorteio que, normalizado sobre a grade e visto pelo histórico do aluno,
@@ -482,7 +482,7 @@ export type ClassCut =
   | "classes"
   | "hours"
   | "difficulty"
-  | "attractiveness"
+  | "shift"
   | "curriculum_period";
 
 /** Os recortes **espaciais** da tela de comparação — as cores das linhas.
@@ -496,7 +496,7 @@ export type CutAxis =
   | "performance"
   | "availability"
   | "selectivity"
-  | "concentration";
+  | "routine";
 
 /** As réguas do eixo X — `leilao.comparison.RULERS`.
  *
@@ -721,6 +721,17 @@ export interface DisciplineSnapshot {
    * disciplinas com o mesmo valor caem no mesmo grupo. */
   curriculum_period: number;
   hours: number;
+  /** A dificuldade da disciplina, replicada em cada turma dela. */
+  difficulty: number;
+  /** Em quantas turmas a disciplina foi repartida. */
+  classes: number;
+  /** O **turno** da turma — `day` ou `night`. É o único atributo que varia
+   * dentro de uma disciplina, e por isso o único recorte de preço que mostra
+   * algo dentro dela. */
+  shift: string;
+  /** O horário da turma, como `"Diurno 3"`. Horário é grupo de exclusão
+   * mútua: ninguém cursa duas turmas no mesmo. */
+  schedule: string;
   seats: number;
   filled: number;
   /** Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
@@ -753,15 +764,15 @@ export interface StudentSummary {
   id: string;
   name: string;
   entry_period: number; // t_a — eq. (31)
-  /** Os quatro grupos a que ele pertence, pelo nome. Os dois primeiros são
-   * **traço** e não entram em decisão nenhuma dele; os dois últimos são
-   * **estratégia** e são exatamente o que ele decide. Estão aqui porque a tela
+  /** Os grupos a que ele pertence, pelo nome. Os dois primeiros são
+   * **traço** e não entram em decisão nenhuma dele; o último é
+   * **estratégia** e é exatamente o que ele decide. Estão aqui porque a tela
    * individual é onde se pergunta "por que *este* aluno foi assim" — e o
    * perfil é metade da resposta, com a seed sendo a outra. */
   performance: string;
   availability: string;
   selectivity: string;
-  concentration: string;
+  routine: string;
   grade_average: number; // N_a — eq. (49)
   approved_hours: number;
   /** S — a carga da grade inteira. Toda disciplina é obrigatória, então é a
@@ -889,7 +900,6 @@ export interface PlaygroundRequest {
     /** Horas já realizadas; ausente, o aluno leva tudo o que obteve. */
     availability?: number;
     selectivity: number;
-    concentration: number;
   }[];
 }
 

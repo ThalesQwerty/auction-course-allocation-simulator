@@ -1,11 +1,12 @@
 """O corte da seletividade — quais disciplinas entram no pedido.
 
-    admitidas = { x : score_x ≥ limiar }
+    admitidas = { X : U_{a,X} ≥ s_a^(t) }
 
-O limiar vem de `equations.reserve_threshold`: a seletividade do perfil em
-múltiplos do score médio. O termo "reserva" é o da literatura de desenho de
-mecanismos — o payoff da opção externa, contra o qual se escreve a restrição
-de participação. Não é o preço de reserva do vendedor: é o lado do agente.
+O limiar vem de `equations.reserve_threshold`: a seletividade do perfil
+repartida entre as elegíveis do período. O termo "reserva" é o da literatura
+de desenho de mecanismos — o payoff da opção externa, contra o qual se
+escreve a restrição de participação. Não é o preço de reserva do vendedor: é
+o lado do agente.
 
 O MESMO LIMIAR NOS DOIS MECANISMOS
 -----------------------------------
@@ -17,11 +18,9 @@ deixa de comprar crédito quando o ganho marginal do próximo cai abaixo dele.
 Uma regra, dois usos, um por mecanismo. No CR não há investimento marginal
 que se possa interromper, então lá o filtro é tudo o que existe.
 
-**A parada já existiu e foi removida uma vez**, porque comparava o ganho
-marginal (ordenado por score) contra a utilidade: a sequência que saía da
-fila não era monótona no critério, e parar na primeira reprovada excluía
-disciplinas que ainda passariam. Comparando contra o **score**, que é a
-própria chave do heap, a monotonicidade volta e o `break` fica correto.
+A parada da mochila compara contra a **própria chave do heap**, que é o
+ganho marginal `U_{a,X}/k`: se o topo não passa do limiar, nada passa, e o
+`break` fica correto.
 
 **Nada impede que nada passe.** Perfil achatado com seletividade alta zera o
 pedido do período, e o aluno não solicita nada. É consequência da regra, não

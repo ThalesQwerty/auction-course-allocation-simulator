@@ -52,9 +52,17 @@ def greedy_allocation(
 ) -> dict[tuple[str, str], int]:
     remaining = dict(seats)
     room = dict(capacity)
-    # Cliques de exclusão mútua (eq. 5): no máximo um bem de cada clique por
-    # agente. O guloso respeita olhando o que já concedeu.
-    taken: dict[str, set[str]] = {agent_id: set() for agent_id in capacity}
+    # Cliques de exclusão mútua (eq. 5), indexados **pelo bem**: com `E = M ∪ G`
+    # são dezenas de cliques e milhões de pares, e varrer a lista inteira por
+    # par custaria o produto dos dois. O índice responde a pergunta que a
+    # varredura faz — "de que cliques este bem participa?" — em tempo
+    # constante, e a semântica é a mesma.
+    cliques_of: dict[str, list[int]] = {}
+    for index, clique in enumerate(exclusions):
+        for good_id in clique:
+            cliques_of.setdefault(good_id, []).append(index)
+    # O que cada agente já comprometeu, por clique.
+    taken: dict[str, set[int]] = {agent_id: set() for agent_id in capacity}
 
     allocation = {(agent_id, good_id): 0 for agent_id, good_id, _, _ in demands}
     for agent_id, good_id, _preference, _tiebreak in sorted(
@@ -64,12 +72,12 @@ def greedy_allocation(
             continue
         if room.get(agent_id, 0) < hours.get(good_id, 0):
             continue
-        if any(
-            good_id in clique and taken[agent_id] & clique for clique in exclusions
-        ):
+        groups = cliques_of.get(good_id, ())
+        committed = taken.setdefault(agent_id, set())
+        if any(group in committed for group in groups):
             continue
         remaining[good_id] -= 1
         room[agent_id] -= hours[good_id]
-        taken[agent_id].add(good_id)
+        committed.update(groups)
         allocation[(agent_id, good_id)] = 1
     return allocation

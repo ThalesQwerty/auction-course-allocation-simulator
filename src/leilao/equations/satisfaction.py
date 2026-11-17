@@ -2,40 +2,31 @@
 
     ψ_a = Σ_{x ∈ B} u_{a,x} · z_{a,x}
 
-A fração do **desejo alcançável** do aluno naquele período que foi
-atendida. O denominador é `equations.reachable_utility` — a soma, sobre as
-disciplinas, da utilidade da turma mais útil de cada uma —, porque o aluno
-só pode levar uma turma por disciplina. É utilidade, e não interesse,
-porque disciplina que ele não podia cursar não é desejo atendível.
+A fração do que o aluno queria naquele período e de fato obteve. **Não há
+denominador**: `equations.utility` faz `Σ_{X ∈ M_a} U_{a,X} = 1`, e a melhor
+turma de cada disciplina vale exatamente `U_{a,X}` — então a soma do que ele
+poderia levar, uma turma por disciplina, é 1 por construção.
 
-**Sem turmas o denominador vale 1** e a divisão some: o interesse é
-normalizado sobre a grade (`interest_row`) e a redistribuição o conserva
-(`utility`), de modo que ψ volta a ser a soma simples das utilidades
-atendidas, como era antes de as turmas existirem.
+É utilidade, e não interesse, porque disciplina que ele não podia cursar não
+é desejo atendível.
 
-**O denominador mudou**, e vale saber qual leitura você está olhando. Antes
-era `U_a` — a soma só sobre o conjunto elegível (eq. 43) —, e ψ media "do que
-eu podia cursar, quanto cursei". Como U_a varia de ~0,002 a ~0,65 entre
-linhas, aquilo era uma razão de denominador móvel: maximizá-la premiava estar
-num período pobre de opções. As duas leituras se recuperam uma da outra por
-`ψ_elegível = ψ / U_a`. O que se perde com o denominador fixo é que **ψ = 1
-deixa de ser atingível** — exigiria cursar a grade inteira num período —, e o
-que se ganha é uma escala igual para todo aluno, em todo período.
+**O `U_a` da eq. (43) saiu de cena**, e vale saber qual leitura você está
+olhando. Houve duas antes desta: a soma sobre o conjunto elegível, que variava
+de ~0,002 a ~0,65 entre linhas e premiava estar num período pobre de opções; e
+a soma das melhores turmas, que era `≤ 1` e ficava abaixo de 1 porque a
+redistribuição espalhava massa pelas irmãs. Agora o teto é 1 e é **atingível**:
+o ingressante que recebe a matrícula garantida inteira num cenário sem
+optativa marca exatamente 1.
 
 `allocated` pode trazer disciplina fora de `utilities` (já aprovada, por
 exemplo); ela é ignorada, que é o certo — não é desejo deste período.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 
 def satisfaction(
-    *,
-    utilities: dict[str, float],
-    allocated: Iterable[str],
-    reachable: float = 1.0,
+    *, utilities: Mapping[str, float], allocated: Iterable[str]
 ) -> float:
-    if reachable <= 0.0:
-        return 0.0
-    return sum(utilities.get(name, 0.0) for name in allocated) / reachable
+    return sum(utilities.get(name, 0.0) for name in allocated)

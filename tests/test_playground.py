@@ -29,7 +29,6 @@ def student(
     max_hours: int = 120,
     availability: float | None = None,
     selectivity: float = 0.0,
-    concentration: float = 1.0,
 ) -> PlaygroundStudent:
     return PlaygroundStudent(
         student_id,
@@ -40,7 +39,6 @@ def student(
         tuple(eligible if eligible is not None else utilities),
         availability=availability,
         selectivity=selectivity,
-        concentration=concentration,
     )
 
 
@@ -168,9 +166,11 @@ def test_a_non_positive_utility_is_rejected():
 
 
 def test_the_bid_reads_the_student_behavior():
-    """Seletividade e concentração entram no lance como na simulação."""
-    utilities = {"A": 6, "B": 3, "C": 1}
-    behavior = Behavior(concentration=2.0, selectivity=0.5)
+    """A seletividade entra no lance como na simulação. As utilidades vêm na
+    escala do motor — somam 1 sobre as disciplinas —, que é a escala em que a
+    reserva `S/|M_a|` se lê."""
+    utilities = {"A": 0.6, "B": 0.3, "C": 0.1}
+    behavior = Behavior(selectivity=0.5)
     result = run_playground(
         mechanism="credits",
         rounds=1,
@@ -183,7 +183,6 @@ def test_the_bid_reads_the_student_behavior():
                 credits=12,
                 max_hours=180,
                 selectivity=behavior.selectivity,
-                concentration=behavior.concentration,
             )
         ],
     )
@@ -198,7 +197,7 @@ def test_the_bid_reads_the_student_behavior():
 
 
 def test_selectivity_also_cuts_the_ranking_request():
-    utilities = {"A": 10, "B": 1}
+    utilities = {"A": 0.9, "B": 0.1}
     result = run_playground(
         mechanism="ranking",
         rounds=1,

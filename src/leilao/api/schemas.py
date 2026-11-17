@@ -14,15 +14,15 @@ from ..auction import AuctionResult
 from ..comparison import ARMS, MAX_RUNS
 from ..config import (
     DEFAULT_AVAILABILITY,
-    DEFAULT_CONCENTRATION,
     DEFAULT_PERFORMANCE,
+    DEFAULT_ROUTINE,
     DEFAULT_SELECTIVITY,
     AvailabilityProfile,
-    ConcentrationProfile,
     CreditMemory,
     Mechanism,
     PerformanceProfile,
     Resolver,
+    RoutineProfile,
     SelectivityProfile,
     horizon_for_lifecycle,
 )
@@ -112,16 +112,6 @@ class DisciplineIn(BaseModel):
             "a dificuldade, em quantas tentativas a disciplina custa para render "
             "o que uma de "
             "dificuldade 1 rende de primeira"
-        ),
-    )
-    attractiveness: float = Field(
-        default=1.0,
-        gt=0,
-        description=(
-            "A_x — atratividade: o multiplicador do interesse sorteado, comum a "
-            "toda a população. 1 é a disciplina média, 2 vale o dobro dela e 0,5 "
-            "a metade. É a parte do gosto comum a todos, enquanto "
-            "`interest_sigma` é a privada de cada aluno"
         ),
     )
     elective: bool = Field(
@@ -247,33 +237,9 @@ class ProfileIn(BaseModel):
 class SelectivityProfileIn(BaseModel):
     """Um grupo da população no eixo de **seletividade**.
 
-    O valor é um múltiplo do score médio: o aluno não pede nem financia nada
-    abaixo de `valor × média`. Em 0 não há corte — é o especulador, que pede
-    tudo e gasta o orçamento inteiro.
-
-    O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
-    """
-
-    name: str = Field(min_length=1, max_length=40)
-    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
-    # só passa por aqui para o cenário gravado em disco voltar igual.
-    color: str | None = Field(default=None, max_length=32)
-    value: float = Field(ge=0, description="múltiplo do score médio; 0 desliga o corte")
-
-    @classmethod
-    def of(cls, profile: SelectivityProfile) -> "SelectivityProfileIn":
-        return cls(name=profile.name, value=profile.value)
-
-    def to_profile(self) -> SelectivityProfile:
-        return SelectivityProfile(name=self.name, value=self.value)
-
-
-class ConcentrationProfileIn(BaseModel):
-    """Um grupo da população no eixo de **concentração**.
-
-    O expoente do score sobre a utilidade. 1 é o lance sincero; abaixo achata,
-    acima concentra, e negativo inverte — aposta mais no que o aluno quer
-    menos, que é o controle do absurdo.
+    `S_a`, repartido entre as elegíveis do período: o aluno não pede nem
+    financia nada abaixo de `S_a / |M_a|`. Em 0 não há corte — é o
+    especulador, que pede tudo e gasta o orçamento inteiro.
 
     O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
     """
@@ -283,15 +249,42 @@ class ConcentrationProfileIn(BaseModel):
     # só passa por aqui para o cenário gravado em disco voltar igual.
     color: str | None = Field(default=None, max_length=32)
     value: float = Field(
-        ge=-3, le=5, description="expoente do score; 1 é o lance sincero"
+        ge=0, description="S_a, repartido entre as elegíveis; 0 desliga o corte"
     )
 
     @classmethod
-    def of(cls, profile: ConcentrationProfile) -> "ConcentrationProfileIn":
+    def of(cls, profile: SelectivityProfile) -> "SelectivityProfileIn":
         return cls(name=profile.name, value=profile.value)
 
-    def to_profile(self) -> ConcentrationProfile:
-        return ConcentrationProfile(name=self.name, value=self.value)
+    def to_profile(self) -> SelectivityProfile:
+        return SelectivityProfile(name=self.name, value=self.value)
+
+
+class RoutineProfileIn(BaseModel):
+    """Um grupo da população no eixo de **rotina** — a vida fora da grade.
+
+    Os dois valores multiplicam o interesse das turmas de cada turno. O
+    indiferente é o neutro (1 e 1); quem tem rotina diurna dobra o peso das
+    turmas diurnas, e vice-versa.
+
+    O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
+    """
+
+    name: str = Field(min_length=1, max_length=40)
+    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
+    # só passa por aqui para o cenário gravado em disco voltar igual.
+    color: str | None = Field(default=None, max_length=32)
+    day: float = Field(gt=0, description="multiplicador do interesse nas turmas diurnas")
+    night: float = Field(
+        gt=0, description="multiplicador do interesse nas turmas noturnas"
+    )
+
+    @classmethod
+    def of(cls, profile: RoutineProfile) -> "RoutineProfileIn":
+        return cls(name=profile.name, day=profile.day, night=profile.night)
+
+    def to_profile(self) -> RoutineProfile:
+        return RoutineProfile(name=self.name, day=self.day, night=self.night)
 
 
 class ScenarioIn(BaseModel):
@@ -312,10 +305,10 @@ class ScenarioIn(BaseModel):
     class_size: int = Field(
         default=25, gt=0, description="alunos por turma — q_x = classes × este"
     )
-    # Os **quatro** eixos de perfil. Os dois primeiros são traço (governam
-    # sorteios e o aluno não os conhece); os dois últimos são estratégia e
-    # viram a decisão dele. A repartição entre as combinações é igualitária
-    # e exata: a coorte é `students_per_profile × combinações`.
+    # Os **quatro** eixos de perfil. Três são traço (governam sorteios e o
+    # aluno não os conhece); a seletividade é estratégia e vira a decisão
+    # dele. A repartição entre as combinações é igualitária e exata: a coorte
+    # é `students_per_profile × combinações`.
     performance_profiles: list[PerformanceProfileIn] = Field(
         default_factory=lambda: [
             PerformanceProfileIn.of(x) for x in DEFAULT_PERFORMANCE
@@ -340,26 +333,25 @@ class ScenarioIn(BaseModel):
         ],
         min_length=1,
         description=(
-            "perfis de seletividade: o múltiplo do score médio abaixo do qual o "
-            "aluno não pede nem financia. 0 é o especulador"
+            "perfis de seletividade: S_a, repartido entre as disciplinas "
+            "elegíveis do período. 0 é o especulador"
         ),
     )
-    concentration_profiles: list[ConcentrationProfileIn] = Field(
-        default_factory=lambda: [
-            ConcentrationProfileIn.of(x) for x in DEFAULT_CONCENTRATION
-        ],
+    routine_profiles: list[RoutineProfileIn] = Field(
+        default_factory=lambda: [RoutineProfileIn.of(x) for x in DEFAULT_ROUTINE],
         min_length=1,
         description=(
-            "perfis de concentração: o expoente do score sobre a utilidade. "
-            "1 é o lance sincero, negativo inverte"
+            "perfis de rotina: os multiplicadores do interesse nas turmas "
+            "diurnas e nas noturnas. O indiferente é 1 e 1"
         ),
     )
     students_per_profile: int = Field(
-        default=1,
+        default=2,
         ge=1,
         description=(
             "exemplares de cada combinação de perfil em cada coorte. A coorte é "
-            "isto vezes o número de combinações (3 · 3 · 6 · 6 = 324 nos padrões), "
+            "isto vezes o número de combinações (3 · 3 · 5 · 3 = 135 nos "
+            "padrões), "
             "e a população é a coorte vezes os períodos com ingresso. "
             "A coorte não pode passar da menor oferta entre as disciplinas de "
             "entrada, porque o ingressante tem vaga garantida em todas elas."
@@ -374,13 +366,21 @@ class ScenarioIn(BaseModel):
             "todas valem o mesmo para o aluno; em 0 cada uma tem valor próprio"
         ),
     )
-    class_difficulty_levels: tuple[float, float, float] = Field(
-        default=(1.0, 1.0, 1.0),
+    day_slots: int = Field(
+        default=12,
+        ge=1,
+        le=48,
         description=(
-            "os três níveis da escada de dificuldade das turmas — baixa, média "
-            "e alta —, multiplicadores da dificuldade da disciplina. Iguais "
-            "entre si, a escada está desligada"
+            "quantos horários diurnos existem. Cada horário é um grupo de "
+            "exclusão mútua entre turmas, e as turmas da grade são repartidas "
+            "entre eles circularmente"
         ),
+    )
+    night_slots: int = Field(
+        default=6,
+        ge=1,
+        le=48,
+        description="quantos horários noturnos existem",
     )
     interest_stability: float = Field(
         default=0.5,
@@ -550,8 +550,8 @@ class AxisBandsOut(BaseModel):
 
     As duas dimensões são independentes na tela, e vêm todas as combinações:
     `ruler` é `period`, `age` ou `cohort`; `axis` é `overall` (um grupo só) ou
-    um dos quatro eixos de perfil — `performance`, `availability`,
-    `selectivity`, `concentration`.
+    um dos eixos de perfil — `performance`, `availability`, `selectivity`,
+    `routine`.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -614,7 +614,7 @@ class ClassPriceBandsOut(BaseModel):
     cruzar "disciplina de 2 turmas" com uma métrica por aluno não produziria
     leitura nenhuma.
 
-    `axis` é `classes`, `hours`, `difficulty`, `attractiveness` ou
+    `axis` é `classes`, `hours`, `difficulty`, `shift` ou
     `curriculum_period`. Os grupos têm a forma das demais faixas, com uma
     grandeza só (`mean_price`), e a chave de cada um é **o valor**, sem
     idioma: `"2"`, `"60"`, `"1.4"` — e `"elective"` no recorte por período,
@@ -824,12 +824,12 @@ class StudentSummaryOut(BaseModel):
     id: str
     name: str
     entry_period: int
-    # Os quatro perfis do aluno, pelo nome — o recorte que a tela individual
+    # Os perfis do aluno, pelo nome — o recorte que a tela individual
     # mostra no cabeçalho dele, e os eixos pelos quais o relatório agrega.
     performance: str
     availability: str
     selectivity: str
-    concentration: str
+    routine: str
     grade_average: float
     approved_hours: int
     hours_to_graduate: int
@@ -965,9 +965,8 @@ class PlaygroundStudentIn(BaseModel):
     eligible: list[str]
     # Horas já realizadas; ausente, o aluno leva tudo o que obteve.
     availability: int | None = Field(default=None, ge=0)
-    # Os mesmos limites dos perfis do cenário.
+    # O mesmo limite do perfil do cenário.
     selectivity: float = Field(default=0.0, ge=0)
-    concentration: float = Field(default=1.0, ge=-3, le=5)
 
 
 class PlaygroundRequest(BaseModel):

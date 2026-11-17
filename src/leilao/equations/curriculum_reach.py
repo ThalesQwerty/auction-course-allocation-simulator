@@ -2,7 +2,9 @@
 
     d_x = | fecho transitivo de unlocks(x) |
 
-O "quanto avanço se passar" do termo de progresso de `decision_score`.
+O "quanto avanço se passar" de uma disciplina. Não é lido por decisão
+nenhuma hoje — o termo de progresso que o consumia saiu com o algoritmo
+genético —, e fica como leitura da grade.
 
 **Não é a altura.** Altura é o comprimento da cadeia mais longa à frente;
 alcance é o tamanho do que fica destravado. Uma disciplina pode ter altura 1

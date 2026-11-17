@@ -1,6 +1,6 @@
 /** O tamanho da coorte, derivado dos perfis.
  *
- *     |A| = exemplares × |desempenho| · |disponibilidade| · |seletividade| · |concentração|
+ *     |A| = exemplares × |desempenho| · |disponibilidade| · |seletividade| · |rotina|
  *
  * A coorte não é digitada: ela sai do número de **combinações de perfil**
  * vezes quantos exemplares de cada uma o cenário pede. É assim que toda
@@ -17,7 +17,7 @@ type Axes = Pick<
   | "performance_profiles"
   | "availability_profiles"
   | "selectivity_profiles"
-  | "concentration_profiles"
+  | "routine_profiles"
 >;
 
 export function profileCombinations(config: Axes): number {
@@ -25,7 +25,7 @@ export function profileCombinations(config: Axes): number {
     config.performance_profiles.length *
     config.availability_profiles.length *
     config.selectivity_profiles.length *
-    config.concentration_profiles.length
+    config.routine_profiles.length
   );
 }
 

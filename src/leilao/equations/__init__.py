@@ -27,23 +27,26 @@ Uma rodada de leilão (Seção 7.1)
 
 Decisão do aluno (Seção 7.2.4)
 
-    decision_scores           score = ũ^concentração              —
-    reserve_threshold         seletividade · score médio          —
+    reserve_threshold         s_a = S_a / |M_a|                   —
     available_goods           B_a^(t,r)                           eq. (15)
     concave_bids              mochila côncava do lance        substitui 44-46
                               (em dois níveis: disciplina, depois turma)
     request_set               D_a^(t,r), tudo em ordem            eq. (50)
     serial_dictatorship       ditadura serial por CR              7.3.1
 
-Turmas, o bem alocado
+Turmas, turnos e horários
 
-    class_difficulty          escada das turmas da disciplina     —
-    entry_class               o bloco da coorte em cada turma     —
+    class_shift               N = ⌊k/3⌋ noturnas, D = k − N        —
+    class_schedule            a varredura circular por horário    —
+    routine_weight            o peso do turno no interesse        —
+    entry_class               o bloco girado da coorte em cada turma —
     best_class                a turma pedida na linha de base     —
 
     A exclusão mútua (eq. 5) não tem arquivo próprio: ela é a restrição de
     clique montada em `wdp_solver`, o filtro por grupo de `available_goods`
-    e a caminhada de `serial_dictatorship` — três lugares, uma regra.
+    e a caminhada de `serial_dictatorship` — três lugares, uma regra. O que
+    ela proíbe é `E = M ∪ G`: duas turmas da mesma disciplina ou duas turmas
+    no mesmo horário.
 
 Interesse, utilidade e grade
 
@@ -61,6 +64,7 @@ Interesse, utilidade e grade
     interest_row              normalização do interesse     substitui 41
     eligible_set              não aprovada, liberada, X em aberto eq. (42)
     utility                   interesse → utilidade      substitui 41 e 43
+                              (média das turmas, herança de um nível)
     admitted_set              corte da utilidade de reserva       —
     curriculum_height         s_x, a cadeia à frente          substitui 38
     curriculum_period         o período induzido dos pré-req.     —
@@ -94,8 +98,7 @@ Disponibilidade e exclusão
 
 Métricas de um recorte (Seção 7.3.3)
 
-    reachable_utility         U_a = Σ_d max_t ũ_t                  eq. (43)
-    satisfaction              ψ_a = Σ u·z / U_a                         eq. (51)
+    satisfaction              ψ_a = Σ u·z                          eq. (51)
     mean_satisfaction         ψ̄                                   eq. (53)
     occupancy                 θ = alocadas/ofertadas              eq. (54)
     jain_index                φ de Jain                           eq. (55)
@@ -127,8 +130,11 @@ Não implementadas, e por quê
                Com isso a eq. (34) é a única entrada de crédito novo, e a
                (35) fica sendo só o somatório — ver `next_budget`
     eq. (41)   a invariante de altura saiu: punha valor curricular dentro do
-               gosto. `utility` a substitui redistribuindo o interesse
-               do inelegível sobre o que destrava
+               gosto. `utility` a substitui fazendo a elegível herdar o
+               interesse do que ela destrava um período à frente
+    eq. (43)   U_a, a utilidade alcançável, saiu de denominador: com
+               `Σ_X U_{a,X} = 1` por construção, ψ é a soma simples das
+               utilidades atendidas — ver `satisfaction`
     eqs. (47)-(48)  grupos da grade: toda obrigatória pesa igual, não há o
                     que hierarquizar
     eq. (20)   α̂, o fator de desempate: em [0, 1) por par, mas somado sobre
@@ -150,8 +156,18 @@ from .attempt_rates import attempt_rates
 from .availability_shape import availability_shape
 from .available_goods import available_goods
 from .best_class import best_class
-from .class_difficulty import class_difficulty
-from .entry_class import entry_class, entry_class_load
+from .class_schedule import (
+    class_schedules,
+    schedule_cliques,
+    schedule_names,
+)
+from .class_shift import DAY, NIGHT, class_shifts
+from .entry_class import (
+    entry_block,
+    entry_class,
+    entry_class_load,
+    rotated_index,
+)
 from .concave_bids import concave_bids
 from .credit_consumption import consumption
 from .credit_return import DEFAULT_MULTIPLIER, credit_return
@@ -159,7 +175,6 @@ from .credits_per_seat import credits_per_seat
 from .curriculum_height import curriculum_heights
 from .curriculum_period import curriculum_periods
 from .curriculum_reach import curriculum_reach
-from .decision_score import NEUTRAL, Behavior, decision_scores
 from .demand_per_seat import demand_per_seat
 from .effective_load import effective_load
 from .eligible_set import eligible_set
@@ -186,15 +201,15 @@ from .occupancy import occupancy
 from .pearson_correlation import pearson
 from .period_return import period_return
 from .preference_split import preference_split
-from .reachable_utility import reachable_utility
 from .remaining_budget import remaining_budget
 from .remaining_capacity import remaining_capacity
 from .remaining_seats import remaining_seats
 from .request_funnel import RequestFunnel, request_funnel
 from .request_set import request_set
-from .reserve_threshold import reserve_threshold
+from .reserve_threshold import NEUTRAL, Behavior, reserve_threshold
 from .request_states import RequestStates, request_states
 from .retained_set import retained_set
+from .routine_weight import routine_weights
 from .satisfaction import satisfaction
 from .semestralization import semestralization
 from .serial_dictatorship import serial_dictatorship
@@ -219,9 +234,17 @@ __all__ = [
     "admitted_set",
     "availability_shape",
     "best_class",
-    "class_difficulty",
+    "DAY",
+    "NIGHT",
+    "class_schedules",
+    "class_shifts",
+    "routine_weights",
+    "schedule_cliques",
+    "schedule_names",
+    "entry_block",
     "entry_class",
     "entry_class_load",
+    "rotated_index",
     "concave_bids",
     "consumption",
     "DEFAULT_MULTIPLIER",
@@ -230,7 +253,6 @@ __all__ = [
     "curriculum_heights",
     "curriculum_periods",
     "curriculum_reach",
-    "decision_scores",
     "demand_per_seat",
     "effective_load",
     "eligible_set",

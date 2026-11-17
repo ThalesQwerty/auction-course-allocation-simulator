@@ -33,6 +33,7 @@ def request_set(
     available: list[str],
     behavior: Behavior = NEUTRAL,
     classes: dict[str, tuple[str, ...]] | None = None,
+    conflicts: dict[str, tuple[str, ...]] | None = None,
 ) -> list[str]:
     """D_a^(t,r) — ver `equations.request_set`.
 
@@ -46,15 +47,23 @@ def request_set(
 
     **Dois níveis**, como no leilão. De fora, as disciplinas na ordem de
     preferência; de dentro, **uma turma por disciplina** — a melhor
-    disponível (`equations.best_class`). Aqui o aluno escolhe a seção em que
-    quer se matricular, e o pedido é por ela: pedir duas turmas da mesma
-    disciplina seria pedir duas vezes a mesma vaga, e o clique da eq. (5)
-    reduziria o par a uma delas de todo modo.
+    disponível que ainda não choca com o que ele já pediu
+    (`equations.best_class`). Aqui o aluno escolhe a seção em que quer se
+    matricular, e o pedido é por ela: pedir duas turmas da mesma disciplina
+    seria pedir duas vezes a mesma vaga, e pedir duas no mesmo horário seria
+    pedir o que ele não pode cursar junto.
+
+    **O pedido sai sem choque**, e isso é do mecanismo: deste lado o aluno
+    resolve o conflito de horário *em casa*, na ordem de preferência dele —
+    a disciplina que ele quer mais escolhe primeiro, e a seguinte se acomoda
+    no que sobrou. Do lado do leilão quem resolve é o clique dentro da PLI,
+    globalmente.
 
     É aí que a assimetria com o leilão aparece, e ela é do mecanismo: lá o
     nível de dentro é **outra mochila côncava**, porque há *quanto* a dizer e
-    o aluno reparte a fatia da disciplina entre as turmas dela. Aqui só há
-    *qual*, e o aluno diz a melhor. Perdida ela na rodada 1,
+    o aluno reparte a fatia da disciplina entre as turmas dela — inclusive
+    entre turmas que colidem, já que apostar não é levar. Aqui só há *qual*,
+    e o aluno diz a melhor que ainda cabe. Perdida ela na rodada 1,
     `available_goods` devolve as irmãs na rodada 2.
     """
     groups, scores, _reserve = decide(
@@ -72,11 +81,20 @@ def request_set(
         scores=groups,
         available=[d for d, names in open_classes.items() if names],
     )
-    chosen = (
-        best_class(scores=scores, available=open_classes[discipline])
-        for discipline in ordered
-    )
-    return [name for name in chosen if name is not None]
+    blocked: set[str] = set()
+    chosen: list[str] = []
+    for discipline in ordered:
+        name = best_class(
+            scores=scores,
+            available=open_classes[discipline],
+            blocked=blocked,
+            conflicts=conflicts,
+        )
+        if name is None:
+            continue
+        blocked.update(conflicts[name] if conflicts else (name,))
+        chosen.append(name)
+    return chosen
 
 
 def allocate_by_ilp(
@@ -86,7 +104,7 @@ def allocate_by_ilp(
     seats: dict[str, int],
     hours: dict[str, int],
     capacity: dict[str, int],
-    groups: dict[str, str] | None = None,
+    conflicts: dict[str, tuple[str, ...]] | None = None,
     tiebreak: dict[str, float] | None = None,
 ) -> list[tuple[str, str]]:
     """A mesma linha de base, resolvida globalmente: maximiza a soma dos CRs
@@ -106,11 +124,13 @@ def allocate_by_ilp(
     """
     if not requests:
         return []
+    # Os cliques de `E` saem do mapa turma → grupos: é a mesma informação que
+    # a varredura lê, na forma que a PLI precisa. Manter uma assinatura só
+    # entre os dois alocadores é o que torna o eixo ordenação × PLI exato.
     cliques: dict[str, set[str]] = {}
-    if groups:
-        for name, group in groups.items():
-            if name in seats:
-                cliques.setdefault(group, set()).add(name)
+    for name in seats:
+        for group in (conflicts or {}).get(name, ()):
+            cliques.setdefault(group, set()).add(name)
     problem = Problem(
         agents=[Agent(student_id, capacity[student_id]) for student_id in capacity],
         goods=[Good(name, seats[name], hours[name]) for name in seats],

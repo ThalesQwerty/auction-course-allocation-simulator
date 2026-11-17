@@ -2,8 +2,8 @@
 
 O que estes testes guardam é a eq. (5) — ninguém leva duas turmas da mesma
 disciplina — e as consequências dela que não dão erro quando quebram: o preço
-inflado pelo próprio grupo, o lance pulverizado dentro dele, ψ com teto de
-1/k e a herança repartida onde deveria entrar inteira.
+inflado pelo próprio grupo, o lance pulverizado dentro dele e a disciplina
+valendo o número de turmas dela em vez do quanto o aluno a quer.
 """
 from __future__ import annotations
 
@@ -11,18 +11,19 @@ import math
 
 import numpy as np
 import pytest
-from profiles import single_axis
+from profiles import always_available, single_axis
 
 from leilao.behavior import compute_bids, draw_interest, utility_matrix
 from leilao.config import Discipline, SimulationConfig
 from leilao.equations import (
     Behavior,
     RequestStates,
-    class_difficulty,
+    class_schedules,
+    class_shifts,
     concave_bids,
     entry_class_load,
     market_prices,
-    reachable_utility,
+    rotated_index,
     request_states,
     utility,
 )
@@ -80,14 +81,84 @@ def test_one_class_is_the_discipline_itself():
         name: (name,) for name in config.hours_by_discipline()
     }
     assert config.seats_by_class() == config.hours_by_discipline().keys() | set() or True
-    assert config.class_exclusions() == ()
+    assert config.discipline_cliques() == ()
 
 
 def test_the_clique_is_one_per_discipline_with_more_than_one_class():
     config = make_config(classes=4)
-    cliques = config.class_exclusions()
+    cliques = config.discipline_cliques()
     assert len(cliques) == 3
     assert all(len(clique) == 4 for clique in cliques)
+
+
+# --- o turno e o horário ---------------------------------------------------
+
+
+def test_a_third_of_the_classes_is_nocturnal_rounded_down():
+    """A divisão para baixo preserva a assimetria real entre os turnos:
+    disciplina de turma única é diurna, não meio-a-meio."""
+    esperado = {9: 3, 8: 2, 7: 2, 6: 2, 5: 1, 4: 1, 3: 1, 2: 0, 1: 0}
+    for count, night in esperado.items():
+        shifts = class_shifts(count)
+        assert len(shifts) == count
+        assert shifts.count("night") == night
+        # As diurnas vêm primeiro: a ordem é convenção, e o que distingue as
+        # turmas para o aluno é o interesse.
+        assert shifts == ("day",) * (count - night) + ("night",) * night
+
+
+def test_the_schedules_are_handed_out_in_a_circle():
+    shifts = ["day"] * 14 + ["night"] * 8
+    horarios = class_schedules(shifts=shifts, day_slots=12, night_slots=6)
+    assert horarios[:3] == ("Diurno 1", "Diurno 2", "Diurno 3")
+    # A 13ª diurna (índice 12) volta ao primeiro horário.
+    assert horarios[12] == "Diurno 1"
+    assert horarios[14] == "Noturno 1"
+    assert horarios[20] == "Noturno 1"
+
+
+def test_the_classes_per_schedule_differ_by_at_most_one():
+    """O equilíbrio sai de graça da varredura circular, e é o que impede um
+    horário de virar gargalo da grade inteira."""
+    config = make_config(classes=5)
+    por_horario: dict[str, int] = {}
+    for schedule in config.schedule_by_class().values():
+        por_horario[schedule] = por_horario.get(schedule, 0) + 1
+    diurnos = [v for k, v in por_horario.items() if k.startswith("Diurno")]
+    noturnos = [v for k, v in por_horario.items() if k.startswith("Noturno")]
+    assert max(diurnos) - min(diurnos) <= 1
+    assert max(noturnos) - min(noturnos) <= 1
+
+
+def test_every_period_has_a_clash_free_grid():
+    """Com até 6 disciplinas por período e as turmas distribuídas em círculo,
+    sempre existe uma turma de cada obrigatória sem choque — inclusive só no
+    diurno ou só no noturno."""
+    config = make_config(classes=5)
+    schedule = config.schedule_by_class()
+    for turno in ("Diurno", "Noturno"):
+        livres: set[str] = set()
+        for names in config.classes_by_discipline().values():
+            opcoes = [
+                schedule[name]
+                for name in names
+                if schedule[name].startswith(turno) and schedule[name] not in livres
+            ]
+            assert opcoes, (turno, names)
+            livres.add(opcoes[0])
+
+
+def test_the_exclusion_cliques_are_the_disciplines_plus_the_schedules():
+    config = make_config(classes=5)
+    cliques = config.exclusion_cliques()
+    assert config.discipline_cliques()[0] in cliques
+    # Três disciplinas de 5 turmas: 12 diurnas em 12 horários (uma cada, sem
+    # clique) e 3 noturnas em 3 horários distintos — também sem clique.
+    assert len(cliques) == 3
+    # O mapa de conflito traz os dois grupos de cada turma.
+    conflitos = config.conflict_groups()
+    for name, groups in conflitos.items():
+        assert groups == (config.discipline_by_class()[name], config.schedule_by_class()[name])
 
 
 # --- a eq. (5) ------------------------------------------------------------
@@ -132,13 +203,13 @@ def test_a_routed_student_does_not_inflate_the_price_of_his_own_group():
     """Quem apostou em A, B e C e foi roteado para C não foi recusado em A e
     B: foi atendido. Contá-lo como perdedor ali faria cada membro do grupo
     encarecer as turmas do próprio grupo."""
-    groups = {"D T1": "D", "D T2": "D", "D T3": "D"}
+    groups = {"D T1": ("D",), "D T2": ("D",), "D T3": ("D",)}
     bids = {("a", "D T1"): 10, ("a", "D T2"): 8, ("a", "D T3"): 6, ("b", "D T1"): 3}
     allocation = {("a", "D T3"): 1, ("b", "D T1"): 0}
 
     sem_grupo = market_prices(good_ids=list(groups), bids=bids, allocation=allocation)
     com_grupo = market_prices(
-        good_ids=list(groups), bids=bids, allocation=allocation, groups=groups
+        good_ids=list(groups), bids=bids, allocation=allocation, conflicts=groups
     )
 
     # Sem grupos, os lances do próprio "a" definem o preço de T1 e T2.
@@ -147,6 +218,20 @@ def test_a_routed_student_does_not_inflate_the_price_of_his_own_group():
     # Com grupos, só "b" perdeu — e só em T1.
     assert com_grupo["D T1"] == 3
     assert com_grupo["D T2"] == 1
+
+
+def test_the_schedule_also_spares_whoever_was_served_in_it():
+    """O mesmo raciocínio do grupo vale para o horário: quem levou uma turma
+    não foi recusado na outra que acontece no mesmo horário, porque não
+    poderia cursá-la de todo modo."""
+    conflicts = {"A T1": ("A", "Diurno 1"), "B T1": ("B", "Diurno 1")}
+    bids = {("a", "A T1"): 9, ("a", "B T1"): 7}
+    allocation = {("a", "A T1"): 1}
+
+    precos = market_prices(
+        good_ids=list(conflicts), bids=bids, allocation=allocation, conflicts=conflicts
+    )
+    assert precos["B T1"] == 1
 
 
 # --- o lance ---------------------------------------------------------------
@@ -237,6 +322,47 @@ def test_the_request_is_one_class_per_discipline():
     assert pedido == ["A T2", "B T1"]
 
 
+def test_the_ranking_request_comes_out_without_a_clash():
+    """O aluno resolve o conflito de horário **em casa**, na ordem de
+    preferência dele: a disciplina que ele quer mais escolhe primeiro, e a
+    seguinte se acomoda no que sobrou."""
+    classes = {"Alta": ("A T1", "A T2"), "Baixa": ("B T1", "B T2")}
+    conflicts = {
+        "A T1": ("Alta", "Diurno 1"),
+        "A T2": ("Alta", "Diurno 2"),
+        "B T1": ("Baixa", "Diurno 1"),
+        "B T2": ("Baixa", "Diurno 2"),
+    }
+    utilities = {"A T1": 0.5, "A T2": 0.2, "B T1": 0.4, "B T2": 0.1}
+    pool = [name for names in classes.values() for name in names]
+
+    pedido = request_set(
+        utilities=utilities, available=pool, classes=classes, conflicts=conflicts
+    )
+
+    # Alta leva "A T1" (Diurno 1); Baixa preferia "B T1", que choca, e fica
+    # com "B T2".
+    assert pedido == ["A T1", "B T2"]
+
+
+@pytest.mark.parametrize("mechanism", ["credits", "ranking"])
+def test_nobody_takes_two_classes_in_the_same_schedule(mechanism):
+    """A outra metade da eq. (5): `E = M ∪ G`. O leilão a resolve dentro da
+    PLI; o CR, no pedido e na caminhada da ditadura serial."""
+    config = make_config(classes=5, mechanism=mechanism)
+    schedule = config.schedule_by_class()
+    result = run_simulation(config)
+
+    for history in result.histories:
+        for record in history.periods:
+            horarios = [
+                schedule[r.discipline]
+                for r in record.requests
+                if r.won_round is not None
+            ]
+            assert len(horarios) == len(set(horarios)), (history.student_id, horarios)
+
+
 def test_selectivity_cuts_disciplines_not_classes():
     """O corte é sobre `max_t`, com a média tomada entre disciplinas: é ela
     que dá a leitura em múltiplos da indiferença."""
@@ -259,47 +385,55 @@ def test_selectivity_cuts_disciplines_not_classes():
 # --- a utilidade -----------------------------------------------------------
 
 
-def test_the_inheritance_enters_whole_in_every_class_of_the_target():
-    """Somar a mesma parcela a todas as turmas eleva o máximo exatamente
-    nela, e `Σ_d max` se conserva. Repartir trataria as turmas como partes da
-    disciplina, e elas são alternativas."""
+def test_the_inheritance_is_shared_by_the_mean_of_the_classes():
+    """A travada entrega a **média** das turmas dela, e a porteira a recebe
+    inteira. O máximo faria disciplina com muitas turmas valer mais só por
+    ter mais sorteios."""
     classes = {"Porteira": ("P T1", "P T2"), "Travada": ("T T1", "T T2")}
     interest = {"P T1": 0.3, "P T2": 0.1, "T T1": 0.4, "T T2": 0.2}
 
     resultado = utility(
         interest=interest,
         eligible=["Porteira"],
-        approved=set(),
-        prerequisites={"Travada": ("Porteira",)},
+        successors={"Porteira": ("Travada",), "Travada": ()},
+        prerequisites={"Porteira": (), "Travada": ("Porteira",)},
         classes=classes,
     )
-    # A travada vale o da turma mais útil dela: 0,4. Alvo único, parcela
-    # inteira em cada turma da Porteira.
-    assert resultado == {"P T1": pytest.approx(0.7), "P T2": pytest.approx(0.5)}
-    # E o alcançável se conserva: 0,3 + 0,4 antes, 0,7 depois.
-    assert reachable_utility(utilities=resultado, classes={"Porteira": classes["Porteira"]}) == pytest.approx(0.7)
+    # Elegível única: ela vale 1, e a irmã vale a fração do interesse dela.
+    assert resultado == {
+        "P T1": pytest.approx(1.0),
+        "P T2": pytest.approx(1.0 / 3.0),
+    }
 
 
-def test_the_reachable_utility_is_the_sum_of_the_best_classes():
-    """Com o 1 da linha inteira no denominador, ψ ganharia teto de ~1/k."""
+def test_the_best_class_of_each_discipline_sums_to_one():
+    """É o que torna ψ a soma simples das utilidades atendidas: o aluno só
+    pode levar uma turma por disciplina, e levar a melhor de todas é 1."""
     classes = {"A": ("A T1", "A T2", "A T3"), "B": ("B T1",)}
-    utilities = {"A T1": 0.1, "A T2": 0.3, "A T3": 0.2, "B T1": 0.4}
+    interest = {"A T1": 0.1, "A T2": 0.3, "A T3": 0.2, "B T1": 0.4}
 
-    assert sum(utilities.values()) == pytest.approx(1.0)
-    assert reachable_utility(utilities=utilities, classes=classes) == pytest.approx(0.7)
+    utilities = utility(
+        interest=interest,
+        eligible=["A", "B"],
+        successors={"A": (), "B": ()},
+        prerequisites={"A": (), "B": ()},
+        classes=classes,
+    )
+    melhores = sum(
+        max(utilities[name] for name in names) for names in classes.values()
+    )
+    assert melhores == pytest.approx(1.0)
 
 
-def test_satisfaction_can_reach_one_with_mutually_exclusive_classes():
-    """Levar a melhor turma de toda disciplina elegível é ψ = 1. Era isso que
-    o denominador fixo em 1 tornava impossível por construção."""
+def test_satisfaction_reaches_one_with_mutually_exclusive_classes():
+    """Levar a melhor turma de toda disciplina elegível é ψ = 1, sem
+    denominador nenhum."""
     from leilao.equations import satisfaction
 
-    classes = {"A": ("A T1", "A T2"), "B": ("B T1", "B T2")}
-    utilities = {"A T1": 0.4, "A T2": 0.1, "B T1": 0.35, "B T2": 0.15}
-    alcancavel = reachable_utility(utilities=utilities, classes=classes)
+    utilities = {"A T1": 0.6, "A T2": 0.2, "B T1": 0.4, "B T2": 0.1}
 
     assert satisfaction(
-        utilities=utilities, allocated=["A T1", "B T1"], reachable=alcancavel
+        utilities=utilities, allocated=["A T1", "B T1"]
     ) == pytest.approx(1.0)
 
 
@@ -311,40 +445,17 @@ def test_psi_never_passes_one_in_a_full_simulation():
             assert 0.0 <= record.satisfaction <= 1.0 + 1e-9
 
 
-# --- a escada de dificuldade ----------------------------------------------
-
-
-@pytest.mark.parametrize("count", range(1, 10))
-def test_the_ladder_keeps_the_geometric_mean_at_the_middle_level(count):
-    """`n_baixa = n_alta` é o que fixa o centro, para todo k. A geométrica é o
-    invariante certo porque a dificuldade entra em `attempt_rates` como
-    expoentes recíprocos."""
-    levels = class_difficulty(count=count, levels=(0.5, 1.0, 2.0))
-    assert len(levels) == count
-    geometric = math.exp(sum(math.log(x) for x in levels) / count)
-    assert geometric == pytest.approx(1.0)
-
-
-def test_the_ladder_has_as_many_easy_classes_as_hard_ones():
-    for count in range(1, 10):
-        levels = class_difficulty(count=count, levels=(0.5, 1.0, 2.0))
-        assert levels.count(0.5) == levels.count(2.0)
-
-
-def test_the_ladder_is_off_by_default():
-    config = make_config(classes=4)
-    assert set(config.difficulty_by_class().values()) == {1.0}
-
-
-def test_the_difficulty_multiplies_the_one_declared_by_the_discipline():
+def test_the_newcomer_without_electives_marks_exactly_one():
+    """Sem optativa o conjunto elegível do calouro **é** o pacote da matrícula
+    garantida, e com turma única ele leva a melhor turma de cada uma: ψ = 1,
+    sem denominador nenhum."""
     config = make_config(
-        classes=1,
-        disciplines=[
-            Discipline("D", seats=24, hours=60, classes=3, difficulty=2.0, entry=True)
-        ],
-        class_difficulty_levels=(0.5, 1.0, 2.0),
+        classes=1, availability_profiles=always_available(WORKLOAD)
     )
-    assert sorted(config.difficulty_by_class().values()) == [1.0, 2.0, 4.0]
+    result = run_simulation(config)
+    primeiros = [h.periods[0].satisfaction for h in result.histories if h.periods]
+    assert primeiros
+    assert all(psi == pytest.approx(1.0) for psi in primeiros)
 
 
 # --- o interesse em dois níveis -------------------------------------------
@@ -457,13 +568,47 @@ def test_the_cohort_is_spread_evenly_over_the_entry_classes():
 
     por_turma = {s.name: s.granted for s in primeiro.disciplines}
     assert sum(por_turma.values()) == 3 * config.students_per_period
+    offsets = config.entry_offsets() or {}
     for discipline, names in config.classes_by_discipline().items():
         esperado = entry_class_load(
-            cohort=config.students_per_period, classes=names
+            cohort=config.students_per_period,
+            classes=names,
+            offset=offsets.get(discipline, 0),
         )
         assert {name: por_turma[name] for name in names} == esperado
         # Blocos contíguos: nenhuma turma fica com dois a mais que outra.
         assert max(esperado.values()) - min(esperado.values()) <= 1
+
+
+def test_the_guaranteed_package_never_clashes_with_itself():
+    """O pacote de entrada é entregue inteiro e fora do mecanismo, então ele
+    tem de respeitar a eq. (5) por construção. Sem o giro do bloco, as
+    primeiras turmas de disciplinas distintas voltam ao mesmo horário assim
+    que a varredura circular dá a volta."""
+    config = make_config(classes=9, day_slots=6, night_slots=3)
+    schedule = config.schedule_by_class()
+    classes = config.classes_by_discipline()
+    offsets = config.entry_offsets()
+    assert offsets is not None
+    # Sem giro a grade choca: é o que o passo escolhido desfaz.
+    assert any(offset for offset in offsets.values())
+    for block in range(9):
+        horarios = [
+            schedule[
+                classes[discipline][
+                    rotated_index(block=block, offset=offset, classes=9)
+                ]
+            ]
+            for discipline, offset in offsets.items()
+        ]
+        assert len(horarios) == len(set(horarios)), (block, horarios)
+
+
+def test_a_clashing_guaranteed_package_is_refused():
+    """Onde o giro não encontra pacote sem choque, o cenário é recusado em vez
+    de alocar algo que ninguém conseguiria cursar."""
+    with pytest.raises(ValueError, match="mesmo horário"):
+        make_config(classes=1, day_slots=2, night_slots=1)
 
 
 def test_a_class_only_prices_what_it_sold():

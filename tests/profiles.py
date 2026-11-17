@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from leilao.config import (
     DEFAULT_PERFORMANCE,
-    NEUTRAL_CONCENTRATION,
+    NEUTRAL_ROUTINE,
     NEUTRAL_SELECTIVITY,
     AvailabilityProfile,
     default_availability,
@@ -36,7 +36,7 @@ def always_available(max_hours: int) -> tuple[AvailabilityProfile, ...]:
 
 
 def single_axis(max_hours: int) -> dict:
-    """Um perfil em cada um dos quatro eixos.
+    """Um perfil em cada um dos eixos.
 
     Com uma combinação só, `students_per_profile` **é** o tamanho da coorte —
     que é o que a maioria dos testes quer dizer quando pede "N alunos por
@@ -49,5 +49,5 @@ def single_axis(max_hours: int) -> dict:
         "performance_profiles": (DEFAULT_PERFORMANCE[1],),
         "availability_profiles": default_availability(max_hours)[1:2],
         "selectivity_profiles": (NEUTRAL_SELECTIVITY,),
-        "concentration_profiles": (NEUTRAL_CONCENTRATION,),
+        "routine_profiles": (NEUTRAL_ROUTINE,),
     }

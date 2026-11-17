@@ -61,14 +61,22 @@ class Draws:
     # dificuldade — é por turma. O histórico acadêmico é por disciplina:
     # nota, tentativa e conclusão não sabem em que seção ele cursou.
     hours: dict[str, int]  # por turma, replicada inteira
-    difficulty: dict[str, float]  # por turma, pela escada do grupo
+    difficulty: dict[str, float]  # por turma, herdada da disciplina
     seats: dict[str, int]  # por turma
     discipline_hours: dict[str, int]  # por disciplina, para o histórico
     classes: dict[str, tuple[str, ...]]  # grupo -> turmas
     discipline_of: dict[str, str]  # turma -> grupo
-    exclusions: tuple[frozenset[str], ...]  # X, os cliques da eq. (5)
+    shift_of: dict[str, str]  # turma -> turno
+    schedule_of: dict[str, str]  # turma -> horário
+    # Turma -> os grupos de `E = M ∪ G` a que ela pertence. É a forma que a
+    # varredura usa; os cliques abaixo são a forma que a PLI usa.
+    conflicts: dict[str, tuple[str, ...]]
+    exclusions: tuple[frozenset[str], ...]  # E, os cliques da eq. (5)
     curriculum: dict[str, int]
     entry_courses: list[str]
+    # O giro do bloco de entrada de cada disciplina — `config.entry_offsets`.
+    # É o que mantém o pacote garantido sem choque de horário.
+    entry_offsets: dict[str, int]
     required: set[str]
     elective_hours_by_discipline: dict[str, int]
     hours_to_graduate: int
@@ -104,9 +112,13 @@ def prepare(config: SimulationConfig) -> Draws:
         discipline_hours=config.hours_by_discipline(),
         classes=config.classes_by_discipline(),
         discipline_of=config.discipline_by_class(),
-        exclusions=config.class_exclusions(),
+        shift_of=config.shift_by_class(),
+        schedule_of=config.schedule_by_class(),
+        conflicts=config.conflict_groups(),
+        exclusions=config.exclusion_cliques(),
         curriculum=config.curriculum_periods(),
         entry_courses=config.entry_disciplines(),
+        entry_offsets=config.entry_offsets() or {},
         required=config.required_disciplines(),
         elective_hours_by_discipline=config.elective_hours_by_discipline(),
         hours_to_graduate=config.hours_to_graduate(),

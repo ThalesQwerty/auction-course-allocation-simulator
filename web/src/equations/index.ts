@@ -49,10 +49,13 @@
  *     induct             a travessia das duas induções
  *     curriculumPeriods  o período induzido dos pré-requisitos
  *     curriculumHeights  a altura na DAG de sucessores
+ *     classShifts        N = ⌊k/3⌋ noturnas, D = k − N
+ *     schedulePressure   quantas turmas caem em cada horário
  */
 export { approvalShare } from "./approvalShare";
 export { availabilityShape, fullLoadThreshold } from "./availabilityShape";
 export { boxStats } from "./boxStats";
+export { DAY, NIGHT, classShifts, schedulePressure } from "./classSchedule";
 export { cohortSize, entryClassLoad, profileCombinations } from "./cohort";
 export type { BoxStats } from "./boxStats";
 export { CYCLIC, curriculumPeriods } from "./curriculumPeriods";

@@ -54,9 +54,10 @@ class AuctionInput:
     budgets: dict[str, int]  # C_a — eq. (19)
     bids: list[Bid]
     exclusions: list[MutualExclusion] = field(default_factory=list)
-    # Turma -> disciplina. Entra no preço: quem foi roteado para outra
-    # turma do mesmo grupo não é perdedor nesta.
-    groups: dict[str, str] = field(default_factory=dict)
+    # Turma -> os grupos de `E = M ∪ G` a que ela pertence: a disciplina e o
+    # horário. Entra no preço — quem foi roteado para outra turma de um grupo
+    # em comum não é perdedor nesta.
+    conflicts: dict[str, tuple[str, ...]] = field(default_factory=dict)
     epsilon: dict[tuple[str, str], float] | None = None
     seed: int = 0
 
@@ -138,7 +139,7 @@ def run_auction(auction_input: AuctionInput, *, resolver: Resolver = "ilp") -> A
         good_ids=[g.id for g in auction_input.goods],
         bids=bids,
         allocation=allocation,
-        groups=auction_input.groups,
+        conflicts=auction_input.conflicts,
     )
     consumed = consumption(bids=bids, allocation=allocation, prices=prices)
 

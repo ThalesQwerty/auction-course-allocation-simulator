@@ -113,6 +113,7 @@ import numpy as np
 
 from .behavior import draw_interest
 from .equations import (
+    DAY,
     RequestStates,
     grade_for_attempt,
     grade_histogram,
@@ -387,7 +388,7 @@ CUT_AXES: tuple[str, ...] = (
     "performance",
     "availability",
     "selectivity",
-    "concentration",
+    "routine",
 )
 
 
@@ -399,7 +400,7 @@ CLASS_CUTS: tuple[str, ...] = (
     "classes",
     "hours",
     "difficulty",
-    "attractiveness",
+    "shift",
     "curriculum_period",
 )
 
@@ -428,8 +429,9 @@ def _class_group(snapshot: DisciplineSnapshot, axis: str) -> tuple[float, str]:
         return (snapshot.hours, str(snapshot.hours))
     if axis == "difficulty":
         return (snapshot.difficulty, _number_key(snapshot.difficulty))
-    if axis == "attractiveness":
-        return (snapshot.attractiveness, _number_key(snapshot.attractiveness))
+    if axis == "shift":
+        # Diurno antes de noturno, que é a ordem da grade.
+        return (0.0 if snapshot.shift == DAY else 1.0, snapshot.shift)
     if axis == "curriculum_period":
         if snapshot.elective:
             return (float("inf"), ELECTIVE_GROUP)

@@ -64,10 +64,10 @@ from .equations import (
     Behavior,
     admitted_set,
     concave_bids,
-    decision_scores,
     normalize_rows,
     preference_split,
     reserve_threshold,
+    routine_weights,
     utility,
 )
 from .equations.interest_histogram import BINS as DISTRIBUTION_BINS
@@ -94,7 +94,6 @@ __all__ = [
     "InterestMatrix",
     "compute_bids",
     "decide",
-    "decision_scores",
     "draw_interest",
     "interest_distribution",
     "utility_matrix",
@@ -118,29 +117,38 @@ def _stability_by_discipline(config: SimulationConfig) -> np.ndarray:
     ).reshape(1, 1, -1)
 
 
-def _attractiveness(config: SimulationConfig) -> np.ndarray:
-    """A_x de cada disciplina, já em logaritmo — ln do multiplicador.
+def _routine_log_weights(
+    students: list["Student"], shifts: list[str]
+) -> np.ndarray:
+    """ln do multiplicador de turno de cada par (aluno, turma).
 
-    É a **componente comum** do gosto: todo aluno a recebe igual, enquanto
-    sigma reparte o que é privado de cada um. A razão entre as duas é
-    literalmente a correlação de preferência entre dois alunos no mesmo
-    período — a irmã do que `stability` faz entre dois períodos do mesmo
-    aluno.
+    É a **componente privada do turno**: dois alunos com a mesma rotina a
+    recebem igual, e é por isso que ela não se cancela na normalização —
+    varia dentro da linha, entre turmas diurnas e noturnas. Ver
+    `equations.routine_weight`.
 
-    O cenário a declara como **multiplicador**, com 1 no neutro: uma
-    disciplina de atratividade 2 vale, em média, o dobro de uma de 1 para
-    todo mundo. Entra no log porque é lá que a log-normal mora, e multiplicar
-    o sorteio por A é somar ln(A) ao expoente — a mesma conta, dita na
-    unidade em que se lê. Era deslocamento do expoente até 05/11/2026, e o
-    neutro era 0; a tradução entre as duas formas é exp.
-
-    O nível comum **se cancela na normalização quando é comum a todos**: o
-    que sobrevive é a razão entre as disciplinas, que é o que ele existe para
-    dizer.
+    O cálculo é cacheado por par (diurno, noturno) porque são três perfis
+    para milhares de alunos; o `np.log` entra porque é lá que a log-normal
+    mora, e multiplicar o sorteio por `m` é somar `ln m` ao expoente.
     """
-    return np.log(
-        np.array([d.attractiveness for d in config.disciplines], dtype=float)
-    ).reshape(1, 1, -1)
+    cache: dict[tuple[float, float], np.ndarray] = {}
+
+    def row(profile) -> np.ndarray:
+        key = (profile.day, profile.night)
+        cached = cache.get(key)
+        if cached is None:
+            cached = np.log(
+                np.array(
+                    routine_weights(
+                        shifts=shifts, day=profile.day, night=profile.night
+                    ),
+                    dtype=float,
+                )
+            )
+            cache[key] = cached
+        return cached
+
+    return np.array([row(student.routine) for student in students])[:, None, :]
 
 
 class InterestMatrix(Mapping[tuple[str, int], dict[str, float]]):
@@ -224,12 +232,12 @@ def draw_interest(
     abaixo daqui o vê. Existe para a prévia da interface desenhar a fonte numa
     escala que se lê.
 
-    **O que sobra da média desse logaritmo é a atratividade da disciplina**
-    (`_attractiveness`): sigma é a dispersão privada de cada aluno, A_x é o
-    nível comum a todos. Em A = 1 as linhas são independentes e a disputa por
-    uma disciplina não tem como ser antecipada pelo próprio gosto; com A
-    espalhado, gostar muito de algo passa a ser sinal de que os colegas também
-    gostam.
+    **O que sobra da média desse logaritmo é o peso do turno**
+    (`_routine_log_weights`): o perfil de rotina do aluno multiplica o
+    interesse das turmas diurnas ou das noturnas, conforme a vida que ele tem
+    fora da grade. Ao contrário de μ, ele não se cancela na normalização —
+    varia dentro da linha, e é exatamente isso que o faz redistribuir o
+    interesse entre os turnos.
 
     A linha é sobre **turmas**, e o sorteio é composto em dois níveis: o valor
     da disciplina, comum às turmas dela, mais um desvio por turma, repartidos
@@ -238,9 +246,9 @@ def draw_interest(
     disciplina parada e a turma oscilando.
 
     A normalização vem depois e está em `equations.interest_row`: a linha
-    inteira soma 1, e é sobre as turmas que ela soma — a soma por disciplina é
-    menor, porque a disciplina vale o da turma mais útil
-    (`equations.reachable_utility`).
+    inteira soma 1, e é sobre as **turmas** que ela soma. Quem converte isso
+    no valor da disciplina é `equations.utility`, pela média das turmas
+    dela.
     """
     groups = [d.name for d in config.disciplines]
     classes = config.classes_by_discipline()
@@ -277,10 +285,11 @@ def draw_interest(
         )
         level = np.sqrt(stability) * level + np.sqrt(1.0 - stability) * deviation
 
+    shifts = config.shift_by_class()
     log = (
         config.interest_sigma * level
         + config.interest_mean
-        + _attractiveness(config)[:, :, spread]
+        + _routine_log_weights(students, [shifts[name] for name in columns])
     )
     normalized = normalize_rows(np.maximum(np.exp(log), UNDERFLOW_GUARD))
     return InterestMatrix(
@@ -304,13 +313,14 @@ def utility_matrix(
     pelo histórico.
 
     Determinística: mesmo interesse e mesmo estado do aluno, mesma saída.
-    Devolve só as disciplinas do conjunto elegível (`equations.eligible_set`);
-    as já aprovadas e as ainda bloqueadas têm utilidade zero por definição e
-    não aparecem, e o interesse delas foi redistribuído sobre as que aparecem
-    (`equations.utility`). A redistribuição conserva a massa, então a soma
-    sobre as **turmas** é 1 — mas a soma sobre as *disciplinas*, que é o que
-    `equations.reachable_utility` calcula, é menor, porque o aluno só pode
-    levar uma turma de cada.
+    Devolve só as turmas das disciplinas do conjunto elegível
+    (`equations.eligible_set`); as já aprovadas e as ainda bloqueadas têm
+    utilidade zero por definição e não aparecem, e a elegível herda o
+    interesse do que ela destrava um período à frente (`equations.utility`).
+
+    A soma sobre as **disciplinas** — a melhor turma de cada uma — é 1, e é
+    essa invariante que dispensa o denominador de ψ. Sobre as *turmas* a soma
+    é maior, porque as irmãs somam junto e o aluno só pode levar uma.
 
     É o **único** ponto onde o interesse vira utilidade, e tudo o que decide —
     lance, pedido, reserva, ψ — lê daqui.
@@ -322,7 +332,7 @@ def utility_matrix(
     return utility(
         interest=interest,
         eligible=config.eligible_disciplines(approved),
-        approved=approved,
+        successors=config.successors_by_discipline(),
         prerequisites=config.prerequisites_by_discipline(),
         classes=config.classes_by_discipline(),
     )
@@ -336,22 +346,28 @@ def decide(
 ) -> tuple[dict[str, float], dict[str, float], float]:
     """A mensagem do aluno, antes de o mecanismo lê-la.
 
-    Devolve **(score por disciplina admitida, score por turma, limiar)**.
+    Devolve **(utilidade por disciplina admitida, utilidade por turma,
+    limiar)**.
 
     Os dois mecanismos chamam esta função, e é isso que garante que eles
     recebem a mesma mensagem — o que muda é só o que cada um faz com ela. O
     CR ordena; o leilão reparte crédito e para no limiar.
+
+    **A mensagem é a própria utilidade.** Não há expoente a aplicar: o aluno
+    lança proporcionalmente ao que quer, que é o ótimo da relaxação contínua
+    da mochila côncava (`equations.concave_bids`). Distorcer de propósito foi
+    um eixo de perfil até 16/11/2026, e saiu — concentrar crédito no que mais
+    se quer passou a ser **premissa** do modelo, não tratamento.
 
     **A disciplina vale o da turma mais útil dela.** O aluno só pode levar
     uma, e leva a melhor que conseguir — então é esse valor que a seletividade
     corta e que a mochila de fora reparte. Cortar no nível da turma faria o
     número de turmas decidir o que ele pede.
 
-    Três passos, um por equação: `decision_scores` aplica a concentração,
-    `reserve_threshold` converte a seletividade em limiar sobre os scores das
-    disciplinas, e `admitted_set` corta.
+    Dois passos, um por equação: `reserve_threshold` reparte a seletividade
+    entre as disciplinas elegíveis, e `admitted_set` corta.
     """
-    scores = decision_scores(utilities=utilities, behavior=behavior)
+    scores = {name: value for name, value in utilities.items() if value > 0.0}
     if classes:
         groups = {
             discipline: max(
@@ -362,7 +378,11 @@ def decide(
         groups = {name: value for name, value in groups.items() if value > 0.0}
     else:
         groups = scores
-    reserve = reserve_threshold(scores=groups, selectivity=behavior.selectivity)
+    # |M_a^(t)| é contado **antes** do corte: a reserva reparte a seletividade
+    # entre o que o aluno podia cursar, não entre o que sobrou dela.
+    reserve = reserve_threshold(
+        selectivity=behavior.selectivity, eligible=len(groups)
+    )
     return admitted_set(scores=groups, reserve=reserve), scores, reserve
 
 

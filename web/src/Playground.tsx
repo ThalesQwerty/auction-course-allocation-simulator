@@ -11,7 +11,6 @@ interface PlaygroundStudent {
   /** δ em horas, já realizada: aqui não há perfil de onde sorteá-la. */
   availability: number;
   selectivity: number;
-  concentration: number;
   /** Utilidade por **turma**: é a turma que se aloca, como na simulação. */
   rows: Record<string, number>;
 }
@@ -74,12 +73,11 @@ function newStudent(id: string, label: string, config: Scenario): PlaygroundStud
     credits: config.min_credits,
     cr: 7,
     maxHours: config.max_hours,
-    // Disponibilidade que cobre a carga e os dois valores neutros: o aluno
-    // novo não exclui nada e manda a mensagem sincera, como o `Student`
+    // Disponibilidade que cobre a carga e a seletividade neutra: o aluno
+    // novo não exclui nada e pede tudo que é elegível, como o `Student`
     // construído à mão no motor.
     availability: config.max_hours,
     selectivity: 0,
-    concentration: 1,
     rows: {},
   };
 }
@@ -167,7 +165,6 @@ export function Playground({
               eligible,
               availability: student.availability ?? student.maxHours,
               selectivity: student.selectivity ?? 0,
-              concentration: student.concentration ?? 1,
             };
           }),
         })
@@ -356,7 +353,7 @@ export function Playground({
             <input
               type="number"
               min={0}
-              step={0.125}
+              step={0.5}
               list="submochila-seletividade"
               value={selected.selectivity ?? 0}
               onChange={(e) =>
@@ -365,25 +362,6 @@ export function Playground({
             />
             <datalist id="submochila-seletividade">
               {config.selectivity_profiles.map((profile) => (
-                <option key={profile.name} value={profile.value} label={profile.name} />
-              ))}
-            </datalist>
-          </div>
-          <div className="field">
-            <label>Concentração</label>
-            <input
-              type="number"
-              min={-3}
-              max={5}
-              step={0.5}
-              list="submochila-concentracao"
-              value={selected.concentration ?? 1}
-              onChange={(e) =>
-                patchStudent((student) => ({ ...student, concentration: Number(e.target.value) }))
-              }
-            />
-            <datalist id="submochila-concentracao">
-              {config.concentration_profiles.map((profile) => (
                 <option key={profile.name} value={profile.value} label={profile.name} />
               ))}
             </datalist>

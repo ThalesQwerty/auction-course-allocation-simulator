@@ -7,6 +7,7 @@ import {
   entryClassLoad,
   fullLoadThreshold,
   profileCombinations,
+  schedulePressure,
 } from "./equations";
 import { PresetList } from "./PresetList";
 import { nameExists } from "./savedPresets";
@@ -14,6 +15,7 @@ import type { SavedPreset } from "./savedPresets";
 import {
   AvailabilityProfileList,
   PerformanceProfileList,
+  RoutineProfileList,
   StrategyProfileList,
   axisShare,
 } from "./ProfileList";
@@ -21,22 +23,25 @@ import { SaveScenario } from "./SaveScenario";
 import { COMPARISON_ARMS, MAX_COMPARISON_RUNS } from "./types";
 import type { Scenario } from "./types";
 
-/** Os três degraus da escada, na ordem em que o cenário os guarda. */
-const DIFFICULTY_LEVELS = [
-  { label: "fácil", index: 0 },
-  { label: "média", index: 1 },
-  { label: "difícil", index: 2 },
-] as const;
-
-/** A média geométrica dos três níveis — o centro que a escada fixa, e o
- * número que de fato calibra a taxa de aprovação do cenário. */
-const difficultyCentre = (levels: readonly number[]) =>
-  (levels.every((value) => value > 0)
-    ? Math.exp(
-        levels.reduce((sum, value) => sum + Math.log(value), 0) / levels.length
-      )
-    : 0
-  ).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+/** Quantas turmas caem em cada horário, lido como faixa. É o número que diz
+ * se mexer nos horários apertou o conflito: menos horários é mais turma por
+ * horário, e mais escolha do aluno travada por choque. */
+const scheduleLoad = (config: Scenario): string => {
+  const load = schedulePressure(
+    config.disciplines,
+    config.day_slots,
+    config.night_slots
+  );
+  const faixa = (counts: number[]) => {
+    const low = Math.min(...counts);
+    const high = Math.max(...counts);
+    return low === high ? `${low}` : `${low}–${high}`;
+  };
+  return (
+    `${faixa(load.day)} turmas por horário diurno · ` +
+    `${faixa(load.night)} por noturno`
+  );
+};
 
 export function Config({
   config,
@@ -110,7 +115,6 @@ export function Config({
   // vai para a API, e por isso mora aqui e não em `Scenario`.
   const [difficulty, setDifficulty] = useState(1);
   const [attempt, setAttempt] = useState(1);
-  const [attractiveness, setAttractiveness] = useState(1);
   // Qual linha do editor a prévia ao lado desenha. Uma curva por vez, em vez
   // de todas sobrepostas: com cinco ou seis grupos aquilo vira emaranhado.
   const [performanceIndex, setPerformanceIndex] = useState(0);
@@ -135,8 +139,8 @@ export function Config({
     [availability, config.max_hours]
   );
   const interest = useMemo(
-    () => interestCurve(config, attractiveness),
-    [config, attractiveness]
+    () => interestCurve(config),
+    [config]
   );
   // O eixo do interesse é o suporte da própria amostra, que a curva já carrega
   // no último ponto.
@@ -384,25 +388,6 @@ export function Config({
                 points={interest.points}
                 domain={[0, interestTop]}
                 footer={<>mais provável: {interestValue(interest.mode)}</>}
-                controls={
-                  <div className="field-row">
-                    <div className="field">
-                      <label>Atratividade</label>
-                      {/* O recorte, não o cenário: a curva é a de uma
-                          disciplina com esta atratividade quando as demais
-                          estão em 1. No cenário ela é declarada por
-                          disciplina. É multiplicador, então o eixo é (0, ∞) e
-                          abaixo de 1 é gosto abaixo da disciplina média. */}
-                      <input
-                        type="number"
-                        min={0.1}
-                        step={0.1}
-                        value={attractiveness}
-                        onChange={(e) => setAttractiveness(Number(e.target.value))}
-                      />
-                    </div>
-                  </div>
-                }
               />
             </div>
           </div>
@@ -513,32 +498,6 @@ export function Config({
                 </div>
               </div>
 
-              <div className="field-row">
-                {DIFFICULTY_LEVELS.map(({ label, index }) => (
-                  <div className="field" key={label}>
-                    <label>Turma {label}</label>
-                    <input
-                      type="number"
-                      min={0.1}
-                      step={0.1}
-                      value={config.class_difficulty_levels[index]}
-                      onChange={(e) =>
-                        patch({
-                          class_difficulty_levels: config.class_difficulty_levels.map(
-                            (current, position) =>
-                              position === index ? Number(e.target.value) : current
-                          ) as [number, number, number],
-                        })
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
-              <p className="note">
-                A escada multiplica a dificuldade da disciplina e reparte as
-                turmas com tantas fáceis quantas difíceis. Centro geométrico:{" "}
-                {difficultyCentre(config.class_difficulty_levels)}
-              </p>
             </div>
 
             <div className="config-preview">
@@ -605,9 +564,9 @@ export function Config({
           <p className="note">{performanceShare}</p>
         </div>
 
-        {/* Os dois eixos de estratégia, cada um com seu painel como os de
-            traço. Sem prévia: o valor é uma regra de decisão, não uma
-            distribuição, e não há curva a desenhar. */}
+        {/* O eixo de estratégia, com seu painel como os de traço. Sem
+            prévia: o valor é uma regra de decisão, não uma distribuição, e
+            não há curva a desenhar. */}
         <div className="panel">
           <h2>Seletividade</h2>
           <StrategyProfileList
@@ -616,25 +575,48 @@ export function Config({
             label="Seletividade"
             base="seletividade"
             min={0}
-            step={0.125}
+            step={0.5}
             fallback={0}
           />
           <p className="note">{axisShare(config.selectivity_profiles.length)}</p>
         </div>
 
         <div className="panel">
-          <h2>Concentração</h2>
-          <StrategyProfileList
-            profiles={config.concentration_profiles}
-            onChange={(concentration_profiles) => patch({ concentration_profiles })}
-            label="Concentração"
-            base="concentração"
-            min={-3}
-            max={5}
-            step={0.5}
-            fallback={1}
+          <h2>Rotina</h2>
+          <RoutineProfileList
+            profiles={config.routine_profiles}
+            onChange={(routine_profiles) => patch({ routine_profiles })}
           />
-          <p className="note">{axisShare(config.concentration_profiles.length)}</p>
+          <p className="note">{axisShare(config.routine_profiles.length)}</p>
+        </div>
+
+        <div className="panel">
+          <h2>Horários</h2>
+          <div className="field-row">
+            <div className="field">
+              <label>Horários diurnos</label>
+              <input
+                type="number"
+                min={1}
+                max={48}
+                step={1}
+                value={config.day_slots}
+                onChange={(e) => patch({ day_slots: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Horários noturnos</label>
+              <input
+                type="number"
+                min={1}
+                max={48}
+                step={1}
+                value={config.night_slots}
+                onChange={(e) => patch({ night_slots: Number(e.target.value) })}
+              />
+            </div>
+          </div>
+          <p className="note">{scheduleLoad(config)}</p>
         </div>
 
         <div className="actions sticky-actions">

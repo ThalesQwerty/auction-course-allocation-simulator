@@ -60,7 +60,7 @@ export const CUTS: { axis: CutAxis; label: string }[] = [
   { axis: "performance", label: "Desempenho" },
   { axis: "availability", label: "Disponibilidade" },
   { axis: "selectivity", label: "Seletividade" },
-  { axis: "concentration", label: "Concentração" },
+  { axis: "routine", label: "Rotina" },
 ];
 
 const STATE_KEYS = [
@@ -158,7 +158,7 @@ export function cutGroups(
       performance: config.performance_profiles,
       availability: config.availability_profiles,
       selectivity: config.selectivity_profiles,
-      concentration: config.concentration_profiles,
+      routine: config.routine_profiles,
     }[cut] ?? [];
   const styles = declared.map((profile, index) => ({
     key: profile.name,

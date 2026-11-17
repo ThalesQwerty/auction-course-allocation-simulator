@@ -1,100 +1,160 @@
-"""A utilidade: o interesse redistribuído sobre o que o aluno pode cursar agora."""
+"""A utilidade: o interesse da elegível mais o do que ela destrava."""
 from __future__ import annotations
 
 import pytest
 
 from leilao.equations import utility
 
-# Cadeia linear: C depende de B, que depende de A.
-CHAIN = {"A": (), "B": ("A",), "C": ("B",)}
+# Cadeia linear: A destrava B, que destrava C.
+CHAIN_SUCCESSORS = {"A": ("B",), "B": ("C",), "C": ()}
+CHAIN_PREREQUISITES = {"A": (), "B": ("A",), "C": ("B",)}
 
 
-def test_a_massa_total_se_conserva():
-    interest = {"A": 0.2, "B": 0.3, "C": 0.5}
-
-    result = utility(
-        interest=interest, eligible=["A"], approved=set(), prerequisites=CHAIN
+def chain(interest, eligible, **overrides):
+    return utility(
+        interest=interest,
+        eligible=eligible,
+        successors=overrides.get("successors", CHAIN_SUCCESSORS),
+        prerequisites=overrides.get("prerequisites", CHAIN_PREREQUISITES),
     )
+
+
+def test_a_soma_das_elegiveis_e_um():
+    """A invariante que dispensa o denominador de ψ."""
+    result = chain({"A": 0.2, "B": 0.3, "C": 0.5}, ["A"])
 
     assert result == {"A": pytest.approx(1.0)}
 
 
-def test_a_cadeia_inteira_desce_ate_a_porteira():
-    """Nenhuma órfã: C não tem pré-requisito elegível *direto*, e mesmo assim
-    encontra A subindo a cadeia. É o que a cascata fazia em vários passos."""
-    interest = {"A": 0.1, "B": 0.4, "C": 0.5}
+def test_a_heranca_e_de_um_nivel():
+    """O aluno olha um período à frente: C, que está a dois passos de A, não
+    entra nem no numerador nem no denominador."""
+    successors = {"A": ("B",), "B": ("C",), "C": (), "D": ()}
+    prerequisites = {"A": (), "B": ("A",), "C": ("B",), "D": ()}
+    interest = {"A": 0.1, "B": 0.4, "C": 0.5, "D": 0.1}
 
-    result = utility(
-        interest=interest, eligible=["A"], approved=set(), prerequisites=CHAIN
+    result = chain(
+        interest, ["A", "D"], successors=successors, prerequisites=prerequisites
     )
 
-    assert result["A"] == pytest.approx(1.0)
+    # Denominador: 0,1 (A) + 0,1 (D) + 0,4 (B) = 0,6. O 0,5 de C é ignorado.
+    assert result["A"] == pytest.approx(0.5 / 0.6)
+    assert result["D"] == pytest.approx(0.1 / 0.6)
+    assert sum(result.values()) == pytest.approx(1.0)
 
 
-def test_pre_requisito_ja_aprovado_nao_recebe():
-    """Se C exige A e B e o aluno já passou em A, C trava só por B. Mandar
-    interesse para A gastaria o sinal onde ele não tem efeito."""
+def test_a_parcela_se_reparte_entre_as_porteiras_elegiveis():
+    """C exige A e B, e as duas estão elegíveis: cada uma herda metade. O
+    pré-requisito é conjuntivo, então as duas são igualmente necessárias, e
+    dar o interesse inteiro a cada uma contaria C duas vezes."""
+    successors = {"A": ("C",), "B": ("C",), "C": ()}
     prerequisites = {"A": (), "B": (), "C": ("A", "B")}
-    interest = {"A": 0.1, "B": 0.3, "C": 0.6}
 
-    result = utility(
-        interest=interest, eligible=["B"], approved={"A"}, prerequisites=prerequisites
-    )
-
-    # B fica com o próprio interesse, mais o de C inteiro (é a única que
-    # trava), mais o de A, que já saiu da grade.
-    assert result == {"B": pytest.approx(1.0)}
-
-
-def test_ja_aprovada_divide_entre_todas_as_elegiveis():
-    prerequisites = {"A": (), "B": (), "C": ()}
-    interest = {"A": 0.4, "B": 0.2, "C": 0.4}
-
-    result = utility(
-        interest=interest, eligible=["B", "C"], approved={"A"}, prerequisites=prerequisites
-    )
-
-    assert result["B"] == pytest.approx(0.2 + 0.2)
-    assert result["C"] == pytest.approx(0.4 + 0.2)
-
-
-def test_divide_igual_entre_os_ancestrais_elegiveis_da_cadeia():
-    """O exemplo da docstring: C exige B1 e B2, B1 exige A1 e B2 exige A2, A3
-    e A4. Distribuindo no destino, os quatro recebem 1/4 — a cascata daria
-    1/2 a A1 contra 1/6 aos outros."""
-    prerequisites = {
-        "A1": (), "A2": (), "A3": (), "A4": (),
-        "B1": ("A1",), "B2": ("A2", "A3", "A4"),
-        "C": ("B1", "B2"),
-    }
-    interest = {"A1": 0.0, "A2": 0.0, "A3": 0.0, "A4": 0.0, "B1": 0.0, "B2": 0.0, "C": 1.0}
-
-    result = utility(
-        interest=interest,
-        eligible=["A1", "A2", "A3", "A4"],
-        approved=set(),
+    result = chain(
+        {"A": 0.1, "B": 0.1, "C": 0.8},
+        ["A", "B"],
+        successors=successors,
         prerequisites=prerequisites,
     )
 
-    assert all(result[name] == pytest.approx(0.25) for name in ("A1", "A2", "A3", "A4"))
+    assert result["A"] == pytest.approx(0.5)
+    assert result["B"] == pytest.approx(0.5)
+
+
+def test_pre_requisito_ja_aprovado_nao_divide():
+    """C exige A e B, o aluno já passou em A: C trava só por B, e B herda o
+    interesse de C inteiro. O interesse de A simplesmente não entra."""
+    successors = {"A": ("C",), "B": ("C",), "C": ()}
+    prerequisites = {"A": (), "B": (), "C": ("A", "B")}
+
+    result = chain(
+        {"A": 0.1, "B": 0.3, "C": 0.6},
+        ["B"],
+        successors=successors,
+        prerequisites=prerequisites,
+    )
+
+    assert result == {"B": pytest.approx(1.0)}
+
+
+def test_a_aprovada_e_a_dispensada_nao_sao_redistribuidas():
+    """Fora da grade do aluno é fora da conta: o interesse delas não vai para
+    lugar nenhum, e o denominador não as enxerga."""
+    successors = {"A": (), "B": (), "C": ()}
+    prerequisites = {"A": (), "B": (), "C": ()}
+
+    result = chain(
+        {"A": 0.4, "B": 0.2, "C": 0.4},
+        ["B", "C"],
+        successors=successors,
+        prerequisites=prerequisites,
+    )
+
+    assert result["B"] == pytest.approx(0.2 / 0.6)
+    assert result["C"] == pytest.approx(0.4 / 0.6)
+
+
+def test_a_disciplina_vale_a_media_das_turmas():
+    """A média, e não o máximo: abrir uma turma a mais não muda o quanto a
+    matéria vale para o aluno."""
+    classes = {"X": ("X T1", "X T2"), "Y": ("Y T1",)}
+    interest = {"X T1": 0.6, "X T2": 0.2, "Y T1": 0.4}
+
+    result = utility(
+        interest=interest,
+        eligible=["X", "Y"],
+        successors={"X": (), "Y": ()},
+        prerequisites={"X": (), "Y": ()},
+        classes=classes,
+    )
+
+    # I_X = 0,4 e I_Y = 0,4: as duas valem o mesmo, 0,5 cada.
+    assert result["X T1"] == pytest.approx(0.5)
+    assert result["Y T1"] == pytest.approx(0.5)
+    # A irmã vale a fração do interesse dela sobre o da melhor turma.
+    assert result["X T2"] == pytest.approx(0.5 * 0.2 / 0.6)
+
+
+def test_a_melhor_turma_de_cada_disciplina_soma_um():
+    """É esta soma que ψ mede, e é por isso que ela dispensa denominador."""
+    classes = {"X": ("X T1", "X T2"), "Y": ("Y T1", "Y T2", "Y T3")}
+    interest = {
+        "X T1": 0.3,
+        "X T2": 0.1,
+        "Y T1": 0.2,
+        "Y T2": 0.25,
+        "Y T3": 0.15,
+    }
+
+    result = utility(
+        interest=interest,
+        eligible=["X", "Y"],
+        successors={"X": (), "Y": ()},
+        prerequisites={"X": (), "Y": ()},
+        classes=classes,
+    )
+
+    melhores = sum(
+        max(result[name] for name in names) for names in classes.values()
+    )
+    assert melhores == pytest.approx(1.0)
 
 
 def test_a_ordem_das_chaves_e_a_da_grade():
     """É dela que as duas mochilas tiram o desempate: reordenar muda
     resultado."""
+    successors = {"A": (), "B": (), "C": ()}
     prerequisites = {"A": (), "B": (), "C": ()}
-    interest = {"A": 0.3, "B": 0.3, "C": 0.4}
 
-    result = utility(
-        interest=interest, eligible=["C", "A"], approved={"B"}, prerequisites=prerequisites
+    result = chain(
+        {"A": 0.3, "B": 0.3, "C": 0.4},
+        ["C", "A"],
+        successors=successors,
+        prerequisites=prerequisites,
     )
 
     assert list(result) == ["C", "A"]
 
 
-def test_sem_elegivel_nao_ha_para_onde_redistribuir():
-    interest = {"A": 1.0}
-
-    assert utility(
-        interest=interest, eligible=[], approved={"A"}, prerequisites={"A": ()}
-    ) == {}
+def test_sem_elegivel_nao_ha_utilidade():
+    assert chain({"A": 1.0}, []) == {}

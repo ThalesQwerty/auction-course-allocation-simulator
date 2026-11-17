@@ -120,7 +120,7 @@ COMPARE_SCENARIO = {
         {"name": "Cheia", "mode_hours": 350.0, "full_load_rate": 0.9}
     ],
     "selectivity_profiles": [{"name": "Neutra", "value": 0.0}],
-    "concentration_profiles": [{"name": "Neutra", "value": 1.0}],
+    "routine_profiles": [{"name": "Indiferente", "day": 1.0, "night": 1.0}],
     "periods": 3,
     "students_per_profile": 4,
     "rounds": 2,
@@ -266,7 +266,7 @@ def test_compare_returns_only_the_allocation_metrics(client):
             "performance",
             "availability",
             "selectivity",
-            "concentration",
+            "routine",
         )
     ]
     overall = series[0]["groups"][0]
@@ -407,7 +407,7 @@ def test_the_price_cuts_split_the_offer_and_only_exist_in_the_auction(client):
             "classes",
             "hours",
             "difficulty",
-            "attractiveness",
+            "shift",
             "curriculum_period",
         }
         for cut in cortes:

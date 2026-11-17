@@ -132,10 +132,9 @@ const INTEREST_TOP = 0.95;
  *
  *     x = A · exp(μ + σ·Z),   Z ~ N(0, 1)
  *
- * É a distribuição de onde o motor sorteia (`behavior.draw_interest`), numa
- * disciplina de atratividade `attractiveness`. Forma fechada, como a da
- * disponibilidade: sem amostragem, e por isso a curva não treme enquanto se
- * digita.
+ * É a distribuição de onde o motor sorteia (`behavior.draw_interest`). Forma
+ * fechada, como a da disponibilidade: sem amostragem, e por isso a curva não
+ * treme enquanto se digita.
  *
  * **É a fonte, não o interesse normalizado.** A normalização divide a linha
  * pelo somatório e com isso apaga μ — o fator e^μ é comum à linha toda —, de
@@ -143,11 +142,9 @@ const INTEREST_TOP = 0.95;
  * a massa se espreme entre 0 e 1 e a forma não se lê. O que σ faz aparece aqui
  * do mesmo jeito que na linha normalizada: grande concentra, pequeno achata.
  *
- * A `attractiveness` é o **recorte** que se olha, como a dificuldade é na
- * prévia das notas: a curva é a de uma disciplina com aquela atratividade.
- * Não é parâmetro de cenário — lá ela é declarada por disciplina. É
- * **multiplicador**, então entra como ln(A) somado a μ e desloca a curva
- * inteira; campo vazio vira 1, o neutro.
+ * O **peso do turno** (`routine_profiles`) não entra: ele multiplica a linha
+ * por turma e o que ele faz é redistribuir interesse entre diurnas e
+ * noturnas, não mudar a forma da fonte.
  *
  * **A estabilidade não entra**: ela reparte a variância entre a peça
  * permanente e a do semestre, e a soma das duas é sempre σ², de modo que a
@@ -157,8 +154,8 @@ const INTEREST_TOP = 0.95;
  * vezes |disciplinas|, sorteada linha a linha): ela é invariante a μ por
  * construção, e mostrar μ foi o motivo de abri-lo ao cenário.
  */
-export function interestCurve(scenario: Scenario, attractiveness = 1): Curve {
-  const logMean = scenario.interest_mean + Math.log(attractiveness);
+export function interestCurve(scenario: Scenario): Curve {
+  const logMean = scenario.interest_mean;
   const logSd = scenario.interest_sigma;
   if (!(logSd > 0) || !Number.isFinite(logMean)) return { points: [], mode: 0 };
 

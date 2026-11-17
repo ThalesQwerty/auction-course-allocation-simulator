@@ -129,7 +129,7 @@ class RoundReport:
     # o que é determinístico.
     allocation_seconds: float = field(compare=False)
     # O mesmo instante por perfil, um recorte por eixo — `performance`,
-    # `availability`, `selectivity` e `concentration` —, cada um na ordem em
+    # `availability`, `selectivity` e `routine` —, cada um na ordem em
     # que o cenário declara os grupos. Também particiona `overall`. A API de
     # traço não o publica: quem o lê é a comparação, que o reduz por período.
     by_profile: dict[str, list[GroupSnapshot]] = field(default_factory=dict)
@@ -162,17 +162,17 @@ class DisciplineSnapshot:
     discipline: str
     curriculum_period: int
     hours: int  # w_x — repetido para o recorte por carga horária
-    # Os três atributos abaixo são da **disciplina**, repetidos em cada
-    # turma dela pelo mesmo motivo que `hours` e `curriculum_period`: o
-    # recorte do preço é por turma, e uma turma tem de saber sozinha em que
-    # grupo cai, sem consultar o cenário de volta.
-    #
-    # `difficulty` é a exceção: ela é da **turma**, pela escada do grupo
-    # (`config.difficulty_by_class`), e é justamente por isso que o recorte
-    # por dificuldade tem o que mostrar dentro de uma mesma disciplina.
+    # Os atributos abaixo são da **disciplina**, repetidos em cada turma dela
+    # pelo mesmo motivo que `hours` e `curriculum_period`: o recorte do preço
+    # é por turma, e uma turma tem de saber sozinha em que grupo cai, sem
+    # consultar o cenário de volta.
     difficulty: float
-    attractiveness: float  # A_x
     classes: int  # em quantas turmas a disciplina foi repartida
+    # O **turno** é da turma, e é o único atributo que varia dentro de uma
+    # disciplina — é por isso que o recorte por turno tem o que mostrar onde
+    # o recorte por dificuldade não tem mais.
+    shift: str
+    schedule: str
     elective: bool
     seats: int  # q_x no início do período
     filled: int  # vagas preenchidas, contando as garantidas
@@ -269,15 +269,14 @@ class StudentSummary:
     id: str
     name: str
     entry_period: int  # t_a
-    # Os **quatro** grupos a que ele pertence, pelo nome. Os dois primeiros
-    # são traço e não entram em decisão nenhuma; os dois últimos são a
-    # estratégia dele. Estão aqui porque a tela individual é onde se
-    # pergunta "por que *este* aluno foi assim", e porque o relatório
-    # recorta por eles.
+    # Os **quatro** grupos a que ele pertence, pelo nome. Três são traço e
+    # não entram em decisão nenhuma; a seletividade é a estratégia dele.
+    # Estão aqui porque a tela individual é onde se pergunta "por que *este*
+    # aluno foi assim", e porque o relatório recorta por eles.
     performance: str
     availability: str
     selectivity: str
-    concentration: str
+    routine: str
     grade_average: float  # N_a
     approved_hours: int
     hours_to_graduate: int  # S — igual para todos

@@ -343,21 +343,22 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           alcançáveis.
         </li>
         <li>
-          <strong>A dificuldade é da turma:</strong> uma escada reparte as turmas de
-          cada disciplina entre fáceis, médias e difíceis, com tantas de um lado
-          quantas do outro — o que fixa a média <em>geométrica</em> no nível do meio,
-          que é o invariante certo porque a dificuldade entra nas taxas como
-          expoentes recíprocos. É o que torna toda disciplina uma disputa pela nota,
-          e não só pela vaga.
+          <strong>A turma tem turno; a disciplina tem dificuldade:</strong> um terço
+          das turmas de cada disciplina, arredondado para baixo, é noturno, e cada
+          turma ocupa um <strong>horário</strong> — grupo de exclusão mútua, como a
+          disciplina. A dificuldade é da matéria e vale para todas as turmas dela.
         </li>
         <li>
-          <strong>Os dois eixos de estratégia:</strong> além do desempenho e da
+          <strong>A rotina do aluno:</strong> um eixo de perfil que multiplica o
+          interesse das turmas de cada turno. Quem trabalha de dia prefere as
+          noturnas sem ficar proibido das diurnas — é traço, não corte no pedido.
+        </li>
+        <li>
+          <strong>O eixo de estratégia:</strong> além do desempenho e da
           disponibilidade, que são traço, o perfil declara{" "}
-          <strong>seletividade</strong> — o múltiplo do score médio abaixo do qual o
-          aluno não pede nem financia, com 0 no especulador — e{" "}
-          <strong>concentração</strong> — o expoente do score, com 1 no lance
-          sincero e negativo invertendo. São valor fixo, não distribuição: um perfil
-          de estratégia é tratamento, não descrição.
+          <strong>seletividade</strong> — a exigência repartida entre as elegíveis
+          do período, com 0 no especulador. É valor fixo, não distribuição: um
+          perfil de estratégia é tratamento, não descrição.
         </li>
         <li>
           <strong>Matrícula garantida do ingressante:</strong> entra sem leilão nas disciplinas de

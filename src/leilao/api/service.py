@@ -53,7 +53,6 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
                 entry=d.entry,
                 elective=d.elective,
                 stability=d.stability,
-                attractiveness=d.attractiveness,
             )
             for d in req.disciplines
         ],
@@ -62,12 +61,11 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
             p.to_profile() for p in req.availability_profiles
         ),
         selectivity_profiles=tuple(p.to_profile() for p in req.selectivity_profiles),
-        concentration_profiles=tuple(
-            p.to_profile() for p in req.concentration_profiles
-        ),
+        routine_profiles=tuple(p.to_profile() for p in req.routine_profiles),
         interest_stability=req.interest_stability,
         class_stability=req.class_stability,
-        class_difficulty_levels=req.class_difficulty_levels,
+        day_slots=req.day_slots,
+        night_slots=req.night_slots,
         resolver=req.resolver,
         credit_memory=req.credit_memory,
         interest_mean=req.interest_mean,

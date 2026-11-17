@@ -19,7 +19,7 @@ cenário em cada **braço**, N vezes, e mostra as métricas de alocação perío
 período, recortadas por coorte ou por um dos quatro eixos de perfil.
 
 São **dois braços**, e só. A complexidade do trabalho foi para os parâmetros —
-os dois eixos de perfil e a disponibilidade —, e por equilíbrio saiu dos
+os quatro eixos de perfil, o turno e o horário —, e por equilíbrio saiu dos
 modelos comparados. O preço é que o vão medido soma três mudanças ao mesmo
 tempo e não diz qual pesou:
 
@@ -133,25 +133,28 @@ Para cada período letivo `t`:
    não escolhe turma: a coorte é repartida entre as turmas de cada disciplina
    de entrada em blocos contíguos (`equations.entry_class`), os primeiros na
    primeira turma e assim por diante.
-2. Cada aluno ativo converte sua linha de **interesse** `u^(t)` — já sorteada
-   na inicialização — em **utilidade** `ũ^(t)` sobre o seu **conjunto
+2. Cada aluno ativo converte sua linha de **interesse** `i^(t)` — já sorteada
+   na inicialização — em **utilidade** `U^(t)` sobre o seu **conjunto
    elegível**: as disciplinas que ainda não aprovou e cujos pré-requisitos já
-   cumpriu (eqs. 41-43). Fora dele a utilidade é zero, e o interesse do que
-   ficou de fora é redistribuído sobre o que ele pode cursar. O interesse não
-   muda dentro do laço: é sorteado uma vez só, para a simulação inteira.
+   cumpriu (eqs. 41-43). Fora dele a utilidade é zero; a elegível vale a média
+   das turmas dela mais o que ela destrava um período à frente, e a linha é
+   normalizada para somar 1 sobre as disciplinas. O interesse não muda dentro
+   do laço: é sorteado uma vez só, para a simulação inteira.
 3. Para cada rodada `r`, os lances saem deterministicamente das utilidades
    (mochila côncava **em dois níveis**: entre disciplinas, depois entre as
-   turmas de cada uma), o leilão resolve o WDP por PLI (eqs. 22-25) — com a
-   restrição de clique que impede duas turmas da mesma disciplina (eq. 5) — e
-   vagas, carga horária e orçamento são descontados (eqs. 13, 14, 27).
+   turmas de cada uma), o leilão resolve o WDP por PLI (eqs. 22-25) — com as
+   restrições de clique que impedem duas turmas da mesma disciplina e duas
+   turmas no mesmo horário (eq. 5) — e vagas, carga horária e orçamento são
+   descontados (eqs. 13, 14, 27).
 4. Encerradas as rodadas, o aluno **exclui**: descarta disciplinas obtidas
    até que a carga retida caiba nas horas que a disponibilidade
    daquele período lhe deu (`equations.retained_set`). A vaga descartada
    **não volta** para a oferta — a esta altura as alocações já se encerraram.
 5. Só então saem as notas do que ficou (eq. 33), o retorno de créditos
    (eqs. 34-36) e as conclusões de curso (eq. 40). Aqui a turma **colapsa na
-   disciplina**: a tentativa, a nota e a aprovação são do histórico, e a turma
-   entra só pela dificuldade, que move a distribuição sob o quantil do aluno.
+   disciplina**: a tentativa, a nota e a aprovação são do histórico, e a
+   dificuldade, que move a distribuição sob o quantil do aluno, é da
+   disciplina — toda turma dela a herda.
 
 Tudo que é aleatório vem da `seed` e é sorteado **na inicialização**, antes do
 primeiro período — nada é sorteado dentro do loop, como exige a Seção 7.3:
@@ -160,7 +163,7 @@ primeiro período — nada é sorteado dentro do loop, como exige a Seção 7.3:
 | --- | --- | --- |
 | `q` | quantil de desempenho de cada par (aluno, disciplina), persistente | `grading.draw_base_quantiles` |
 | `δ^(t)` | disponibilidade em horas de cada par (aluno, período) | `availability.draw_availability` |
-| `u^(t)` | interesse de cada par (aluno, turma) em cada período | `behavior.draw_interest` |
+| `i^(t)` | interesse de cada par (aluno, turma) em cada período | `behavior.draw_interest` |
 | `epsilon` | perturbação estocástica, uma por par (aluno, disciplina) | `simulation.setup` |
 
 Três coisas **não** vêm da seed, de propósito: o período de ingresso `t_a`, a
@@ -229,47 +232,80 @@ do aluno**:
 
 | | O que é | Soma | Depende do histórico | Quando |
 | --- | --- | --- | --- | --- |
-| **interesse** `u` | o sorteio normalizado: o quanto o aluno quer cada turma | 1 sobre as turmas todas | não | sorteado na inicialização, nunca mais tocado |
-| **utilidade** `ũ` | o interesse com o inelegível zerado e redistribuído | 1 sobre as turmas elegíveis | sim | recalculada a cada período |
+| **interesse** `i` | o sorteio normalizado: o quanto o aluno quer cada turma | 1 sobre as turmas todas | não | sorteado na inicialização, nunca mais tocado |
+| **utilidade** `U` | o que a disciplina elegível vale, com o que ela destrava | 1 sobre as disciplinas elegíveis | sim | recalculada a cada período |
 
-A disciplina vale o da **turma mais útil** dela: `max_t ũ_t`. É dessa forma
-que a decisão é em dois níveis — primeiro quais disciplinas, depois qual turma
-de cada —, e é por isso que a soma sobre disciplinas é menor que 1.
+As três fórmulas estão em `equations.utility`:
 
-O `u_{a,x}` do anteprojeto, como sai do sorteio da eq. (41), é o **interesse**
-daqui. Os zeros da eq. (42) não são máscara: são a **definição** da utilidade —
-uma disciplina que o aluno está proibido de cursar não tem utilidade para ele
-naquele período. O interesse se move por um motivo só (o gosto derivou no
-semestre, por `interest_stability`); a utilidade, por dois, porque o estado do
-aluno também mudou.
+    I_{a,X} = (1/|X|) · Σ_{x ∈ X} i_{a,x}
 
-**A decisão vê utilidade, nunca interesse.** Lance, pedido, reserva, ψ e as
-escassezes leem a saída de `utility_matrix`, o único ponto onde um vira o outro.
-O interesse cru só aparece em relatório — o histograma do cenário.
+                I_{a,X} + Σ_{Y ∈ seq(X)} I_{a,Y} / |M_a ∩ req(Y)|
+    U_{a,X} = ───────────────────────────────────────────────────
+                     Σ_{Z ∈ M_a ∪ seq(M_a)} I_{a,Z}
 
-A linha fica na **elegibilidade**, não na disponibilidade:
+    u_{a,x} = U_{a,X} · i_{a,x} / max_{y ∈ X} i_{a,y}
 
-| Não pode cursar porque… | Utilidade | O interesse vai para… |
-| --- | --- | --- |
-| travada por pré-requisito | zero | os ancestrais elegíveis |
-| fora da grade dele (aprovada, ou optativa dispensada pela cota) | zero | igualmente para todas as elegíveis |
-| sem vaga, carga não cabe, já conquistada na rodada, **ou é irmã de uma já conquistada** | inalterada | lugar nenhum |
+A **disciplina vale a média das turmas dela**, não o máximo: quanto a matéria
+vale para o aluno não depende de quantas seções a universidade abriu, e a
+média é a única estatística que não se move ao abrir uma turma a mais. Na
+volta, a turma vale a fatia da disciplina na proporção em que o aluno a
+prefere — de modo que **a melhor turma de cada disciplina vale exatamente
+`U_{a,X}`** e as irmãs valem menos.
 
-Na redistribuição quem conta é a **disciplina**: a travada entrega `max_t ũ_t`,
-o divisor é o número de disciplinas-alvo, e a parcela entra **inteira** em cada
-turma do alvo — não repartida entre elas. Repartir trataria as turmas como
-partes da disciplina, e elas são alternativas. Somar inteiro é o que faz o
-máximo do alvo subir exatamente a parcela, e é o que conserva `U_a`.
+**A herança é de um nível.** A elegível acumula o interesse do que ela
+destrava **imediatamente**, um período à frente, e a parcela de `Y` se reparte
+entre os pré-requisitos de `Y` que estão elegíveis agora. Como o pré-requisito
+é conjuntivo, cada porteira é igualmente necessária, e repartir é o que impede
+que destravar `Y` seja contado uma vez por porteira. O aluno olha o próximo
+passo: querer o que vem depois de amanhã não é previsão que ele faça, e
+cascatear a grade inteira faria toda porteira da raiz herdar o curso todo.
 
-A terceira linha é o `available_goods` (eq. 15): filtro do que se pode pedir
-*nesta rodada*, não afirmação sobre valor — o aluno continua querendo a
-disciplina que lotou.
+A porteira continua valendo mais que a terminal, mas **porque acumulou o
+interesse do que destrava**, e não porque uma desigualdade o impôs — era isso
+que a invariante de altura da eq. (41) fazia.
+
+**`Σ_{X ∈ M_a} U_{a,X} = 1`, e isso é aritmética, não calibragem.** O
+numerador somado sobre `M_a` conta cada `I_{a,Y}` de um sucessor exatamente
+`|M_a ∩ req(Y)|` vezes, uma por porteira elegível, e as frações se recompõem
+inteiras; sobra o próprio denominador. A união é **disjunta**: se `Y` é
+sucessor de um elegível `X`, então `X` é pré-requisito não aprovado de `Y`, e
+`Y` não é elegível.
+
+A consequência é que **ψ dispensa denominador** (`equations.satisfaction`): a
+soma do que o aluno poderia levar, uma turma por disciplina, é 1 por
+construção, e ψ volta a ser a soma simples das utilidades atendidas. O `U_a`
+da eq. (43) saiu de cena, e com ele o `reachable_utility`. O teto 1 é
+**atingível**: o ingressante que recebe a matrícula garantida inteira num
+cenário sem optativa marca exatamente 1.
+
+O que fica **fora** da conta: a disciplina já aprovada, a optativa que a cota
+dispensou e tudo que está a dois ou mais níveis de distância. O interesse
+delas não é redistribuído — ele simplesmente não entra, e o denominador o
+ignora. É a diferença entre esta regra e a **redistribuição** que existiu até
+16/11/2026, que conservava a massa da linha inteira espalhando o inelegível
+sobre o elegível.
+
+**A decisão vê utilidade, nunca interesse.** Lance, pedido, reserva e ψ leem a
+saída de `utility_matrix`, o único ponto onde um vira o outro. O interesse cru
+só aparece em relatório — o histograma do cenário.
+
+A terceira linha da tabela abaixo é o `available_goods` (eq. 15): filtro do
+que se pode pedir *nesta rodada*, não afirmação sobre valor — o aluno continua
+querendo a disciplina que lotou.
+
+| Não pode cursar porque… | Utilidade |
+| --- | --- |
+| travada por pré-requisito | zero; o interesse dela desce para as porteiras elegíveis, se ela estiver a um nível |
+| fora da grade dele (aprovada, ou optativa dispensada pela cota) | zero, e o interesse não vai para lugar nenhum |
+| sem vaga, carga não cabe, já conquistada na rodada, **ou conflita com uma já conquistada** | inalterada |
+
+#### O sorteio do interesse
 
 O interesse é sorteado como **uma linha por (aluno, período)**, sobre as
 **turmas**, em dois passos:
 
 1. Um valor por par (aluno, turma), tirado de uma **log-normal** de média
-   logarítmica `interest_mean + ln(A_x)` e desvio `interest_sigma`.
+   logarítmica `interest_mean + ln(peso do turno)` e desvio `interest_sigma`.
 2. **Divisão pelo somatório**, que faz a linha valer 1 sobre as turmas todas.
 
 O passo 1 é composto em **dois níveis**: um valor da disciplina, comum às
@@ -291,8 +327,8 @@ independentes — e é assim que se forma o quanto alguém quer uma disciplina:
 interesse no tema vezes afinidade com a área vezes horário vezes dificuldade
 percebida. É uma afirmação sobre alunos, e não sobre a ignorância de quem modela.
 
-`sigma` é o único parâmetro que chega à alocação, e **grande concentra,
-pequeno achata**:
+`sigma` é o único parâmetro de dispersão que chega à alocação, e **grande
+concentra, pequeno achata**:
 
 - o coeficiente de variação é `sqrt(exp(σ²) − 1)`, que cresce depressa, de modo
   que a faixa útil inteira cabe entre ~0,25 (aluno quase indiferente) e ~3 (quer
@@ -303,62 +339,25 @@ pequeno achata**:
   de normalizar — em μ = 0 a massa se espreme entre 0 e 1 e a forma não se lê.
   Há um teste (`test_the_mean_is_only_scale`) que garante que ela não mexe em
   nada;
-- a moda do sorteio cru é `exp(μ + A_x − σ²)`, **sempre positiva** — não há
-  limiar de sigma a respeitar para que o interesse mais provável de uma
-  disciplina não seja zero.
+- a moda do sorteio cru é `exp(μ − σ²)`, **sempre positiva** — não há limiar de
+  sigma a respeitar para que o interesse mais provável de uma disciplina não
+  seja zero.
 
 Os padrões são **μ = 1 e σ = 1**: a moda da fonte cai em 1 e o coeficiente de
 variação fica em ~1,3.
 
-**A normalização deixou de ser dispensável.** Ela já mantinha o número legível
-no relatório — 0,11 é "11% do que o aluno quer", 1,94 não é nada —, e agora
-carrega o modelo: como a redistribuição conserva a massa do interesse, **a
-utilidade também soma 1** sobre as turmas. O aluno compara participações, e é
-nessa escala que a **seletividade** fixa a reserva — em múltiplos do score
-médio, não em valor absoluto.
-
-Sobre as **disciplinas** a soma é menor que 1, porque a disciplina vale o da
-turma mais útil dela e as irmãs não são alcançáveis junto. Esse número é o
-`U_a` da eq. (43) e é o denominador de ψ (`equations.reachable_utility`): com
-o 1 da linha inteira ali, ψ ganharia teto de ~1/k e chegar a 1 seria
-impossível por construção, não por escassez.
+O **peso do turno** é a única coisa que sobrevive à normalização além de σ, e
+por um motivo exato: ele **varia dentro da linha**. É o perfil de rotina
+(`equations.routine_weight`) multiplicando as turmas diurnas ou as noturnas,
+conforme a vida que o aluno tem fora da grade — e é isso que o distingue de
+μ, que é comum à linha inteira e por isso se cancela.
 
 **A invariante de altura da eq. (41) saiu.** Ela impunha `s_x > s_y ⇒ u_x > u_y`:
 a disciplina que destrava uma cadeia mais longa valia sempre mais que a terminal,
 qualquer que tivesse sido o sorteio. Isso punha valor curricular dentro do que
 deveria ser gosto, e a correlação resultante entre interesse e posição na grade
 tornava indistinguíveis dois genes que precisavam ser eixos separados. No lugar
-dela entrou a **redistribuição** que converte interesse em utilidade.
-
-### Do interesse à utilidade
-
-A cada período, o interesse é convertido no que o aluno pode de fato pedir
-(`equations.utility`). O interesse do que ele **não** pode cursar agora é
-redistribuído:
-
-- **travada por pré-requisito** — divide igualmente entre as elegíveis que estão
-  na cadeia de pré-requisitos dela, isto é, as que a destravam. Pré-requisito já
-  aprovado não entra: não trava nada;
-- **fora da grade dele** (já aprovada, ou optativa que a cota dispensou) — divide
-  igualmente entre todas as elegíveis.
-
-A cadeia é percorrida até o fim e o interesse é distribuído **só no destino**,
-nunca ao longo do caminho. Não existe órfã: se uma disciplina está travada,
-subindo a cadeia ou se chega a uma sem pré-requisito faltante — elegível por
-definição — ou o grafo tem ciclo, e ele é acíclico por construção.
-
-A porteira continua valendo mais que a terminal, mas agora **porque acumulou o
-interesse de tudo que destrava**, e não porque uma desigualdade o impôs. Quem não
-quer nada à frente não é empurrado para lá.
-
-Uma consequência visível: `psi` passou a ler "fração do que dava para querer e
-levar". O calouro que recebe a matrícula garantida inteira marca exatamente 1.
-
-Há uma **guarda contra underflow** (`behavior.UNDERFLOW_GUARD`) que não é
-parâmetro de modelagem: utilidade zero é o que marca o *inelegível*, filtrado por
-`utilidade > 0` nas duas mochilas, e um interesse zero viraria utilidade zero e
-tiraria a disciplina do conjunto de escolha. Com a log-normal ela nunca dispara — só chegaria a zero com expoente
-abaixo de −745 —, e fica como invariante.
+dela entrou a **herança** de `equations.utility`.
 
 **Esta é a terceira distribuição do projeto**, e as duas anteriores caíram por
 motivos estruturais. A normal cortada em `[ε, 1]` não produzia aluno
@@ -374,20 +373,19 @@ com uma preferência fixa, perder uma vaga disputada condenava o aluno a querer 
 mesma disciplina com a mesma intensidade até consegui-la, e a fila se acumulava;
 agora a disputa recomeça com preferências novas.
 
-Sobre o interesse do período agem os zeros da eq. (42), e `utility_matrix`
-devolve só o conjunto elegível, já com a redistribuição. Como ela conserva a
-massa, a utilidade soma 1 em qualquer estágio do aluno: o `U_a^(t)` da eq. (43)
-deixou de ser leitura — não há "utilidade ao alcance" menor que o interesse
-inteiro. E `psi = 1` é atingível, que é o que o ingressante com matrícula
-garantida obtém.
+Há uma **guarda contra underflow** (`behavior.UNDERFLOW_GUARD`) que não é
+parâmetro de modelagem: utilidade zero é o que marca o *inelegível*, filtrado por
+`utilidade > 0` nas duas mochilas, e um interesse zero viraria utilidade zero e
+tiraria a disciplina do conjunto de escolha. Com a log-normal ela nunca
+dispara — só chegaria a zero com expoente abaixo de −745 —, e fica como
+invariante.
 
 Sobre poupar: **depende da seletividade**. No leilão o aluno investe enquanto o
 ganho marginal do próximo crédito ficar acima da reserva, e abaixo dela para de
 gastar; com `credit_memory = "carry"` (eq. 36) o saldo passa para o período
 seguinte, então poupar é decisão. Em seletividade 0 — o especulador — não há
-corte e ele gasta tudo, que era o comportamento único antes dos eixos de
-estratégia. Na linha de base não há nada a poupar: carga horária não passa de um
-período para o outro, e ele pede até o `W_a` cheio.
+corte e ele gasta tudo. Na linha de base não há nada a poupar: carga horária
+não passa de um período para o outro, e ele pede até o `W_a` cheio.
 
 Isso importa para comparar cenários. Com o sorteio dentro do loop, mexer numa
 vaga deslocava o fluxo do gerador e mudava as utilidades de todo mundo, de modo
@@ -410,7 +408,7 @@ diferença entre eles se lê como efeito do mecanismo.
 | **Estratégia** | mochila **côncava** de pesos unitários: o N-ésimo crédito posto em `x` vale `u_{a,x}/N` | mochila **0-1**: `w_x` é peso, `u_{a,x}` é valor |
 | **Quem decide a alocação** | PLI exata sobre todos os lances (eq. 22) | varredura por `N_a^(t) + ε` — eq. (49) |
 | **Onde as restrições são resolvidas** | globalmente, no resolvedor | localmente e *ex-ante*, por cada aluno |
-| **A exclusão mútua entre turmas (eq. 5)** | restrição de clique dentro da PLI, sobre as apostas repartidas | o pedido já é de uma turma por disciplina; o roteamento da caminhada é a guarda |
+| **A exclusão mútua `E = M ∪ G` (eq. 5)** | restrições de clique dentro da PLI, sobre as apostas repartidas | o pedido já sai sem irmã e sem choque de horário; o roteamento da caminhada é a guarda |
 | **Preço** | 2º preço, eq. (24) | não existe |
 | **Retorno de créditos** | `f_γ`, eq. (34) | não existe — não houve preço a devolver |
 | **Custo de excluir** | o preço pago se perde por inteiro (`exclusion_refund_rate`, padrão 0) | nenhum — não há moeda a perder |
@@ -438,8 +436,11 @@ menores nas irmãs: ele só pode **levar** uma (eq. 5), mas pode **pedir** em
 várias, e é esse hedge dentro da rodada que o segundo nível expressa.
 
 Na linha de base ele é uma **escolha** (`equations.best_class`): uma turma por
-disciplina, a melhor disponível. Não há *quanto* a dizer, só *qual*, e pedir
-duas turmas da mesma disciplina seria pedir duas vezes a mesma vaga. Perdida
+disciplina, a melhor disponível que não choca com o que ele já pediu. Não há
+*quanto* a dizer, só *qual*, e pedir duas turmas da mesma disciplina — ou duas
+no mesmo horário — seria pedir o que ele não pode cursar junto. **O aluno
+resolve o conflito em casa**, na ordem de preferência dele; do lado do leilão
+quem resolve é o clique dentro da PLI, globalmente. Perdida
 a turma na rodada 1, `available_goods` devolve as irmãs na rodada 2 — do lado
 do CR o seguro é a rodada; do lado do leilão, a repartição e a rodada.
 
@@ -451,7 +452,7 @@ fazer.
 **O preço disso é tempo de PLI**, e é preciso declará-lo: cada restrição de
 clique nasce de um aluno que apostou em mais de uma turma do grupo, e repartir
 dentro do grupo faz com que quase todo aluno o faça. Medido no cenário padrão
-— 63 disciplinas, 288 turmas, coorte de 324, 23 períodos e 3 rodadas, uma
+— 63 disciplinas, 288 turmas, coorte de 270, 23 períodos e 3 rodadas, uma
 simulação do braço `credits_return`: **1 193 356 lances e 492 s** repartindo,
 contra 526 336 lances e 120 s se a fatia da disciplina fosse inteira para uma
 turma só. São 2,3× os lances e 4,1× o tempo, e é o custo da expressividade que
@@ -499,18 +500,18 @@ dois casos você está lendo:
 
 | | conjunto elegível do calouro | ψ |
 | --- | --- | --- |
-| sem optativa | só as de entrada — exatamente o pacote | **1,000**, sem exceção |
-| com optativa | entrada + todo o catálogo de optativas | **~0,2**, nunca 1,000 |
+| sem optativa, turma única | só as de entrada — exatamente o pacote | **1,000**, sem exceção |
+| sem optativa, várias turmas | o mesmo pacote, mas a turma é sorteada por bloco | ≤ 1, e abaixo quando a turma recebida não é a preferida |
+| com optativa | entrada + todo o catálogo de optativas | bem abaixo de 1, e nunca 1,000 |
 
-Com optativa a garantia deixa de cobrir o elegível: no cenário padrão são 8
-garantidas contra 32 elegíveis, porque as 24 optativas não têm pré-requisito e
+Com optativa a garantia deixa de cobrir o elegível: no cenário padrão são 6
+garantidas contra 33 elegíveis, porque as 27 optativas não têm pré-requisito e
 estão abertas desde o 1º período. O `ψ` do calouro passa a medir o quanto a
 preferência sorteada coincidiu com o pacote — **ruído**, onde antes era
-constante (o ~0,2 da tabela foi medido no antigo preset Computação, em que as
-450 h do pacote esgotavam `W_a`). A regra de excluí-lo não muda; o motivo, sim.
+constante. A regra de excluí-lo não muda; o motivo, sim.
 
-Com `W_a = 30` contra as 20 h do pacote, o calouro ainda **disputa**: sobram
-10 h, e é com elas que ele pede optativa. Era o que a folga existia para
+Com `W_a = 24` contra as 15 h do pacote, o calouro ainda **disputa**: sobram
+9 h, e é com elas que ele pede optativa. Era o que a folga existia para
 produzir — teto colado no pacote não deixa pedido nenhum para observar.
 
 Num preset com 6 coortes ele chega a **11% de todas as linhas
@@ -624,8 +625,8 @@ gráfico da tela cujas linhas não são grupos de gente — o que elas repartem 
 |---|---|
 | turmas | quantas turmas a disciplina tem: 1, 2, … |
 | carga horária | os valores de `hours` que a grade usa |
-| dificuldade | a escada de `class_difficulty_levels` — é da **turma**, então o recorte separa seções da mesma disciplina |
-| atratividade | os valores de A_x que a grade usa |
+| dificuldade | os valores de `difficulty` que a grade usa — é da **disciplina**, e toda turma dela a herda |
+| turno | diurna ou noturna; é o único atributo que varia **dentro** de uma disciplina |
 | período | o período da grade, com a **optativa** como grupo à parte: ela não tem período, é elegível desde o ingresso |
 
 Os grupos saem dos valores que o cenário de fato usa, e não de uma lista fixa:
@@ -655,7 +656,7 @@ e não é escolha — ele é sempre o traçado, contínuo no leilão e tracejado
 | coorte | um período de ingresso | um corte transversal: a vida inteira de cada turma resumida num ponto |
 
 O recorte é o **Geral** (uma linha por modelo) ou um dos quatro eixos de perfil
-— desempenho, disponibilidade, seletividade, concentração.
+— desempenho, disponibilidade, seletividade, rotina.
 
 A coorte era recorte até 11/11/2026 e virou régua: ela é um corte do **tempo**,
 e tê-la como cor obrigava a ler duas dimensões temporais no mesmo gráfico.
@@ -751,7 +752,7 @@ o gráfico da causa ao lado do da consequência. Ele mostra como a preferência 
 um aluno se reparte entre as disciplinas: cada linha (aluno, período) é
 reescalada ao **próprio** mínimo e máximo e dividida em 9 faixas de mesma
 largura, e a altura é a fração de valores em cada faixa. É o interesse, e não
-a utilidade, porque é ele que σ e a atratividade governam. A escala é por
+a utilidade, porque é ele que σ e o peso do turno governam. A escala é por
 linha, e não do menor ao maior valor da matriz inteira, porque global degenera —
 um único extremo define o intervalo e, de `σ = 1` em diante, 94% dos valores
 caem na primeira faixa, de modo que todos os gráficos sairiam iguais.
@@ -801,35 +802,63 @@ sozinho.
 
 - **A turma como bem alocado** (`Discipline.classes`, `class_size`): o
   anteprojeto é de turma única, e a exclusão mútua da eq. (5) está lá sem
-  critério declarado. Aqui o **único** critério de conflito é serem duas turmas
-  da mesma disciplina — não há horário, e sem ele uma turma não pode conflitar
-  com turma de outra matéria. A oferta da disciplina é repartida entre as
-  turmas, com a sobra da divisão nas primeiras.
+  critério declarado. Aqui são **dois** critérios de conflito, e juntos são o
+  `E = M ∪ G`: duas turmas da mesma disciplina, ou duas turmas no mesmo
+  **horário**. A oferta da disciplina é repartida entre as turmas, com a sobra
+  da divisão nas primeiras.
 
-  O que isso acrescenta ao modelo é a **escolha dentro da disciplina**. Hoje,
-  numa obrigatória, não há nada a ganhar além da vaga; com turmas de
-  dificuldades diferentes, toda disciplina vira também disputa pela nota — e aí
-  os dois mecanismos se separam de novo: sob CR a vantagem é posicional e se
-  acumula (quem tem CR alto pega a turma fácil, tira nota melhor, mantém o CR
-  alto), sob leilão a turma fácil tem preço e a vantagem se dilui.
-- **A dificuldade por turma** (`class_difficulty_levels`): uma escada de três
-  níveis reparte as turmas de cada disciplina com `n_baixa = n_alta =
-  round(k/3)`, o que fixa a média **geométrica** no nível do meio para todo `k`.
-  A geométrica é o invariante certo porque a dificuldade entra em
-  `attempt_rates` como expoentes recíprocos (`zero_rate^(t/d)` e
-  `max_rate^(d/t)`). Com níveis fixos e contagens inteiras dá para segurar o
-  centro ou a amplitude, não os dois — e o centro é o que vale segurar, porque é
-  ele que calibra a taxa de aprovação do cenário inteiro.
+  O que isso acrescenta ao modelo é a **escolha dentro da disciplina**. Numa
+  obrigatória sem turmas não há nada a ganhar além da vaga; com turnos e
+  horários, escolher a seção passa a ser decisão — e aí os dois mecanismos se
+  separam de novo: sob CR a vantagem é posicional e se acumula (quem tem CR
+  alto pega a turma que lhe serve), sob leilão a turma disputada tem preço e a
+  vantagem se dilui.
+- **O turno e o horário** (`equations.class_shift`, `equations.class_schedule`):
+  um terço das turmas de cada disciplina, arredondado **para baixo**, é
+  noturno — a divisão para baixo é o que preserva a assimetria real entre os
+  turnos, e deixa a disciplina de turma única sendo diurna em vez de
+  meio-a-meio. As turmas são então repartidas em círculo entre `day_slots`
+  horários diurnos e `night_slots` noturnos, varrendo a grade na ordem em que
+  ela é declarada.
 
-  Com os três níveis iguais a escada está **desligada**, que é o padrão.
+  A varredura circular dá **duas garantias de graça**. O número de turmas por
+  horário difere em no máximo 1 (na grade padrão, 17 a 18 por horário diurno e
+  12 a 13 por noturno). E em todo período existe uma grade sem choque,
+  inclusive só no diurno ou só no noturno: cada horário aparece no máximo
+  `⌈D/2⌉` vezes entre as diurnas de uma disciplina do período, então `t`
+  disciplinas ocupam ao menos `t` horários distintos e o teorema de Hall
+  garante o emparelhamento.
+
+  As **condições** disso são do cenário: até 6 disciplinas por período,
+  disciplinas do mesmo período declaradas em sequência, e no máximo
+  `day_slots` turmas diurnas e `night_slots` noturnas por disciplina. E há uma
+  simplificação declarada: **cada turma ocupa um horário**, seja de 2 h ou de
+  3 h — o choque é de encontro, não de minuto.
+- **A dificuldade é da disciplina** (`Discipline.difficulty`): toda turma dela
+  a herda inteira. Houve uma escada por turma (`class_difficulty_levels`) até
+  16/11/2026, que repartia as turmas entre fáceis, médias e difíceis mantendo
+  a média geométrica no nível do meio; ela saiu junto com a atratividade, e o
+  que distingue as turmas entre si passou a ser o **turno**. A grade padrão
+  cruza carga × dificuldade, com (1; 1,4; 2) — centro geométrico 1,41, o mesmo
+  que a escada fixava.
 - **A turma de entrada do calouro** (`equations.entry_class`): a matrícula
   garantida não escolhe turma, então a coorte é repartida em blocos contíguos,
   na ordem em que os alunos foram gerados. Em blocos e não sorteada porque não
   há sorteio em tempo de execução, e porque o bloco é o único jeito de a
   repartição ser exata sem consultar nada. O bloco **não gira** entre as
   disciplinas de entrada: quem é do bloco 0 leva a primeira turma de todas elas.
-  A consequência, se a escada de dificuldade estiver ligada, é que o primeiro
-  bloco cursa a turma fácil de tudo — declarada na docstring da equação.
+  **O bloco gira entre as disciplinas de entrada**, e esse giro não é enfeite:
+  sem ele, as primeiras turmas de disciplinas distintas voltam ao mesmo
+  horário assim que a varredura circular dá a volta, e o pacote garantido —
+  que é entregue inteiro, fora do mecanismo — sairia em choque consigo mesmo,
+  violando a eq. (5) antes de o leilão abrir. O giro é uma progressão
+  aritmética cujo passo `config.entry_offsets` procura, **começando pelo
+  passo 0**: a grade que já saía sem choque não é girada e continua bit a bit
+  igual. Onde passo nenhum resolve, o cenário é recusado.
+
+  O que permanece: o turno segue o bloco, porque o giro é dentro do turno —
+  o calouro de bloco baixo entra no diurno e o de bloco alto no noturno,
+  independentemente da rotina dele.
 - **Pré-requisitos** (`Discipline.prerequisites`): tomam o lugar da senioridade
   `s_x` da eq. (38). O período de uma disciplina não é configurado — sai da
   indução `1 + max(período dos pré-requisitos)`, com 1 para quem não tem
@@ -862,30 +891,29 @@ sozinho.
   as duas validações do ritmo de entrada: a coorte não pode passar da menor
   oferta entre as disciplinas de 1º período, nem a carga somada delas pode
   passar do `W_a` — a matrícula garantida não escolhe quem a recebe.
-- **Os dois eixos de perfil**, mais o sigma do interesse:
+- **Os três eixos de traço**, mais o sigma do interesse:
 
   | Eixo | O que governa | Sorteio |
   | --- | --- | --- |
   | desempenho | a normal dividida da nota, e por aí a frequência com que o aluno reprova | uma por par (aluno, disciplina), persistente |
   | disponibilidade | a log-normal das horas que ele tem para o período, e por aí a frequência com que exclui | uma por par (aluno, período) |
+  | rotina | o peso do turno no interesse de cada turma | nenhum: multiplica o sorteio do interesse |
   | interesse | o quanto o aluno diferencia as disciplinas | `interest_sigma`, uma linha por (aluno, período) |
 
-  Estes dois eixos descrevem o comportamento do aluno **fora do mecanismo** —
-  se ele vai bem na disciplina ou se a larga. São **traço imutável**: não
-  respondem a sinal e o aluno não os conhece. Os outros dois eixos de perfil,
-  seletividade e concentração, são de **estratégia** e agem *dentro* do
-  mecanismo, ao pedir — são coisas separadas de propósito.
+  Estes três eixos descrevem o aluno **fora do mecanismo** — se ele vai bem na
+  disciplina, se a larga, em que turno ele consegue estudar. São **traço
+  imutável**: não respondem a sinal e o aluno não os conhece. O quarto eixo de
+  perfil, a seletividade, é de **estratégia** e age *dentro* do mecanismo, ao
+  pedir — são coisas separadas de propósito.
 
-  Não há eixo de perfil para **interesse**: a concentração já é o parâmetro de
-  o quanto o aluno diferencia as disciplinas, e dois botões para a mesma coisa
-  tornariam qualquer resultado ambíguo de ler.
+  Não há eixo de perfil para **interesse**: `interest_sigma` já é o parâmetro
+  de o quanto o aluno diferencia as disciplinas, e dois botões para a mesma
+  coisa tornariam qualquer resultado ambíguo de ler.
 
-  A repartição é **igualitária entre as combinações**: com 3 perfis em cada
-  eixo são 9 pares e ~11% da coorte em cada um. Não há porcentagem a
-  configurar — o que o cenário escolhe é quantos grupos existem. O rodízio é
-  sobre o índice global (`SimulationConfig.profile_index`), de modo que a sobra
-  de uma coorte que não é múltipla do número de pares gira entre as coortes
-  em vez de cair sempre nos mesmos.
+  A repartição é **igualitária entre as combinações**, e **exata**: a coorte é
+  `students_per_profile × combinações`, então não há porcentagem a configurar
+  nem sobra a girar entre as coortes. O que o cenário escolhe é quantos grupos
+  existem.
 
   A dispersão de **desempenho** existe porque sem ela ninguém reprova, a
   recursada some do cenário e o CR vira ruído — a eq. (57) não mediria nada. A
@@ -956,7 +984,7 @@ sozinho.
   carga são inteiras: um conjunto que cabe por meia hora é admitido. Mas deixou
   de ser o que governa a frequência de carga cheia — essa agora é **declarada**
   no perfil, e a calibragem do limiar garante que o declarado seja o
-  realizado. Medido no preset (`W_a = 30`), o perfil *Alta disponibilidade*
+  realizado. Medido no preset (`W_a = 24`), o perfil *Alta disponibilidade*
   pede 50% e entrega 50,0%.
 
   Excluir **não** mexe no CR, **não** soma carga cursada e **não** incrementa a
@@ -1170,24 +1198,25 @@ sozinho.
   permitido conta como concluinte. Com ele e os períodos de ingresso o
   horizonte deixa de ser escolha — `|T| = entry_periods + max_residence − 1` é
   quando a última coorte sai e a universidade fica vazia.
-- **Atratividade** (`A_x`): a parte do gosto **comum a toda a população**,
-  contra o `interest_sigma`, que é a privada de cada aluno. É a **média do
-  expoente** da log-normal do interesse: em 0 o valor gravita em torno de 1,
-  negativo o puxa para dentro de (0, 1) e positivo o leva acima — em múltiplos
-  da disciplina média o fator é `e^A`, de modo que `A = 1` é ≈ 2,72×. Por
-  estar na mesma unidade de sigma, `A/σ` se lê direto como a correlação de
-  preferência entre alunos. Com a invariante de altura fora, ela ordena a linha
-  inteira: uma optativa muito atraente **passa à frente** de uma obrigatória no
-  sorteio, e o que a faz valer menos na decisão é a redistribuição, não uma
-  desigualdade sobre o gosto.
-- **Interesse e utilidade**: o interesse é um valor por par (aluno,
-  disciplina, período), tirado de uma log-normal de média `A_x` e desvio
-  `interest_sigma`, dividido pelo somatório da linha — uma linha por (aluno,
-  período). A utilidade é ele visto pelo histórico do aluno: inelegível
-  zerado, interesse redistribuído sobre o elegível. O anteprojeto não fixa a
-  distribuição nem o valor de `U_a`; aqui `U_a^(t)` é 1 para todo aluno, e ele
-  gasta tudo o que tem, porque não há transferência de saldo entre períodos que
-  justificasse poupar.
+- **A rotina** (`routine_profiles`): o peso do **turno** no interesse de cada
+  turma. É a parte do gosto comum a quem tem a mesma vida fora da grade,
+  contra o `interest_sigma`, que é a privada de cada aluno. Entra como
+  `ln(peso)` somado ao expoente da log-normal, e **não se cancela na
+  normalização** porque varia dentro da linha — é nisso que difere de μ.
+
+  Ela tomou o lugar da **atratividade** (`A_x`), que era o nível comum a toda
+  a população, por disciplina, e saiu em 16/11/2026. A atratividade dizia "a
+  população quer mais esta matéria"; a rotina diz "esta parte da população
+  consegue estudar neste turno", que é a heterogeneidade que o modelo precisa
+  para que a escolha de turma seja decisão.
+- **Interesse e utilidade**: o interesse é um valor por par (aluno, turma,
+  período), tirado de uma log-normal de média `interest_mean + ln(peso do
+  turno)` e desvio `interest_sigma`, dividido pelo somatório da linha. A
+  utilidade é ele visto pelo histórico do aluno: a disciplina elegível vale a
+  média das turmas dela mais o que ela destrava um período à frente, tudo
+  normalizado sobre `M_a ∪ seq(M_a)`. O anteprojeto não fixa a distribuição
+  nem o valor de `U_a`; aqui `Σ_X U_X = 1` por construção, de modo que a
+  eq. (43) deixou de ser leitura e virou aritmética.
 - **Oferta em turmas** (`q_x`): a grade declara **quantas turmas** cada
   disciplina abre, e o cenário diz **quantos cabem em cada uma**
   (`class_size`, padrão 25). As vagas são o produto. A separação é o que torna
@@ -1221,9 +1250,11 @@ sozinho.
   nem a tela por aluno de uma execução por CR.
 - Teste estatístico sobre as duas amostras: a comparação mostra a dispersão e a
   contagem pareada, mas não calcula p-valor nem intervalo de confiança.
-- Choque de **horário**: a exclusão mútua existe e é usada, mas o único
-  critério de conflito é serem duas turmas da mesma disciplina. Sem horário,
-  uma turma não pode conflitar com turma de outra matéria.
+- **Horário no sandbox**: a tela de alocação isolada não tem grade, e o
+  horário sai da varredura circular sobre ela — lá a única exclusão mútua que
+  resta é a disciplina.
+- **Horário de duração variável**: cada turma ocupa um horário, seja de 2 h ou
+  de 3 h. O choque é de encontro, não de minuto.
 - **Poupança entre rodadas.** Poupar *entre períodos* existe desde que a
   seletividade entrou: o aluno para de investir quando o ganho marginal cai
   abaixo da reserva, e com `credit_memory = "carry"` o saldo passa adiante.
@@ -1239,64 +1270,86 @@ sozinho.
   exógena: sai da log-normal do perfil, não de um cálculo do aluno. A evasão do curso
   responde ao mecanismo, e é contra a linha de base por CR que ela precisaria
   ser medida — agora que ela existe, é comparação possível.
-- **A sincronização de turma.** A atratividade é da disciplina, e não há
-  análogo dela um andar abaixo — o "todo mundo quer a da manhã". O que separa
-  as turmas hoje é só o desvio privado de cada aluno, governado pela
-  estabilidade entre turmas.
-- **A fama da turma fácil.** Sem os sinais publicados, o aluno não percebe que
-  uma turma aprova mais que a outra. O atalho barato para recuperá-lo seria
-  correlacionar, por construção, a atratividade da turma com a facilidade dela
-  — a turma do professor leve é mais querida porque a fama circula —, o que dá
-  o mesmo gráfico sem aparato de sinal.
-- **A varredura do teste de invasão.** Os eixos de estratégia já põem as
-  frações coexistindo e disputando entre si — um exemplar de cada perfil na
-  mesma coorte —, mas a **proporção** é fixa: 1/6 em cada nível. Varrer a
-  fração de estrategistas de 0 a 100% é o que distinguiria estratégia
-  posicional (uma corrida que redistribui sem mudar o bolo) de mecanismo que
-  premia reportar torto.
+- **O nível comum por disciplina.** A rotina sincroniza o gosto por turno, e
+  não há análogo dela um andar acima — o "todo mundo quer esta matéria", que
+  era a atratividade. O que separa as disciplinas hoje é só o desvio privado
+  de cada aluno, governado por `interest_sigma`.
+- **A fama da turma fácil.** A dificuldade é da disciplina, então não há turma
+  fácil a descobrir dentro de uma matéria. Recuperá-la exigiria devolver a
+  dificuldade ao nível da turma e publicar algum sinal sobre ela.
+- **A varredura do teste de invasão.** O eixo de estratégia já põe as frações
+  coexistindo e disputando entre si — exemplares de cada perfil na mesma
+  coorte —, mas a **proporção** é fixa: 1/5 em cada nível. Varrer a fração de
+  seletivos de 0 a 100% é o que distinguiria estratégia posicional (uma
+  corrida que redistribui sem mudar o bolo) de mecanismo que premia a espera.
 
 ## Os quatro eixos de perfil
 
-Todo aluno carrega quatro rótulos, e a coorte contém **um exemplar de cada
-combinação**: nos padrões, 3 × 3 × 6 × 6 = 324 alunos por período com ingresso.
-O tamanho da coorte não é digitado — ele é `exemplares por perfil × número de
-combinações —, e é assim que todo perfil recebe o mesmo número de exemplares em
-toda coorte, sem sobra a girar entre elas.
+Todo aluno carrega quatro rótulos, e a coorte contém o **mesmo número de
+exemplares de cada combinação**: nos padrões, 3 × 3 × 5 × 3 = 135 combinações
+com 2 exemplares, 270 alunos por período com ingresso. O tamanho da coorte não
+é digitado — ele é `exemplares por perfil × número de combinações` —, e é
+assim que todo perfil recebe o mesmo número de exemplares em toda coorte, sem
+sobra a girar entre elas.
 
-Os dois primeiros são **traço**: governam sorteios, e o aluno não os conhece.
+Três são **traço**: governam sorteios, e o aluno não os conhece.
 
 | Eixo | O que governa |
 | --- | --- |
 | desempenho | a normal dividida da nota — nota mais provável, chance de 0, chance de 10 |
 | disponibilidade | a log-normal das horas do período, resorteada a cada um |
+| rotina | o multiplicador do interesse por **turno** da turma |
 
-Os dois últimos são **estratégia**: entram na decisão do aluno, e por isso são
-valor fixo em vez de distribuição. Um perfil de estratégia é tratamento, não
-descrição — não se mede a frequência de especuladores no mundo, declara-se
-quais existem para ver como cada mecanismo os trata.
+A **rotina** é a vida do aluno fora da grade, e entra no sorteio do interesse
+como `ln(peso)` somado ao expoente — a mesma conta dita na unidade em que se
+lê. Os três perfis padrão:
+
+| rotina | diurnas | noturnas |
+| --- | --- | --- |
+| Diurno | × 2 | × 1 |
+| Noturno | × 1 | × 2 |
+| Indiferente | × 1 | × 1 |
+
+O **indiferente é o neutro**, e os outros dois dobram o lado que lhes convém
+em vez de penalizar o outro — depois da normalização da linha as duas formas
+dão a mesma preferência, e dobrar é a que se lê sem decimal. Ela não é corte
+no pedido: quem trabalha de dia continua podendo cursar uma turma diurna, só a
+quer menos.
+
+O quarto é **estratégia**: entra na decisão do aluno, e por isso é valor fixo
+em vez de distribuição. Um perfil de estratégia é tratamento, não descrição —
+não se mede a frequência de especuladores no mundo, declara-se quais existem
+para ver como cada mecanismo os trata.
 
 | Eixo | Campo | O que faz | Neutro |
 | --- | --- | --- | --- |
-| concentração | `concentration` | expoente do score sobre a utilidade | 1 |
-| seletividade | `selectivity` | múltiplo do score médio abaixo do qual não pede | 0 |
+| seletividade | `selectivity` | a exigência `S_a`, repartida entre as elegíveis | 0 |
 
 ```
-score_x  = ũ_x^concentração
-reserva  = seletividade · (Σ_d max_t score_t) / |disciplinas|
-pede x enquanto score_x ≥ reserva
+reserva s_a = S_a / |elegíveis do período|
+pede X                 enquanto U_X     ≥ s_a
+investe o k-ésimo em X enquanto U_X / k ≥ s_a
 ```
-
-A **concentração** é expoente, de modo que o modelo é log-linear: 1 é o lance
-sincero, abaixo achata, acima concentra, e **negativo inverte** — aposta mais
-no que o aluno quer menos, que é o controle do absurdo. Acima de 2 satura e
-deixa de graduar. Em 0 todas as elegíveis valem o mesmo, que é a premissa da
-Seção 2.2 sobre revelação de preferência posta à prova.
 
 A **seletividade** é a utilidade de reserva no sentido da literatura de
 desenho de mecanismos — o payoff da opção externa, contra o qual se escreve a
-restrição de participação. Em múltiplos do score médio porque o score cru não
-tem escala que se calibre: dizer "a disciplina precisa valer metade de uma
-disciplina média" se lê, "precisa valer 0,03" não.
+restrição de participação. Dividida pelas elegíveis porque `Σ_X U_X = 1`: a
+utilidade média de uma elegível é exatamente `1/|M_a|`, e `S_a` se lê direto
+como **múltiplo da disciplina média**. Dito ao contrário, `S_a` é a soma das
+reservas — o aluno reparte a própria exigência entre as disciplinas que tem
+diante de si.
+
+Os cinco níveis padrão **têm os próprios valores como nome**, porque o que
+separa os grupos é literalmente quantas disciplinas cada um pede. Na grade
+padrão, com 33 elegíveis por período:
+
+| S | disciplinas pedidas | fração das elegíveis |
+| --- | --- | --- |
+| 0 | 33 | 100% |
+| 0,5 | 20,5 | 62% |
+| 1 | 11,7 | 35% |
+| 1,5 | 6,7 | 20% |
+| 2 | 4,0 | 12% |
 
 Ela age em **dois lugares**, e é essa a diferença entre os mecanismos:
 
@@ -1311,6 +1364,14 @@ Ela age em **dois lugares**, e é essa a diferença entre os mecanismos:
 Em 0 não há corte nenhum: é o **especulador**, que pede tudo e gasta o
 orçamento inteiro. Acima de 1 o aluno fica mais exigente que a média e
 acumula saldo para um período em que valha a pena.
+
+**A concentração saiu em 16/11/2026.** Ela era o expoente do score sobre a
+utilidade — 1 no lance sincero, acima concentrando, negativo invertendo —, e
+com ela saiu a pergunta de *para que lado distorcer compensa*. Concentrar
+crédito no que mais se quer passou a ser **premissa** do modelo: o lance é
+proporcional à utilidade, que é o ótimo da relaxação contínua da mochila
+côncava. O que se ganha, além da leitura, é tempo de solver — ver *O que a
+concentração 0 custava ao resolvedor*.
 
 ### O desempate e o viés saíram da preferência
 
@@ -1449,7 +1510,7 @@ tolerância numérica do resolvedor**.
 | 3 | 3 | 3,7·10⁻² | não |
 | 40 | 63 | 9,9·10⁻⁶ | não |
 | 180 | 63 | 4,9·10⁻⁷ | **sim** |
-| 324 | 288 | 3,3·10⁻⁸ | **sim** |
+| 270 | 288 | 4,8·10⁻⁸ | **sim** |
 
 O CBC trabalha com tolerância de integralidade de 10⁻⁶, então em qualquer
 preset de tamanho real ele **não vê** o ε: onde o modelo diz que há
@@ -1487,7 +1548,11 @@ movimento, aumenta o peso dele contra o lance. Separá-las em dois estágios
 escapa disso — e esbarra na degenerescência descrita na seção anterior. As
 três saídas estão fechadas, e é por isso que a PLI não desempata.
 
-### O que a concentração 0 custa ao resolvedor
+### O que a concentração 0 custava ao resolvedor
+
+Esta seção é **histórico**: a concentração saiu do modelo em 16/11/2026, e
+com ela o caso patológico abaixo. Fica registrada porque a medição é a razão
+de o eixo ter saído.
 
 Medido em 06/11/2026, coorte de 324, 288 turmas, 3 períodos, braço com PLI:
 
@@ -1755,23 +1820,28 @@ não mostra contagem de disciplinas: ela seria a mesma em toda linha e não
 separaria nada. Mostra alunos, períodos e a data.
 
 O cenário padrão é o **fatorial**. Ele não imita um currículo real: é um
-delineamento experimental. Três eixos binários — carga, dificuldade e
-atratividade — cruzados, com **todas as oito combinações presentes em todo
-período da grade**, de modo que os três ficam balanceados dentro de cada
-período e, portanto, ortogonais tanto ao período quanto às vagas. Uma diferença
-entre grupos nos gráficos é da grandeza em tela, nunca de composição.
+delineamento experimental. Dois eixos — carga e dificuldade — cruzados, com
+**todas as seis combinações presentes em todo período da grade**, de modo que
+os dois ficam balanceados dentro de cada período e, portanto, ortogonais tanto
+ao período quanto às vagas. Uma diferença entre grupos nos gráficos é da
+grandeza em tela, nunca de composição.
 
-São 48 obrigatórias (6 × 8) em cadeia triangular e 24 optativas, com a oferta
-em **funil** — 9 turmas no 1º período, 4 no 6º —, 180 alunos por coorte em 8
-coortes (1 440 ao todo), 3 rodadas por período e 23 períodos — 16 de
-residência, o que faz o jubilamento morder. O preço do desenho é que **vagas sai do fatorial no obrigatório**:
-elas variam por período, então ali não dá para separar "tem poucas vagas" de
-"é avançada". Quem recupera o eixo são as optativas, que não têm período: os
-três patamares de oferta cruzam o mesmo 2³.
+São 36 obrigatórias (6 × 6) em cadeia triangular e 27 optativas, com a oferta
+em **funil** — 9 turmas no 1º período, 4 no 6º —, 270 alunos por coorte em 8
+coortes (2 160 ao todo), 3 rodadas por período e 23 períodos — 16 de
+residência, o que faz o jubilamento morder. O preço do desenho é que **vagas
+sai do fatorial no obrigatório**: elas variam por período, então ali não dá
+para separar "tem poucas vagas" de "é avançada". Quem recupera o eixo são as
+optativas, que não têm período: os três patamares de oferta cruzam o mesmo
+cruzamento de carga × dificuldade.
 
-**O tamanho da coorte vem dos perfis, não da oferta.** São 324 alunos por
-período com ingresso — 3 × 3 × 6 × 6 combinações, um exemplar de cada —, e é a
-oferta que tem de acompanhar. Medido numa seed, com os parâmetros de
+O terceiro eixo é **dentro** da disciplina: o **turno** da turma. Um terço
+delas, arredondado para baixo, é noturno, e cada turma cai num dos 12 horários
+diurnos ou dos 6 noturnos. É esse eixo que a rotina do aluno lê.
+
+**O tamanho da coorte vem dos perfis, não da oferta.** São 270 alunos por
+período com ingresso — 3 × 3 × 5 × 3 combinações, dois exemplares de cada —, e
+é a oferta que tem de acompanhar. Medido numa seed, com os parâmetros de
 03/11/2026, ir de 40 para 180 por coorte derrubava a conclusão de 77% para 40%
 e subia o jubilamento de 23% para 60%; multiplicando toda a oferta por 4,5 ela
 voltava a 76% com o mesmo tempo de formatura. É escassez de vaga, não efeito do
@@ -1779,7 +1849,7 @@ tamanho da coorte.
 
 A lotação é campo do cenário (`class_size`, 45 por padrão) e é o botão que
 acompanha a coorte sem mexer na estrutura: as 9 turmas de cada disciplina de
-entrada dão 405 vagas, a coorte repartida põe 36 em cada uma e sobram 9 por
+entrada dão 405 vagas, a coorte repartida põe 30 em cada uma e sobram 15 por
 turma para quem recursa.
 
 Isso mexe na leitura do jubilamento: enquanto ele morde, o tempo de formatura é
@@ -1790,8 +1860,8 @@ períodos × 6 disciplinas encadeadas mais 24 optativas —, e o que o derrubou 
 justamente o que o Fatorial resolve: ali carga, dificuldade e vagas andavam
 juntas, de modo que nenhum recorte por disciplina separava os eixos.
 
-A população do cenário padrão, nos dois eixos de perfil. **O nome carrega o eixo** de
-propósito: "Alto" e "Alta" nos dois lados fariam "alto-baixo" virar charada em
+A população do cenário padrão, nos dois eixos de traço com distribuição. **O
+nome carrega o eixo** de propósito: "Alto" e "Alta" nos dois lados fariam "alto-baixo" virar charada em
 legenda de gráfico, e com o eixo no rótulo a combinação se lê sozinha.
 
 | Perfil de desempenho | moda · chance de 0 · chance de 10 | O que ele produz |
@@ -1802,14 +1872,14 @@ legenda de gráfico, e com o eixo no rótulo a combinação se lê sozinha.
 
 | Perfil de disponibilidade | moda · chance de encher | O que ele produz |
 | --- | --- | --- |
-| Alta disponibilidade | 28 h · 50% | teto mediano 29 h · enche de fato 50,0% |
-| Média disponibilidade | 20 h · 5% | teto mediano 21 h · enche de fato 5,1% |
-| Baixa disponibilidade | 10 h · 0,1% | teto mediano 11 h · enche de fato 0,1% |
+| Alta disponibilidade | 22 h · 50% | teto mediano 23 h · enche de fato 50,0% |
+| Média disponibilidade | 16 h · 5% | teto mediano 17 h · enche de fato 5,1% |
+| Baixa disponibilidade | 8 h · 0,1% | teto mediano 9 h · enche de fato 0,1% |
 
-São 9 combinações, com ~11% da coorte em cada. A aprovação é em dificuldade 1 e
-primeira tentativa, que é a situação que os três parâmetros descrevem, e é
-**derivada**, não editada; a carga cheia é a fração dos semestres em que o teto
-alcança `W_a = 30`, medida sobre 40 mil sorteios.
+São 9 combinações entre os dois, e 135 com a seletividade e a rotina. A
+aprovação é em dificuldade 1 e primeira tentativa, que é a situação que os três
+parâmetros descrevem, e é **derivada**, não editada; a carga cheia é a fração
+dos semestres em que o teto alcança `W_a = 24`, medida sobre 40 mil sorteios.
 
 A média fica bem abaixo da moda em todos os três, e isso não é desajuste: a
 cauda esquerda é longa — quem vai mal vai muito mal —, e numa distribuição
@@ -1830,14 +1900,17 @@ junto.
 
 Ou monte o seu: a tela de configuração tem **Configurações gerais** (o N da
 comparação, o horizonte e o ritmo de ingresso, as rodadas e a faixa de
-crédito),
-**Interesse**, **Notas** e **Disponibilidade**, cada uma destas ao lado da
-prévia da distribuição que seus parâmetros produzem. As duas últimas editam
-listas de **perfis**, e as duas editam coisas diferentes porque as
-distribuições são de famílias diferentes: cada linha de **Notas** traz nome,
-nota mais provável e as duas chances de ponta; cada linha de
-**Disponibilidade** traz
-nome, média e concentração. Os botões criam e removem grupos. Não há campo de porcentagem — a repartição é
+crédito), **Interesse**, **Notas** e **Disponibilidade** — cada uma destas ao
+lado da prévia da distribuição que seus parâmetros produzem —, e mais três sem
+prévia: **Seletividade**, **Rotina** e **Horários**. As duas primeiras não
+descrevem distribuição nenhuma, e sim uma regra de decisão e um par de pesos;
+a de horários é o par `day_slots` × `night_slots`, com o número de turmas por
+horário na nota do painel. Cinco delas editam listas de **perfis**, e editam
+coisas diferentes porque descrevem objetos diferentes: cada linha de **Notas**
+traz nome, nota mais provável e as duas chances de ponta; cada linha de
+**Disponibilidade** traz nome, moda em horas e chance de encher a carga; cada
+linha de **Seletividade** traz nome e um número; cada linha de **Rotina** traz
+nome e os dois pesos. Os botões criam e removem grupos. Não há campo de porcentagem — a repartição é
 igualitária. O rodapé de cada seção fala do **próprio** eixo: quantos grupos
 ele tem e que fatia da coorte cabe a cada um (com três, 33,3%), e só então
 quantas combinações isso dá com o outro eixo. A fatia da combinação não entra
@@ -1891,20 +1964,16 @@ estado nunca diz sozinha o que quer dizer, e a amarela fica abaixo de 3:1 contra
 o fundo claro.
 
 A prévia **do interesse** desenha a **log-normal fonte**, antes da
-normalização — `exp(μ + A + σ·Z)` —, em forma fechada, com o eixo de 0 ao
+normalização — `exp(μ + σ·Z)` —, em forma fechada, com o eixo de 0 ao
 percentil 95. É a fonte, e não o interesse normalizado, porque a normalização
 apaga μ: a prévia anterior, em **interesse relativo** (a fração vezes o número
 de disciplinas, sorteada linha a linha), era invariante a μ por construção, e
 mostrar μ foi o motivo de abri-lo ao cenário. σ aparece nas duas do mesmo
 jeito: grande concentra, pequeno achata.
 
-Como a prévia das notas, ela desenha **um caso de cada vez**, e o campo abaixo
-do gráfico diz qual: a **atratividade** da disciplina, quando as demais estão
-em 0. É o recorte, não o cenário — lá a atratividade é declarada por
-disciplina. Ela se soma a μ no expoente: em 0 a curva é a da disciplina média;
-subi-la desloca a
-distribuição inteira para a direita e baixá-la para a esquerda, porque a
-atratividade é a parte do gosto comum a toda a população.
+O **peso do turno** não entra nessa prévia: ele multiplica a linha por turma,
+e o que faz é redistribuir interesse entre diurnas e noturnas — não muda a
+forma da fonte.
 
 Os gráficos são a representação principal e saem em **dois lados do mercado**.
 
@@ -1942,7 +2011,7 @@ simulação por grupo e por período não caberia no histórico do navegador.
 
 O **recorte** vale para a tela inteira: Geral (a universidade toda), Coorte
 (período de ingresso) ou um dos quatro eixos de perfil — desempenho,
-disponibilidade, seletividade e concentração. A **cor** é o grupo do recorte,
+disponibilidade, seletividade e rotina. A **cor** é o grupo do recorte,
 com a cor que o cenário deu a cada perfil (as coortes usam a paleta
 categórica); o **traçado** é o modelo — contínuo para o leilão, tracejado para
 o CR. A legenda alterna cores e traçados separadamente.
@@ -2003,9 +2072,9 @@ Trocar o modelo **mantém o aluno escolhido**: a população, o interesse e as
 notas saem da seed, então o aluno 42 de uma seed é a mesma pessoa nos quatro
 modelos — é a comparação pareada da Seção 7.3 lida numa pessoa só.
 
-A vista por **aluno** traz os **quatro perfis** dele junto do nome — os dois de
-traço (desempenho e disponibilidade) e os dois de estratégia (seletividade e
-concentração) —, porque é ali que se pergunta "por que *este* aluno foi assim",
+A vista por **aluno** traz os **quatro perfis** dele junto do nome — os três de
+traço (desempenho, disponibilidade e rotina) e o de estratégia (seletividade)
+—, porque é ali que se pergunta "por que *este* aluno foi assim",
 e o perfil é metade da resposta, com a seed sendo a outra. Traz também o cabeçalho (coorte, CR, carga aprovada,
 conclusão) e, período a período, **uma tabela por rodada** com as disciplinas
 que lhe eram elegíveis: a utilidade, o lance daquela rodada, o resultado, a

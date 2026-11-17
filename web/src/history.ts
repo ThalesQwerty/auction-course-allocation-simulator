@@ -1,6 +1,7 @@
 import { withUnlocks } from "./curriculum";
 import { cohortSize } from "./equations";
 import { readEntries, requestPersistence, writeEntries } from "./historyStore";
+import { strategyDefaults } from "./presets";
 import { COMPARISON_ARMS, horizonFor } from "./types";
 import type { PerformanceProfile, Profile } from "./types";
 import type { CompareRequest, CompareResponse, Scenario } from "./types";
@@ -153,6 +154,16 @@ function migrateScenario<
   if (typeof campos.exclusion_refund_rate !== "number") {
     campos.exclusion_refund_rate = 0;
   }
+  // Execução gravada antes de 16/11/2026 não tem turno nem horário, e rodou
+  // num modelo em que a turma não tinha nenhum dos dois. Reexecutá-la dará
+  // outro resultado — o que os padrões fazem aqui é só impedir que a API caia
+  // calada em outro cenário ainda.
+  if (!Array.isArray(campos.routine_profiles)) {
+    campos.routine_profiles = strategyDefaults().routine_profiles;
+  }
+  if (typeof campos.day_slots !== "number") campos.day_slots = 12;
+  if (typeof campos.night_slots !== "number") campos.night_slots = 6;
+  delete campos.class_difficulty_levels;
   return migrated;
 }
 
@@ -313,7 +324,7 @@ function describeScenario(config: Scenario | CompareRequest): string {
     `desempenho: ${perfis(config.performance_profiles)}`,
     `disponibilidade: ${perfis(config.availability_profiles)}`,
     `seletividade: ${perfis(config.selectivity_profiles)}`,
-    `concentração: ${perfis(config.concentration_profiles)}`,
+    `rotina: ${perfis(config.routine_profiles)}`,
     `interesse σ ${config.interest_sigma.toLocaleString("pt-BR")}`,
   ];
   return (

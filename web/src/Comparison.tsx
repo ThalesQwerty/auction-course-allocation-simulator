@@ -107,7 +107,7 @@ const CLASS_CUTS: { axis: ClassCut; label: string }[] = [
   { axis: "classes", label: "Turmas" },
   { axis: "hours", label: "Carga horária" },
   { axis: "difficulty", label: "Dificuldade" },
-  { axis: "attractiveness", label: "Atratividade" },
+  { axis: "shift", label: "Turno" },
   { axis: "curriculum_period", label: "Período" },
 ];
 
@@ -124,8 +124,8 @@ const classGroupLabel = (axis: ClassCut, key: string): string => {
       return `${number} h`;
     case "difficulty":
       return `dificuldade ${number}`;
-    case "attractiveness":
-      return `atratividade ${number}`;
+    case "shift":
+      return key === "night" ? "noturna" : "diurna";
     case "curriculum_period":
       return `${number}º período`;
   }
