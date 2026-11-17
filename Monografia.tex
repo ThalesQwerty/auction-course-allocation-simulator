@@ -1,0 +1,715 @@
+\documentclass[
+    12pt,
+    openany,
+    oneside,
+    a4paper,
+    english,
+    brazil
+]{abntex2}
+
+% ---
+% Pacotes Básicos e Obrigatórios
+% ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern} % fontes vetoriais: sem ela o microtype aborta com as EC bitmap
+\usepackage{graphicx}
+\usepackage{indentfirst}
+\usepackage{lastpage}
+\usepackage{microtype}
+\usepackage{float}
+
+% ---
+% Tabelas
+% ---
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+
+% ---
+% Pacotes Matemáticos
+% ---
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+
+% ---
+% Configuração de Citações (Sistema Numérico)
+% ---
+\usepackage[num,overcite]{abntex2cite}
+\citebrackets[]
+
+% ---
+% Metadados do Documento (Capa e Folha de Rosto)
+% ---
+\instituicao{
+    \textbf{UNIVERSIDADE FEDERAL DA BAHIA} \\
+    \textbf{INSTITUTO DE COMPUTAÇÃO}
+}
+\autor{Thales Brito Rodrigues}
+\titulo{Modelagem e simulação computacional de mecanismos de leilão por créditos aplicadas à matrícula universitária}
+\local{Salvador}
+\data{2026}
+
+% Natureza do trabalho para a Folha de Rosto (Contracapa)
+\preambulo{Trabalho de Conclusão de Curso apresentado ao Instituto de Computação da Universidade Federal da Bahia, como requisito para obtenção do grau de Bacharel em Ciência da Computação.}
+\orientador{Prof. Dr. Rafael Augusto de Melo}
+
+% ---
+% Configurações de Layout do abntex2
+% ---
+\selectlanguage{brazil}
+\setlength{\parindent}{1.3cm} % Tamanho padrão do parágrafo
+\setlength{\parskip}{0.2cm}   % Espaçamento entre parágrafos
+
+\usepackage{icomma}
+
+% ---
+% Início do Documento
+% ---
+\begin{document}
+
+% ----------------------------------------------------------
+% ELEMENTOS PRÉ-TEXTUAIS
+% ----------------------------------------------------------
+\pretextual
+
+\imprimircapa
+\imprimirfolhaderosto
+
+% A seguir, quando prontos: ficha catalográfica, folha de aprovação,
+% dedicatória, agradecimentos, resumo, abstract, listas e sumário.
+
+% ----------------------------------------------------------
+% ELEMENTOS TEXTUAIS
+% ----------------------------------------------------------
+\textual
+
+\chapter{Introdução}
+\label{cap:introducao}
+
+\section{Tema}
+\label{sec:tema}
+
+O presente trabalho insere-se no escopo da Pesquisa Operacional e do Desenho de Mecanismos (\textit{mechanism design}), concentrando-se no problema de alocação de recursos escassos entre agentes que os disputam simultaneamente. O objeto específico de investigação é a comparação entre dois mecanismos de alocação de vagas em disciplinas universitárias: de um lado, um leilão por créditos com orçamentos finitos e discretos, cuja alocação é decidida por um modelo de Programação Linear Inteira (PLI); de outro, a ordenação linear por Coeficiente de Rendimento (CR), que predomina nos sistemas acadêmicos tradicionais \cite{sonmez2011} e que serve de linha de base para este estudo.
+
+A fronteira desta pesquisa delimita-se à análise sistêmica desses mecanismos por meio de simulação computacional. Os bens alocados são as vagas das turmas universitárias, e a simulação acompanha ingressos sucessivos de estudantes ao longo de vários períodos letivos. Sobre as trajetórias dos alunos no curso, mensuram-se quantitativamente os \textit{trade-offs} entre métricas como eficiência e equidade (\textit{fairness}), e as diferenças observadas entre os resultados de alunos de diferentes comportamentos e desempenhos acadêmicos.
+
+\section{Justificativa}
+\label{sec:justificativa}
+
+\subsection{Contexto do trabalho}
+
+A matrícula em disciplinas constitui um problema recorrente de alocação de recursos escassos em instituições de ensino superior, dado que a quantidade de vagas disponíveis é frequentemente insuficiente para atender à demanda integral dos estudantes. Em grande parte dos sistemas acadêmicos tradicionais, a prioridade de acesso é determinada de forma sequencial por meio de um ordenamento linear baseado no Coeficiente de Rendimento (CR) dos estudantes \cite{sonmez2011}, normalmente definido pela média das notas obtidas nas disciplinas, ponderada pela carga horária. Embora esse modelo apresente simplicidade de implementação e incentivo ao desempenho acadêmico, ele impõe limitações estruturais que prejudicam a eficiência global da distribuição de vagas.
+
+A primeira deficiência reside na baixa expressividade de preferências permitida aos estudantes. Isso se dá devido à incapacidade dos algoritmos baseados em ordenação de processarem restrições acopladas globalmente \cite{kellerer2004}. Para mitigar essa limitação computacional, as plataformas baseadas em CR transferem as restrições de viabilidade (como, por exemplo, a carga horária máxima por período e a proibição de cursar múltiplas turmas da mesma disciplina) para o escopo local do estudante, aplicando-as de forma \textit{ex-ante} no ato da inscrição. Essa abordagem impede que o discente declare planos de contingência flexíveis, obrigando-o a realizar uma otimização local heurística sob incerteza, o que gera uma auto-restrição nas solicitações de matrículas \cite{sonmez2011}. Em alguns casos, o sistema tenta mitigar isso pela realização de rodadas de alocação de vagas remanescentes.
+
+Por consequência dessa baixa expressividade de preferências, surge o incentivo a solicitações especulativas de vagas, que configura a segunda ineficiência do sistema \cite{sonmez2011}. Diante do risco de rejeição e da ausência de um custo de oportunidade real para acrescentar demandas que não violem as restrições \textit{ex-ante}, o incentivo racional do estudante é maximizar suas solicitações até o limite permitido, planejando descartar o excedente \textit{ex-post}, caso haja. Esse comportamento estratégico, embora beneficie individualmente o aluno, promove uma escassez artificial de vagas no cenário coletivo e distorce a sinalização de demanda no sistema.
+
+Por fim, essa escassez artifical é agravada pela terceira limitação do sistema: o ordenamento puramente baseado no CR causa o efeito bola de neve (\textit{snowballing}) \cite{sonmez2011}. Trata-se de um ciclo de retroalimentação positiva no qual estudantes com rendimento inicial elevado possuem uma vantagem homogênea no acesso às disciplinas, que é indiferente à quantidade de solicitações e ao interesse real do aluno em cada uma delas. Como consequência, alunos com rendimento menor conseguem menos vagas, gerando uma barreira estrutural que dificulta a progressão curricular, fechando assim o ciclo de retroalimentação: o estudante precisa aumentar seu CR para cursar mais disciplinas, ao mesmo tempo em que precisa cursar mais disicplinas para aumentar seu CR.
+
+\subsection{Proposta de inovação}
+
+A introdução de um leilão de vagas baseado em orçamentos limitados de créditos reconfigura os incentivos do ecossistema ao impor um custo de oportunidade explícito a cada solicitação de matrícula \cite{cramton2006}. No modelo proposto, o orçamento limitado funciona como um recurso artificial escasso, denominado "créditos", de modo que a decisão de concentrar créditos em um lance para aumentar suas chances de obter vaga em uma disciplina reduz a competitividade do discente nas demais solicitações. Esse \textit{trade-off} orçamentário força os agentes a gerenciarem estrategicamente seus saldos de créditos; por consequência, a distribuição escolhida de créditos investidos nos lances tende a revelar suas reais preferências para o sistema, que poderá usar essa informação como um critério de alocação, de forma a desincentivar solicitações especulativas e aumentar o bem-estar gerado por cada solicitação atendida.
+
+Além disso, tal abordagem equilibra a vantagem de alunos com maior prioridade dentro do sistema. Mesmo se os orçamentos forem proporcionais ao desempenho acadêmico de cada estudante, um aluno com maior orçamento é forçado a diluir a própria vantagem caso solicite múltiplas disciplinas, possibilitando que alguém com menor orçamento eventualmente ganhe uma disputa de vaga com este aluno ao concentrar estrategicamente seus créditos em um lance que considere de alta prioridade. Este equilíbrio mitiga o problema de \textit{snowballing} discutido anteriormente.
+
+O mesmo contraste se reproduz um nível abaixo, entre as turmas de uma mesma disciplina. Como o estudante pode ser contemplado em apenas uma delas, mas pode solicitar várias, a repartição do orçamento entre turmas irmãs é uma forma de proteção contra a incerteza que apenas o leilão consegue expressar: declarar o quanto se aposta em cada turma é diferente de declarar uma única turma como favorita. Essa escolha interna à disciplina tem consequência direta sobre o efeito bola de neve quando as turmas diferem entre si, por exemplo, em dificuldade. Sob a ordenação por CR, a vantagem é posicional e se acumula, pois quem tem CR elevado obtém sistematicamente a turma mais favorável, dela extrai melhor desempenho e assim preserva a própria posição; sob o leilão, a turma mais disputada tem preço, e a vantagem se dilui no ato de exercê-la.
+
+Paralelamente, a centralização do processo alocativo por meio de modelos de Programação Linear Inteira (PLI) altera a abordagem algorítmica do problema, uma vez que estes modelos são capazes de gerenciar as restrições de carga horária e de exclusão mútua entre turmas no resolvedor global \cite{wolsey1998}. O tratamento unificado de tais restrições evita que o sistema exija do estudante uma auto-restrição prévia das suas próprias demandas, o que reduz a necessidade de rodadas de alocação de vagas remanescentes. O orçamento de créditos, portanto, passa a ser o único fator limitador \textit{ex-ante} das solicitações de matrícula de cada estudante.
+
+Diante deste cenário, a presente pesquisa justifica-se pela importância de projetar e avaliar um mecanismo alternativo que desloque o tratamento de restrições do plano local dos agentes para o plano global do resolvedor, utilizando o mercado de créditos como ferramenta de revelação de preferências reais e nivelamento de prioridades com base nestas. A análise quantitativa desse modelo visa fornecer subsídios para a elaboração de sistemas de alocação de vagas mais eficientes, de forma a ampliar o bem-estar e a percepção de justiça dos participantes, e reduzir atrasos de integralização curricular decorrentes de escassez de vagas.
+
+\subsection{Simulação como instrumento de análise}
+
+A comparação empírica direta entre mecanismos de matrícula universitária é inviável no ambiente real. Uma instituição opera um único sistema por período letivo, de modo que não existe o cenário contrafactual contra o qual comparar o resultado observado: não há como saber que alocação a mesma população teria recebido sob outra regra. Submeter alunos reais a regras distintas, além de operacionalmente custoso, teria consequências permanentes sobre a trajetória acadêmica dos envolvidos. 
+
+A simulação computacional, entretanto, contorna essa limitação ao permitir que exatamente a mesma população, com as mesmas preferências, no mesmo modelo de universidade, encontre mecanismos de alocação diferentes, de forma a concentrar o nexo causal da diferença entre os resultados obtidos estritamente nos mecanismos analisados.
+
+% Essa possibilidade é o que organiza a metodologia adotada. Os dois mecanismos são executados sobre um único modelo de universidade: a grade de disciplinas, a população de estudantes, suas preferências, seu desempenho acadêmico, os pré-requisitos, a matrícula garantida dos ingressantes e os critérios de conclusão são idênticos nos dois lados, e o que se substitui é apenas o núcleo decisório de cada rodada de alocação. Como toda a aleatoriedade do cenário é derivada de uma semente fixada antes da execução, rodar a mesma semente em ambos os mecanismos significa submeter literalmente os mesmos estudantes, com as mesmas preferências e as mesmas aptidões, a regras diferentes --- e é essa construção pareada que torna a diferença observada atribuível ao mecanismo, e não à amostra sorteada. A repetição do experimento sobre múltiplas sementes separa, por sua vez, o efeito do mecanismo da variabilidade de uma população específica.
+
+% A dimensão temporal do modelo não é um refinamento acessório, mas condição para observar o fenômeno que motiva o trabalho. O efeito bola de neve é, por definição, cumulativo: ele se manifesta como divergência progressiva entre trajetórias, e uma única rodada de alocação --- ou mesmo um único período letivo --- não é capaz de exibi-lo. Pela mesma razão, métricas como o tempo médio até a integralização curricular e a fração de ingressantes que efetivamente concluem o curso só existem sobre um horizonte que acompanhe coortes do ingresso ao desligamento.
+
+% Por fim, o próprio simulador desenvolvido constitui contribuição secundária do trabalho. Implementado de modo que cada equação do modelo corresponda a uma função isolada e verificável, e acompanhado de uma interface de configuração que permite variar a grade curricular, o tamanho e a composição da população, a oferta de vagas e os parâmetros comportamentais, ele torna os resultados aqui apresentados reproduzíveis e permite que as conclusões sejam reexaminadas sob cenários distintos dos que foram adotados.
+
+\section{Hipótese}
+\label{sec:hipotese}
+
+A hipótese central desta pesquisa é que a substituição do mecanismo ordinal baseado em CR por um leilão por créditos de orçamentos limitados, resolvido globalmente via PLI \cite{wolsey1998}, produz uma alocação com as seguintes propriedades comparativas, medidas sobre o mesmo cenário e a mesma população:
+
+\begin{itemize}
+    \item \textbf{Maior eficiência:} a satisfação média dos estudantes com as alocações é aumentada;
+    \item \textbf{Maior equidade:} a dispersão da satisfação entre os estudantes é reduzida;
+    \item \textbf{Menor influência do CR:} a correlação entre desempenho acadêmico e satisfação é reduzida;
+    \item \textbf{Ocupação mais rápida:} a demanda é atendida em menos rodadas, reduzindo a proporção de vagas obtidas após a primeira;
+\end{itemize}
+
+\section{Objetivo}
+\label{sec:objetivo}
+
+\subsection{Objetivo geral}
+
+Propor, formalizar e avaliar comparativamente um mecanismo de alocação de vagas em disciplinas universitárias baseado em leilão por créditos artificiais, medindo, por meio de modelagem matemática e simulação computacional multi-período, seus efeitos sobre eficiência, equidade, influência do desempenho acadêmico e progressão curricular, frente à ordenação por Coeficiente de Rendimento tomada como linha de base.
+
+\subsection{Objetivos específicos}
+
+\begin{enumerate}[label=\Roman*.]
+    \item Formalizar matematicamente o problema de alocação subjacente e os dois mecanismos comparados, de modo que ambos operem sobre a mesma formulação e difiram apenas no critério de decisão;
+    \item Desenvolver um ambiente de simulação computacional que represente uma universidade ao longo de múltiplos períodos letivos, com grade curricular, pré-requisitos, turmas, perfis de estudante e oferta de vagas configuráveis;
+    \item Definir métricas de eficiência, equidade, influência do desempenho acadêmico, desperdício de vagas e progressão curricular, e um procedimento de comparação pareada que torne a diferença observada atribuível ao mecanismo;
+    \item Comparar os resultados obtidos, identificando vantagens, limitações e efeitos emergentes do mecanismo proposto, inclusive os que lhe sejam desfavoráveis.
+\end{enumerate}
+
+\chapter{Fundamentação teórica}
+\label{sec:fundamentacao_teorica}
+
+\section{Teoria dos Leilões e Desenho de Mecanismos}
+\label{sec:teoria_leiloes}
+
+O Desenho de Mecanismos (\textit{Mechanism Design}) estuda a criação de regras e estruturas de incentivo para alcançar resultados sociais desejados quando os participantes possuem informações privadas \cite{sonmez2011}. No contexto de recursos escassos e indivisíveis em ambientes não monetários, essa teoria orienta a organização de mercados artificiais que buscam eficiência distributiva sem o uso de dinheiro real.
+
+Mecanismos baseados apenas em prioridades fixas ou ordenações ordinais, como a Ditadura Serial (\textit{Serial Dictatorship}), falham por não medir a intensidade das preferências dos agentes. Como esses sistemas não diferenciam o nível de urgência entre duas solicitações em uma mesma faixa de prioridade, os participantes tendem a pedir o máximo de itens permitido. A falta de um custo de oportunidade gera pedidos especulativos que saturam os recursos mais concorridos e impedem o sistema de identificar as demandas prioritárias \cite{sonmez2011}.
+
+Para resolver esse problema através de lances, a literatura avalia o uso de leilões combinatórios de múltiplos itens com propostas fechadas e simultâneas. Na teoria econômica clássica, o mecanismo Vickrey-Clarke-Groves (VCG) representa o modelo ideal para essas alocações, pois garante que revelar a real utilidade de cada item seja uma estratégia dominante para o agente. O VCG alcança essa propriedade ao cobrar de cada vencedor o custo da externalidade que ele impõe aos demais participantes, alinhando o ganho individual ao bem-estar social global \cite{cramton2006}.
+
+O mecanismo VCG assume que os agentes possuem utilidades quase-lineares, o que exige orçamentos flexíveis onde o capital disponível não seja um limitante absoluto \cite{cramton2006}. No entanto, em mercados baseados em moedas artificiais (\textit{scrip markets}), os participantes normalmente enfrentam limites rígidos e explícitos nos seus saldos de créditos \cite{budish2011}. Esse teto orçamentário impede que os agentes deem lances equivalentes às suas reais utilidades caso estas superem a dotação disponível. Como consequência, as garantias teóricas de honestidade e eficiência do VCG deixam de valer. Sem a flexibilidade orçamentária, torna-se impossível calcular preços de equilíbrio por meio de equações econômicas clássicas, o que justifica modelar a alocação como um problema de otimização combinatória.
+
+Diante dessa limitação teórica, a determinação de preços de limpeza de mercado (\textit{market-clearing prices}) surge como uma abordagem heurística eficaz para estimular a honestidade nos lances \cite{budish2011, cramton2006}. Ao fixar um preço uniforme baseado no maior lance rejeitado para cada recurso, o mecanismo replica localmente a lógica de um leilão de segundo preço. Como o valor final pago pelo vencedor é determinado pela concorrência marginal e não pelo seu próprio lance, elimina-se a estratégia de subvalorizá-lo com o intuito de pagar menos pelo item, incentivando a revelação sincera das preferências dos agentes. 
+
+A coordenação centralizada dessa alocação combinatória configura o Problema de Determinação de Vencedores (\textit{Winner Determination Problem} -- WDP) \cite{cramton2006}, resolvido por meio dos modelos de otimização detalhados a seguir.
+
+\section{O Problema da Mochila e suas generalizações}
+\label{sec:problema_mochila}
+
+A resolução algorítmica do Problema de Determinação de Vencedores (WDP) exige mapear regras institucionais em equações de capacidade. Na literatura de otimização combinatória, essa transição é realizada a partir de extensões do problema da mochila \cite{kellerer2004}. O WDP pode ser interpretado como um cenário no qual múltiplos agentes competem por conjuntos de recursos escassos, consumindo limites físicos e orçamentários acoplados.
+
+O Problema da Mochila Clássico 0-1 (\textit{0-1 Knapsack Problem}) funciona como a base para essa modelagem de capacidade \cite{kellerer2004}. Em sua forma pura, o problema consiste em selecionar um subconjunto de itens independentes para preencher uma única mochila de capacidade fixa. Cada item possui um peso e um benefício associados, e o objetivo matemático é maximizar o valor acumulado sem ultrapassar o limite do recipiente. Esse modelo introduz a estrutura básica de gerenciamento de restrições de escassez sob variáveis de decisão binárias.
+
+Para representar sistemas com múltiplos participantes e recursos, a modelagem evolui para o Problema da Mochila Múltipla 0-1 (\textit{0-1 Multiple Knapsack Problem}) \cite{kellerer2004}. O modelo analisado expande essa estrutura tradicional ao incorporar o compartilhamento de itens: enquanto a formulação clássica exige que cada item seja alocado a no máximo um recipiente, o cenário avaliado permite que um mesmo recurso receba atribuições de múltiplos agentes de forma simultânea, até que a disponibilidade intrínseca desse item seja esgotada. Essa modificação exige um gerenciamento síncrono e bidimensional das restrições de capacidade: de um lado, o limite de consumo de cada participante, e do outro lado, o limite de consumo de cada item disponível.
+
+Algumas situações podem criar relações de exclusão mútua entre os bens (por exemplo, cada participante poder obter no máximo um único item de cada categoria). Tais relações podem ser mapeadas por meio de um grafo de conflito, onde os vértices correspondem aos itens e as arestas indicam os pares mutuamente excludentes \cite{kellerer2004}, isto é, pares nos quais é proibido aos participantes obter ambos os itens. Nesses casos, a modelagem computacional evolui para o Problema da Mochila Múltipla 0-1 com Itens Compartilhados e Grafos de Conflito \cite{kellerer2004}.
+
+A determinação da classe de complexidade desse modelo é estabelecida por meio de redução polinomial. Como o Problema da Mochila Múltipla 0-1 clássico é sabidamente NP-difícil \cite{kellerer2004}, e o sistema analisado constitui uma generalização direta deste (ao incorporar compartilhamento de itens e restrições de exclusão em grafos), o problema em questão é classificado como também NP-difícil. Essa classificação teórica comprova a inexistência de algoritmos exatos em tempo polinomial para o pior caso, assumindo que $\text{P} \neq \text{NP}$.
+
+Essa intratabilidade justifica o colapso de heurísticas gulosas fundamentadas em ordenações decrescentes locais. Um contraexemplo clássico manifesta-se em cenários com acoplamento de restrições rígidas, onde um item de alto benefício individual consome uma fração crítica do orçamento de um agente. O algoritmo guloso, ao alocar este item, bloqueia a inclusão de múltiplos itens secundários que, combinados, gerariam um benefício agregado muito superior para o sistema. O acoplamento das restrições impede que heurísticas gulosas de ordenação simples garantam a otimalidade global \cite{kellerer2004}, deixando o gancho analítico para a aplicação de métodos exatos de programação matemática.
+
+\section{Programação Linear Inteira (PLI) e viabilidade computacional}
+\label{sec:pli_viabilidade}
+
+A modelagem do Problema de Determinação de Vencedores (WDP) como uma generalização do problema da mochila múltipla favorece o emprego da Programação Linear Inteira (PLI) como ferramenta de resolução exata. Visto que o problema é NP-difícil e que abordagens gulosas não garantem a otimalidade global, a PLI traduz a função de bem-estar social e as restrições bidimensionais de capacidade em um sistema de equações lineares com variáveis de decisão estritamente binárias \cite{wolsey1998}.
+
+Para resolver sistemas de PLI, os algoritmos modernos partem da relaxação linear, que remove temporariamente a restrição de integridade das variáveis, permitindo que elas assumam qualquer valor contínuo no intervalo entre zero e um. O conjunto de todas as soluções que atendem a essas restrições lineares contínuas define geometricamente um espaço multidimensional denominado politopo viável \cite{wolsey1998}. O Teorema Fundamental da Programação Linear garante que a solução ótima da relaxação contínua estará localizada em um dos vértices desse politopo, o qual pode ser encontrado rapidamente através de algoritmos eficientes, como o Simplex ou métodos de pontos interiores.
+
+Quando o vértice ótimo encontrado pela relaxação linear apresenta valores fracionários, o algoritmo \textit{Branch-and-Bound} atua para tornar as variáveis inteiras novamente \cite{wolsey1998}. Esse método executa uma busca sistemática dividindo o politopo original em subproblemas por meio de ramificações, criando restrições adicionais que excluem a solução fracionária atual sem eliminar nenhuma combinação inteira viável. O algoritmo utiliza os limites numéricos fornecidos pelas relaxações lineares de cada subproblema para podar ramos inteiros do espaço de busca que comprovadamente não contêm uma solução superior à melhor solução inteira já conhecida, reduzindo o esforço computacional necessário para cravar o ótimo global.
+
+% Para garantir a unicidade da solução ótima em problemas de PLI, uma aborgagem comum é o uso de perturbações estocásticas nos coeficientes da função objetivo \cite{wolsey1998}, isto é, valores infinitesimais de uma distribuição aleatória uniforme que são adicionados aos coeficientes de forma a anular, para fins práticos, a possibilidade de duas configurações de decisões geraram o exato mesmo valor na função objetivo, impedindo que haja múltiplas soluções ótimas para o problema.
+
+Embora o pior caso teórico do \textit{Branch-and-Bound} permaneça exponencial devido à natureza NP-difícil do problema, a viabilidade computacional prática é facilitada pela dinâmica do próprio modelo de leilão com orçamentos artificiais: em grande parte dos cenários reais, o teto rígido desses orçamentos restringe severamente a quantidade de lances que cada agente consegue efetuar simultaneamente, e o mecanismo adota a premissa de que nenhum recurso é alocado a um participante que não o tenha explicitamente solicitado; devido a isso, as matrizes de alocação viáveis tornam-se altamente esparsas nesses casos, o que reduz drasticamente os graus de liberdade do modelo matemático aplicado. O encolhimento do politopo viável possibilita um tempo de execução altamente eficiente na prática, apesar da elevada complexidade temporal teórica do algoritmo.
+
+\chapter{Formalização do problema}
+\label{cap:problema}
+
+\section{Problema central}
+\label{sec:formalizacao}
+
+Sob a ótica computacional, o problema central mapeado neste trabalho classifica-se como uma extensão do \textit{0-1 Multiple Knapsack Problem with Shared Items and Conflict Graphs} (Problema da Mochila Múltipla 0-1 com Itens Compartilhados e Grafos de Conflito) \cite{kellerer2004}. Nesta abordagem, cada agente funciona como uma mochila 0-1, limitada por capacidade máxima e por exclusão mútua entre itens incompatíveis; as mochilas competem simultaneamente por um inventário limitado e discreto de bens. O problema é NP-difícil, já que contém o problema da mochila 0-1 como caso particular \cite{kellerer2004}. A estrutura formal do modelo é detalhada a seguir.
+
+\subsection{Conjuntos principais}
+
+O problema consiste na otimização da alocação de bens escassos e discretos $x \in B$ para agentes $a \in A$ interessados em recebê-los. O interesse dos agentes é modelado como pares ordenados de demanda $(a, x)$, que significam "o agente $a$ demanda o bem $x$". Formaliza-se, portanto, o conjunto de demandas $D$ como um subconjunto do produto cartesiano entre agentes e bens: $D \subseteq A \times B$.
+
+\subsection{Variáveis de decisão}
+
+Para cada bem demandado por cada agente, a alocação pode ou não ocorrer. Formaliza-se isto a partir da matriz de variáveis binárias de decisão $z$, representando o resultado geral da alocação, na qual cada elemento $z_{a, x}$ é igual a $1$ quando o agente $a$ recebe uma unidade do bem $x$, e igual a $0$ caso contrário:
+\begin{equation}
+    z_{a, x} \in \{0, 1\} \quad \forall (a, x) \in D
+\end{equation}
+
+É importante especificar que, para os pares $(a, x) \notin D$, correspondentes a bens não demandados, os valores de $z$ são fixados em zero, pois os bens não podem ser alocados à revelia dos agentes:
+\begin{equation} \label{eq:sem-revelia}
+    z_{a, x} = 0 \quad \forall (a, x) \in (A \times B) \setminus D
+\end{equation}
+
+\subsection{Restrições}
+
+O problema possui uma restrição relacionada à oferta dos bens. Existe uma quantidade limitada de cada bem $x$, representada por $q_{x} \in \mathbb{N}$ na restrição formalizada abaixo:
+\begin{equation} \label{eq:vagas}
+    \sum_{a \in A} z_{a, x} \leq q_x \quad \forall x \in B
+\end{equation}
+
+Há também uma restrição relacionada à capacidade máxima dos agentes. Cada bem $x$ tem um peso numérico $w_x \in \mathbb{R}_{>0}$, e a soma dos pesos dos bens recebidos por cada agente $a$ não pode ultrapassar sua capacidade máxima $W_a \in \mathbb{R}_{\geq0}$:
+\begin{equation} \label{eq:capacidade}
+    \sum_{x \in B} z_{a, x} \cdot w_x \leq W_a \quad \forall a \in A
+\end{equation}
+
+A terceira e última restrição a ser formalizada é a possível exclusão mútua entre bens. Dois ou mais bens são mutuamente excludentes quando um agente não pode receber mais de um deles simultaneamente. Isso é formalizado através do conjunto $M \subseteq \mathcal{P}(B)$, que contém os conjuntos de bens mutuamente excludentes:
+\begin{equation} \label{eq:exclusao}
+    \sum_{x \in X} z_{a, x} \leq 1 \quad \forall a \in A, \forall X \in M
+\end{equation}
+
+Nota-se que o conjunto $M$ é uma representação dos cliques do grafo de conflito entre bens.
+
+\subsection{Parâmetros de entrada}
+
+Há diferentes níveis de prioridade entre agentes que disputam um mesmo bem, expressos numericamente através da matriz de parâmetros $p$, na qual cada elemento $p_{a, x} \in \mathbb{R}_{\geq0}$ representa a prioridade com que o agente $a$ disputa unidades do bem $x$ com outros agentes. Se dois agentes, $a$ e $b$, demandam o bem $x$, e $a$ tem prioridade sobre $b$ para obter uma unidade de $x$, isso traduz-se na desigualdade $p_{a,x} > p_{b, x}$.
+
+As prioridades dos pares solicitados são estritamente positivas:
+\begin{equation} \label{eq:prioridade-positiva}
+    p_{a, x} > 0 \quad \forall (a, x) \in D
+\end{equation}
+
+Para assegurar a completude da matriz $p$ sobre o produto cartesiano global $A \times B$, definem-se como nulas as prioridades para os pares não solicitados,  $(a, x) \notin D$:
+\begin{equation} \label{eq:p-igual-zero}
+    p_{a, x} = 0 \quad \forall (a, x) \in (A \times B) \setminus D
+\end{equation}
+
+\subsection{Função objetivo}
+\label{sec:funcao-objetivo}
+
+O objetivo é maximizar a prioridade agregada dos bens alocados, representada por $Z$:
+\begin{equation} \label{eq:objetivo}
+    \max \quad Z = \sum_{(a, x)\in D}  p_{a, x} \cdot z_{a, x}
+\end{equation}
+
+\subsection{Expressão em tupla}
+
+Por fim, o problema central é representado por uma tupla $P$ de seus conjuntos e parâmetros de entrada:
+\begin{equation}
+P = (A, B, D, p, q, w, W, M)
+\end{equation}
+
+Define-se uma função resolvedora abstrata, $O$, que encontra uma matriz de decisões, $z_{\max}$, que maximiza o valor de $Z$:
+\begin{equation}
+O(P) = z_{\max}
+\end{equation}
+
+\section{Alocação multi-rodadas}
+\label{sec:multi-rodadas}
+
+A alocação pode ocorrer em uma ou múltiplas rodadas. Um problema de alocação multi-rodadas é expresso pelo conjunto de suas rodadas, $R = \{P^{(1)}, P^{(2)}, \dots, P^{(|R|)}\}$, sendo $|R|$ o número total de rodadas. Cada rodada é uma instância $P^{(r)}$ do problema $P$, dada pela tupla:
+\begin{equation}
+P^{(r)} = (A, B, D^{(r)}, p^{(r)}, q^{(r)}, w, W^{(r)}, M)
+\end{equation}
+
+A alocação de cada rodada $r$ é decidida pela resolução do problema $P^{(r)}$:
+\begin{equation}
+    z^{(r)} = O(P^{(r)})
+\end{equation}
+
+Nota-se que uma dimensão temporal é introduzida às variáveis que podem modificar seus valores no decorrer das rodadas, denotada pelo sobrescrito $^{(r)}$, onde $r \in \{1, 2, \dots, |R|\}$ indica a rodada de alocação atual. As equações que contêm tais sobrescritos aplicam-se para todo valor válido destes.
+
+\subsection{Comportamento entre-rodadas}
+
+As rodadas não são independentes entre si: a alocação resultante de cada rodada influencia as demandas e restrições das próximas.
+
+Unidades alocadas de cada bem tornam-se indisponíveis em rodadas futuras:
+\begin{equation}
+    q_{x}^{(r + 1)} = q_x^{(r)} - \sum_{a \in A} z_{a,x}^{(r)}
+    \quad \forall x \in B
+\end{equation}
+
+A cada rodada subsequente, o peso total dos bens recebidos na rodada anterior é descontado da capacidade máxima dos agentes:
+\begin{equation}
+    W_{a}^{(r + 1)} = W_a^{(r)} - \sum_{x \in B} w_{x} \cdot z_{a,x}^{(r)}
+    \quad \forall a \in A
+\end{equation}
+
+Um agente não pode demandar novamente um bem já recebido por ele em alguma rodada anterior:
+\begin{equation}
+    z_{a, x}^{(r)} = 1 \implies (a, x) \notin D^{(s)}
+    \quad \forall (a, x) \in A \times B, \forall r, s\in \mathbb{N}^*_{\leq |R|} : r < s
+\end{equation}
+
+A restrição de exclusão mútua da equação \eqref{eq:exclusao} atua dentro de uma mesma rodada e, isoladamente, não impediria que um agente recebesse um bem na primeira rodada e um bem mutuamente excludente com ele na segunda. Estende-se, portanto, o impedimento acima a todo o conjunto excludente:
+\begin{equation}
+\begin{aligned}
+    z_{a, y}^{(r)} = 1 \implies (a, x) \notin D^{(s)} \\
+    \forall a \in A, \forall X \in M, \forall x, y \in X, \forall r, s\in \mathbb{N}^*_{\leq |R|} : r < s
+\end{aligned}
+\end{equation}
+
+\subsection{Valores agregados}
+
+A alocação final agregada após o término de todas as rodadas, denotada por $z^{(*)}$, indica quais bens foram alocados para quais agentes em ao menos uma rodada:
+\begin{equation}
+    z_{a, x}^{(*)} =
+    \begin{cases}
+        1 & \text{, se } \exists r \in \mathbb{N}^*_{\leq |R|}, z_{a, x}^{(r)} = 1 \\
+        0 & \text{, caso contrário}
+    \end{cases}
+    \quad
+    \forall (a, x) \in A \times B
+\end{equation}
+
+A demanda agregada, $D^{(*)}$, de todas as rodadas é expressa por:
+\begin{equation}
+    D^{(*)} = \bigcup_{r = 1}^{|R|} D^{(r)}
+\end{equation}
+
+\chapter{Metodologia}
+\label{cap:metodologia}
+\section{Formalização do mecanismo de leilão por créditos}
+
+A proposta deste trabalho consiste em um mecanismo de leilão multi-estágio para decidir a alocação dos bens no problema central $P$, no qual cada agente, $a \in A$, dispõe de um orçamento limitado de créditos a distribuir entre seus lances para os bens, $x \in B$, demandados.
+
+\subsection{Lances e orçamentos}
+
+Cada rodada de alocação possui uma matriz de lances, $c^{(r)}$, na qual cada elemento $c_{a, x}^{(r)} \in \mathbb{N}$ representa o valor em créditos do lance dado por $a$ para demandar uma unidade do bem $x$. Quando não há lance, $c_{a, x}^{(r)} = 0$:
+\begin{equation}
+    c_{a, x}^{(r)} > 0 \iff (a, x) \in D^{(r)}
+\end{equation}
+
+A soma total dos lances dados por cada agente não pode ultrapassar o seu orçamento, denotado por $C_a^{(r)} \in \mathbb{N}$:
+\begin{equation}
+    \sum_{x \in B} c_{a, x}^{(r)} \leq C_a^{(r)} 
+    \quad \forall a \in A
+\end{equation}
+
+O conjunto $R_c = \{c^{(1)}, c^{(2)}, c^{(3)}, \dots, c^{(|R|)}\}$ contém todos os lances de todas as rodadas, sendo que $|R_c| = |R|$. As prioridades de cada demanda são determinadas a partir dos créditos investidos no lance correspondente:
+\begin{equation}
+    p_{a, x}^{(r)} = c_{a,x}^{(r)}
+    \quad 
+    \forall (a, x) \in (A \times B)
+\end{equation}
+
+
+\subsection{Preço dos bens}
+
+Em cada rodada, o preço do bem $x$, denotado por $\pi_x^{(r)}$, é igual ao valor do maior lance mal-sucedido, ou igual a 1, caso não haja lances mal-sucedidos:
+\begin{equation}
+    \pi_{x}^{(r)} =
+    \begin{cases}
+        \max_{a \in A} \quad c_{a, x}^{(r)} \cdot (1 - z_{a, x}^{(r)})
+        & \text{, se } \exists a \in A, z_{a, x}^{(r)} = 0, c_{a, x}^{(r)} > 0 \\
+        1
+        & \text{, caso contrário }
+    \end{cases}
+    \quad
+    \forall a \in A
+\end{equation}
+
+Os agentes que recebem bens terão um consumo de créditos, denotado por $\delta_{a, x}^{(r)}$, dado por:
+\begin{equation}
+    \delta_{a, x}^{(r)} = z_{a,x}^{(r)} \cdot \pi_{x}^{(r)}
+    \quad
+    \forall (a, x) \in A \times B
+\end{equation}
+
+O consumo total de créditos, $\Delta_a^{(r)}$, de cada rodada, por sua vez, é simplesmente o somatório do consumo de cada bem recebido:
+\begin{equation}
+    \Delta_a^{(r)} = \sum_{x \in B} \delta_{a, x}^{(r)}
+    \quad
+    \forall a \in A
+\end{equation}
+
+Na rodada subsequente, o total de créditos consumidos será descontado do orçamento do agente:
+\begin{equation}
+    C_a^{(r + 1)} = C_a^{(r)} - \Delta_a^{(r)}
+    \quad \forall a \in A
+\end{equation}
+
+O consumo de créditos agregado de todas as rodadas dá-se por:
+\begin{equation}
+    \delta_{a,x}^{(*)} = \sum_{r = 1}^{|R|} \delta_{a,x}^{(r)}
+    \quad
+    \forall (a, x) \in A \times B
+\end{equation}
+\begin{equation}
+    \Delta_{a}^{(*)} = \sum_{r = 1}^{|R|} \Delta_{a}^{(r)}
+    \quad
+    \forall a \in A
+\end{equation}
+
+\subsection{Expressão em tupla}
+
+Por fim, um leilão é expresso pela tupla $L$ definida abaixo:
+\begin{equation}
+    L = (C^{(1)}, R, R_c) 
+\end{equation}
+
+Na qual $C^{(1)}$ é o orçamento inicial dos agentes, $R$ são as rodadas de alocação, e $R_c$ são os lances de cada rodada.
+
+\begin{comment}
+\subsection{Exemplo}
+
+\begin{table}[htbp]
+\centering
+\caption{Exemplo de alocação e consumo de créditos em uma rodada}
+\begin{tabular}{ccccc}
+\toprule
+    \textbf{Créditos ($c_{a, x}^{(r)}$)} 
+    & \textbf{Viés ($\beta_{a, x}^{(r)}$)} 
+    & \textbf{Desempate ($\alpha_{a, x}^{(r)}$)} 
+    & \textbf{Resultado ($z_{a, x}^{(r)}$)}  
+    & \textbf{Consumo ($\delta_{a, x}^{(r)}$)}  
+    \\
+\midrule
+\bottomrule
+
+\end{tabular}
+\end{table}
+\end{comment}
+
+
+\section{Simulação do ambiente de matrícula universitária}
+\label{sec:instanciacao}
+
+A formalização do problema central é agnóstica ao domínio. A Tabela \ref{tab:instanciacao} apresenta a correspondência entre seus elementos e os do problema de matrícula.
+
+\begin{table}[htbp]
+\centering
+\caption{Aplicação dos conceitos do problema abstrato para o contexto da matrícula universitária}
+\label{tab:instanciacao}
+\begin{tabularx}{\textwidth}{lXX}
+\toprule
+\textbf{Símbolo} & \textbf{Conceito} & \textbf{Aplicação} \\
+\midrule
+$a \in A$        & Agente                        & Estudante \\
+$x \in B$        & Bem escasso e discreto        & Turma ofertada \\
+$(a,x) \in D$    & Par de demanda                & Solicitação de vaga \\
+$q_x$            & Unidades disponíveis          & Vagas da turma \\
+$w_x$            & Peso do bem                   & Carga horária da turma \\
+$W_a$            & Capacidade do agente          & Carga horária máxima do estudante \\
+$X \in M$        & Bens mutuamente excludentes & Turmas de uma mesma disciplina \\
+$p_{a,x}$        & Prioridade de alocação         & Valor do lance de créditos \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Por razões de simplificação, a única aplicação de bens mutuamente excludentes incluída na simulação é a multiplicidade de turmas por disciplina, das quais todas terão a mesma carga horária; sendo assim, pode-se utilizar a notação $w_X$ para se falar da carga horária da disciplina $X \in M$.
+
+\subsection{Dimensão temporal}
+
+As simulações dos mecanismos de alocação ocorrerão no decorrer de múltiplos períodos letivos. Define-se $T = \{L_1, L_2, L_3, \dots, L_{|T|}\}$ como o conjunto de todos os leilões realizados, isto é, em cada período $t \in \{1, 2, 3, \dots, |T|\}$, realiza-se um leilão de vagas $L_t$.
+
+Para fins de clareza na notação, algumas variáveis podem receber um sobrescrito $^{(t)}$ para indicar que se referem ao período letivo do leilão $L_t \in T$. O conjunto dos alunos matriculados no quinto período, por exemplo, é expresso por $A^{(5)} \subseteq A$. Para variáveis que já possuem um sobrescrito referente à rodada de alocação, este sobrescrito passa a ser $^{(t, r)}$, onde $t$ indica o período letivo e $r$ indica a rodada de alocação. Por exemplo, o orçamento inicial de um estudante no leilão do terceiro período é expresso por $C_a^{(3, 1)}$.
+
+A cada período, novos alunos poderão ingressar na universidade, e alunos matriculados poderão sair, por conclusão do curso ou jubilamento. Cada estudante, $a \in A$, possui dois valores associados a tais eventos: $t_a \in \mathbb{N}_{\geq 1}$, o período em que entrou; e $t^{\prime}_a  \in \mathbb{N}_{\geq 2}$, o período em que saiu:
+\begin{equation}
+    t^{\prime}_a > t_a \quad \forall a \in A
+\end{equation}
+\begin{equation}
+    a \in A^{(t)} \iff t_a \leq t < t^{\prime}_a \quad \forall a \in A 
+\end{equation}
+
+O subconjunto de calouros de um período é denotado por $A^{(t)}_\text{cal} \subseteq A^{(t)}$, e construído por:
+\begin{equation}
+    A^{(t)}_\text{cal} = \{a \in A^{(t)} \mid t_a = t\}
+\end{equation}
+
+O aluno é jubilado quando não consegue concluir o curso antes do tempo máximo de permanência, denotado por $j \in \mathbb{N}^*$:
+\begin{equation}
+    t^{\prime}_a - t_a \leq j \quad \forall a \in A
+\end{equation}
+
+A simulação termina quando todos os alunos saem da universidade e não há mais alunos para entrar:
+\begin{equation}
+    |T| = \max_{a \in A} t^{\prime}_a - 1
+\end{equation}
+
+
+% Por sua vez, o valor $t^{(t)}_a$ indica por quantos perídos o aluno esteve matrículado até o período $t$:
+% \begin{equation}
+%     t^{(t)}_a = t - t_a \implies a \notin A^{(t)} \quad \forall a \in A
+% \end{equation}
+
+\subsection{Notas e retorno de créditos}
+
+Ao final de cada período, os alunos recebem notas entre 0 e 10 nas disciplinas cursadas, expressas pela matriz $n^{(t)}$, onde cada elemento, $n_{a, X}^{(t)} \in \{\frac{k}{10} \mid k \in \mathbb{N}_{\leq100}\}$, representa a maior nota obtida pelo aluno na disciplina até o presente período; se o aluno ainda não cursou a disciplina, a nota é considerada zero por padrão. A simulação segue, portanto, a invariante:
+\begin{equation}
+    n_{a, X}^{(t + 1)} \geq n_{a, X}^{(t)}
+    \quad
+    \forall (a, X) \in (A^{(t)} \cap A^{(t + 1)}) \times M
+\end{equation}
+
+Se um aluno obtém uma nota igual ou superior ao limiar de aprovação, $n_\text{apr} \in \{\frac{k}{10} \mid k \in \mathbb{N}^*_{\leq100}\}$, ele é considerado aprovado na disciplina, e portanto não a solicitará novamente nos períodos subsequentes. Isso é representado pelo conjunto das disciplinas aprovadas de cada aluno, $H^{(t)}_a \subseteq M$:
+\begin{equation}
+    H^{(t)}_a = \{X \in M \mid n^{(t)}_{a, X} \geq n_\text{apr} \}
+    \quad
+    \forall (a, X) \in A^{(t)} \times M
+\end{equation}
+\begin{equation}
+    x \in X \land X \in H^{(t)}_a \implies (a, x) \notin D^{(t)}
+    \quad
+    \forall (a, x) \in A^{(t)} \times B
+\end{equation}
+
+% \begin{equation}
+%     n_{a, x}^{(t)} \geq n_\text{apr} \implies (a, x) \notin D^{(t+ u, *)}
+%     \quad
+%     \forall (a, x) \in D^{(t, *)},\text{ }
+%     \forall t, u \in \mathbb{N}^*
+% \end{equation}
+
+Cada disciplina cursada retorna uma quantidade de créditos, $\gamma_{a, x}^{(t)} \in \mathbb{N}$, definida em função do preço pago e da nota obtida, onde $m_\gamma$ é uma constante que atua como multiplicador máximo de retorno:
+\begin{equation}
+\gamma_{a, x}^{(t)} = m_\gamma \cdot \delta_{a, x} \cdot (\frac{n_{a, X}^{(t)}}{10}) 
+\quad
+\forall a \in A^{(t)}, \forall x \in X, \forall X \in M
+\end{equation}
+
+O retorno total de créditos, $\Gamma_{a}^{(t)}$, é dado por:
+\begin{equation}
+\Gamma_{a}^{(t)} = \sum_{x \in B} \gamma_{a, x}^{(t)}
+\quad
+\forall a \in A^{(t)}
+\end{equation}
+
+Ao início de cada próximo período letivo, o orçamento restante do período anterior será somado ao retorno total de crédtios. Para garantir que os alunos nunca fiquem com orçamento zerado (o que os impediriam de solicitar vagas), o orçamento inicial de cada período é sempre igual ou superior a $C_{\min} \in \mathbb{N}^*$; e para evitar acúmulo excessivo de créditos, o orçamento nunca pode superar $C_{\max} \in \mathbb{N}^*$:
+\begin{equation}\label{creditos_inicio_semestre}
+\begin{aligned}
+    C_a^{(t + 1, 1)} = \text{clamp}_{[C_{\min}, C_{\max}]} (C_a^{(t, 1)} - \Delta_a^{(t, *)} + \Gamma_a^{(t)})
+    \quad \forall a \in A^{(t)} \cap A^{(t + 1)}
+\end{aligned}
+\end{equation}
+
+No primeiro período matriculado de cada aluno, seu orçamento inicial é $C_{\min}$:
+\begin{equation}
+t = t_a \implies C_a^{(t, 1)} = C_{\min}
+\quad
+\forall a \in A^{(t)}
+\end{equation}
+
+
+\subsection{Grade curricular}
+
+A grade de disciplinas é única e comum a todos os estudantes da simulação, não havendo distinção entre cursos ou campi, por razões de simplificação. Cada disciplina declara carga horária, número de turmas, dificuldade, seus pré-requisitos e a classificação de obrigatória ou optativa, representada pelos conjuntos $M_\text{obg} \subseteq M$ e $M_\text{opt} \subseteq M$, respectivamente. O estudante precisa ser aprovado em todas as disciplinas obrigatórias e em uma carga horária total mínima de optativas, denotada por $W_\text{opt}$, para concluir o curso e, consequentemente, sair da universidade no período seguinte:
+\begin{equation}
+M_\text{obg} \subseteq H_a^{(t)} 
+\land \sum_{X \in M_\text{opt} \cup H_a^{(t)}} w_{X} \geq W_\text{opt} 
+\implies t = t^{\prime}_a - 1
+\quad \forall a \in A^{(t)}
+\end{equation}
+
+Cada disciplina, $X \in M$, é composta por suas turmas, $x \in X$, e pode ter um conjunto de pré-requisitos, denotados pela função $\mathrm{req}: M \xrightarrow{} \mathcal{P}(M)$; o aluno só poderá solicitar uma disciplina caso tenha sido aprovado em todos os seus pré-requisitos:
+\begin{equation}
+    \exists Y \in \mathrm{req}(X) : Y \notin H^{(t - 1)}_a
+    \implies (a, x) \notin D^{(t)}
+    \quad \forall X, Y \in M, \forall x \in X, \forall a \in A^{(t)}
+\end{equation}
+
+A função $\mathrm{seq}: M \xrightarrow{} \mathcal{P}(M)$, por sua vez, obtém a sequência de pós-requisitos na grade a partir de uma disciplina, isto é, o conjunto de disciplinas que são desbloqueadas por ela:
+\begin{equation}
+    Y \in \mathrm{seq}(X) \iff X \in \mathrm{req}(Y)
+    \quad \forall X, Y \in M
+\end{equation}
+
+Disciplinas optativas não possuirão pré-requisitos na grade da simulação:
+\begin{equation}
+    X \in M_\text{opt} \implies \mathrm{req}(X) = \emptyset
+\end{equation}
+
+% Para as disciplinas obrigatórias, o período da disciplina, denotado pela função $\mathrm{per}: M_\text{obg} \xrightarrow{} \mathbb{N}^*$, decorre por indução da cadeia de pré-requisitos:
+% \begin{equation} \label{eq:periodo-disciplina}
+%     \mathrm{per}(X) =
+%     \begin{cases}
+%         1 & \text{, se } \mathrm{req}(x) = \emptyset \\
+%         1 + \max_{y \in \mathrm{req}(x)} \mathrm{per}(y) & \text{, caso contrário}
+%     \end{cases}
+%     \quad
+%     \forall X \in M_\text{obg}
+% \end{equation}
+
+Dentre as disciplinas obrigatórias, haverá disciplinas de entrada, representadas pelo subconjunto $M_\text{cal} \subseteq \{X \in M_\text{obg} \mid \mathrm{req}(x) = \emptyset\}$. Os calouros de cada período recebem vagas garantidas nestas disciplinas, distribuídas igualmente entre suas turmas:
+\begin{equation}
+    \exists! x \in X : z^{(t, *)}_{a, x} = 1
+    \quad \forall a \in A^{(t)}_\text{cal}, \forall  X \in M_\text{cal}
+\end{equation}
+\begin{equation} \label{eq:oferta-de-entrada}
+    \left| A^{(t)}_\text{cal} \right| \leq \sum_{x \in X} q_x
+    \quad \forall X \in M_\text{cal}
+\end{equation}
+\begin{equation} \label{eq:reparticao-garantida}
+    \left|
+        \sum_{a \in A^{(t)}_\text{cal}}
+        \left( z^{(t, *)}_{a, x} - z^{(t, *)}_{a, y} \right)
+    \right| \leq 1
+    \quad \forall X \in M_\text{cal}, \; \forall x, y \in X
+\end{equation}
+
+\section{Simulação do comportamento dos estudantes}
+
+\subsection{Interesse e utilidade}
+
+O comportamento dos alunos é governado por uma matriz $i^{(t)}$, na qual cada elemento, $i_{a, x}^{(t)} \in \mathbb{R}_{> 0}$, representa o interesse do aluno $a$ na turma $x$ no período $t$. Se o aluno tem mais interesse em uma vaga na turma $x$ em relação à turma $y$, isto implica $i_{a, x}^{(t)} > i_{a, y}^{(t)}$. A matriz $I^{(t)}$, por sua vez, representa o interesse dos alunos nas disciplinas; cada elemento $I^{(t)}_{a, X}$ é construído a partir da média aritmética do interesse pelas turmas de $X$:
+\begin{equation} 
+    I^{(t)}_{a, X} = \frac{1}{|X|} \cdot \sum_{x \in X} i^{(t)}_{a, x}
+\end{equation}
+
+Denomina-se disciplinas elegíveis aquelas nas quais o estudante está habilitado a solicitar vagas. Conforme definido anteriormente, disciplinas nas quais o estudante já foi aprovado, já recebeu vaga em uma rodada anterior do mesmo período, ou das quais os pré-requisitos ainda não foram totalmente aprovados, são inelegíveis. O subconjunto das disciplinas elegíveis ao aluno $a$ no período $t$ é denotado por $M_a^{(t)} \subseteq M$.
+\begin{equation}
+    x \in X \land X \in M \setminus M_a^{(t)} \implies (a, x) \notin D^{(t)} 
+    \quad \forall a \in A^{(t)}, \forall X \in M
+\end{equation}
+
+A partir dos valores da matriz de interesses em disciplinas, $I^{(t)}$, e das turmas elegíveis, $M_a^{(t)}$, constroi-se a matriz de utilidades de disciplinas, $U^{(t)}$, na qual todas as suas linhas somam 1, e todas as disciplinas inelegíveis têm utilidade zerada e redistribuída igualmente entre seus pré-requisitos elegíveis, caso haja.
+\begin{equation}
+    \sum_{X \in M} U_{a, X}^{(t)} = 1
+    \quad \forall{a \in A^{(t)}}
+\end{equation}
+\begin{equation}
+    U_{a, X}^{(t)} = 0 
+    \quad
+    \forall a \in A^{(t)}, \forall X \in M \setminus M_a^{(t)}
+\end{equation}
+\begin{equation}
+    U_{a, X}^{(t)} = 
+        \left(
+        I_{a, X}^{(t)} 
+        + \sum_{Y \in \mathrm{seq}(X)}
+        \frac{I_{a, Y}^{(t)}}{|M_a^{(t)} \cap \mathrm{req}(Y)|}
+        \right)
+        \cdot
+        \frac{1}{\sum_{Z \in M_a^{(t)} \cup \mathrm{seq}(X)} I_{a, Z}^{(t)}}
+    \quad
+    \forall a \in A^{(t)}, \forall X \in M_a^{(t)}
+\end{equation}
+
+Com base nisto, a matriz de utilidades de turmas, $u^{(t)}$, é construída seguindo as seguintes propriedades: os valores de utilidade das turmas de cada disicplina elegível para cada aluno têm as mesmas proporções dos seus valores de interesse; e a turma de maior utilidade tem o mesmo valor numérico que a utilidade da disciplina.
+\begin{equation}
+    \frac{u_{a, x}^{(t)}}{u_{a, y}^{(t)}} = \frac{i_{a, x}^{(t)}}{i_{a, y}^{(t)}}
+    \quad \forall{a \in A^{(t)}}, \forall x, y \in X : X \in M_a^{(t)}
+\end{equation}
+\begin{equation}
+    \max_{x \in X} u_{a, x}^{(t)} = U_{a, X}^{(t)}
+    \quad \forall{a \in A^{(t)}}, \forall X \in M
+\end{equation}
+\begin{equation}
+    \sum_{x \in B} u_{a, x}^{(t)} \geq 1
+    \quad \forall{a \in A^{(t)}}
+\end{equation}
+
+\subsection{Estratégia dos lances}
+
+Os lances dados pelos alunos na solicitação se darão através da resolução local de um subproblema da mochila, mais especificamente, uma Mochila Côncava, na qual é possível alocar múltiplos itens a um mesmo recipiente, com ganho decrescente a cada unidade adicional. O orçamento $C_a^{(t, r)}$ atua como capacidade, cada crédito tem peso unitário, e o ganho de investir o $k$-ésimo crédito em uma disciplina decresce com $k$, segundo a lei da utilidade marginal decrescente: o primeiro crédito é o que mais compra chance de vaga, e cada um depois dele compra menos.
+
+A repartição dos créditos ocorre em dois níveis. No primeiro, sobre as disciplinas elegíveis, decide-se quantos créditos cada disciplina receberá no total, $c_{a, X}^{(t, r)}$. O algoritmo da mochila usará como ganho a utilidade da disciplina, $U_{a, x}^{(t)}$, dividida por quantos créditos ela terá no total se o aluno investir mais um: o ganho de investir o primeiro crédito é $U_{a, x}^{(t)}$, o do segundo, $\frac{U_{a, x}^{(t)}}{2}$, o do terceiro, $\frac{U_{a, x}^{(t)}}{3}$, por diante; ou seja, o ganho sofre um decaimento hiperbólico em função de cada crédito adicional investido. $\frac{1}{k}$ foi escolhida como função de decaimento para que os créditos investidos reflitam aproximadamente as mesmas proporções das utilidades.
+
+No segundo nível, uma vez por disciplina, o mesmo algoritmo reparte esses créditos entre as turmas dela, usando $u_{a, x}^{(t)}$ no lugar da utilidade da disciplina, e $c_{a, X}^{(t, r)}$ no lugar do orçamento geral. A divisão em dois níveis é implementada para evitar que disciplinas concentrem mais créditos que outras apenas por terem mais turmas.
+
+\subsection{Exclusão e especulação}
+
+Encerradas as rodadas do período, o estudante não necessariamente cursa tudo o que obteve. A carga horária efetiva de cada estudante, $\hat{W}_a^{(t)} \in \mathbb{N}$, representa as horas que ele verdadeiramente pretende cursar no período. Ela é independente do teto institucional, $W_a^{(t, 1)}$, e não é acessível ao sistema de alocação, pois trata-se de uma informação privada de cada agente.
+
+O estudante retém o subconjunto de maior utilidade das turmas obtidas que cabe na carga horária efetiva, e exclui o excedente; esta é a simulação do comportamento especulativo abordado na introdução do trabalho. Trata-se de um segundo subproblema da mochila resolvido localmente, desta vez uma Mochila 0-1, na qual a carga horária $w_x$ atua como peso, a utilidade $u_{a, x}^{(t)}$ atua como ganho, e a carga efetiva $\hat{W}_a^{(t)}$ atua como capacidade máxima; os itens que ficarem de fora da mochila serão as turmas a serem excluídas pelo estudante ao final das alocações.
+
+Vale ressaltar que cada exclusão é essencialmente uma vaga desperdiçada, pois só volta a ficar disponível no próximo período, dado que a exclusão ocorre após o término das alocações.
+
+\subsection{Perfis de alunos}
+
+[TO-DO]
+
+\section{Comparação com o modelo tradicional baseado em CR}
+
+[TO-DO]
+
+% ----------------------------------------------------------
+% ELEMENTOS PÓS-TEXTUAIS
+% ----------------------------------------------------------
+\postextual
+
+% Gerenciador de referências. O arquivo deve se chamar 'referencias.bib'
+\bibliographystyle{abntex2-num} % Define a estilização numérica da ABNT
+\bibliography{referencias}       % Aponta para o seu arquivo "referencias.bib"
+
+\end{document}
