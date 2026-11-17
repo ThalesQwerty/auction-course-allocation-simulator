@@ -246,7 +246,8 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
           <dt>Progresso — fora do anteprojeto</dt>
           <dd>
             Carga aprovada do histórico dividida pela carga que fecha o curso — todas as
-            obrigatórias mais a exigência optativa X —, na média de quem disputou. É a única
+            obrigatórias mais a exigência optativa W<sub>opt</sub> —, na média de quem
+            disputou. É a única
             métrica que <em>acumula</em>: as outras medem o período, esta mede o quanto do curso
             já ficou para trás, e por isso sobe ao longo do horizonte em qualquer mecanismo. O que
             separa os modelos é a <em>inclinação</em>. Lê-se com a fração de concluintes ao lado,

@@ -255,7 +255,7 @@ export function Config({
             </div>
             <div className="field">
               <label>
-                Carga de optativas para concluir (X)
+                Carga de optativas para concluir (W<sub>opt</sub>)
               </label>
               <input
                 type="number"

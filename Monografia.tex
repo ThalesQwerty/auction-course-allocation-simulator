@@ -112,7 +112,7 @@ Por fim, essa escassez artifical é agravada pela terceira limitação do sistem
 
 A introdução de um leilão de vagas baseado em orçamentos limitados de créditos reconfigura os incentivos do ecossistema ao impor um custo de oportunidade explícito a cada solicitação de matrícula \cite{cramton2006}. No modelo proposto, o orçamento limitado funciona como um recurso artificial escasso, denominado "créditos", de modo que a decisão de concentrar créditos em um lance para aumentar suas chances de obter vaga em uma disciplina reduz a competitividade do discente nas demais solicitações. Esse \textit{trade-off} orçamentário força os agentes a gerenciarem estrategicamente seus saldos de créditos; por consequência, a distribuição escolhida de créditos investidos nos lances tende a revelar suas reais preferências para o sistema, que poderá usar essa informação como um critério de alocação, de forma a desincentivar solicitações especulativas e aumentar o bem-estar gerado por cada solicitação atendida.
 
-Além disso, tal abordagem equilibra a vantagem de alunos com maior prioridade dentro do sistema. Mesmo se os orçamentos forem proporcionais ao desempenho acadêmico de cada estudante, um aluno com maior orçamento é forçado a diluir a própria vantagem caso solicite múltiplas disciplinas, possibilitando que alguém com menor orçamento eventualmente ganhe uma disputa de vaga com este aluno ao concentrar estrategicamente seus créditos em um lance que considere de alta prioridade. Este equilíbrio mitiga o problema de \textit{snowballing} discutido anteriormente.
+Além disso, tal abordagem equilibra a vantagem de alunos com maior prioridade dentro do sistema. Mesmo se os orçamentos forem proporcionais ao desempenho acadêmico de cada estudante, um aluno com maior orçamento é forçado a diluir a própria vantagem caso solicite múltiplas disciplinas, possibilitando que alguém com menor orçamento eventualmente ganhe uma disputa de vaga com este aluno ao concentrar seus créditos nos lances de maior utilidade para si. Este equilíbrio mitiga o problema de \textit{snowballing} discutido anteriormente.
 
 O mesmo contraste se reproduz um nível abaixo, entre as turmas de uma mesma disciplina. Como o estudante pode ser contemplado em apenas uma delas, mas pode solicitar várias, a repartição do orçamento entre turmas irmãs é uma forma de proteção contra a incerteza que apenas o leilão consegue expressar: declarar o quanto se aposta em cada turma é diferente de declarar uma única turma como favorita. Essa escolha interna à disciplina tem consequência direta sobre o efeito bola de neve quando as turmas diferem entre si, por exemplo, em dificuldade. Sob a ordenação por CR, a vantagem é posicional e se acumula, pois quem tem CR elevado obtém sistematicamente a turma mais favorável, dela extrai melhor desempenho e assim preserva a própria posição; sob o leilão, a turma mais disputada tem preço, e a vantagem se dilui no ato de exercê-la.
 
@@ -242,12 +242,12 @@ Há também uma restrição relacionada à capacidade máxima dos agentes. Cada 
     \sum_{x \in B} z_{a, x} \cdot w_x \leq W_a \quad \forall a \in A
 \end{equation}
 
-A terceira e última restrição a ser formalizada é a possível exclusão mútua entre bens. Dois ou mais bens são mutuamente excludentes quando um agente não pode receber mais de um deles simultaneamente. Isso é formalizado através do conjunto $M \subseteq \mathcal{P}(B)$, que contém os conjuntos de bens mutuamente excludentes:
+A terceira e última restrição a ser formalizada é a possível exclusão mútua entre bens. Dois ou mais bens são mutuamente excludentes quando um agente não pode receber mais de um deles simultaneamente. Isso é formalizado através do conjunto $E \subseteq \mathcal{P}(B)$, que contém os conjuntos de bens mutuamente excludentes:
 \begin{equation} \label{eq:exclusao}
-    \sum_{x \in X} z_{a, x} \leq 1 \quad \forall a \in A, \forall X \in M
+    \sum_{x \in X} z_{a, x} \leq 1 \quad \forall a \in A, \forall X \in E
 \end{equation}
 
-Nota-se que o conjunto $M$ é uma representação dos cliques do grafo de conflito entre bens.
+Nota-se que o conjunto $E$ é uma representação dos cliques do grafo de conflito entre bens.
 
 \subsection{Parâmetros de entrada}
 
@@ -275,7 +275,7 @@ O objetivo é maximizar a prioridade agregada dos bens alocados, representada po
 
 Por fim, o problema central é representado por uma tupla $P$ de seus conjuntos e parâmetros de entrada:
 \begin{equation}
-P = (A, B, D, p, q, w, W, M)
+P = (A, B, D, p, q, w, W, E)
 \end{equation}
 
 Define-se uma função resolvedora abstrata, $O$, que encontra uma matriz de decisões, $z_{\max}$, que maximiza o valor de $Z$:
@@ -288,7 +288,7 @@ O(P) = z_{\max}
 
 A alocação pode ocorrer em uma ou múltiplas rodadas. Um problema de alocação multi-rodadas é expresso pelo conjunto de suas rodadas, $R = \{P^{(1)}, P^{(2)}, \dots, P^{(|R|)}\}$, sendo $|R|$ o número total de rodadas. Cada rodada é uma instância $P^{(r)}$ do problema $P$, dada pela tupla:
 \begin{equation}
-P^{(r)} = (A, B, D^{(r)}, p^{(r)}, q^{(r)}, w, W^{(r)}, M)
+P^{(r)} = (A, B, D^{(r)}, p^{(r)}, q^{(r)}, w, W^{(r)}, E)
 \end{equation}
 
 A alocação de cada rodada $r$ é decidida pela resolução do problema $P^{(r)}$:
@@ -316,15 +316,15 @@ A cada rodada subsequente, o peso total dos bens recebidos na rodada anterior é
 
 Um agente não pode demandar novamente um bem já recebido por ele em alguma rodada anterior:
 \begin{equation}
-    z_{a, x}^{(r)} = 1 \implies (a, x) \notin D^{(s)}
-    \quad \forall (a, x) \in A \times B, \forall r, s\in \mathbb{N}^*_{\leq |R|} : r < s
+    z_{a, x}^{(r)} = 1 \implies (a, x) \notin D^{(r')}
+    \quad \forall (a, x) \in A \times B, \forall r, r'\in \mathbb{N}^*_{\leq |R|} : r < r'
 \end{equation}
 
 A restrição de exclusão mútua da equação \eqref{eq:exclusao} atua dentro de uma mesma rodada e, isoladamente, não impediria que um agente recebesse um bem na primeira rodada e um bem mutuamente excludente com ele na segunda. Estende-se, portanto, o impedimento acima a todo o conjunto excludente:
 \begin{equation}
 \begin{aligned}
-    z_{a, y}^{(r)} = 1 \implies (a, x) \notin D^{(s)} \\
-    \forall a \in A, \forall X \in M, \forall x, y \in X, \forall r, s\in \mathbb{N}^*_{\leq |R|} : r < s
+    z_{a, y}^{(r)} = 1 \implies (a, x) \notin D^{(r')} \\
+    \forall a \in A, \forall X \in E, \forall x, y \in X, \forall r, r'\in \mathbb{N}^*_{\leq |R|} : r < r'
 \end{aligned}
 \end{equation}
 
@@ -420,6 +420,21 @@ O consumo de créditos agregado de todas as rodadas dá-se por:
     \forall a \in A
 \end{equation}
 
+\begin{table}[htbp]
+\centering
+\caption{Exemplo de preço e consumo em uma turma com duas vagas}
+\label{tab:exemplo-preco}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Agente} & $c_{a, x}^{(r)}$ & $z_{a, x}^{(r)}$ & $\pi_{x}^{(r)}$ & $\delta_{a, x}^{(r)}$ \\
+\midrule
+$a_1$ & 2 & 1 & 1 & 1 \\
+$a_2$ & 3 & 1 & 1 & 1 \\
+$a_3$ & 1 & 0 & 1 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \subsection{Expressão em tupla}
 
 Por fim, um leilão é expresso pela tupla $L$ definida abaixo:
@@ -428,28 +443,6 @@ Por fim, um leilão é expresso pela tupla $L$ definida abaixo:
 \end{equation}
 
 Na qual $C^{(1)}$ é o orçamento inicial dos agentes, $R$ são as rodadas de alocação, e $R_c$ são os lances de cada rodada.
-
-\begin{comment}
-\subsection{Exemplo}
-
-\begin{table}[htbp]
-\centering
-\caption{Exemplo de alocação e consumo de créditos em uma rodada}
-\begin{tabular}{ccccc}
-\toprule
-    \textbf{Créditos ($c_{a, x}^{(r)}$)} 
-    & \textbf{Viés ($\beta_{a, x}^{(r)}$)} 
-    & \textbf{Desempate ($\alpha_{a, x}^{(r)}$)} 
-    & \textbf{Resultado ($z_{a, x}^{(r)}$)}  
-    & \textbf{Consumo ($\delta_{a, x}^{(r)}$)}  
-    \\
-\midrule
-\bottomrule
-
-\end{tabular}
-\end{table}
-\end{comment}
-
 
 \section{Simulação do ambiente de matrícula universitária}
 \label{sec:instanciacao}
@@ -470,13 +463,18 @@ $(a,x) \in D$    & Par de demanda                & Solicitação de vaga \\
 $q_x$            & Unidades disponíveis          & Vagas da turma \\
 $w_x$            & Peso do bem                   & Carga horária da turma \\
 $W_a$            & Capacidade do agente          & Carga horária máxima do estudante \\
-$X \in M$        & Bens mutuamente excludentes & Turmas de uma mesma disciplina \\
+$X \in E$        & Bens mutuamente excludentes & Turmas de uma mesma disciplina ou de um mesmo horário \\
 $p_{a,x}$        & Prioridade de alocação         & Valor do lance de créditos \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-Por razões de simplificação, a única aplicação de bens mutuamente excludentes incluída na simulação é a multiplicidade de turmas por disciplina, das quais todas terão a mesma carga horária; sendo assim, pode-se utilizar a notação $w_X$ para se falar da carga horária da disciplina $X \in M$.
+Os conjuntos de bens mutuamente excludentes têm duas origens na simulação. A primeira é a disciplina: suas turmas são excludentes entre si, pois o estudante pode cursar apenas uma delas. A segunda é o horário: cada turma ocupa um único horário, e o conjunto $G$ reúne, para cada horário, as turmas nele ofertadas, que também são excludentes entre si.
+\begin{equation}
+    E = M \cup G
+\end{equation}
+
+Por razões de simplificação, todas as turmas de uma mesma disciplina terão a mesma carga horária; sendo assim, pode-se utilizar a notação $w_X$ para se falar da carga horária da disciplina $X \in M$.
 
 \subsection{Dimensão temporal}
 
@@ -603,14 +601,14 @@ Disciplinas optativas não possuirão pré-requisitos na grade da simulação:
 % \begin{equation} \label{eq:periodo-disciplina}
 %     \mathrm{per}(X) =
 %     \begin{cases}
-%         1 & \text{, se } \mathrm{req}(x) = \emptyset \\
-%         1 + \max_{y \in \mathrm{req}(x)} \mathrm{per}(y) & \text{, caso contrário}
+%         1 & \text{, se } \mathrm{req}(X) = \emptyset \\
+%         1 + \max_{y \in \mathrm{req}(X)} \mathrm{per}(y) & \text{, caso contrário}
 %     \end{cases}
 %     \quad
 %     \forall X \in M_\text{obg}
 % \end{equation}
 
-Dentre as disciplinas obrigatórias, haverá disciplinas de entrada, representadas pelo subconjunto $M_\text{cal} \subseteq \{X \in M_\text{obg} \mid \mathrm{req}(x) = \emptyset\}$. Os calouros de cada período recebem vagas garantidas nestas disciplinas, distribuídas igualmente entre suas turmas:
+Dentre as disciplinas obrigatórias, haverá disciplinas de entrada, representadas pelo subconjunto $M_\text{cal} \subseteq \{X \in M_\text{obg} \mid \mathrm{req}(X) = \emptyset\}$. Os calouros de cada período recebem vagas garantidas nestas disciplinas, distribuídas igualmente entre suas turmas:
 \begin{equation}
     \exists! x \in X : z^{(t, *)}_{a, x} = 1
     \quad \forall a \in A^{(t)}_\text{cal}, \forall  X \in M_\text{cal}
@@ -636,13 +634,13 @@ O comportamento dos alunos é governado por uma matriz $i^{(t)}$, na qual cada e
     I^{(t)}_{a, X} = \frac{1}{|X|} \cdot \sum_{x \in X} i^{(t)}_{a, x}
 \end{equation}
 
-Denomina-se disciplinas elegíveis aquelas nas quais o estudante está habilitado a solicitar vagas. Conforme definido anteriormente, disciplinas nas quais o estudante já foi aprovado, já recebeu vaga em uma rodada anterior do mesmo período, ou das quais os pré-requisitos ainda não foram totalmente aprovados, são inelegíveis. O subconjunto das disciplinas elegíveis ao aluno $a$ no período $t$ é denotado por $M_a^{(t)} \subseteq M$.
+Denomina-se disciplinas elegíveis aquelas nas quais o estudante está habilitado a solicitar vagas. Conforme definido anteriormente, disciplinas nas quais o estudante já foi aprovado, ou das quais os pré-requisitos ainda não foram totalmente aprovados, são inelegíveis. O subconjunto das disciplinas elegíveis ao aluno $a$ no período $t$ é denotado por $M_a^{(t)} \subseteq M$.
 \begin{equation}
     x \in X \land X \in M \setminus M_a^{(t)} \implies (a, x) \notin D^{(t)} 
     \quad \forall a \in A^{(t)}, \forall X \in M
 \end{equation}
 
-A partir dos valores da matriz de interesses em disciplinas, $I^{(t)}$, e das turmas elegíveis, $M_a^{(t)}$, constroi-se a matriz de utilidades de disciplinas, $U^{(t)}$, na qual todas as suas linhas somam 1, e todas as disciplinas inelegíveis têm utilidade zerada e redistribuída igualmente entre seus pré-requisitos elegíveis, caso haja.
+A partir dos valores da matriz de interesses em disciplinas, $I^{(t)}$, e das disciplinas elegíveis, $M_a^{(t)}$, constroi-se a matriz de utilidades de disciplinas, $U^{(t)}$, na qual todas as suas linhas somam 1 e as disciplinas inelegíveis têm utilidade nula. O interesse por uma disciplina inelegível é herdado por seus pré-requisitos elegíveis, repartido igualmente entre eles; a herança é de um único nível, isto é, o estudante enxerga apenas um período à frente da sua posição na grade.
 \begin{equation}
     \sum_{X \in M} U_{a, X}^{(t)} = 1
     \quad \forall{a \in A^{(t)}}
@@ -653,39 +651,88 @@ A partir dos valores da matriz de interesses em disciplinas, $I^{(t)}$, e das tu
     \forall a \in A^{(t)}, \forall X \in M \setminus M_a^{(t)}
 \end{equation}
 \begin{equation}
-    U_{a, X}^{(t)} = 
-        \left(
-        I_{a, X}^{(t)} 
+    U_{a, X}^{(t)} =
+    \frac{
+        I_{a, X}^{(t)}
         + \sum_{Y \in \mathrm{seq}(X)}
-        \frac{I_{a, Y}^{(t)}}{|M_a^{(t)} \cap \mathrm{req}(Y)|}
-        \right)
-        \cdot
-        \frac{1}{\sum_{Z \in M_a^{(t)} \cup \mathrm{seq}(X)} I_{a, Z}^{(t)}}
+        \frac{I_{a, Y}^{(t)}}{\left| M_a^{(t)} \cap \mathrm{req}(Y) \right|}
+    }{
+        \sum_{Z \in M_a^{(t)} \cup \mathrm{seq}(M_a^{(t)})} I_{a, Z}^{(t)}
+    }
     \quad
     \forall a \in A^{(t)}, \forall X \in M_a^{(t)}
 \end{equation}
+\begin{equation}
+    \mathrm{seq}(M_a^{(t)}) = \bigcup_{X \in M_a^{(t)}} \mathrm{seq}(X)
+\end{equation}
 
-Com base nisto, a matriz de utilidades de turmas, $u^{(t)}$, é construída seguindo as seguintes propriedades: os valores de utilidade das turmas de cada disicplina elegível para cada aluno têm as mesmas proporções dos seus valores de interesse; e a turma de maior utilidade tem o mesmo valor numérico que a utilidade da disciplina.
+Com base nisto, a matriz de utilidades de turmas, $u^{(t)}$, é construída seguindo as seguintes propriedades: os valores de utilidade das turmas de cada disciplina elegível para cada aluno têm as mesmas proporções dos seus valores de interesse; e a turma de maior utilidade tem o mesmo valor numérico que a utilidade da disciplina.
 \begin{equation}
-    \frac{u_{a, x}^{(t)}}{u_{a, y}^{(t)}} = \frac{i_{a, x}^{(t)}}{i_{a, y}^{(t)}}
-    \quad \forall{a \in A^{(t)}}, \forall x, y \in X : X \in M_a^{(t)}
+    u_{a, x}^{(t)} = U_{a, X}^{(t)} \cdot \frac{i_{a, x}^{(t)}}{\max_{y \in X} i_{a, y}^{(t)}}
+    \quad \forall a \in A^{(t)}, \forall x \in X, \forall X \in M_a^{(t)}
 \end{equation}
-\begin{equation}
-    \max_{x \in X} u_{a, x}^{(t)} = U_{a, X}^{(t)}
-    \quad \forall{a \in A^{(t)}}, \forall X \in M
-\end{equation}
-\begin{equation}
-    \sum_{x \in B} u_{a, x}^{(t)} \geq 1
-    \quad \forall{a \in A^{(t)}}
-\end{equation}
+
+\begin{table}[htbp]
+\centering
+\caption{Exemplo de construção das utilidades, com $A$ e $B$ elegíveis e $C$ e $D$ bloqueadas por pré-requisito}
+\label{tab:exemplo-utilidade}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Disciplina} & $\mathrm{req}(X)$ & $i_{a, x}^{(t)}$ & $I_{a, X}^{(t)}$ & \textbf{Numerador} & $U_{a, X}^{(t)}$ & $u_{a, x}^{(t)}$ \\
+\midrule
+$A$ & $\emptyset$ & 4,5; 1,5 & 3  & $3 + 2/2 = 4$       & 0,4 & 0,4; 0,13 \\
+$B$ & $\emptyset$ & 4; 2     & 3  & $3 + 2/2 + 2/1 = 6$ & 0,6 & 0,6; 0,3  \\
+$C$ & $\{A, B\}$  & 2; 2     & 2  & ---                 & 0   & ---       \\
+$D$ & $\{B\}$     & 2        & 2  & ---                 & 0   & ---       \\
+\midrule
+    &             &          & 10 & 10                  & 1   &           \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Estratégia dos lances}
 
 Os lances dados pelos alunos na solicitação se darão através da resolução local de um subproblema da mochila, mais especificamente, uma Mochila Côncava, na qual é possível alocar múltiplos itens a um mesmo recipiente, com ganho decrescente a cada unidade adicional. O orçamento $C_a^{(t, r)}$ atua como capacidade, cada crédito tem peso unitário, e o ganho de investir o $k$-ésimo crédito em uma disciplina decresce com $k$, segundo a lei da utilidade marginal decrescente: o primeiro crédito é o que mais compra chance de vaga, e cada um depois dele compra menos.
 
-A repartição dos créditos ocorre em dois níveis. No primeiro, sobre as disciplinas elegíveis, decide-se quantos créditos cada disciplina receberá no total, $c_{a, X}^{(t, r)}$. O algoritmo da mochila usará como ganho a utilidade da disciplina, $U_{a, x}^{(t)}$, dividida por quantos créditos ela terá no total se o aluno investir mais um: o ganho de investir o primeiro crédito é $U_{a, x}^{(t)}$, o do segundo, $\frac{U_{a, x}^{(t)}}{2}$, o do terceiro, $\frac{U_{a, x}^{(t)}}{3}$, por diante; ou seja, o ganho sofre um decaimento hiperbólico em função de cada crédito adicional investido. $\frac{1}{k}$ foi escolhida como função de decaimento para que os créditos investidos reflitam aproximadamente as mesmas proporções das utilidades.
+A repartição dos créditos ocorre em dois níveis. No primeiro, sobre as disciplinas elegíveis, decide-se quantos créditos cada disciplina receberá no total, $c_{a, X}^{(t, r)}$. O algoritmo da mochila usará como ganho a utilidade da disciplina, $U_{a, X}^{(t)}$, dividida por quantos créditos ela terá no total se o aluno investir mais um: o ganho de investir o primeiro crédito é $U_{a, X}^{(t)}$, o do segundo, $\frac{U_{a, X}^{(t)}}{2}$, o do terceiro, $\frac{U_{a, X}^{(t)}}{3}$, por diante; ou seja, o ganho sofre um decaimento hiperbólico em função de cada crédito adicional investido. $\frac{1}{k}$ foi escolhida como função de decaimento para que os créditos investidos reflitam aproximadamente as mesmas proporções das utilidades.
 
 No segundo nível, uma vez por disciplina, o mesmo algoritmo reparte esses créditos entre as turmas dela, usando $u_{a, x}^{(t)}$ no lugar da utilidade da disciplina, e $c_{a, X}^{(t, r)}$ no lugar do orçamento geral. A divisão em dois níveis é implementada para evitar que disciplinas concentrem mais créditos que outras apenas por terem mais turmas.
+
+A quantidade de disciplinas solicitadas é governada pela seletividade do estudante, $S_a \in \mathbb{R}_{\geq 0}$, um traço fixo do seu perfil. Dela deriva-se a utilidade de reserva do período, $s_a^{(t)}$, que reparte a seletividade entre as disciplinas elegíveis:
+\begin{equation}
+    s_a^{(t)} = \frac{S_a}{\left| M_a^{(t)} \right|}
+    \quad \forall a \in A^{(t)}
+\end{equation}
+
+A reserva atua como ganho mínimo exigido de cada crédito investido: o estudante só solicita a disciplina $X$ se $U_{a, X}^{(t)} \geq s_a^{(t)}$, e só investe nela o $k$-ésimo crédito se $\frac{U_{a, X}^{(t)}}{k} \geq s_a^{(t)}$. Como as utilidades das disciplinas elegíveis somam 1, a seletividade lê-se em múltiplos da utilidade média; com $S_a = 0$ não há corte, e o estudante solicita todas as disciplinas elegíveis e gasta o orçamento inteiro.
+
+\begin{table}[htbp]
+\centering
+\caption{Exemplo de seletividade, sobre as utilidades da Tabela \ref{tab:exemplo-utilidade}}
+\label{tab:exemplo-seletividade}
+\begin{tabular}{ccl}
+\toprule
+$S_a$ & $s_a^{(t)}$ & \textbf{Disciplinas solicitadas} \\
+\midrule
+0 & 0   & $A$, $B$ \\
+1 & 0,5 & $B$      \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Exemplo de repartição de 5 créditos com $S_a = 0$, sobre as utilidades da Tabela \ref{tab:exemplo-utilidade}}
+\label{tab:exemplo-lances}
+\begin{tabular}{lcccccl}
+\toprule
+\textbf{Disciplina} & $U/1$ & $U/2$ & $U/3$ & $U/4$ & $c_{a, X}^{(t, r)}$ & \textbf{Por turma} \\
+\midrule
+$A$ & \textbf{0,4} & \textbf{0,2} & 0,13         & 0,1  & 2 & $A_1$: 2; $A_2$: 0 \\
+$B$ & \textbf{0,6} & \textbf{0,3} & \textbf{0,2} & 0,15 & 3 & $B_1$: 2; $B_2$: 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Exclusão e especulação}
 
@@ -697,7 +744,13 @@ Vale ressaltar que cada exclusão é essencialmente uma vaga desperdiçada, pois
 
 \subsection{Perfis de alunos}
 
-[TO-DO]
+A população da simulação é organizada em perfis. Cada eixo de traço oferece um conjunto de valores possíveis, e um perfil é uma combinação com um valor de cada eixo; a coorte de ingressantes de cada período é composta pelo mesmo número de exemplares de cada combinação, de modo que todos os eixos fiquem igualmente representados e o recorte dos resultados por traço seja direto. O perfil de cada estudante é definido na sua entrada na universidade e permanece fixo durante toda a sua trajetória.
+
+O eixo de desempenho governa a distribuição das notas obtidas pelo estudante e, por consequência, a frequência com que ele reprova. Ele é descrito pela nota mais provável e pelas chances de obter cada extremo da escala, sobre as quais atuam ainda a dificuldade da disciplina e a repetição.
+
+O eixo de disponibilidade governa a carga horária efetiva do período, $\hat{W}_a^{(t)}$, e portanto o quanto o estudante exclui ao final das rodadas de alocação.
+
+O eixo de seletividade fixa o valor de $S_a$, e com ele a quantidade de disciplinas que o estudante solicita e financia a cada período.
 
 \section{Comparação com o modelo tradicional baseado em CR}
 
