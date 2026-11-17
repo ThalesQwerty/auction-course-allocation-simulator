@@ -210,10 +210,11 @@ export interface Scenario {
   elective_hours: number;
   min_credits: number; // C_min — orçamento mínimo do período
   max_credits: number | null; // C_max — orçamento máximo do período
-  /** k — o multiplicador do retorno, eq. (34): γ = ⌊nota/10 · k · preço⌋.
+  /** k — o multiplicador do retorno, eq. (34): γ = round(nota/10 · k · preço).
    * Zero desliga o retorno; com 1 ele nunca supera o gasto e o orçamento trava
-   * em C_min; com 2 a nota de corte é o ponto neutro e só a nota 10 dobra o
-   * que se investiu. */
+   * em C_min; com 2 a nota de corte é o ponto neutro da conta contínua, e o
+   * prêmio máximo (2 · preço) começa na nota 10 · (1 − 1/(4 · preço)) — 7,5
+   * num lance de 1 crédito, 9,5 num de 5. */
   return_multiplier: number;
   /** Fração do preço pago que a disciplina excluída devolve. Zero — o padrão —
    * é "excluir não devolve nada", qualquer que seja a política de retorno. */
@@ -292,7 +293,7 @@ export const COMPARISON_ARMS: ArmDescription[] = [
     label: "Leilão acumulativo",
     short: "Acumulativo",
     dash: "",
-    hint: "o modelo proposto (Seção 7.1): o aluno reparte um orçamento de créditos em lances por disciplina, um PLI resolve a alocação e o segundo preço cobra. O saldo atravessa o período (eq. 36) e o f_γ da eq. (34) o alimenta — ⌊nota/10 · k · preço⌋ do que pagou, de modo que só a nota 10 dobra o investido. É a única fonte de mérito do leilão, e quem exclui não recupera nada",
+    hint: "o modelo proposto (Seção 7.1): o aluno reparte um orçamento de créditos em lances por disciplina, um PLI resolve a alocação e o segundo preço cobra. O saldo atravessa o período (eq. 36) e o f_γ da eq. (34) o alimenta — round(nota/10 · k · preço) do que pagou, de modo que a vaga só rende mais do que custou com nota bem acima da de corte. É a única fonte de mérito do leilão, e quem exclui não recupera nada",
   },
 ];
 

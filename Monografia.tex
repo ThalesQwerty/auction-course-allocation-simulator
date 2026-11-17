@@ -563,9 +563,9 @@ Ao início de cada próximo período letivo, o orçamento restante do período a
 
 No primeiro período matriculado de cada aluno, seu orçamento inicial é $C_{\min}$:
 \begin{equation}
-t = t_a \implies C_a^{(t, 1)} = C_{\min}
+C_a^{(t, 1)} = C_{\min}
 \quad
-\forall a \in A^{(t)}
+\forall a \in A^{(t)}_\text{cal}
 \end{equation}
 
 
@@ -629,7 +629,7 @@ Dentre as disciplinas obrigatórias, haverá disciplinas de entrada, representad
 
 \subsection{Interesse e utilidade}
 
-O comportamento dos alunos é governado por uma matriz $i^{(t)}$, na qual cada elemento, $i_{a, x}^{(t)} \in \mathbb{R}_{> 0}$, representa o interesse do aluno $a$ na turma $x$ no período $t$. Se o aluno tem mais interesse em uma vaga na turma $x$ em relação à turma $y$, isto implica $i_{a, x}^{(t)} > i_{a, y}^{(t)}$. A matriz $I^{(t)}$, por sua vez, representa o interesse dos alunos nas disciplinas; cada elemento $I^{(t)}_{a, X}$ é construído a partir da média aritmética do interesse pelas turmas de $X$:
+O comportamento dos alunos é governado por uma matriz $i^{(t)}$, na qual cada elemento, $i_{a, x}^{(t)} \in \mathbb{R}_{> 0}$, representa o interesse do aluno $a$ na turma $x$ no período $t$. Se o aluno tem mais interesse em uma vaga na turma $x$ em relação à turma $y$, isto implica $i_{a, x}^{(t)} > i_{a, y}^{(t)}$. A matriz $I^{(t)}$, por sua vez, representa o interesse dos alunos nas disciplinas; cada elemento $I^{(t)}_{a, X}  \in \mathbb{R}_{> 0}$ é construído a partir da média aritmética do interesse pelas turmas de $X$:
 \begin{equation} 
     I^{(t)}_{a, X} = \frac{1}{|X|} \cdot \sum_{x \in X} i^{(t)}_{a, x}
 \end{equation}

@@ -121,8 +121,9 @@ export function migrateInterest<T extends object>(config: T): T {
  * ganho base, e reexecutá-la dará outro resultado.
  *
  * O **multiplicador** entra em 1, que é o `ratio` de então — o braço com
- * retorno rodava `round(nota/10 · preço)`, e hoje isso é `k = 1` (com piso no
- * lugar do arredondamento). As outras três políticas não se traduzem em `k`
+ * retorno rodava `round(nota/10 · preço)`, que é exatamente o `k = 1` de
+ * hoje: o piso que tomou esse lugar em 15/11/2026 voltou a ser arredondamento
+ * em 17/11/2026. As outras três políticas não se traduzem em `k`
  * nenhum, e também nunca chegaram a rodar: numa comparação o retorno do
  * cenário era ignorado e cada braço impunha o seu.
  *

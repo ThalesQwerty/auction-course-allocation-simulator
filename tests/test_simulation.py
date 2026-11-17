@@ -831,13 +831,14 @@ def test_graduates_are_counted_in_the_cohort_they_entered():
 
 
 def test_the_return_follows_the_grade_and_the_multiplier():
-    """f_gamma — eq. (34): γ = ⌊nota/10 · k · preço⌋, com k = 2 por padrão.
+    """f_gamma — eq. (34): γ = round(nota/10 · k · preço), com k = 2 por padrão.
 
     A nota de corte **não entra na conta**: o retorno é contínuo na nota, e
-    quem reprova com 4,9 recebe quase tanto quanto quem passa com 5,0.
+    quem reprova com 4,9 recebe quase tanto quanto quem passa com 5,0 — a
+    preço 10 recebe o mesmo, porque a moeda é inteira.
     """
-    # ⌊4,9/10 · 2 · 10⌋, ⌊5,0/10 · 2 · 10⌋, ⌊9,0/10 · 2 · 10⌋
-    esperado = (9, 10, 18)
+    # round(4,9/10 · 2 · 10), round(5,0/10 · 2 · 10), round(9,0/10 · 2 · 10)
+    esperado = (10, 10, 18)
     got = tuple(credit_return(paid=10, grade=grade) for grade in (4.9, 5.0, 9.0))
     assert got == esperado
 
@@ -850,29 +851,55 @@ def test_the_return_follows_the_grade_and_the_multiplier():
 
 def test_the_cut_grade_is_the_neutral_point_of_the_return():
     """A calibragem que justifica o multiplicador 2: aprovar com a nota de
-    corte devolve exatamente o preço pago. Acima disso o aluno sai ganhando
-    crédito, abaixo sai perdendo — e é o que faz o retorno medir desempenho em
-    vez de devolver troco.
+    corte devolve exatamente o preço pago, em qualquer preço.
+
+    Abaixo dela o aluno perde — mas só onde o preço tem resolução para isso.
+    Com o arredondamento a perda começa em `5 − 2,5/preço`, de modo que a
+    preço 1 a faixa neutra é [2,5, 7,5) e a preço 10 ela já aperta em torno
+    da nota de corte.
     """
     for paid in (1, 2, 5, 10, 17):
         assert credit_return(paid=paid, grade=5.0) == paid
         assert credit_return(paid=paid, grade=0.0) == 0
-        # A nota de corte é o último ponto em que não se perde: logo abaixo
-        # dela o aluno já recebe menos do que pagou.
-        assert credit_return(paid=paid, grade=4.9) < paid
+
+    assert credit_return(paid=1, grade=2.5) == 1  # ainda empata
+    assert credit_return(paid=1, grade=2.4) == 0  # aqui já perde
+    assert credit_return(paid=10, grade=4.8) == 10
+    assert credit_return(paid=10, grade=4.7) == 9
 
 
-def test_only_the_maximum_grade_doubles_what_was_invested():
-    """O retorno **trunca**, e é o que faz de `k · paid` um teto que só a nota
-    máxima alcança. Arredondar daria o dobro a quem tirou 9,8 num lance de 5,
-    e o prêmio máximo deixaria de distinguir a nota máxima.
+def test_the_rounding_has_no_bias_and_the_top_prize_follows_the_price():
+    """O retorno **arredonda** (meio para cima) desde 17/11/2026; truncava
+    antes.
+
+    O piso errava sempre para o mesmo lado — até um crédito a menos por vaga
+    —, e onde o preço fica em 1 crédito esse era o retorno inteiro: medido no
+    cenário cheio, o retorno somava 0,625 do pago e 92% dos alunos abriam todo
+    período em `C_min`. Arredondar deixa o erro sem viés e em meio crédito.
+
+    O preço é o teto do prêmio: `k · paid` deixou de ser exclusivo da nota
+    máxima e passa a começar em `10 · (1 − 1/(2·k·paid))` — 7,5 num lance de
+    1 crédito, 9,5 num de 5, 9,8 num de 10. Quem quer que o prêmio máximo
+    distinga a nota máxima precisa de preço, não de fórmula.
     """
     for paid in (1, 2, 5, 10, 17):
+        for decimos in range(101):
+            grade = decimos / 10
+            exato = grade / 10 * 2 * paid
+            assert abs(credit_return(paid=paid, grade=grade) - exato) <= 0.5 + 1e-9
         assert credit_return(paid=paid, grade=10.0) == 2 * paid
-        assert credit_return(paid=paid, grade=9.9) < 2 * paid
 
-    # A conta é inteira de propósito: em ponto flutuante `4,9/10 · 2 · 10` e
-    # `1,4/10 · 2 · 25` caem um ulp abaixo do inteiro e truncariam errado.
+    assert credit_return(paid=1, grade=7.5) == 2
+    assert credit_return(paid=1, grade=7.4) == 1
+    assert credit_return(paid=5, grade=9.5) == 10
+    assert credit_return(paid=5, grade=9.4) == 9
+    assert credit_return(paid=10, grade=9.8) == 20
+    assert credit_return(paid=10, grade=9.7) == 19
+
+    # A conta é inteira de propósito. Em ponto flutuante a fronteira do empate
+    # cai do lado errado: `2,5/10 · 2 · 1` é exatamente 0,5, e o `round` do
+    # Python arredonda para o par, devolvendo 0.
+    assert credit_return(paid=1, grade=2.5) == 1
     assert credit_return(paid=25, grade=1.4) == 7
     assert credit_return(paid=25, grade=2.8, multiplier=3) == 21
 

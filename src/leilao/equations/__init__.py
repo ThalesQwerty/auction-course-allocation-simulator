@@ -78,7 +78,7 @@ Notas, créditos e saída (Seção 7.2.2)
     grade_shape               (moda, P₀, P₁₀) → forma       substitui 32
     attempt_rates             P₀^(t/d) e P₁₀^(d/t)                —
     grade_for_attempt         quantil → nota, censurada     substitui 33
-    credit_return             γ = ⌊nota/10 · k · preço⌋            eq. (34)
+    credit_return             γ = round(nota/10 · k · preço)      eq. (34)
     guaranteed_share          ⌊C / |entrada|⌋                     —
     period_return             Γ = Σγ                        substitui 35
     next_budget               clamp(C − gasto + Γ, C_min, C_max) eqs. (36)-(37)

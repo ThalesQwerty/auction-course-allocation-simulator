@@ -1069,7 +1069,7 @@ sozinho.
   **uma forma só**, aplicada ao fim de cada período sobre o preço pago
   (`paid`) e a nota obtida:
 
-      gamma_{a,x} = ⌊ nota / 10 · k · paid ⌋
+      gamma_{a,x} = round( nota / 10 · k · paid )
 
   O que o retorno devolve é o preço pago corrigido por dois fatores: a nota,
   que diz quão bem o aluno usou a vaga, e o multiplicador `k`
@@ -1090,16 +1090,42 @@ sozinho.
   Com 2, a **nota de corte vira o ponto neutro**: nota 5 devolve exatamente o
   que se pagou, acima disso o aluno sai ganhando e abaixo sai perdendo.
 
-  **A conta trunca**, e é o que faz de `k · paid` um teto que só a nota máxima
-  alcança: com `k = 2` o aluno dobra o que investiu se tirar 10, e só se tirar
-  10 — com 9,9 ele leva `⌊1,98 · paid⌋`, que fica abaixo. Arredondar daria o
-  dobro a quem tirou 9,8 num lance de 5, e o prêmio máximo deixaria de
-  distinguir a nota máxima. O piso também garante que a nota de corte seja o
-  **último** ponto em que o aluno não perde: em 4,9 ele já recebe menos do que
-  pagou, sempre. A conta é feita em **aritmética inteira** porque o piso em
-  ponto flutuante erra por um crédito nos casos em que o produto deveria cair
-  exatamente sobre um inteiro e cai um ulp abaixo — medido, 30 combinações em
-  18.876 de (nota, preço, `k`), entre elas nota 1,4 com preço 25 e `k = 2`.
+  **A conta arredonda** (meio para cima). Truncava até 17/11/2026, e a troca
+  é sobre a **resolução da moeda**: γ é inteiro, a conta erra, e o que mudou é
+  o viés do erro. O piso errava sempre para baixo, até um crédito por vaga —
+  ruído onde a disputa forma preço, e a conta inteira onde o preço fica no
+  piso de 1 crédito, porque ali um crédito *é* a resolução.
+
+  Medido no cenário cheio, com `k = 2` e 185 mil vagas obtidas (84,7% delas a
+  1 crédito):
+
+  | | truncando | arredondando |
+  |---|---|---|
+  | retorno ÷ pago | 0,625 | 1,009 |
+  | vagas que renderam mais do que custaram | 3,8% | 21,2% |
+  | vagas que empataram | 52,1% | 59,9% |
+  | vagas que custaram mais do que renderam | 44,0% | 18,9% |
+  | abertura média do período | 12,1 | 15,8 |
+  | aberturas em `C_min` | 92% | 43% |
+
+  Com o piso, o retorno somava menos do que o gasto e o saldo descia todo
+  período até `C_min` o levantar de volta — o braço acumulativo saía quase
+  idêntico ao igualitário, e o retorno não separava aluno nenhum. Arredondando,
+  o erro fica **sem viés** e em meio crédito, e a preço 1 a vaga passa a render
+  2 a partir da nota 7,5.
+
+  O que se perdeu, e vale declarar: **o teto `k · paid` deixou de ser exclusivo
+  da nota máxima**. Ele começa em `10 · (1 − 1/(2·k·paid))` — 7,5 num lance de
+  1 crédito, 9,5 num de 5, 9,8 num de 10 —, de modo que o prêmio máximo só
+  distingue a nota máxima onde o preço é alto. Pela mesma razão, a nota de
+  corte deixou de ser o último ponto em que não se perde: a preço 1 a faixa
+  neutra é [2,5, 7,5). É o custo de o crédito ser inteiro, e a alternativa
+  medida era um retorno que não premiava ninguém.
+
+  A conta é feita em **aritmética inteira** porque em ponto flutuante o produto
+  cai um ulp abaixo do inteiro que deveria dar — medido, 30 combinações em
+  18.876 de (nota, preço, `k`) —, e isso põe a fronteira do arredondamento do
+  lado errado justamente onde ela é um empate.
 
   **A nota de corte `n_min` não entra na conta.** O retorno é contínuo na nota:
   quem reprova com 4,9 recebe quase tanto quanto quem passa com 5,0. Aprovar é
@@ -1119,8 +1145,8 @@ sozinho.
   cursada, e excluir não cursa.
 
   A fração existe para quem quiser medir o degrau entre punir a exclusão por
-  inteiro e amortecê-la, e é validada em `[0, 1]`. Ela arredonda, e não
-  trunca: o teto de `k · paid` que justifica o piso no retorno não existe aqui. Uma ressalva de leitura:
+  inteiro e amortecê-la, e é validada em `[0, 1]`. Ela arredonda, como o
+  retorno. Uma ressalva de leitura:
   frações pequenas **zeram em lance pequeno** — com 0,25 um lance de 1 crédito
   devolve 0 —, e lance de 1 é o caso mais frequente, porque o orçamento limita
   o aluno a lances em no máximo `C_a` disciplinas. A penalidade é, nesse

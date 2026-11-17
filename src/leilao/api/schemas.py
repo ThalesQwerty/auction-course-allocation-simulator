@@ -472,7 +472,7 @@ class ScenarioIn(BaseModel):
         ge=1,
         description="C_max — orçamento máximo do período; nulo desliga o teto",
     )
-    # f_gamma — eq. (34): γ = ⌊nota/10 · k · preço⌋. Este e o `min_credits`
+    # f_gamma — eq. (34): γ = round(nota/10 · k · preço). Este e o `min_credits`
     # acima são do leilão por créditos e não têm efeito na linha de base por
     # CR, que não tem orçamento nem preço pago.
     return_multiplier: float = Field(
