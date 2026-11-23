@@ -3,15 +3,17 @@
 Eles não são configurados um a um: o usuário diz quantos ingressam por período
 e a população inteira sai da seed.
 
-Cada aluno carrega **quatro perfis**, um por eixo. Três são **traço** —
-desempenho, disponibilidade e rotina —, governam sorteios e o aluno não os
-conhece. Um é **estratégia** — a seletividade —, e é literalmente o
-`Behavior` com que ele decide.
+Cada aluno carrega **três níveis basilares**, um por eixo: desempenho,
+disponibilidade e seletividade. São posições na normal padrão, sorteadas uma
+vez e permanentes, e é sobre elas que os relatórios recortam os quantis.
 
-Nenhum sai da seed: a repartição é igualitária entre as combinações e
-determinística (`SimulationConfig.profile_index`), do mesmo modo que o
-período de ingresso. Da seed vêm os escalares que as distribuições dos
-perfis de traço produzem, não o grupo.
+Os dois primeiros são **traço** — governam sorteios e o aluno não os conhece.
+O terceiro é **estratégia**: dele sai, período a período, o `Behavior` com que
+ele decide.
+
+Houve **perfis** nomeados até 19/11/2026, repartidos igualmente entre as
+combinações. Os níveis basilares os substituíram, e estes **saem da seed** —
+ao contrário dos perfis, que eram atribuídos por posição.
 """
 from __future__ import annotations
 
@@ -19,17 +21,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .config import (
-    NEUTRAL_AVAILABILITY,
-    NEUTRAL_PERFORMANCE,
-    NEUTRAL_ROUTINE,
-    NEUTRAL_SELECTIVITY,
-    AvailabilityProfile,
-    PerformanceProfile,
-    RoutineProfile,
-    SelectivityProfile,
-    SimulationConfig,
-)
+from .config import SimulationConfig
 from .equations import NEUTRAL, Behavior, grade_average
 from .names import sample_names
 
@@ -48,23 +40,16 @@ class Student:
     name: str
     credits: int  # C_a^(t,1) — eqs. (36)/(37)
     entry_period: int = 1  # t_a — eq. (31)
-    # Os dois grupos a que ele pertence. São **traço imutável** e o aluno não
-    # os conhece: não entram no genoma nem na decisão de lance, só no sorteio
-    # da aptidão e da disponibilidade — e no recorte dos relatórios.
+    # Os **níveis basilares**: a posição permanente do aluno em cada eixo, na
+    # normal padrão. Zero é a mediana da população, e é o default porque quem
+    # constrói um aluno à mão não está escolhendo uma ponta.
     #
-    # O default é o perfil **neutro**, não o primeiro da lista: quem constrói
-    # um aluno à mão não está escolhendo um grupo, e herdar "forte" por
-    # omissão enviesaria o teste sem avisar. `generate_students` sempre define
-    # os dois.
-    performance: PerformanceProfile = NEUTRAL_PERFORMANCE
-    availability: AvailabilityProfile = NEUTRAL_AVAILABILITY
-    # A **rotina**: o terceiro traço. Não governa um sorteio próprio — ela
-    # entra no do interesse, multiplicando as turmas de cada turno
-    # (`equations.routine_weight`).
-    routine: RoutineProfile = NEUTRAL_ROUTINE
-    # O de estratégia. Fica aqui para o relatório poder recortar por ele;
-    # quem decide é o `behavior`, que sai do valor dele.
-    selectivity: SelectivityProfile = NEUTRAL_SELECTIVITY
+    # Os dois primeiros são traço e entram só em sorteio; o terceiro vira a
+    # seletividade do período. Os três são o que os quantis dos relatórios
+    # recortam — ver `simulation.snapshots.Axis.quantiles`.
+    performance_level: float = 0.0
+    availability_level: float = 0.0
+    selectivity_level: float = 0.0
     # n_{a,x}: a **maior** nota já obtida, que é a que conta para o CR e para
     # a aprovação. A nota de cada tentativa vive no histórico do período.
     grades: dict[str, float] = field(default_factory=dict)
@@ -111,43 +96,34 @@ def generate_students(
     """Cria a população inteira a partir da seed. Todos começam em C_min
     (eq. 37).
 
-    O ingresso (t_a, eq. 31) é escalonado: entra uma coorte nova a cada
-    período letivo, do primeiro ao último com ingresso, com exatamente
-    `students_per_period` alunos — como numa universidade, que abre vestibular
-    todo semestre em vez de matricular toda a população de uma vez. Quando são
-    menos que |T|, os períodos seguintes não recebem ninguém: é a fase de
-    drenagem.
+    O ingresso (t_a, eq. 31) é escalonado: entra uma coorte nova **em todo
+    período letivo**, com exatamente `students_per_period` alunos — como numa
+    universidade, que abre vestibular todo semestre em vez de matricular toda
+    a população de uma vez.
 
-    O período de ingresso **não** vem da seed, e o par de perfis também não.
-    As coortes têm todas o mesmo tamanho, em períodos consecutivos, e os
-    perfis se repartem igualmente entre as combinações — e isso importa para
-    comparar cenários: duas simulações com seeds diferentes têm a mesma
-    estrutura de entrada e os mesmos grupos, então a diferença entre elas não
-    é quem entrou quando nem quem calhou de ser frágil. Da seed vem o nome —
-    e, fora daqui, a aptidão, a disponibilidade e as utilidades.
+    O período de ingresso **não** vem da seed: as coortes têm todas o mesmo
+    tamanho, em períodos consecutivos, e isso importa para comparar cenários —
+    duas simulações com seeds diferentes têm a mesma estrutura de entrada,
+    então a diferença entre elas não é quem entrou quando. Da seed vêm o nome
+    e os três níveis basilares — e, fora daqui, as notas, a disponibilidade, a
+    seletividade e as utilidades.
     """
     names = sample_names(config.total_students(), rng)
+    # Os três níveis basilares, de uma vez: uma matriz (alunos × 3) da normal
+    # padrão. Sair tudo de um sorteio só mantém o fluxo do gerador
+    # independente de qual eixo se mexe depois.
+    levels = rng.normal(0.0, 1.0, size=(config.total_students(), 3))
     students = []
     for index in range(config.total_students()):
-        performance, availability, selectivity, routine = config.profile_index(
-            index
-        )
-        selectivity_profile = config.selectivity_profiles[selectivity]
         students.append(
             Student(
                 id=f"a{index:05d}",
                 name=names[index],
                 credits=config.min_credits,
                 entry_period=1 + index // config.students_per_period,
-                performance=config.performance_profiles[performance],
-                availability=config.availability_profiles[availability],
-                routine=config.routine_profiles[routine],
-                selectivity=selectivity_profile,
-                # O eixo de estratégia **é** o comportamento: não há genoma
-                # separado a atribuir, e é por isso que o perfil entra na
-                # decisão enquanto desempenho e disponibilidade ficam no
-                # sorteio.
-                behavior=Behavior(selectivity=selectivity_profile.value),
+                performance_level=float(levels[index, 0]),
+                availability_level=float(levels[index, 1]),
+                selectivity_level=float(levels[index, 2]),
             )
         )
     return students

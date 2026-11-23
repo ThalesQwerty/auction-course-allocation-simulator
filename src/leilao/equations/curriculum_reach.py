@@ -1,6 +1,6 @@
 """Alcance: quantas disciplinas cada uma destrava, transitivamente.
 
-    d_x = | fecho transitivo de unlocks(x) |
+    d_x = | seq(x) |
 
 O "quanto avanço se passar" de uma disciplina. Não é lido por decisão
 nenhuma hoje — o termo de progresso que o consumia saiu com o algoritmo
@@ -11,24 +11,15 @@ alcance é o tamanho do que fica destravado. Uma disciplina pode ter altura 1
 e alcance 10 se destrava dez terminais de uma vez — e o que interessa ao
 aluno que quer avançar é o alcance.
 
-O memo é preenchido com o conjunto vazio **antes** de descer, o que corta
-ciclo sem travar; a validação do cenário já os rejeita.
+É a contagem do mesmo conjunto que `equations.utility` soma: o fecho mora em
+`curriculum_closure`, e aqui só se mede o tamanho dele.
 """
 from __future__ import annotations
 
+from .curriculum_closure import transitive_closure
+
 
 def curriculum_reach(unlocks: dict[str, tuple[str, ...]]) -> dict[str, int]:
-    memo: dict[str, set[str]] = {}
-
-    def descend(name: str) -> set[str]:
-        if name in memo:
-            return memo[name]
-        memo[name] = set()
-        reached: set[str] = set()
-        for successor in unlocks.get(name, ()):
-            reached.add(successor)
-            reached |= descend(successor)
-        memo[name] = reached
-        return reached
-
-    return {name: len(descend(name)) for name in unlocks}
+    return {
+        name: len(reached) for name, reached in transitive_closure(unlocks).items()
+    }

@@ -4,19 +4,22 @@ O usuário descreve o cenário em dois blocos — parâmetros gerais e disciplin
 e a simulação deriva o resto (alunos, nomes, interesse, notas)
 aleatoriamente a partir da `seed`.
 
-**Os perfis de aluno descrevem o comportamento fora do mecanismo.** São dois
-eixos de traço — `performance_profiles`, que governa a normal dividida da nota
-e portanto a frequência com que o aluno reprova, e `availability_profiles`,
-que governa a log-normal da disponibilidade e portanto a frequência com que
-ele exclui. Cada eixo é uma lista de grupos, e o aluno carrega **dois
-escalares** sorteados das distribuições dos grupos que lhe couberam.
+**A população é descrita por três distribuições, não por grupos.** O
+desempenho governa a normal dividida da nota, e portanto a frequência com que
+o aluno reprova; a disponibilidade governa a log-normal da carga, e portanto a
+frequência com que ele exclui; a seletividade é a opção externa dele, e entra
+na decisão de pedir e de gastar.
 
-O traço é **imutável**: não evolui, não responde a sinal e o aluno não o
-conhece. Ele age *depois* da vaga — se o aluno vai bem na disciplina ou se a
-larga. A estratégia (`equations.reserve_threshold`) age *dentro* do
-mecanismo, ao pedir.
+Cada eixo tem um **nível basilar** (`*_stability`): a fração da variância que é
+permanente do aluno, contra a que é resorteada por período ou por disciplina.
+É isso que faz "este aluno é bom", "este aluno tem pouco tempo" e "este aluno
+é exigente" significarem alguma coisa — e é sobre o nível basilar que os
+relatórios cortam os **quantis**.
 
-A repartição é **igualitária entre as combinações** — ver `profile_index`.
+Houve **perfis** nomeados em cada eixo até 19/11/2026, com a coorte derivada do
+produto das combinações. Os quantis os substituíram: eles saem de um valor
+contínuo, não há grupo a declarar, e o tamanho da coorte voltou a ser
+digitado (`students_per_period`).
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade. A
 obrigatória tem de ser aprovada uma a uma; a **optativa** (`elective`) conta só
@@ -33,6 +36,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Literal
 
 from .equations import (
@@ -41,17 +45,34 @@ from .equations import (
     DEFAULT_RATE,
     availability_shape,
     class_schedules,
-    class_shifts,
     curriculum_heights,
     curriculum_periods,
     curriculum_reach,
     eligible_set,
     entry_class_load,
+    inverse_edges,
     rotated_index,
     grade_shape,
     schedule_cliques,
     schedule_names,
+    transitive_closure,
 )
+
+# Fecho transitivo da grade: `seq` e `req` de `equations.utility`.
+#
+# Memoizado porque a utilidade é recalculada por (aluno, período) e o fecho
+# não depende de nenhum dos dois — é propriedade só da grade. A chave é a
+# lista de arestas declarada, que é hashável e identifica a grade inteira.
+#
+# `req` sai de **inverter o fecho**, e não de um segundo fecho sobre as
+# arestas opostas: é a inversão exata que sustenta `Σ U = 1`. Ver
+# `equations.curriculum_closure`.
+@lru_cache(maxsize=16)
+def _curriculum_closures(
+    edges: tuple[tuple[str, tuple[str, ...]], ...],
+) -> tuple[dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]]:
+    forward = transitive_closure(dict(edges))
+    return forward, inverse_edges(forward)
 
 # Mecanismo de alocação. `credits` é o leilão por créditos proposto (Seção 7.1),
 # em que o aluno reparte um orçamento entre lances e um PLI decide a alocação.
@@ -97,15 +118,21 @@ Resolver = Literal["ilp", "greedy"]
 # canal só — ver `equations.next_budget`.
 CreditMemory = Literal["none", "carry"]
 
+# Quantas faixas os relatórios podem recortar. Cinco é o limite da paleta
+# ordenada da interface (violeta, azul, verde, amarelo, vermelho) e também o
+# ponto a partir do qual uma faixa deixa de ter gente bastante para a mediana
+# dela significar alguma coisa numa coorte típica.
+MAX_QUANTILES = 5
+
 
 @dataclass(frozen=True)
-class PerformanceProfile:
-    """Um grupo da população no eixo de desempenho.
+class PerformanceShape:
+    """A distribuição de desempenho da população — **uma só**.
 
-    A nota sai de uma **normal dividida censurada** em [0, 10], e o grupo a
-    descreve pelas três grandezas que se leem — nota mais provável, chance de
-    tirar 0 e chance de tirar 10 —, não pelos três parâmetros de forma. A
-    conversão está em `equations.grade_shape`.
+    A nota sai de uma **normal dividida censurada** em [0, 10], descrita pelas
+    três grandezas que se leem — nota mais provável, chance de tirar 0 e chance
+    de tirar 10 —, não pelos três parâmetros de forma. A conversão está em
+    `equations.grade_shape`.
 
     Cada uma governa uma parte: a moda é a locação, e o número digitado é
     literalmente o pico da curva; a chance de zero fixa a cauda esquerda e a de
@@ -115,21 +142,19 @@ class PerformanceProfile:
 
     A **média sai derivada**, e fica tipicamente 1 a 2 pontos abaixo da moda,
     porque a cauda esquerda é longa. A taxa de aprovação também é derivada:
-    `n_min` é regra de cenário, não propriedade do aluno, e se definisse o
-    perfil mudar a linha de corte redefiniria a população em silêncio.
+    `n_min` é regra de cenário, não propriedade do aluno.
 
-    Toda trinca existe — não há combinação a recusar. Parametrizar pela média,
-    ao contrário, deixaria casos inviáveis: com a moda presa dentro da escala,
-    média alta com poucos dezes não fecha.
-
-    O nome é rótulo de relatório, e precisa ser único dentro do seu eixo — é
-    por ele que o recorte por perfil separa os grupos.
+    Houve três **perfis** de desempenho até 19/11/2026, e era deles que vinha a
+    dispersão de CR entre alunos: o quantil `q_{a,x}` é sorteado por par
+    (aluno, disciplina), de modo que, com uma distribuição só e sem nada mais,
+    a média dos quantis de um aluno convergiria para 0,5 e o CR deixaria de
+    ordenar ninguém. Quem sustenta essa dispersão agora é o **nível basilar**
+    (`SimulationConfig.performance_stability`).
     """
 
-    name: str
-    mode_grade: float
-    zero_rate: float
-    max_rate: float
+    mode_grade: float = 8.0
+    zero_rate: float = 0.005
+    max_rate: float = 0.008
 
     @property
     def shape(self) -> tuple[float, float, float]:
@@ -142,32 +167,26 @@ class PerformanceProfile:
 
 
 @dataclass(frozen=True)
-class AvailabilityProfile:
-    """Um grupo da população no eixo de disponibilidade.
+class AvailabilityShape:
+    """A distribuição de disponibilidade da população — **uma só**.
 
     A disponibilidade é a carga que o aluno tem para o período, **em horas**, e
     sai de uma log-normal — suporte (0, ∞), de modo que ela nunca fica negativa
-    e **não tem máximo artificial**. O grupo a descreve pelas duas grandezas
-    que se leem: a **moda**, o pico da curva em horas, e a **chance de alcançar
-    a carga máxima**, que é a frequência com que ele não precisa excluir nada.
-    A conversão está em `equations.availability_shape`.
+    e **não tem máximo artificial**. Duas grandezas a descrevem: a **moda**, o
+    pico da curva em horas, e a **chance de alcançar a carga máxima**, que é a
+    frequência com que o aluno não precisa excluir nada. A conversão está em
+    `equations.availability_shape`.
 
     Passar de W_a é permitido e não é inconsistência: o teto de carga é do
-    sistema, e quem o aplica é o alocador. Quem tem tempo para mais do que o
-    curso oferece simplesmente não exclui nada.
+    sistema, e quem o aplica é o alocador.
 
-    A forma depende de **W_a**, que é do cenário e não do perfil — "quantas
-    vezes eu encho a carga" só significa algo contra uma carga concreta. Por
-    isso `shape` é método, e não propriedade: o perfil guarda o que é dele, e a
-    conversão recebe o resto na hora.
-
-    O nome é rótulo de relatório, e precisa ser único dentro do seu eixo — é
-    por ele que o recorte por perfil separa os grupos.
+    A forma depende de **W_a**, que é do cenário — "quantas vezes eu encho a
+    carga" só significa algo contra uma carga concreta. Por isso `shape` é
+    método, e não propriedade.
     """
 
-    name: str
-    mode_hours: float
-    full_load_rate: float
+    mode_hours: float = 306.0
+    full_load_rate: float = 0.10
 
     def shape(self, max_hours: float) -> tuple[float, float]:
         """(média logarítmica, desvio logarítmico) da log-normal."""
@@ -178,156 +197,28 @@ class AvailabilityProfile:
         )
 
 
-# A calibragem dos dois eixos. A nota mais provável do perfil de desempenho é o
-# pico da curva numa disciplina de dificuldade padrão, de primeira; a **média**
-# sai 1 a 2 pontos abaixo dela, porque a cauda esquerda é longa. O "baixo" fica
-# calibrado por essa média derivada: ela encosta em `n_min = 5` (4,96), de modo
-# que ele reprova em torno de metade das vezes.
+# A calibragem dos dois eixos, agora como uma distribuição só em cada um.
 #
-# As chances de 0 e de 10 separam os grupos onde a média sozinha não separa:
-# o forte quase nunca zera e tira 10 em 3% das disciplinas; o fraco zera em 3%
-# e quase nunca tira 10. É a assimetria entre as duas caudas que dá ao CR o
-# que ordenar.
+# No desempenho, a moda de 8,0 põe a média derivada perto de 6,4 — o patamar
+# "médio" dos três perfis antigos, que era o do meio da população que eles
+# produziam juntos. As chances de 0 e de 10 são as dele também.
 #
-# O nome carrega o eixo de propósito. "Alto" e "Alta" nos dois lados fariam
-# "alto-baixo" virar charada em legenda de gráfico; com o eixo no rótulo, a
-# combinação se lê sozinha.
-DEFAULT_PERFORMANCE: tuple[PerformanceProfile, ...] = (
-    PerformanceProfile(
-        name="Alto desempenho", mode_grade=9.0, zero_rate=0.0005, max_rate=0.030
-    ),
-    PerformanceProfile(
-        name="Médio desempenho", mode_grade=8.0, zero_rate=0.0050, max_rate=0.008
-    ),
-    PerformanceProfile(
-        name="Baixo desempenho", mode_grade=6.5, zero_rate=0.0300, max_rate=0.0015
-    ),
-)
+# Na disponibilidade, a moda é **absoluta**, em horas, e por isso o padrão é
+# uma **função de W_a**: um cenário de teto menor recusaria uma constante
+# dimensionada para 360 h.
+DEFAULT_PERFORMANCE = PerformanceShape()
 
-# A chance de alcançar a carga máxima é o que separa os três de verdade:
-# "Alta" enche a carga em dois de cada cinco semestres, "Baixa" quase nunca — e
-# é essa chance, não a moda, que governa a frequência de exclusão.
-#
-# A moda é **absoluta**, em horas, e por isso o padrão é uma **função de W_a**
-# e não uma constante: um cenário de teto menor recusaria modas dimensionadas
-# para 360 h. Quem declara os próprios perfis os declara em horas, e aí a
-# responsabilidade de caber é de quem declarou.
-#
-# As frações (0,95, 0,85 e 0,60) são as médias que os três patamares tinham
-# quando a disponibilidade ainda era medida em fração de W_a. Elas entram como
-# **moda**, não como média — a log-normal é assimétrica, então os dois não
-# coincidem —, mas mantêm os patamares onde estavam.
-def default_availability(max_hours: float) -> tuple[AvailabilityProfile, ...]:
-    """Os três patamares de disponibilidade, dimensionados para um W_a."""
-    return (
-        AvailabilityProfile(
-            name="Alta disponibilidade",
-            mode_hours=round(max_hours * 0.95),
-            full_load_rate=0.40,
-        ),
-        AvailabilityProfile(
-            name="Média disponibilidade",
-            mode_hours=round(max_hours * 0.85),
-            full_load_rate=0.10,
-        ),
-        AvailabilityProfile(
-            name="Baixa disponibilidade",
-            mode_hours=round(max_hours * 0.60),
-            full_load_rate=0.005,
-        ),
+DEFAULT_MAX_HOURS = 360
+
+
+def default_availability(max_hours: float) -> AvailabilityShape:
+    """A distribuição de disponibilidade, dimensionada para um W_a."""
+    return AvailabilityShape(
+        mode_hours=round(max_hours * 0.85), full_load_rate=0.10
     )
 
 
-DEFAULT_MAX_HOURS = 360
-DEFAULT_AVAILABILITY: tuple[AvailabilityProfile, ...] = default_availability(
-    DEFAULT_MAX_HOURS
-)
-
-# O perfil de quem é construído **fora** de `generate_students` — um aluno de
-# teste, um cenário escrito à mão. Não descreve grupo nenhum: reproduz o grupo
-# médio no desempenho e disponibilidade praticamente cheia, de modo que
-# construir um aluno sem dizer o perfil dele não liga a exclusão sem querer.
-NEUTRAL_PERFORMANCE = PerformanceProfile(
-    name="—", mode_grade=8.0, zero_rate=0.0050, max_rate=0.008
-)
-# Praticamente nunca exclui, de modo que construir um aluno à mão não liga a
-# exclusão sem querer. A moda é relativa porque este perfil é usado fora de um
-# cenário, sem W_a a que se ancorar; quem o consome o reescala.
-NEUTRAL_AVAILABILITY = AvailabilityProfile(
-    name="—", mode_hours=round(DEFAULT_MAX_HOURS * 0.99), full_load_rate=0.999
-)
-
-
-@dataclass(frozen=True)
-class SelectivityProfile:
-    """Um grupo da população no eixo de **seletividade**.
-
-    `S_a`: a exigência do aluno, repartida entre as disciplinas elegíveis do
-    período. Ele não pede — nem financia — nada abaixo de `S_a / |M_a|`. Como
-    a utilidade das elegíveis soma 1, o valor se lê em múltiplos da
-    disciplina média. Ver `equations.reserve_threshold`.
-
-    Em 0 não há corte: ele pede tudo que é elegível e gasta o orçamento
-    inteiro. É o especulador, e é o perfil que a Seção 2.2 do anteprojeto diz
-    que o CR incentiva.
-    """
-
-    name: str
-    value: float
-
-    def __post_init__(self) -> None:
-        if self.value < 0:
-            raise ValueError(f"seletividade {self.name!r}: o valor deve ser >= 0")
-
-
-# Cinco níveis, **com os próprios valores como nome**: o eixo não tem
-# patamar qualitativo a batizar — o que separa os grupos é literalmente
-# quantas disciplinas cada um pede, e o número diz isso melhor que um
-# rótulo. Na grade padrão, com 33 elegíveis por período, eles pedem 33;
-# 20,5; 11,7; 6,7 e 4,0 disciplinas em média.
-DEFAULT_SELECTIVITY: tuple[SelectivityProfile, ...] = (
-    SelectivityProfile(name="0", value=0.0),
-    SelectivityProfile(name="0,5", value=0.5),
-    SelectivityProfile(name="1", value=1.0),
-    SelectivityProfile(name="1,5", value=1.5),
-    SelectivityProfile(name="2", value=2.0),
-)
-
-NEUTRAL_SELECTIVITY = SelectivityProfile(name="—", value=0.0)
-
-
-@dataclass(frozen=True)
-class RoutineProfile:
-    """Um grupo da população no eixo de **rotina** — a vida fora da grade.
-
-    Os dois valores são multiplicadores do interesse por turma, conforme o
-    turno dela: `day` para as diurnas, `night` para as noturnas. Ver
-    `equations.routine_weight`.
-
-    É **traço**, não estratégia: o aluno não escolhe trabalhar de dia, e o
-    turno não entra em decisão de lance — entra antes, no quanto cada turma
-    vale para ele.
-    """
-
-    name: str
-    day: float
-    night: float
-
-    def __post_init__(self) -> None:
-        if self.day <= 0 or self.night <= 0:
-            raise ValueError(f"rotina {self.name!r}: os pesos devem ser > 0")
-
-
-# O indiferente é o neutro, e os outros dois **dobram** o lado que lhes
-# convém em vez de penalizar o outro: depois da normalização da linha as duas
-# formas dão a mesma preferência, e dobrar é a que se lê sem decimal.
-DEFAULT_ROUTINE: tuple[RoutineProfile, ...] = (
-    RoutineProfile(name="Diurno", day=2.0, night=1.0),
-    RoutineProfile(name="Noturno", day=1.0, night=2.0),
-    RoutineProfile(name="Indiferente", day=1.0, night=1.0),
-)
-
-NEUTRAL_ROUTINE = RoutineProfile(name="—", day=1.0, night=1.0)
+DEFAULT_AVAILABILITY = default_availability(DEFAULT_MAX_HOURS)
 
 
 @dataclass(frozen=True)
@@ -372,8 +263,9 @@ class Discipline:
     #
     # É atributo da **disciplina**, e toda turma dela a herda inteira. Houve
     # uma escada por turma (`class_difficulty_levels`) até 16/11/2026; ela
-    # saiu junto com a atratividade, e o que distingue as turmas entre si
-    # passou a ser o **turno** (`equations.class_shift`).
+    # saiu junto com a atratividade. O turno, que a substituiu, saiu por sua
+    # vez em 19/11/2026 — hoje o que distingue as turmas entre si é o
+    # **horário** e o sorteio do interesse.
     difficulty: float = 1.0
     unlocks: tuple[str, ...] = ()
     entry: bool = False
@@ -421,66 +313,119 @@ class SimulationConfig:
 
     disciplines: list[Discipline] = field(default_factory=list)
     periods: int = 1  # |T| — períodos letivos
-    # Em quantos dos |T| períodos entra coorte nova, contados do primeiro.
-    # `None` = em todos, e aí o último período recebe uma coorte que só vive
-    # esse período. Quando são menos que |T|, a simulação ganha uma fase de
-    # drenagem: depois do último ingresso a população só diminui, e as coortes
-    # tardias têm tempo de chegar ao fim do curso em vez de serem cortadas pelo
-    # horizonte.
-    entry_periods: int | None = None
-    # **Exemplares de cada perfil em cada coorte** — é por aqui que se controla
-    # o tamanho da população.
+    # Quantos dos |T| períodos iniciais são **pré-população**: rodam inteiros,
+    # com o mesmo mecanismo, mas ficam fora da medição. É o aquecimento da
+    # janela estacionária.
     #
-    # A coorte não é digitada: ela é `students_per_profile × combinações`, e
-    # com os padrões de 3 · 3 · 6 · 6 isso dá 324 alunos por exemplar. Deixar
-    # o controle aqui faz a divisibilidade sair de graça — a repartição do
-    # `profile_index` é exata por construção, e some a classe inteira de
-    # cenários em que a sobra gira entre as coortes e os perfis ficam
-    # desiguais.
-    students_per_profile: int = 1
+    # Com ingresso em todo período e residência máxima R, no período `t` estão
+    # vivas as coortes que entraram em `t, t−1, …, t−R+1`: antes de `t = R`
+    # ninguém é velho o bastante para sair, e a população cresce uma coorte
+    # por período. A partir de `t = R` entra uma e sai outra, e só aí ela é
+    # constante — daí a pré-população ser **fixada em `max_residence`** por
+    # quem monta o cenário (`api.service.build_config`).
+    #
+    # 0, o padrão, mede tudo: é o que o motor fazia antes de a janela existir,
+    # e é o que os testes de uma simulação isolada querem.
+    #
+    # O motor **não joga nada fora** — a simulação devolve todos os períodos, e
+    # quem recorta é a comparação (`comparison.observed_periods`). O gráfico
+    # de `students` dentro da janela é o teste de validade do aquecimento: se
+    # não for plano, ele foi curto.
+    warmup_periods: int = 0
+    # **Quantos alunos ingressam por período.** É digitado, e é por aqui que se
+    # controla o tamanho da população: em regime ela vale
+    # `students_per_period × max_residence`.
+    #
+    # Era derivado até 19/11/2026 — `students_per_profile × combinações de
+    # perfil` —, de modo que mexer num eixo de perfil mudava o tamanho da
+    # coorte sem que ninguém pedisse. Com os perfis fora, não há mais
+    # divisibilidade a preservar e o número volta a ser o que se lê.
+    students_per_period: int = 8
     # **Jubilamento**: quantos períodos o aluno tem para concluir, contados do
     # ingresso. Quem chega ao fim do último sem concluir sai da simulação e não
     # disputa mais nada. `None` desliga, e aí a conclusão (eq. 40) volta a ser a
     # única porta de saída.
     #
-    # É o que fecha o ciclo de vida da população: o último ingressante sai um
-    # período de residência depois do último ingresso, menos a sobreposição do
-    # primeiro, e depois dele não há mais ninguém. Daí o horizonte derivado em
-    # `horizon_for_lifecycle`, que é o |T| que a tela de configuração mostra.
+    # É também o que **faz o estado estacionário existir**: com ingresso em
+    # todo período, se ninguém saísse a população cresceria sem limite. E é o
+    # que fixa o aquecimento, porque a população só é constante a partir de
+    # `t = max_residence` — ver `warmup_periods` e `horizon_for_window`.
     #
     # A ordem importa no fechamento do período: quem conclui **no** último
     # período de residência conta como concluinte, não como jubilado — o
     # jubilamento só alcança quem chegou ao fim dele sem fechar a grade.
     max_residence: int | None = None
-    # --- os dois eixos de perfil --------------------------------------------
+    # --- os três eixos da população ----------------------------------------
     #
+    # Cada um é **uma distribuição só** mais um **nível basilar**: a fração da
+    # variância que é permanente do aluno, contra a que é resorteada. É a
+    # mesma repartição do interesse (`equations.preference_split`), e a mesma
+    # razão — sem componente permanente o eixo descreve o sorteio do período,
+    # não um tipo de aluno, e o corte por quantil fatiaria ruído.
+    #
+    # Havia **perfis** nomeados em cada eixo até 19/11/2026, e era deles que
+    # vinha a persistência. Os quantis os substituíram: eles saem do nível
+    # basilar, que é contínuo, e por isso não há grupo a declarar.
+
     # **Desempenho**: a nota sai de uma normal dividida censurada em [0, 10] —
     # ver `grading`. O que o aluno carrega por disciplina é o **quantil** dele
-    # naquela matéria, sorteado uma vez e persistente: é traço, não sorte. A
-    # dificuldade e a recursada movem a distribuição sob esse quantil. A
-    # calibragem importa — sem dispersão de desempenho ninguém reprova, a
-    # recursada some do cenário e o CR vira ruído, de modo que a eq. (57) não
-    # mede nada.
-    performance_profiles: tuple[PerformanceProfile, ...] = DEFAULT_PERFORMANCE
-    # **Disponibilidade**: a fração de W_a que o aluno vai de fato cursar,
-    # sorteada da Beta do perfil **a cada período** — ao contrário da aptidão,
-    # que é uma só para o curso inteiro. Depois da última rodada ele descarta
-    # o que não couber nessa fração (`equations.retained_set`), e o descartado
+    # naquela matéria. A calibragem importa — sem dispersão de desempenho
+    # ninguém reprova, a recursada some do cenário e o CR vira ruído, de modo
+    # que a eq. (57) não mede nada.
+    performance: PerformanceShape = DEFAULT_PERFORMANCE
+    # Quanto do desempenho é **do aluno**, e não da matéria: a correlação entre
+    # os quantis dele em duas disciplinas quaisquer.
+    #
+    # Em 0 o quantil é sorteado de novo em cada matéria, a média dos quantis de
+    # um aluno converge para 0,5 e **a dispersão do CR entre alunos não tem
+    # piso** — ela cai como 1/√D conforme ele cursa mais disciplinas, e a
+    # ordenação por CR passa a ordenar acúmulo de sorte. Em 1 o aluno tem uma
+    # posição só, igual em tudo. No meio, "bom em cálculo e ruim em escrita"
+    # continua significando alguma coisa sem que o CR deixe de ordenar.
+    performance_stability: float = 0.5
+    # **Disponibilidade**: a carga que o aluno vai de fato cursar, em horas,
+    # sorteada da log-normal **a cada período**. Depois da última rodada ele
+    # descarta o que não couber nela (`equations.retained_set`), e o descartado
     # vira solicitação **excluída**: não conta carga, não conta tentativa, não
     # mexe no CR, e no leilão não devolve crédito nenhum, a menos que
-    # `exclusion_refund_rate` diga o contrário (`equations.exclusion_refund`).
+    # `exclusion_refund_rate` diga o contrário.
     #
     # A vaga excluída **não volta para a oferta** — exclui-se depois de
     # encerradas as alocações do período. É o que torna a exclusão socialmente
     # cara e dá sentido à penalidade do leilão.
-    # Vazio quer dizer **derive de W_a** (`default_availability`): as modas
-    # são absolutas, e uma constante dimensionada para 360 h recusaria todo
-    # cenário de teto menor. Declarar explicitamente desliga a derivação.
-    availability_profiles: tuple[AvailabilityProfile, ...] = ()
-    # O eixo de **estratégia**. Ao contrário dos dois de cima, que são traço
-    # e entram só no sorteio, este vira o `Behavior` do aluno e entra na
-    # decisão: a seletividade corta o pedido e para o gasto. Ver
-    # `equations.reserve_threshold`.
+    #
+    # `None` quer dizer **derive de W_a** (`default_availability`): a moda é
+    # absoluta, e uma constante dimensionada para 360 h recusaria todo cenário
+    # de teto menor.
+    availability: AvailabilityShape | None = None
+    # Quanto da disponibilidade é **permanente**: a correlação entre dois
+    # períodos do mesmo aluno. Em 0 o tempo livre é pura circunstância e
+    # ninguém é sistematicamente mais ocupado que ninguém.
+    availability_stability: float = 0.5
+    # **Seletividade**: o eixo de estratégia, e o único que entra na decisão
+    # em vez de num sorteio. É o valor da opção externa do aluno — quanto vale
+    # não cursar nada —, na **escala do interesse**, que
+    # `equations.interest_row` normaliza sobre a grade inteira. A reserva é
+    # `S / (S + ΣI)` (`equations.reserve_threshold`).
+    #
+    # A referência para calibrar: com `S = 1/(turmas da grade)` o limiar fica
+    # na utilidade média de uma elegível. Na grade padrão são 288 turmas, daí
+    # o default — medido, ele admite 29% das elegíveis.
+    #
+    # Sai de uma log-normal, como o interesse. A mediana é o que se lê; o
+    # sigma é a dispersão em log.
+    selectivity_median: float = 0.0035
+    selectivity_sigma: float = 0.6
+    # Quanto da seletividade é permanente, entre períodos.
+    selectivity_stability: float = 0.7
+    # **Quantis** em que os relatórios recortam a população, de 1 a 5. O corte
+    # é sobre o **nível basilar** de cada eixo — o componente permanente —, e
+    # não sobre o valor do período: fatiar o sorteio do semestre não separaria
+    # tipos de aluno, e o mesmo aluno trocaria de faixa a cada ponto do
+    # gráfico.
+    #
+    # Em 1 há uma faixa só, que é a universidade inteira.
+    quantiles: int = 3
     # **Estabilidade entre turmas**: quanto da variância do interesse fica no
     # nível da disciplina, de 0 a 1. É a irmã espacial da estabilidade entre
     # períodos — uma reparte a variância no tempo, a outra no espaço —, e as
@@ -490,28 +435,24 @@ class SimulationConfig:
     # mesmo interesse: o gosto é inteiramente pela matéria, e o sorteio da
     # turma nem acontece. Em **0** cada turma é um sorteio independente, e
     # turmas da mesma disciplina não se parecem mais entre si do que turmas
-    # de disciplinas diferentes — o agrupamento some *do gosto*, e continua
-    # valendo para clique, pré-requisito, carga e nota.
+    # de disciplinas diferentes.
     #
     # O parâmetro decide, portanto, se o gosto é **por matéria ou por
     # seção**: em 1 a turma não existe como objeto de preferência, em 0 a
     # disciplina não existe.
     class_stability: float = 1.0
-    selectivity_profiles: tuple[SelectivityProfile, ...] = DEFAULT_SELECTIVITY
-    # **Rotina**: o terceiro eixo de traço. Multiplica o interesse das turmas
-    # de cada turno (`equations.routine_weight`), de modo que quem trabalha de
-    # dia prefere as noturnas sem ficar proibido das diurnas.
-    routine_profiles: tuple[RoutineProfile, ...] = DEFAULT_ROUTINE
-    # Quantos **horários** existem em cada turno. Cada horário é um grupo de
-    # exclusão mútua entre turmas (eq. 5), e as turmas da grade são repartidas
-    # entre eles circularmente — ver `equations.class_schedule`.
+    # Quantos **horários** o cenário tem. Cada horário é um grupo de exclusão
+    # mútua entre turmas (eq. 5), e as turmas da grade são repartidas entre
+    # eles circularmente — ver `equations.class_schedule`.
     #
-    # São o botão de aperto do choque: menos horários é mais turma por
-    # horário, e mais escolha do aluno travada por conflito. O par 12 × 6 é o
-    # que a grade padrão comporta mantendo a garantia de que todo período tem
-    # uma grade sem choque, inclusive só num dos turnos.
-    day_slots: int = 12
-    night_slots: int = 6
+    # É o botão de aperto do choque: menos horários é mais turma por horário,
+    # e mais escolha do aluno travada por conflito. O **piso** é o maior
+    # número de turmas de uma disciplina, senão duas turmas da mesma
+    # disciplina dividiriam horário e a oferta efetiva encolheria em silêncio.
+    #
+    # Não há turno: a divisão entre diurno e noturno, e o eixo de perfil de
+    # rotina que a acompanhava, saíram em 19/11/2026.
+    slots: int = 12
     # Quanto do gosto do aluno é **permanente**, de 0 a 1 — a fração da
     # variância que não é resorteada a cada período.
     #
@@ -604,11 +545,9 @@ class SimulationConfig:
         do anterior: os números soltos, a grade, a conclusão e a matrícula
         garantida.
         """
-        if not self.availability_profiles:
+        if self.availability is None:
             object.__setattr__(
-                self,
-                "availability_profiles",
-                default_availability(self.max_hours),
+                self, "availability", default_availability(self.max_hours)
             )
         self._check_horizon()
         self._check_population()
@@ -619,11 +558,6 @@ class SimulationConfig:
     def _check_horizon(self) -> None:
         if self.periods < 1:
             raise ValueError("é preciso simular ao menos 1 período")
-        if self.entry_periods is not None and not 1 <= self.entry_periods <= self.periods:
-            raise ValueError(
-                "períodos com ingresso deve estar entre 1 e o total de períodos "
-                f"({self.periods})"
-            )
         if self.rounds < 1:
             raise ValueError("é preciso simular ao menos 1 rodada por período")
         # O piso em 5 segura a ordem entre aprovar e excluir. Com o
@@ -655,45 +589,51 @@ class SimulationConfig:
         # produziria período nenhum, e toda métrica sairia indefinida.
         if not self.disciplines:
             raise ValueError("o cenário precisa de pelo menos uma disciplina")
-        if self.students_per_profile < 1:
+        if self.students_per_period < 1:
+            raise ValueError("o cenário precisa de pelo menos um aluno por período")
+        if not 1 <= self.quantiles <= MAX_QUANTILES:
             raise ValueError(
-                "o cenário precisa de pelo menos um exemplar de cada perfil"
+                f"os quantis dos relatórios devem estar entre 1 e {MAX_QUANTILES}"
             )
-        for eixo, perfis in (
-            ("desempenho", self.performance_profiles),
-            ("disponibilidade", self.availability_profiles),
-            ("seletividade", self.selectivity_profiles),
-            ("rotina", self.routine_profiles),
+        # As duas distribuições são de famílias diferentes: a nota é uma normal
+        # dividida censurada, a disponibilidade é uma log-normal.
+        try:
+            self.performance.shape
+        except ValueError as erro:
+            raise ValueError(f"distribuição de desempenho: {erro}") from erro
+        try:
+            self.availability_shape()
+        except ValueError as erro:
+            raise ValueError(f"distribuição de disponibilidade: {erro}") from erro
+        if self.selectivity_median < 0:
+            raise ValueError("a mediana da seletividade deve ser >= 0")
+        if self.selectivity_sigma <= 0:
+            raise ValueError("o desvio da seletividade deve ser > 0")
+        for nome, valor in (
+            ("desempenho", self.performance_stability),
+            ("disponibilidade", self.availability_stability),
+            ("seletividade", self.selectivity_stability),
         ):
-            if not perfis:
-                raise ValueError(f"o eixo de {eixo} precisa de pelo menos um perfil")
-            nomes = [p.name.strip() for p in perfis]
-            if any(not nome for nome in nomes):
-                raise ValueError(f"todo perfil de {eixo} precisa de um nome")
-            if len(set(nomes)) != len(nomes):
-                raise ValueError(f"os nomes dos perfis de {eixo} devem ser únicos")
-        # Os números de cada eixo são de famílias diferentes: a nota é uma
-        # normal dividida censurada, a disponibilidade é uma Beta.
-        for perfil in self.performance_profiles:
-            try:
-                perfil.shape
-            except ValueError as erro:
-                raise ValueError(
-                    f"perfil de desempenho '{perfil.name}': {erro}"
-                ) from erro
-        for perfil in self.availability_profiles:
-            try:
-                perfil.shape(self.max_hours)
-            except ValueError as erro:
-                raise ValueError(
-                    f"perfil de disponibilidade '{perfil.name}': {erro}"
-                ) from erro
+            if not 0.0 <= valor <= 1.0:
+                raise ValueError(f"o nível basilar de {nome} deve estar em [0, 1]")
         if not 0.0 <= self.interest_stability <= 1.0:
             raise ValueError("a estabilidade entre períodos deve estar em [0, 1]")
         if not 0.0 <= self.class_stability <= 1.0:
             raise ValueError("a estabilidade entre turmas deve estar em [0, 1]")
-        if self.day_slots < 1 or self.night_slots < 1:
-            raise ValueError("é preciso ao menos um horário em cada turno")
+        if not 0 <= self.warmup_periods < self.periods:
+            raise ValueError(
+                "a pré-população tem de caber no horizonte e deixar ao menos um "
+                "período medido"
+            )
+        if self.slots < 1:
+            raise ValueError("é preciso ao menos um horário")
+        maior_turma = max(d.classes for d in self.disciplines)
+        if self.slots < maior_turma:
+            raise ValueError(
+                f"são precisos ao menos {maior_turma} horários: é o maior número de "
+                "turmas entre as disciplinas, e com menos duas turmas da mesma "
+                "disciplina cairiam no mesmo horário"
+            )
         if self.interest_sigma <= 0:
             raise ValueError("desvio do interesse (sigma) deve ser > 0")
         if not math.isfinite(self.interest_mean):
@@ -858,86 +798,82 @@ class SimulationConfig:
 
     @property
     def entry_span(self) -> int:
-        """Quantos períodos recebem coorte nova, resolvido o `None`."""
-        return self.periods if self.entry_periods is None else self.entry_periods
+        """Quantos períodos recebem coorte nova — **todos**.
+
+        Houve um `entry_periods` menor que |T| até 19/11/2026, e com ele uma
+        fase de drenagem no fim do horizonte, em que a população só diminuía.
+        A janela estacionária a substituiu: o ingresso é contínuo, e quem
+        separa o regime do transitório é a pré-população.
+        """
+        return self.periods
 
     def total_students(self) -> int:
-        """|A| — uma coorte do mesmo tamanho em cada período com ingresso."""
+        """|A| — uma coorte do mesmo tamanho em cada período."""
         return self.students_per_period * self.entry_span
 
-    @property
-    def students_per_period(self) -> int:
-        """Alunos que ingressam em cada período com ingresso.
+    def availability_shape(self) -> tuple[float, float]:
+        """(média logarítmica, desvio logarítmico) da log-normal, com o W_a
+        deste cenário."""
+        shape = self.availability or default_availability(self.max_hours)
+        return shape.shape(self.max_hours)
 
-        **Derivado**, não digitado: é `students_per_profile` vezes o número de
-        combinações de perfil, de modo que toda coorte contém exatamente o
-        mesmo número de exemplares de cada perfil.
+    def steady_population(self) -> int:
+        """Quantos alunos a universidade tem **em regime**.
+
+        Com ingresso de N por período e residência máxima R, no período t
+        estão vivas as coortes que entraram em t, t−1, …, t−R+1: a partir de
+        `t = R` entra uma e sai outra, e a população fica em `N × R`. Sem
+        jubilamento não há regime, e o número é o da população inteira.
         """
-        return self.students_per_profile * self.profile_combinations()
+        if self.max_residence is None:
+            return self.total_students()
+        return self.students_per_period * min(self.max_residence, self.periods)
 
-    def profile_combinations(self) -> int:
-        """Quantas combinações dos quatro eixos de perfil existem."""
-        return (
-            len(self.performance_profiles)
-            * len(self.availability_profiles)
-            * len(self.selectivity_profiles)
-            * len(self.routine_profiles)
-        )
-
-    def profile_index(self, student_index: int) -> tuple[int, int, int, int]:
-        """A combinação (desempenho, disponibilidade, seletividade, rotina)
-        do aluno de índice global.
-
-        A repartição é **igualitária entre as combinações**, e exata: como a
-        coorte é `students_per_profile × combinações`, cada perfil recebe o
-        mesmo número de exemplares em toda coorte, sem sobra a girar.
-
-        O rodízio é sobre o índice **global**, não o índice dentro da coorte.
-        Com a coorte sendo múltipla exata das combinações os dois dão a mesma
-        resposta; o global é o que continua valendo se alguém construir um
-        cenário à mão com outro tamanho.
-
-        Três eixos são **traço**: o aluno não os escolhe nem os conhece, e
-        eles governam o sorteio da aptidão, o da disponibilidade e o do
-        interesse por turno. A seletividade é **estratégia**: vira o
-        `Behavior` dele e entra na decisão de lance e de pedido.
-
-        O perfil **não sai da seed**, pelo mesmo motivo que o período de
-        ingresso não sai: duas simulações com seeds diferentes têm a mesma
-        estrutura de perfis, então a diferença entre elas não é quem calhou de
-        ser frágil nem quem calhou de ser especulador.
-        """
-        combination = student_index % self.profile_combinations()
-        routine = combination % len(self.routine_profiles)
-        combination //= len(self.routine_profiles)
-        selectivity = combination % len(self.selectivity_profiles)
-        combination //= len(self.selectivity_profiles)
-        availability = combination % len(self.availability_profiles)
-        performance = combination // len(self.availability_profiles)
-        return performance, availability, selectivity, routine
+    def _edges(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """As arestas declaradas, na ordem da grade. Serve de chave do memo
+        do fecho, e por isso é tupla e não dicionário."""
+        return tuple((d.name, d.unlocks) for d in self.disciplines)
 
     def successors_by_discipline(self) -> dict[str, tuple[str, ...]]:
-        """seq(X) — o que cada disciplina desbloqueia **imediatamente**.
+        """O que cada disciplina desbloqueia **imediatamente**.
 
         É a `unlocks` do cenário, indexada por nome e completa: disciplina
-        terminal aparece com tupla vazia. É dela que sai a herança de um nível
-        de `equations.utility`.
+        terminal aparece com tupla vazia. É a aresta crua, de onde saem a
+        altura, o alcance e os dois fechos; o `seq` da monografia é o fecho,
+        e está em `reachable_by_discipline`.
         """
-        return {d.name: d.unlocks for d in self.disciplines}
+        return dict(self._edges())
 
     def prerequisites_by_discipline(self) -> dict[str, tuple[str, ...]]:
-        """Aresta inversa dos sucessores: quem precisa estar aprovado para
-        disputar cada disciplina. Mantém a ordem do cenário entre os
-        predecessores."""
-        preds: dict[str, list[str]] = {d.name: [] for d in self.disciplines}
-        for discipline in self.disciplines:
-            for successor in discipline.unlocks:
-                preds[successor].append(discipline.name)
-        return {name: tuple(parents) for name, parents in preds.items()}
+        """Aresta inversa dos sucessores: quem precisa estar aprovado
+        **imediatamente antes** para disputar cada disciplina. Mantém a ordem
+        do cenário entre os predecessores.
+
+        É o que a elegibilidade lê. Elegibilidade e fecho dão o mesmo
+        conjunto — exigir os diretos implica, por indução, todos os
+        ancestrais —, e aqui a aresta direta basta e é mais barata.
+        """
+        return inverse_edges(self.successors_by_discipline())
+
+    def reachable_by_discipline(self) -> dict[str, tuple[str, ...]]:
+        """seq(X) — tudo que a disciplina desbloqueia, **transitivamente**.
+
+        É o que `equations.utility` herda: a cadeia inteira à frente, não só
+        o próximo passo.
+        """
+        return _curriculum_closures(self._edges())[0]
+
+    def required_by_discipline(self) -> dict[str, tuple[str, ...]]:
+        """req(X) — tudo que a disciplina exige, **transitivamente**.
+
+        É por quantos destes estão elegíveis que `equations.utility` reparte
+        a parcela de um sucessor.
+        """
+        return _curriculum_closures(self._edges())[1]
 
     def heights(self) -> dict[str, int]:
         """s_x — ver `equations.curriculum_height`."""
-        return curriculum_heights({d.name: d.unlocks for d in self.disciplines})
+        return curriculum_heights(self.successors_by_discipline())
 
     def curriculum_periods(self) -> dict[str, int]:
         """O período de cada disciplina — ver `equations.curriculum_period`.
@@ -950,7 +886,7 @@ class SimulationConfig:
 
     def reach(self) -> dict[str, int]:
         """d_x — ver `equations.curriculum_reach`."""
-        return curriculum_reach({d.name: d.unlocks for d in self.disciplines})
+        return curriculum_reach(self.successors_by_discipline())
 
     def entry_disciplines(self) -> list[str]:
         """Disciplinas de matrícula garantida, na ordem do cenário.
@@ -1038,36 +974,24 @@ class SimulationConfig:
             for name in self.classes_of(d)
         }
 
-    def shift_by_class(self) -> dict[str, str]:
-        """Turma → turno — ver `equations.class_shift`."""
-        result: dict[str, str] = {}
-        for discipline in self.disciplines:
-            names = self.classes_of(discipline)
-            for name, shift in zip(names, class_shifts(len(names))):
-                result[name] = shift
-        return result
-
     def schedule_by_class(self) -> dict[str, str]:
         """Turma → horário — ver `equations.class_schedule`.
 
         A varredura é na ordem da grade, que é a ordem em que o cenário
         declara as disciplinas: é dela que sai o equilíbrio entre horários e
-        a garantia de que todo período tem uma grade sem choque.
+        o fato de as turmas de uma disciplina caírem em horários consecutivos,
+        e portanto distintos.
         """
-        shifts = self.shift_by_class()
-        names = list(shifts)
-        schedules = class_schedules(
-            shifts=(shifts[name] for name in names),
-            day_slots=self.day_slots,
-            night_slots=self.night_slots,
-        )
-        return dict(zip(names, schedules))
+        names = [
+            name
+            for discipline in self.disciplines
+            for name in self.classes_of(discipline)
+        ]
+        return dict(zip(names, class_schedules(count=len(names), slots=self.slots)))
 
     def schedules(self) -> tuple[str, ...]:
         """`G` — todos os horários do cenário, na ordem da tela."""
-        return schedule_names(
-            day_slots=self.day_slots, night_slots=self.night_slots
-        )
+        return schedule_names(slots=self.slots)
 
     def discipline_cliques(self) -> tuple[frozenset[str], ...]:
         """`M` — um clique por disciplina com mais de uma turma.
@@ -1146,19 +1070,24 @@ class SimulationConfig:
         return max(by_hours, by_chain)
 
 
-def horizon_for_lifecycle(*, entry_periods: int, max_residence: int) -> int:
-    """|T| — o horizonte que esgota a população, dado o ciclo de vida dela.
+def horizon_for_window(*, max_residence: int, observation_periods: int) -> int:
+    """|T| — o horizonte da janela estacionária.
 
-    A última coorte entra no último período com ingresso e sai, concluída ou
-    jubilada, ao fim da residência dela. Depois disso não resta ninguém para
-    disputar, e simular além seria medir uma universidade vazia.
+    A **pré-população é o próprio prazo de jubilamento**: com ingresso em todo
+    período e residência máxima R, a população só fica constante — exatamente
+    `N × R` — a partir de `t = R`, porque antes disso nenhuma coorte é velha o
+    bastante para sair e entra uma por período sem sair nenhuma. Medir antes
+    disso seria medir a rampa, e as métricas deste modelo são muito sensíveis
+    ao tamanho da população.
 
-    O **menos um** é a sobreposição do primeiro período: a coorte que entra em
-    t = 1 já gasta ali o primeiro período de residência dela. Sem ele o
-    horizonte teria sempre um período final sem aluno nenhum.
+    Depois vêm os períodos **observados**, que são os que as tabelas e os
+    gráficos mostram.
+
+    Substituiu o `horizon_for_lifecycle` em 19/11/2026, junto com a fase de
+    drenagem que ele existia para acomodar.
 
     É função solta, e não método de `SimulationConfig`, porque a tela de
     configuração precisa do número **antes** de haver cenário — ela mostra o |T|
     enquanto o usuário mexe nos dois controles de que ele sai.
     """
-    return entry_periods + max_residence - 1
+    return max_residence + observation_periods

@@ -12,9 +12,9 @@
  * do período — as outras combinações não têm material, porque reagrupar por
  * idade ou por coorte exige as células, que ali não foram gravadas.
  */
-import type { SeriesGroupStyle, SeriesLine } from "./charts";
-import { amplitude, boxStats, requestFunnel } from "./equations";
-import { PALETTE, profileColor } from "./profileColors";
+import type { SeriesGroupStyle } from "./charts";
+import { boxStats, requestFunnel } from "./equations";
+import { bandColor } from "./profileColors";
 import type {
   ArmResult,
   AxisBands,
@@ -26,7 +26,24 @@ import type {
   RunSummary,
 } from "./types";
 
-/** As réguas na ordem do seletor, com o rótulo e como o eixo X se lê. */
+/** O eixo X **colapsado**: uma caixa por modelo, sobre as seeds, em vez de
+ * uma linha ao longo do tempo. Não é régua — é a ausência de uma —, e por
+ * isso mora no mesmo seletor delas.
+ *
+ * A caixa é sobre as **seeds**, e não sobre os alunos: ela responde se o vão
+ * entre os mecanismos é maior que o ruído entre populações. A dispersão
+ * entre alunos é o que as linhas de quantil mostram, e misturar as duas numa
+ * caixa só seria erro de leitura. */
+export const AGGREGATE = "aggregate";
+
+/** O que o seletor do eixo X oferece: uma régua da API ou o agregado. */
+export type RulerChoice = Ruler | typeof AGGREGATE;
+
+/** As réguas na ordem do seletor, com o rótulo e como o eixo X se lê.
+ *
+ * A **coorte** saiu em 19/11/2026. Ela só significava algo enquanto havia
+ * fases distintas no horizonte — enchimento, regime, drenagem —; na janela
+ * estacionária ela e o período dizem a mesma coisa. */
 export const RULERS: {
   ruler: Ruler;
   label: string;
@@ -37,32 +54,23 @@ export const RULERS: {
 }[] = [
   {
     ruler: "period",
-    label: "Período",
+    label: "Período global",
     point: (x) => `Período ${x}`,
     weight: "Alunos medidos",
   },
   {
     ruler: "age",
-    label: "Idade",
+    label: "Período local",
     point: (x) => `${x}º período do aluno`,
     weight: "Alunos que chegaram à idade",
   },
-  {
-    ruler: "cohort",
-    label: "Coorte",
-    point: (x) => `Coorte ${x}`,
-    weight: "Aluno-períodos medidos",
-  },
 ];
 
-/** O recorte que a API não manda: em vez de uma linha por grupo, uma linha
- * por **eixo**, e o valor é o vão entre os grupos dele. Ele responde outra
- * pergunta — não "quanto cada perfil colheu" mas "quanto o perfil importou" —
- * e por isso é escolha de recorte, e não gráfico à parte. */
-export const AMPLITUDE = "amplitude";
-
-/** O que o seletor de linhas oferece: um recorte da API ou a amplitude. */
-export type CutChoice = CutAxis | typeof AMPLITUDE;
+/** O que o seletor de linhas oferece. A **amplitude** — uma linha por eixo,
+ * com o vão entre os grupos dele — saiu em 19/11/2026 junto com os perfis: o
+ * que ela media é desigualdade entre alunos, e isso o φ de Jain já publica
+ * como número. */
+export type CutChoice = CutAxis;
 
 /** Os recortes na ordem do seletor, com o rótulo da tela. */
 export const CUTS: { axis: CutChoice; label: string }[] = [
@@ -70,19 +78,7 @@ export const CUTS: { axis: CutChoice; label: string }[] = [
   { axis: "performance", label: "Desempenho" },
   { axis: "availability", label: "Disponibilidade" },
   { axis: "selectivity", label: "Seletividade" },
-  { axis: "routine", label: "Rotina" },
-  { axis: AMPLITUDE, label: "Amplitude" },
 ];
-
-/** A cor de cada eixo na amplitude. Própria e fixa: a linha aqui não é um
- * grupo de gente, então a cor que o cenário deu ao perfil não serve — e o
- * eixo inteiro precisa de uma cor só. */
-const AMPLITUDE_COLORS: Record<string, string> = {
-  performance: PALETTE.green,
-  availability: PALETTE.blue,
-  selectivity: PALETTE.yellow,
-  routine: PALETTE.red,
-};
 
 const STATE_KEYS = [
   "not_eligible",
@@ -159,68 +155,7 @@ function legacyBands(runs: RunSummary[]): AxisBands[] {
 export const seriesOf = (arm: ArmResult | undefined): AxisBands[] =>
   arm ? (arm.series ?? legacyBands(arm.runs)) : [];
 
-/** Os eixos que a amplitude mede numa régua — os de perfil com pelo menos
- * dois grupos presentes. Com um grupo só não há vão, e a linha seria uma reta
- * em zero dizendo que o eixo não separa ninguém.
- *
- * `axes` são os eixos **já filtrados pela régua**, de todos os braços juntos:
- * o que está presente é o mesmo dos dois lados. */
-export const amplitudeGroups = (axes: AxisBands[]): SeriesGroupStyle[] =>
-  CUTS.filter(
-    (cut) =>
-      AMPLITUDE_COLORS[cut.axis] &&
-      axes.some((entry) => entry.axis === cut.axis && entry.groups.length > 1)
-  ).map((cut) => ({
-    key: cut.axis,
-    label: cut.label,
-    color: AMPLITUDE_COLORS[cut.axis],
-  }));
-
-/** As linhas da amplitude de um braço: por eixo de perfil, o vão entre as
- * medianas dos grupos dele em cada ponto da régua (`equations.amplitude`).
- *
- * O ponto não leva faixa — a amplitude é um número só, e não uma redução
- * entre as seeds. O `n` dele é o **menor** entre os grupos que entraram no
- * vão: a amplitude só está tão medida quanto o grupo mais escasso dela. */
-export const amplitudeLines = (
-  axes: AxisBands[],
-  arm: string,
-  key: string
-): SeriesLine[] =>
-  amplitudeGroups(axes).map((style) => {
-    const medians = new Map<number, { values: number[]; n: number }>();
-    axes
-      .filter((entry) => entry.axis === style.key)
-      .flatMap((entry) => entry.groups)
-      .forEach((group) =>
-        pointsOf(group).forEach((x, i) => {
-          const band = group.values[key]?.[i];
-          if (!band) return;
-          const found = medians.get(x);
-          if (found) {
-            found.values.push(band[1]);
-            found.n = Math.min(found.n, group.n[i] ?? 0);
-          } else medians.set(x, { values: [band[1]], n: group.n[i] ?? 0 });
-        })
-      );
-    return {
-      arm,
-      group: style.key,
-      points: [...medians.entries()]
-        .sort((left, right) => left[0] - right[0])
-        .flatMap(([x, entry]) => {
-          const span = amplitude(entry.values);
-          return span === null ? [] : [{ x, median: span, n: entry.n }];
-        }),
-    };
-  });
-
-/** Os grupos de um recorte com a cor e o rótulo da tela.
- *
- * Os de perfil saem do cenário que rodou, na ordem e com a cor que ele
- * declarou; o "Geral", a matiz única das séries solitárias. Grupo presente nos
- * dados e ausente do cenário (não deveria haver) entra com a cor de reserva.
- */
+/** Os grupos de um recorte com a cor e o rótulo da tela. */
 export function cutGroups(
   cut: CutAxis,
   config: CompareRequest,
@@ -230,22 +165,12 @@ export function cutGroups(
   if (cut === "overall") {
     return [{ key: "overall", label: "Geral", color: palette.solo }];
   }
-  const declared: { name: string; color?: string }[] =
-    {
-      performance: config.performance_profiles,
-      availability: config.availability_profiles,
-      selectivity: config.selectivity_profiles,
-      routine: config.routine_profiles,
-    }[cut] ?? [];
-  const styles = declared.map((profile, index) => ({
-    key: profile.name,
-    label: profile.name,
-    color: profileColor(profile, index),
+  // As faixas vêm na ordem da API — da mais baixa para a mais alta —, e a
+  // cor é da **posição**, não do nome: a rampa codifica essa ordem.
+  const bands = Math.max(config.quantiles ?? present.length, present.length, 1);
+  return present.map((key, index) => ({
+    key,
+    label: key,
+    color: bandColor(index, bands),
   }));
-  present
-    .filter((key) => !styles.some((s) => s.key === key))
-    .forEach((key) =>
-      styles.push({ key, label: key, color: profileColor({}, styles.length) })
-    );
-  return styles.filter((s) => present.includes(s.key));
 }

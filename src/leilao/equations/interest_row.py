@@ -22,11 +22,15 @@ desigualdade imposta disse que vale. Quem não quer nada à frente não é
 empurrado para lá.
 
 **A normalização** faz a grade inteira valer 1, o que dá ao número a leitura
-de "fração do que o aluno quer" e ao ψ da eq. (51) um denominador fixo. Agora
-ela deixou de ser dispensável: como a redistribuição conserva a massa, a
-utilidade também soma 1, e é isso que põe `alpha_u` na **mesma unidade**
-da utilidade — o aluno compara participações, e a reserva é um valor nessa
-mesma escala.
+de "fração do que o aluno quer" e ao ψ da eq. (51) um denominador fixo. Como
+a redistribuição de `equations.utility` conserva a massa, a utilidade também
+soma 1 — o aluno compara participações.
+
+É esta normalização que **fixa a escala da seletividade**. A reserva compara
+a opção externa com `Σ_{M_a} I` (`equations.reserve_threshold`), e essa soma
+vale aproximadamente `|M_a| / (turmas da grade)`: o denominador aqui é a
+soma sobre **turmas**, então abrir seções de uma disciplina encolhe `I` e
+endurece o corte. Trocar de grade pede recalibrar a mediana da seletividade.
 
 Opera sobre o eixo final de um array `(alunos, períodos, disciplinas)`.
 """

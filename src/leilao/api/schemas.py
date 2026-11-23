@@ -13,18 +13,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..auction import AuctionResult
 from ..comparison import ARMS, MAX_RUNS
 from ..config import (
-    DEFAULT_AVAILABILITY,
-    DEFAULT_PERFORMANCE,
-    DEFAULT_ROUTINE,
-    DEFAULT_SELECTIVITY,
-    AvailabilityProfile,
+    AvailabilityShape,
     CreditMemory,
     Mechanism,
-    PerformanceProfile,
+    MAX_QUANTILES,
+    PerformanceShape,
     Resolver,
-    RoutineProfile,
-    SelectivityProfile,
-    horizon_for_lifecycle,
+    horizon_for_window,
 )
 from ..equations import grade_shape
 
@@ -124,167 +119,56 @@ class DisciplineIn(BaseModel):
     )
 
 
-class PerformanceProfileIn(BaseModel):
-    """Um grupo da população no eixo de desempenho.
+class PerformanceIn(BaseModel):
+    """A distribuição de desempenho da população — **uma só**.
 
     A nota sai de uma normal dividida censurada em [0, 10], descrita pelas três
-    grandezas que se leem: **nota média, chance de tirar 0 e chance de tirar
-    10**. A moda é a locação, e o número digitado é literalmente o pico da
-    curva; a chance de zero fixa a cauda esquerda e a de dez fixa a direita.
-    `equations.grade_shape` converte na trinca de forma.
+    grandezas que se leem: **nota mais provável, chance de tirar 0 e chance de
+    tirar 10**. A moda é a locação, e o número digitado é literalmente o pico
+    da curva. `equations.grade_shape` converte na trinca de forma.
 
     As três valem para a **disciplina de dificuldade 1 na primeira tentativa**;
     a dificuldade e a recursada transformam as duas chances.
-
-    A **média** e a **taxa de aprovação** saem derivadas. A média fica 1 a 2
-    pontos abaixo da moda, porque a cauda esquerda é longa; e `n_min` é regra
-    de cenário, não propriedade do aluno, de modo que a aprovação é resultado.
-
-    Toda trinca existe — não há combinação a recusar.
-
-    O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
     """
 
-    name: str = Field(min_length=1, max_length=40)
-    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
-    # só passa por aqui para o cenário gravado em disco voltar igual.
-    color: str | None = Field(default=None, max_length=32)
-    mode_grade: float = Field(
-        gt=0, lt=10, description="nota mais provável do grupo, em (0, 10)"
-    )
-    zero_rate: float = Field(
-        gt=0, lt=1, description="chance de tirar 0, em (0, 1)"
-    )
-    max_rate: float = Field(gt=0, lt=1, description="chance de tirar 10, em (0, 1)")
+    model_config = ConfigDict(from_attributes=True)
+
+    mode_grade: float = Field(default=8.0, ge=0, le=10)
+    zero_rate: float = Field(default=0.005, gt=0, lt=1)
+    max_rate: float = Field(default=0.008, gt=0, lt=1)
 
     @model_validator(mode="after")
-    def _shape_exists(self) -> "PerformanceProfileIn":
-        """As duas chances ainda podem não caber juntas; a moda sempre cabe."""
+    def _shape_exists(self) -> "PerformanceIn":
         try:
-            grade_shape(
-                mode_grade=self.mode_grade,
-                zero_rate=self.zero_rate,
-                max_rate=self.max_rate,
-            )
-        except ValueError as exc:
-            raise ValueError(f"perfil {self.name!r}: {exc}") from exc
+            self.to_shape().shape
+        except ValueError as erro:
+            raise ValueError(str(erro)) from erro
         return self
 
-    @classmethod
-    def of(cls, profile: PerformanceProfile) -> "PerformanceProfileIn":
-        return cls(
-            name=profile.name,
-            mode_grade=profile.mode_grade,
-            zero_rate=profile.zero_rate,
-            max_rate=profile.max_rate,
-        )
-
-    def to_profile(self) -> PerformanceProfile:
-        return PerformanceProfile(
-            name=self.name,
+    def to_shape(self) -> PerformanceShape:
+        return PerformanceShape(
             mode_grade=self.mode_grade,
             zero_rate=self.zero_rate,
             max_rate=self.max_rate,
         )
 
 
-class ProfileIn(BaseModel):
-    """Um grupo da população no eixo de disponibilidade.
+class AvailabilityIn(BaseModel):
+    """A distribuição de disponibilidade da população — **uma só**.
 
-    A disponibilidade é a carga que o aluno tem para o período, **em horas**, e
-    sai de uma log-normal — suporte (0, ∞), sem máximo artificial e nunca
-    negativa. O grupo a descreve pela **moda** (o pico da curva, em horas) e
-    pela **chance de alcançar a carga máxima**, que é a frequência com que ele
-    não precisa excluir nada. `equations.availability_shape` converte no par de
-    parâmetros logarítmicos.
-
-    Passar de W_a é permitido: o teto de carga é do sistema, e quem o aplica é
-    o alocador. A validação da moda contra W_a acontece no cenário, onde W_a
-    existe.
-
-    O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
+    Duas grandezas: a **moda** em horas e a **chance de alcançar a carga
+    máxima**. A segunda referencia W_a, que é do cenário.
     """
 
-    name: str = Field(min_length=1, max_length=40)
-    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
-    # só passa por aqui para o cenário gravado em disco voltar igual.
-    color: str | None = Field(default=None, max_length=32)
-    mode_hours: float = Field(
-        gt=0, description="moda da disponibilidade, em horas; deve ficar abaixo de W_a"
-    )
-    full_load_rate: float = Field(
-        gt=0,
-        lt=1,
-        description="chance de alcançar a carga horária máxima, em (0, 1)",
-    )
+    model_config = ConfigDict(from_attributes=True)
 
-    @classmethod
-    def of(cls, profile: AvailabilityProfile) -> "ProfileIn":
-        return cls(
-            name=profile.name,
-            mode_hours=profile.mode_hours,
-            full_load_rate=profile.full_load_rate,
+    mode_hours: float = Field(default=306.0, gt=0)
+    full_load_rate: float = Field(default=0.10, gt=0, lt=1)
+
+    def to_shape(self) -> AvailabilityShape:
+        return AvailabilityShape(
+            mode_hours=self.mode_hours, full_load_rate=self.full_load_rate
         )
-
-    def to_profile(self) -> AvailabilityProfile:
-        return AvailabilityProfile(
-            name=self.name,
-            mode_hours=self.mode_hours,
-            full_load_rate=self.full_load_rate,
-        )
-
-
-class SelectivityProfileIn(BaseModel):
-    """Um grupo da população no eixo de **seletividade**.
-
-    `S_a`, repartido entre as elegíveis do período: o aluno não pede nem
-    financia nada abaixo de `S_a / |M_a|`. Em 0 não há corte — é o
-    especulador, que pede tudo e gasta o orçamento inteiro.
-
-    O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
-    """
-
-    name: str = Field(min_length=1, max_length=40)
-    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
-    # só passa por aqui para o cenário gravado em disco voltar igual.
-    color: str | None = Field(default=None, max_length=32)
-    value: float = Field(
-        ge=0, description="S_a, repartido entre as elegíveis; 0 desliga o corte"
-    )
-
-    @classmethod
-    def of(cls, profile: SelectivityProfile) -> "SelectivityProfileIn":
-        return cls(name=profile.name, value=profile.value)
-
-    def to_profile(self) -> SelectivityProfile:
-        return SelectivityProfile(name=self.name, value=self.value)
-
-
-class RoutineProfileIn(BaseModel):
-    """Um grupo da população no eixo de **rotina** — a vida fora da grade.
-
-    Os dois valores multiplicam o interesse das turmas de cada turno. O
-    indiferente é o neutro (1 e 1); quem tem rotina diurna dobra o peso das
-    turmas diurnas, e vice-versa.
-
-    O nome é rótulo de relatório e precisa ser único dentro do seu eixo.
-    """
-
-    name: str = Field(min_length=1, max_length=40)
-    # A cor do grupo nos gráficos. É da interface: o motor não a lê, e ela
-    # só passa por aqui para o cenário gravado em disco voltar igual.
-    color: str | None = Field(default=None, max_length=32)
-    day: float = Field(gt=0, description="multiplicador do interesse nas turmas diurnas")
-    night: float = Field(
-        gt=0, description="multiplicador do interesse nas turmas noturnas"
-    )
-
-    @classmethod
-    def of(cls, profile: RoutineProfile) -> "RoutineProfileIn":
-        return cls(name=profile.name, day=profile.day, night=profile.night)
-
-    def to_profile(self) -> RoutineProfile:
-        return RoutineProfile(name=self.name, day=self.day, night=self.night)
 
 
 class ScenarioIn(BaseModel):
@@ -305,56 +189,76 @@ class ScenarioIn(BaseModel):
     class_size: int = Field(
         default=25, gt=0, description="alunos por turma — q_x = classes × este"
     )
-    # Os **quatro** eixos de perfil. Três são traço (governam sorteios e o
-    # aluno não os conhece); a seletividade é estratégia e vira a decisão
-    # dele. A repartição entre as combinações é igualitária e exata: a coorte
-    # é `students_per_profile × combinações`.
-    performance_profiles: list[PerformanceProfileIn] = Field(
-        default_factory=lambda: [
-            PerformanceProfileIn.of(x) for x in DEFAULT_PERFORMANCE
-        ],
-        min_length=1,
+    # Os **três eixos da população**, cada um uma distribuição só mais um
+    # nível basilar: a fração da variância que é permanente do aluno. Sem ele
+    # o eixo descreve o sorteio do período, não um tipo de aluno, e o corte
+    # por quantil fatiaria ruído.
+    performance: PerformanceIn = Field(
+        default_factory=PerformanceIn,
         description=(
-            "perfis de desempenho: governam a normal dividida da nota, por nota "
-            "média, chance de tirar 0 e chance de tirar 10"
+            "distribuição de desempenho: governa a normal dividida da nota, por "
+            "nota mais provável, chance de tirar 0 e chance de tirar 10"
         ),
     )
-    availability_profiles: list[ProfileIn] = Field(
-        default_factory=lambda: [ProfileIn.of(x) for x in DEFAULT_AVAILABILITY],
-        min_length=1,
+    performance_stability: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
         description=(
-            "perfis de disponibilidade: governam a log-normal das horas que o "
-            "aluno tem para o período, sorteada a cada período"
+            "quanto do desempenho é do aluno e não da matéria — a correlação "
+            "entre os quantis dele em duas disciplinas. Em 0 a dispersão do CR "
+            "entre alunos não tem piso e a ordenação por CR vira sorte"
         ),
     )
-    selectivity_profiles: list[SelectivityProfileIn] = Field(
-        default_factory=lambda: [
-            SelectivityProfileIn.of(x) for x in DEFAULT_SELECTIVITY
-        ],
-        min_length=1,
+    availability: AvailabilityIn = Field(
+        default_factory=AvailabilityIn,
         description=(
-            "perfis de seletividade: S_a, repartido entre as disciplinas "
-            "elegíveis do período. 0 é o especulador"
+            "distribuição de disponibilidade: governa a log-normal das horas "
+            "que o aluno tem para o período, sorteada a cada período"
         ),
     )
-    routine_profiles: list[RoutineProfileIn] = Field(
-        default_factory=lambda: [RoutineProfileIn.of(x) for x in DEFAULT_ROUTINE],
-        min_length=1,
+    availability_stability: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
         description=(
-            "perfis de rotina: os multiplicadores do interesse nas turmas "
-            "diurnas e nas noturnas. O indiferente é 1 e 1"
+            "quanto da disponibilidade é permanente — a correlação entre dois "
+            "períodos do mesmo aluno"
         ),
     )
-    students_per_profile: int = Field(
-        default=2,
+    selectivity_median: float = Field(
+        default=0.0035,
+        ge=0,
+        description=(
+            "a mediana da seletividade, na **escala do interesse**: quanto "
+            "vale, para o aluno, não estudar. A reserva dele é `S / (S + ΣI)` "
+            "sobre o interesse das elegíveis. 0 é o especulador"
+        ),
+    )
+    selectivity_sigma: float = Field(
+        default=0.6, gt=0, description="desvio em log da seletividade"
+    )
+    selectivity_stability: float = Field(
+        default=0.7,
+        ge=0,
+        le=1,
+        description="quanto da seletividade é permanente, entre períodos",
+    )
+    quantiles: int = Field(
+        default=3,
+        ge=1,
+        le=MAX_QUANTILES,
+        description=(
+            "em quantas faixas os relatórios recortam a população. O corte é "
+            "sobre o nível basilar de cada eixo; em 1 há uma faixa só"
+        ),
+    )
+    students_per_period: int = Field(
+        default=90,
         ge=1,
         description=(
-            "exemplares de cada combinação de perfil em cada coorte. A coorte é "
-            "isto vezes o número de combinações (3 · 3 · 5 · 3 = 135 nos "
-            "padrões), "
-            "e a população é a coorte vezes os períodos com ingresso. "
-            "A coorte não pode passar da menor oferta entre as disciplinas de "
-            "entrada, porque o ingressante tem vaga garantida em todas elas."
+            "quantos alunos ingressam por período. Em regime a população é "
+            "isto vezes o prazo de jubilamento"
         ),
     )
     class_stability: float = Field(
@@ -366,21 +270,15 @@ class ScenarioIn(BaseModel):
             "todas valem o mesmo para o aluno; em 0 cada uma tem valor próprio"
         ),
     )
-    day_slots: int = Field(
+    slots: int = Field(
         default=12,
         ge=1,
         le=48,
         description=(
-            "quantos horários diurnos existem. Cada horário é um grupo de "
-            "exclusão mútua entre turmas, e as turmas da grade são repartidas "
-            "entre eles circularmente"
+            "quantos horários existem. Cada horário é um grupo de exclusão "
+            "mútua entre turmas, e as turmas da grade são repartidas entre eles "
+            "circularmente. O piso é o maior número de turmas de uma disciplina"
         ),
-    )
-    night_slots: int = Field(
-        default=6,
-        ge=1,
-        le=48,
-        description="quantos horários noturnos existem",
     )
     interest_stability: float = Field(
         default=0.5,
@@ -416,36 +314,44 @@ class ScenarioIn(BaseModel):
     max_hours: int = Field(
         default=360, ge=1, description="W_a — carga horária máxima por período"
     )
-    entry_periods: int = Field(
-        default=8,
-        ge=1,
-        le=40,
-        description=(
-            "em quantos períodos entra coorte nova, contados do primeiro. Depois "
-            "do último ingresso vem a fase de drenagem, em que a população só diminui."
-        ),
-    )
     max_residence: int = Field(
         default=12,
         ge=1,
         le=40,
         description=(
             "períodos que o aluno tem para concluir, contados do ingresso. Quem chega "
-            "ao fim do último sem fechar a grade é jubilado e sai da simulação."
+            "ao fim do último sem fechar a grade é jubilado e sai da simulação. É "
+            "também o tamanho da pré-população, porque a população só fica constante "
+            "a partir dele"
+        ),
+    )
+    observation_periods: int = Field(
+        default=10,
+        ge=1,
+        le=40,
+        description=(
+            "quantos períodos são medidos, depois da pré-população. São os que as "
+            "tabelas e os gráficos mostram"
         ),
     )
 
     @property
-    def periods(self) -> int:
-        """|T|, derivado — ver `config.horizon_for_lifecycle`.
+    def warmup_periods(self) -> int:
+        """A pré-população — **é** o prazo de jubilamento.
 
-        Não é campo porque não é escolha: a última coorte sai ao fim da
-        residência dela e depois disso não há mais ninguém a simular. Deixá-lo
-        configurável permitiria um horizonte que corta coortes pela metade ou
-        que roda períodos vazios no fim.
+        Não é campo porque não é escolha: com ingresso em todo período e
+        residência R, antes de `t = R` nenhuma coorte é velha o bastante para
+        sair, e a população cresce uma coorte por período. Qualquer valor menor
+        mediria a rampa.
         """
-        return horizon_for_lifecycle(
-            entry_periods=self.entry_periods, max_residence=self.max_residence
+        return self.max_residence
+
+    @property
+    def periods(self) -> int:
+        """|T|, derivado — ver `config.horizon_for_window`."""
+        return horizon_for_window(
+            max_residence=self.max_residence,
+            observation_periods=self.observation_periods,
         )
     rounds: int = Field(default=1, ge=1, le=10, description="|R| — rodadas por período")
     min_grade: float = Field(default=5.0, gt=0, le=10, description="n_min")
@@ -552,8 +458,7 @@ class AxisBandsOut(BaseModel):
 
     As duas dimensões são independentes na tela, e vêm todas as combinações:
     `ruler` é `period`, `age` ou `cohort`; `axis` é `overall` (um grupo só) ou
-    um dos eixos de perfil — `performance`, `availability`, `selectivity`,
-    `routine`.
+    um dos eixos de perfil — `performance`, `availability` ou `selectivity`.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -597,6 +502,9 @@ class RunSummaryOut(BaseModel):
     # aula. É a quinta métrica da comparação, e a que a disponibilidade existe
     # para produzir.
     exclusion_rate: float
+    # Δψ — a dissipação: a satisfação alocada que não chegou a ser consumida.
+    # Custo **privado** da exclusão, contra o ε acima, que é o social.
+    dissipation: float = 0.0
     # N̄ — o CR médio. Descreve, não pontua: sobe tanto por o aluno ir melhor
     # quanto por o mecanismo roteá-lo para turma mais fácil.
     grade_average: float = 0.0
@@ -619,7 +527,7 @@ class ClassPriceBandsOut(BaseModel):
     cruzar "disciplina de 2 turmas" com uma métrica por aluno não produziria
     leitura nenhuma.
 
-    `axis` é `classes`, `hours`, `difficulty`, `shift` ou
+    `axis` é `classes`, `hours`, `difficulty` ou
     `curriculum_period`. Os grupos têm a forma das demais faixas, com uma
     grandeza só (`mean_price`), e a chave de cada um é **o valor**, sem
     idioma: `"2"`, `"60"`, `"1.4"` — e `"elective"` no recorte por período,
@@ -837,7 +745,6 @@ class StudentSummaryOut(BaseModel):
     performance: str
     availability: str
     selectivity: str
-    routine: str
     grade_average: float
     approved_hours: int
     hours_to_graduate: int

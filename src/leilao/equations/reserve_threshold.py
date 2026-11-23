@@ -1,10 +1,12 @@
-"""A utilidade de reserva: a seletividade repartida entre as elegíveis.
+"""A utilidade de reserva: a opção externa do aluno contra o que ele pode cursar.
 
-    s_a^(t) = S_a / |M_a^(t)|,        Σ_{X ∈ M_a^(t)} s_a^(t) = S_a
+    s_a^(t) = S_a^(t) / ( S_a^(t) + Σ_{X ∈ M_a^(t)} I_{a,X}^(t) )
 
-`S_a` é a **seletividade**, traço fixo do perfil, e é o único eixo de
-estratégia do aluno. `s_a^(t)` é o limiar contra o qual ele compara cada
-disciplina naquele período:
+`S_a^(t)` é a **seletividade** do período — o valor da opção externa, quanto
+vale para o aluno não cursar disciplina nenhuma —, e é o único eixo de
+estratégia dele. `s_a^(t)` é a participação dessa opção no interesse total
+das elegíveis (`equations.eligible_interest`), e é o limiar contra o qual ele
+compara cada disciplina:
 
 - **pede X** se `U_{a,X} ≥ s_a^(t)` (`equations.admitted_set`);
 - **investe o k-ésimo crédito em X** se `U_{a,X}/k ≥ s_a^(t)`
@@ -13,24 +15,43 @@ disciplina naquele período:
 Uma regra, dois usos, um por mecanismo: no CR não há investimento marginal
 que se possa interromper, então lá o corte do conjunto é tudo o que existe.
 
-POR QUE DIVIDIDA PELAS ELEGÍVEIS
+A SELETIVIDADE É UMA ALTERNATIVA A MAIS NO BOLO
+------------------------------------------------
+
+A forma `S / (S + ΣI)` é a da **opção externa**: a seletividade entra no
+mesmo bolo das elegíveis e fica com a fatia dela. É o que "utilidade de
+reserva" quer dizer em desenho de mecanismos — o payoff de não participar,
+contra o qual se escreve a restrição de participação —, e não o preço de
+reserva do vendedor.
+
+A ESCALA DE `S` É A DO INTERESSE
 ---------------------------------
 
-Porque `equations.utility` faz `Σ_{X ∈ M_a} U_{a,X} = 1`: a utilidade média de
-uma disciplina elegível é exatamente `1/|M_a|`, e `S_a` se lê direto como
-**múltiplo da indiferença** — "a disciplina precisa valer o dobro de uma
-disciplina média" é 2, e não um número sem escala.
+`S` é um valor na escala de `I`, e não um múltiplo de disciplina: é assim que
+a monografia o define, e é o que faz a razão cair em [0, 1). Como
+`equations.interest_row` normaliza a linha sobre a **grade inteira**, `ΣI`
+das elegíveis é a fração da grade que o aluno pode cursar agora, e `S` se lê
+na mesma moeda: **quanto da grade inteira vale não estudar**. Daí a ordem de
+grandeza da mediana ser de centésimos, e não de unidades.
 
-Dito ao contrário, `S_a` é a soma das reservas: o aluno reparte a própria
-exigência entre as disciplinas que tem diante de si. Um limiar absoluto não
-sobreviveria ao catálogo crescer — dobrar o número de disciplinas corta a
-participação média pela metade, e o mesmo valor passaria a cortar o dobro —,
-nem se adaptaria ao calouro e ao veterano, que têm conjuntos elegíveis de
-tamanhos bem diferentes.
+A consequência prática: o limiar medido em utilidades médias é `S / Ī`, com
+`Ī = ΣI/|M_a|` o interesse médio de uma elegível. Crescer o **conjunto
+elegível** não mexe nele — `ΣI` e `|M_a|` crescem juntos, a utilidade média
+cai na mesma proporção que a reserva, e a *fração* pedida fica onde estava.
+Crescer a **grade** mexe: a normalização da linha faz `Ī` encolher, e o mesmo
+`S` passa a cortar mais. Trocar de grade pede recalibrar a mediana.
 
-Com `S_a = 0` a reserva é zero e o aluno pede tudo que é elegível: é o
+**O denominador é o das elegíveis, não o da utilidade.** `equations.utility`
+normaliza por `Σ_{M_a ∪ seq(M_a)} I`, que é maior porque absorve o lookahead
+dos sucessores nos *numeradores* — as duas normalizações põem a mesma massa
+total (1) sobre o conjunto elegível, e o lookahead só a redistribui lá dentro.
+Descontá-lo outra vez aqui faria a reserva encolher só porque o aluno tem
+grade longa pela frente, e ele pediria mais por isso.
+
+**Com `S = 0` a reserva é zero** e o aluno pede tudo que é elegível: é o
 especulador, e é o perfil que a Seção 2.2 do anteprojeto diz que o CR
-incentiva.
+incentiva. Com a seletividade sorteada de uma log-normal ele não aparece
+exatamente, mas a cauda baixa dela se comporta como ele.
 
 Não está no anteprojeto.
 """
@@ -47,21 +68,26 @@ class Behavior:
     um perfil com um valor por par (aluno, disciplina) descreveria o que
     fazer com a linha deste semestre e não diria nada sobre a do próximo.
 
-    O valor é declarado pelo cenário e distribuído pela posição do aluno — é
-    um eixo de perfil, ao lado de desempenho, disponibilidade e rotina.
+    O valor é **do período**: a seletividade sai de uma log-normal com nível
+    basilar, como o interesse, então ela muda de semestre para semestre em
+    torno da exigência permanente do aluno. Quem o atribui antes das rodadas é
+    `simulation.period`.
     """
 
-    # S_a — a seletividade. 0 desliga o corte: o aluno pede tudo que é
-    # elegível e gasta o orçamento inteiro.
+    # S_a^(t) — a seletividade, na **escala do interesse**. 0 desliga o corte:
+    # o aluno pede tudo que é elegível e gasta o orçamento inteiro.
     selectivity: float = 0.0
 
 
 NEUTRAL = Behavior()
 
 
-def reserve_threshold(*, selectivity: float, eligible: int) -> float:
-    """`eligible` é `|M_a^(t)|` — quantas **disciplinas** o aluno pode cursar
-    neste período, não quantas turmas."""
-    if selectivity <= 0.0 or eligible <= 0:
+def reserve_threshold(*, selectivity: float, interest: float) -> float:
+    """`interest` é `Σ_{X ∈ M_a^(t)} I_{a,X}` — o interesse total das
+    **disciplinas** elegíveis, de `equations.eligible_interest`.
+
+    Sem elegíveis não há o que cortar, e o limiar sai 0 em vez de 1.
+    """
+    if selectivity <= 0.0 or interest <= 0.0:
         return 0.0
-    return selectivity / eligible
+    return selectivity / (selectivity + interest)

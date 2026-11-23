@@ -3,7 +3,7 @@ import pytest
 
 from profiles import single_axis
 from disciplines import disciplines_from_predecessors
-from leilao.config import Discipline, SimulationConfig, horizon_for_lifecycle
+from leilao.config import Discipline, SimulationConfig, horizon_for_window
 from leilao.equations import next_budget, progress
 from leilao.grading import credit_return
 from leilao.metrics import demand_per_seat, jain_index, pearson, semestralization
@@ -35,7 +35,6 @@ WORKLOAD = 180
 # alcança, de modo que o conjunto elegível continue sendo o de 1º período.
 NEVER_APPROVES = dict(
     periods=2,
-    entry_periods=1,
     # Nota de corte inalcançável: com a nota saindo de `a^E` e `a < 1`, ela
     # nunca chega a 10,0 — então ninguém aprova e o conjunto elegível no 2º
     # período continua sendo o de entrada.
@@ -47,7 +46,7 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=5,
-        students_per_profile=3,
+        students_per_period=3,
         rounds=2,
         max_hours=WORKLOAD,
         **single_axis(WORKLOAD),
@@ -230,12 +229,16 @@ def test_scarcity_only_counts_who_can_actually_take_the_discipline():
     demais não entram na conta de ninguém."""
     config = make_config(**NEVER_APPROVES)
     result = run_simulation(config)
-    overall = result.periods[1].aggregate.overall.metrics
+    snapshot = result.periods[1].aggregate.overall
+    overall = snapshot.metrics
     first = config.entry_disciplines()
     seats = config.hours_by_discipline()  # só para ter o dict de nomes
     assert set(first) == {"D1", "D2"}
     by_name = {d.name: d for d in config.disciplines}
-    expected = sum(overall.students / by_name[name].seats for name in first) / len(first)
+    # O denominador é a população **ativa**, não a medida: a escassez conta
+    # quem disputa a vaga, e o calouro disputa mesmo ficando fora das médias
+    # por aluno.
+    expected = sum(snapshot.active / by_name[name].seats for name in first) / len(first)
     assert overall.scarcity == pytest.approx(expected)
     assert seats.keys() == by_name.keys()
 
@@ -270,9 +273,10 @@ def test_scarcity_ignores_disciplines_with_no_seats_on_offer():
         **NEVER_APPROVES,
     )
     result = run_simulation(config)
-    overall = result.periods[1].aggregate.overall.metrics
-    # Sobra uma única disciplina com vaga, disputada por todo mundo.
-    assert overall.scarcity == pytest.approx(overall.students / 6)
+    snapshot = result.periods[1].aggregate.overall
+    # Sobra uma única disciplina com vaga, disputada por todo mundo — e
+    # "todo mundo" é a população ativa, calouro incluído.
+    assert snapshot.metrics.scarcity == pytest.approx(snapshot.active / 6)
 
 
 def test_contention_does_not_move_between_rounds():
@@ -697,7 +701,7 @@ def test_a_generation_larger_than_the_smallest_entry_offer_is_rejected():
                 Discipline("D1", seats=5, hours=60, entry=True),
                 Discipline("D2", seats=3, hours=60, entry=True),
             ],
-            students_per_profile=4,
+            students_per_period=4,
             **single_axis(360),
         )
     # Exatamente no teto passa — e não sobra vaga nenhuma para quem recursa.
@@ -706,7 +710,7 @@ def test_a_generation_larger_than_the_smallest_entry_offer_is_rejected():
             Discipline("D1", seats=4, hours=60, entry=True),
             Discipline("D2", seats=4, hours=60, entry=True),
         ],
-        students_per_profile=4,
+        students_per_period=4,
         **single_axis(360),
     ).students_per_period == 4
 
@@ -720,7 +724,7 @@ def test_entry_disciplines_heavier_than_the_workload_cap_are_rejected():
                 Discipline("D1", seats=5, hours=60, entry=True),
                 Discipline("D2", seats=5, hours=60, entry=True),
             ],
-            students_per_profile=2,
+            students_per_period=2,
             max_hours=100,
             **single_axis(100),
         )
@@ -794,7 +798,7 @@ def test_an_emptied_cohort_stays_in_the_series_with_its_graduates():
         # Aptidão alta: todo mundo passa de primeira e a geração esvazia
         # dentro do horizonte, que é o caso que o teste quer.
         make_config(
-            periods=12, entry_periods=2
+            periods=12
         )
     )
     emptied = [
@@ -1032,7 +1036,7 @@ def test_without_the_return_the_carry_has_nothing_to_carry():
     assert next_budget("carry", **conta, min_credits=12) == 12
     assert next_budget("none", **conta, min_credits=12) == 12
 
-    apertado = dict(students_per_profile=5, return_multiplier=0, periods=8)
+    apertado = dict(students_per_period=5, return_multiplier=0, periods=8)
     sem_memoria = run_simulation(make_config(credit_memory="none", **apertado))
     com_sobra = run_simulation(make_config(credit_memory="carry", **apertado))
 
@@ -1117,61 +1121,67 @@ def test_credit_return_is_reported_only_at_the_end_of_the_period():
 def test_scenario_without_students_or_disciplines_is_rejected():
     """Garantia de que todo período tem aluno começa na entrada: um cenário sem
     ninguém não produziria período algum, e toda métrica sairia indefinida."""
-    with pytest.raises(ValueError, match="pelo menos um exemplar"):
+    with pytest.raises(ValueError, match="pelo menos um aluno"):
         SimulationConfig(
             disciplines=[Discipline("D1", seats=5, hours=60)],
-            students_per_profile=0,
+            students_per_period=0,
             **single_axis(360),
         )
     with pytest.raises(ValueError, match="pelo menos uma disciplina"):
-        SimulationConfig(students_per_profile=5, **single_axis(360))
+        SimulationConfig(students_per_period=5, **single_axis(360))
 
 
-def test_entry_periods_limits_how_many_generations_enter():
-    """Com menos períodos de ingresso que |T|, só os primeiros recebem geração
-    nova, e a população deixa de crescer com o horizonte."""
-    config = make_config(periods=10, entry_periods=4)
-    assert config.entry_span == 4
-    assert config.total_students() == 12  # 3 por geração em 4 gerações
-    result = run_simulation(config)
-    assert {s.entry_period for s in result.students} == {1, 2, 3, 4}
+def test_every_period_receives_a_generation():
+    """O ingresso é contínuo: toda coorte entra, do primeiro período ao último.
 
-
-def test_entry_periods_beyond_the_horizon_is_rejected():
-    with pytest.raises(ValueError, match="períodos com ingresso"):
-        make_config(periods=5, entry_periods=6)
-
-
-def test_without_entry_periods_every_period_receives_a_generation():
-    """O default: `None` = ingresso em todos os períodos."""
+    Houve um `entry_periods` menor que |T| até 19/11/2026, e com ele uma fase
+    de drenagem no fim do horizonte. A janela estacionária a substituiu.
+    """
     config = make_config(periods=7)
-    assert config.entry_periods is None
     assert config.entry_span == 7
     assert {s.entry_period for s in run_simulation(config).students} == set(range(1, 8))
 
 
-def test_the_drain_phase_lets_late_generations_reach_the_end_of_the_course():
-    """Sem fase de drenagem a última geração vive um período só e nunca se
-    forma — a série por geração sairia censurada pelo horizonte, não pelo
-    mecanismo. Com ela, até a última geração tem tempo de concluir."""
-    censored = run_simulation(make_config(periods=8))
-    last_entry = max(s.entry_period for s in censored.students)
-    assert not [
-        s for s in censored.students if s.entry_period == last_entry and s.graduated_at
-    ]
+def test_the_population_is_constant_once_the_residence_is_full():
+    """O porquê de a pré-população ser o prazo de jubilamento.
 
-    drained = run_simulation(make_config(periods=8, entry_periods=4))
-    assert [s for s in drained.students if s.entry_period == 4 and s.graduated_at]
+    Com ingresso em todo período e residência R, no período t estão vivas as
+    coortes que entraram em t, t−1, ..., t−R+1. Antes de t = R ninguém é velho
+    o bastante para sair e a população cresce uma coorte por período; de R em
+    diante entra uma e sai outra. Medir antes disso seria medir a rampa.
+    """
+    residence = 4
+    config = make_config(periods=8, max_residence=residence, min_grade=10.0)
+    result = run_simulation(config)
+    ativos = {p.period: p.aggregate.overall.active for p in result.periods}
+    coorte = config.students_per_period
+
+    # A rampa: uma coorte a mais por período, até encher a residência.
+    for period in range(1, residence + 1):
+        assert ativos[period] == coorte * period, period
+    # O regime: constante daí em diante.
+    for period in range(residence, 9):
+        assert ativos[period] == coorte * residence, period
 
 
+def test_the_warmup_is_simulated_but_not_measured():
+    """A pré-população roda inteira — o motor não joga nada fora —, e quem a
+    recorta é a comparação."""
+    config = make_config(periods=8, warmup_periods=3)
+    result = run_simulation(config)
+    assert len(result.periods) == 8
+    assert [p.period for p in result.observed] == [4, 5, 6, 7, 8]
 
 
+def test_a_warmup_that_eats_the_horizon_is_refused():
+    with pytest.raises(ValueError, match="pré-população"):
+        make_config(periods=3, warmup_periods=3)
 
 
 def test_population_counts_everyone_who_entered_the_cut():
     """`population` é o denominador da fração de formados: quem já ingressou no
     recorte, tenha concluído ou não."""
-    config = make_config(periods=8, entry_periods=3)
+    config = make_config(periods=8)
     result = run_simulation(config)
     for period in result.periods:
         for snapshot in [period.aggregate.overall, *period.aggregate.by_cohort]:
@@ -1188,7 +1198,7 @@ def test_population_is_not_active_plus_graduated():
     """A soma ingênua conta duas vezes quem se forma ao fim do período: ele
     disputou o período inteiro, então está em `active` *e* já no acumulado.
     Tirar a fração dela daria um denominador inflado."""
-    result = run_simulation(make_config(periods=8, entry_periods=3))
+    result = run_simulation(make_config(periods=8))
     naive = [
         (snapshot.active + snapshot.graduated, snapshot.population)
         for period in result.periods
@@ -1218,7 +1228,7 @@ def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
             ("D", 5, 60, ("A",)),
             ("E", 5, 60, ("A",)),
         ),
-        students_per_profile=5,
+        students_per_period=5,
         max_hours=60,
         **single_axis(60),
     )
@@ -1227,7 +1237,7 @@ def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
     assert wide.minimum_periods_to_graduate() == 5  # max(ceil(300/60), 2)
 
     # Horizonte abaixo do piso: ninguém chega ao fim, por construção.
-    doomed = run_simulation(make_config(periods=2, entry_periods=1))
+    doomed = run_simulation(make_config(periods=2))
     assert all(s.graduated_at is None for s in doomed.students)
 
 
@@ -1468,11 +1478,17 @@ def test_dismissal_lands_on_the_last_period_of_residence():
     """Quem entra em t_a cursa os períodos de residência a partir dali, e é ao
     fim do último deles que o jubilamento o alcança. Com uma nota de corte que
     ninguém alcança, ninguém conclui, e aí a porta de saída é só essa."""
-    config = make_config(periods=9, entry_periods=3, max_residence=4, min_grade=10.0)
+    config = make_config(periods=9, max_residence=4, min_grade=10.0)
     result = run_simulation(config)
     assert all(s.graduated_at is None for s in result.students)
+    # Com ingresso em todo período, as últimas coortes ainda estão no prazo
+    # quando o horizonte acaba: o jubilamento delas cairia depois do fim.
     for student in result.students:
-        assert student.dismissed_at == student.entry_period + 4 - 1
+        fim = student.entry_period + 4 - 1
+        if fim <= config.periods:
+            assert student.dismissed_at == fim
+        else:
+            assert student.dismissed_at is None
 
 
 def test_the_two_exits_are_exclusive_and_graduation_wins():
@@ -1483,7 +1499,7 @@ def test_the_two_exits_are_exclusive_and_graduation_wins():
     jubilamento para achar em que período alguém conclui, e só então se aperta
     o prazo até exatamente esse período. Com um prazo fixo o teste passaria sem
     exercer a precedência — bastaria ninguém concluir no fio."""
-    loose = run_simulation(make_config(periods=12, entry_periods=4))
+    loose = run_simulation(make_config(periods=12))
     graduated = [s for s in loose.students if s.graduated_at is not None]
     assert graduated, "ninguém concluiu nem sem prazo"
     # O prazo que faz o primeiro concluinte fechar a grade no último dia dele.
@@ -1491,7 +1507,7 @@ def test_the_two_exits_are_exclusive_and_graduation_wins():
     residence = first.graduated_at - first.entry_period + 1
 
     tight = run_simulation(
-        make_config(periods=12, entry_periods=4, max_residence=residence)
+        make_config(periods=12, max_residence=residence)
     )
     for student in tight.students:
         assert not (student.graduated_at and student.dismissed_at)
@@ -1503,12 +1519,12 @@ def test_the_two_exits_are_exclusive_and_graduation_wins():
 def test_the_dismissed_stop_disputing():
     """Jubilado sai de `active` e não aparece em período nenhum depois disso —
     é a mesma saída que a conclusão, pela outra porta."""
-    result = run_simulation(make_config(periods=9, entry_periods=3, max_residence=4,
+    result = run_simulation(make_config(periods=9, max_residence=4,
                                         min_grade=10.0))
     by_id = {s.id: s for s in result.students}
     for history in result.histories:
         student = by_id[history.student_id]
-        if history.periods:
+        if history.periods and student.dismissed_at is not None:
             assert max(r.period for r in history.periods) <= student.dismissed_at
 
 
@@ -1522,16 +1538,10 @@ def test_without_max_residence_nobody_is_dismissed():
     assert last.dismissed == 0
 
 
-def test_the_horizon_of_a_lifecycle_empties_the_population():
-    """O horizonte derivado é exatamente o que esgota a população: a última
-    geração entra no último período com ingresso e sai, por uma porta ou outra,
-    ao fim da residência dela. Um período a menos cortaria alguém pela metade;
-    um a mais simularia uma universidade vazia."""
-    entry, residence = 3, 5
-    horizon = horizon_for_lifecycle(entry_periods=entry, max_residence=residence)
-    assert horizon == 7
-    result = run_simulation(make_config(periods=horizon, entry_periods=entry,
-                                        max_residence=residence))
-    assert all(s.graduated_at or s.dismissed_at for s in result.students)
-    last = result.periods[-1].aggregate.overall
-    assert last.graduated + last.dismissed == last.population
+def test_the_horizon_is_the_warmup_plus_the_observation():
+    """|T| derivado: a pré-população é o prazo de jubilamento, e depois dela
+    vêm os períodos medidos."""
+    assert horizon_for_window(max_residence=5, observation_periods=3) == 8
+    config = make_config(periods=8, max_residence=5, warmup_periods=5)
+    result = run_simulation(config)
+    assert [p.period for p in result.observed] == [6, 7, 8]

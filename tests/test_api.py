@@ -111,18 +111,14 @@ COMPARE_SCENARIO = {
     # Uma turma por vaga: estes cenários foram calibrados em vagas, e
     # `class_size = 1` preserva as contas de antes de a grade declarar turmas.
     "class_size": 1,
-    # Um nível em cada eixo: a coorte passa a ser exatamente
-    # `students_per_profile`, como era antes de a grade de perfis existir.
-    "performance_profiles": [
-        {"name": "Médio", "mode_grade": 8.0, "zero_rate": 0.005, "max_rate": 0.008}
-    ],
-    "availability_profiles": [
-        {"name": "Cheia", "mode_hours": 350.0, "full_load_rate": 0.9}
-    ],
-    "selectivity_profiles": [{"name": "Neutra", "value": 0.0}],
-    "routine_profiles": [{"name": "Indiferente", "day": 1.0, "night": 1.0}],
+    # Uma faixa de quantil só, e seletividade desligada: o cenário mede o
+    # mecanismo, não o recorte nem a estratégia.
+    "performance": {"mode_grade": 8.0, "zero_rate": 0.005, "max_rate": 0.008},
+    "availability": {"mode_hours": 350.0, "full_load_rate": 0.9},
+    "selectivity_median": 0.0,
+    "quantiles": 1,
     "periods": 3,
-    "students_per_profile": 4,
+    "students_per_period": 4,
     "rounds": 2,
     "seed": 5,
 }
@@ -133,27 +129,22 @@ COMPARE_SCENARIO = {
 POPULATION = {
     # Aptidão dura: média 0,4 (a Beta(2, 3) de antes), então reprova-se
     # bastante e há recursada o bastante para o teste da razão D/t ter amostra.
-    "mode_grade": 4.0,
-    "zero_rate": 0.05,
-    "max_rate": 0.002,
+    "performance": {"mode_grade": 4.0, "zero_rate": 0.05, "max_rate": 0.002},
     "interest_sigma": 1,
     "max_hours": 120,
-    # As modas da disponibilidade estão em horas, então os perfis padrão
-    # (dimensionados para W_a = 360) não cabem neste W_a.
-    "availability_profiles": [
-        {"name": "Alta", "mode_hours": 110.0, "full_load_rate": 0.4}
-    ],
+    # A moda da disponibilidade está em horas, então o padrão (dimensionado
+    # para W_a = 360) não cabe neste W_a.
+    "availability": {"mode_hours": 110.0, "full_load_rate": 0.4},
 }
 
 def test_compare_returns_one_summary_per_seed_in_every_arm(client):
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 3}).json()
 
     assert payload["runs"] == 3
-    # Os três modelos comparados, na ordem do eixo. Não há braço que rode
+    # Os dois modelos comparados, na ordem do eixo. Não há braço que rode
     # sem aparecer nos resultados — a ablação não roda por padrão.
     assert [a["key"] for a in payload["arms"]] == [
         "ranking_greedy",
-        "credits_ilp",
         "credits_return",
     ]
     # As seeds vão de 1 a N e são pareadas: a i-ésima execução de cada braço
@@ -163,7 +154,7 @@ def test_compare_returns_one_summary_per_seed_in_every_arm(client):
 
 
 def test_compare_runs_only_the_arms_asked_for(client):
-    """Um braço só é o caso de quem está calibrando cenário: um terço do tempo.
+    """Um braço só é o caso de quem está calibrando cenário: metade do tempo.
 
     A seed continua sendo o eixo da amostra, e o que muda é só quantos braços
     a percorrem — nada no resumo de um braço depende do outro ter rodado.
@@ -252,6 +243,7 @@ def test_compare_returns_only_the_allocation_metrics(client):
         "correlation",
         "grade_average",
         "exclusion_rate",
+        "dissipation",
         "request_states",
         "time_to_graduate",
         "allocations_per_round",
@@ -268,7 +260,6 @@ def test_compare_returns_only_the_allocation_metrics(client):
             "performance",
             "availability",
             "selectivity",
-            "routine",
         )
     ]
     overall = series[0]["groups"][0]
@@ -410,7 +401,6 @@ def test_the_price_cuts_split_the_offer_and_only_exist_in_the_auction(client):
             "classes",
             "hours",
             "difficulty",
-            "shift",
             "curriculum_period",
         }
         for cut in cortes:
@@ -467,8 +457,16 @@ def test_trace_reproduces_the_execution_the_comparison_summarized(client):
 
             assert payload["arm"] == arm["key"]
             assert payload["seed"] == run["seed"]
-            assert len(payload["periods"]) == run["periods"]
-            graduated = [s for s in payload["students"] if s["graduated_at"] is not None]
+            # O traço é a vida inteira do aluno, pré-população incluída: é o
+            # que explica o estado dele quando a janela começa. O resumo da
+            # comparação, ao contrário, só conta o que a janela mediu.
+            assert len(payload["periods"]) >= run["periods"]
+            warmup = len(payload["periods"]) - run["periods"]
+            graduated = [
+                s
+                for s in payload["students"]
+                if s["graduated_at"] is not None and s["graduated_at"] > warmup
+            ]
             assert len(graduated) == run["graduates"]
 
 
@@ -539,7 +537,7 @@ def test_compare_rejects_an_invalid_run_count(client):
 
 def test_compare_rejects_an_invalid_scenario(client):
     response = client.post(
-        "/compare", json={**COMPARE_SCENARIO, "students_per_profile": 7, "runs": 2}
+        "/compare", json={**COMPARE_SCENARIO, "students_per_period": 7, "runs": 2}
     )
 
     assert response.status_code == 400

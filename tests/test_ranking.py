@@ -8,6 +8,7 @@ import pytest
 
 from leilao.behavior import DISTRIBUTION_BINS
 from leilao.grading import DISTRIBUTION_BINS as GRADE_BINS
+from leilao.equations import quantile_names
 from leilao.comparison import (
     ABLATION_ARMS,
     ARMS,
@@ -21,7 +22,6 @@ from leilao.equations import weighted_mean
 from profiles import single_axis
 from disciplines import disciplines_from_predecessors
 from leilao.config import (
-    DEFAULT_SELECTIVITY,
     Discipline,
     SimulationConfig,
 )
@@ -44,8 +44,7 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=6,
-        entry_periods=3,
-        students_per_profile=3,
+        students_per_period=3,
         rounds=2,
         max_hours=WORKLOAD,
         **single_axis(WORKLOAD),
@@ -265,7 +264,7 @@ def test_the_two_credit_arms_differ_only_by_the_accumulation():
     o que devolver. Cinco alunos por período bastam para a disputa existir.
     """
     result = run_comparison(
-        make_config(students_per_profile=5), runs=4, arms=ARMS + ABLATION_ARMS
+        make_config(students_per_period=5), runs=4, arms=ARMS + ABLATION_ARMS
     )
     with_return = next(a for a in result.arms if a.key == "credits_return")
     without = next(a for a in result.arms if a.key == "credits_ilp")
@@ -355,8 +354,10 @@ def test_the_series_by_period_is_the_material_of_the_weighted_mean():
 # Dois grupos em dois dos eixos de perfil, para o recorte ter o que repartir.
 # A coorte (4) cabe nas 6 vagas de entrada da grade de teste.
 MIXED = dict(
-    students_per_profile=1,
-    selectivity_profiles=DEFAULT_SELECTIVITY[:2],
+    students_per_period=1,
+    # `1/(turmas da grade)`: 5 disciplinas de turma única.
+    selectivity_median=0.2,
+    quantiles=2,
 )
 
 
@@ -454,35 +455,41 @@ def test_the_cohort_ruler_gives_one_point_per_entry_period():
     cohorts = summary.by_group["cohort"]["overall"][0].series.x
 
     assert cohorts
-    assert max(cohorts) <= config.entry_periods
+    assert max(cohorts) <= config.periods
     assert cohorts == sorted(cohorts)
 
 
-def test_the_profile_cuts_follow_the_scenario_order():
-    """Os grupos de um eixo de perfil saem na ordem em que o cenário os
-    declara — é a ordem da legenda, em qualquer régua."""
+def test_the_quantile_bands_come_out_from_the_lowest_to_the_highest():
+    """As faixas saem sempre na mesma ordem — a da legenda, em qualquer
+    régua —, e a ordem é a do nível basilar, da faixa mais baixa para a mais
+    alta."""
     config = make_config(**MIXED)
     summary = summarize(run_simulation(config), seed=3)
 
+    esperado = quantile_names(config.quantiles)
     for ruler in ("period", "age", "cohort"):
-        assert [g.group for g in summary.by_group[ruler]["selectivity"]] == [
-            p.name for p in config.selectivity_profiles
-        ]
-        assert [g.group for g in summary.by_group[ruler]["selectivity"]] == [
-            p.name for p in config.selectivity_profiles
-        ]
+        for axis in ("performance", "availability", "selectivity"):
+            assert [g.group for g in summary.by_group[ruler][axis]] == esperado
 
 
 def test_the_graduation_rate_is_cumulative_over_who_entered():
     """A fração de concluintes por período é acumulada: quem já concluiu até
-    ali sobre quem já tinha entrado. Mora em [0, 1] e, na régua da idade,
-    nunca desce — ninguém deixa de ter concluído."""
+    ali sobre quem já tinha entrado. Mora em [0, 1], e **por coorte** nunca
+    desce — ninguém deixa de ter concluído.
+
+    A **monotonia** ao longo da idade valia enquanto havia uma onda de
+    ingresso só: cada ponto de idade era a mesma gente, um período mais
+    velha. Com ingresso contínuo cada ponto mistura coortes diferentes, de
+    populações diferentes, e a média ponderada delas pode recuar sem que
+    coorte nenhuma tenha recuado — então o que se guarda aqui é o domínio e a
+    identidade com o último período.
+    """
     result = run_simulation(make_config())
     summary = summarize(result, seed=3)
 
     rates = summary.by_group["age"]["overall"][0].series.graduation_rate
+    assert rates
     assert all(0.0 <= rate <= 1.0 for rate in rates)
-    assert rates == sorted(rates)
 
     last = result.periods[-1].aggregate.overall
     if summary.by_period.x and summary.by_period.x[-1] == result.periods[-1].period:
@@ -522,7 +529,7 @@ def test_the_bands_reduce_the_seeds_to_quartiles():
     assert [(a.ruler, a.axis) for a in axes] == [
         (ruler, axis)
         for ruler in ("period", "age", "cohort")
-        for axis in ("overall", "performance", "availability", "selectivity", "routine")
+        for axis in ("overall", "performance", "availability", "selectivity")
     ]
     overall = axes[0].groups[0]
     for index, period in enumerate(overall.x):
@@ -561,13 +568,19 @@ def test_the_saturation_by_period_reduces_to_the_aggregate_one():
         assert weighted_mean(pairs) == pytest.approx(aggregate)
 
 
-def test_the_series_by_period_shows_the_drainage():
-    """O peso de cada ponto é o que cai na drenagem — é por ele que a média
-    ponderada não deixa um período final valer o mesmo que um cheio."""
+def test_the_series_by_period_carries_the_weight_of_each_point():
+    """O peso de cada ponto é quantos alunos ele mediu, e é o teste de
+    validade da janela: numa janela bem aquecida ele é plano.
+
+    Aqui o cenário não tem pré-população, então a série ainda mostra a rampa —
+    o que o teste guarda é que o peso existe e acompanha a população."""
     result = run_simulation(make_config())
     students = summarize(result, seed=1).by_period.students
 
-    assert students[-1] < max(students)
+    # Um ponto por período medido. O 1º período não publica métrica nenhuma
+    # (todo mundo é calouro ali), então ele fica de fora.
+    assert len(students) == len(result.observed) - 1
+    assert all(count > 0 for count in students)
 
 
 def test_the_saturation_has_one_figure_per_round_and_decays():

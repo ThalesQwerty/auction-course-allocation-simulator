@@ -1,12 +1,13 @@
-/** O turno e o horário de cada turma — o espelho de
- * `equations.class_shift` e `equations.class_schedule`.
+/** O horário de cada turma — o espelho de `equations.class_schedule`.
  *
- *     N = ⌊k / 3⌋ turmas noturnas,  D = k − N diurnas
- *     n-ésima turma de um turno → horário (n mod |slots|) + 1
+ *     n-ésima turma da grade → Horário (n mod |G|) + 1
  *
  * A varredura é na ordem da grade — período, disciplina, turma, com as
  * optativas no fim —, e é dela que sai o equilíbrio: o número de turmas por
  * horário difere em no máximo 1.
+ *
+ * **Não há turno.** A divisão entre diurno e noturno, e o perfil de rotina
+ * que a acompanhava, saíram em 19/11/2026.
  *
  * A tela faz esta conta sozinha porque o formulário precisa dizer quanta
  * turma cai em cada horário **antes** de existir execução a quem perguntar —
@@ -14,36 +15,18 @@
  */
 import type { DisciplineInput } from "../types";
 
-export const DAY = "day";
-export const NIGHT = "night";
-
-export function classShifts(count: number): string[] {
-  if (count <= 0) return [];
-  const night = Math.floor(count / 3);
-  return [
-    ...Array.from({ length: count - night }, () => DAY),
-    ...Array.from({ length: night }, () => NIGHT),
-  ];
-}
-
-/** Quantas turmas caem em cada horário, por turno. Devolve a contagem de
- * cada horário, na ordem deles. */
+/** Quantas turmas caem em cada horário, na ordem deles. */
 export function schedulePressure(
   disciplines: DisciplineInput[],
-  daySlots: number,
-  nightSlots: number
-): { day: number[]; night: number[] } {
-  const slots = { day: Math.max(daySlots, 1), night: Math.max(nightSlots, 1) };
-  const load = {
-    day: Array.from({ length: slots.day }, () => 0),
-    night: Array.from({ length: slots.night }, () => 0),
-  };
-  const seen = { day: 0, night: 0 };
+  slots: number
+): number[] {
+  const total = Math.max(slots, 1);
+  const load = Array.from({ length: total }, () => 0);
+  let seen = 0;
   for (const discipline of disciplines) {
-    for (const shift of classShifts(discipline.classes)) {
-      const turno = shift === NIGHT ? "night" : "day";
-      load[turno][seen[turno] % slots[turno]] += 1;
-      seen[turno] += 1;
+    for (let index = 0; index < discipline.classes; index += 1) {
+      load[seen % total] += 1;
+      seen += 1;
     }
   }
   return load;

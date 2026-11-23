@@ -21,7 +21,6 @@ from disciplines import disciplines_from_predecessors
 from leilao.config import (
     DEFAULT_PERFORMANCE,
     Discipline,
-    RoutineProfile,
     SimulationConfig,
 )
 from leilao.equations import (
@@ -48,7 +47,7 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=5,
-        students_per_profile=8,
+        students_per_period=8,
         max_hours=WORKLOAD,
         **single_axis(WORKLOAD),
         seed=7,
@@ -66,7 +65,7 @@ def _grade_config(disciplines, **overrides):
         # de uma vez, e a eq. (4) tem de caber. E um horário para cada, senão
         # o pacote garantido choca consigo mesmo.
         max_hours=40 * 60,
-        day_slots=40,
+        slots=40,
         **single_axis(40 * 60),
         **overrides,
     )
@@ -165,7 +164,7 @@ def test_the_transformation_holds_the_mode_not_the_mean():
     deixaria de existir nota que a realizasse. Segurando a moda, a média cai
     com a dificuldade, que é o comportamento que se quer."""
     shapes = GradeShapes()
-    profile = DEFAULT_PERFORMANCE[1]
+    profile = DEFAULT_PERFORMANCE
     base_mode = shapes.mode(profile)
 
     means = []
@@ -378,7 +377,7 @@ def test_the_eligible_sum_is_always_one():
     # Numa grade sem pré-requisito nenhum, tudo é elegível de saída e a soma é 1.
     flat = SimulationConfig(
         disciplines=[Discipline(name, seats=20, hours=60, entry=True) for name in ("A", "B", "C")],
-        students_per_profile=8,
+        students_per_period=8,
         max_hours=WORKLOAD,
         **single_axis(WORKLOAD),
     )
@@ -410,7 +409,7 @@ def test_the_workload_cap_bounds_the_enrolled_hours():
         config = SimulationConfig(
             disciplines=disciplines,
             periods=4,
-            students_per_profile=10,
+            students_per_period=10,
             max_hours=max_hours,
             **single_axis(max_hours),
             seed=5,
@@ -432,7 +431,7 @@ def test_the_workload_cap_bounds_the_enrolled_hours():
 def test_the_cohort_axis_partitions_the_university():
     """O recorte fatia a mesma população do agregado: somá-lo reproduz
     `overall`, em toda rodada e todo período."""
-    result = run_simulation(make_config(periods=6, entry_periods=3))
+    result = run_simulation(make_config(periods=6))
     reports = [r for p in result.periods for r in (*p.rounds, p.aggregate)]
     assert reports
 
@@ -449,13 +448,14 @@ def test_the_cohort_axis_partitions_the_university():
 def test_every_generation_has_the_same_size():
     """As gerações entram em períodos consecutivos, todas do mesmo tamanho — o
     ingresso não vem da seed."""
-    config = make_config(periods=6, entry_periods=3)
+    config = make_config(periods=6)
     students = generate_students(config, np.random.default_rng(0))
-    assert len(students) == 24
-    sizes = {entry: 0 for entry in (1, 2, 3)}
+    # Ingresso em todo período: |A| é a coorte vezes o horizonte.
+    assert len(students) == 8 * 6
+    sizes = {entry: 0 for entry in range(1, 7)}
     for student in students:
         sizes[student.entry_period] += 1
-    assert sizes == {1: 8, 2: 8, 3: 8}
+    assert sizes == {entry: 8 for entry in range(1, 7)}
 
 
 # --- a estabilidade da preferência ----------------------------------------
@@ -471,8 +471,8 @@ def _rows(stability, periods=8, **overrides):
         max_hours=20 * 60,
         interest_stability=stability,
         # 20 disciplinas de entrada, de turma única: o pacote garantido só
-        # cabe se houver um horário diurno para cada uma.
-        day_slots=20,
+        # cabe se houver um horário para cada uma.
+        slots=20,
         **single_axis(20 * 60),
         **overrides,
     )
@@ -537,7 +537,7 @@ def test_a_discipline_can_carry_its_own_stability():
         periods=4,
         max_hours=20 * 60,
         interest_stability=0.0,
-        day_slots=20,
+        slots=20,
         **single_axis(20 * 60),
     )
     students = [Student(id=f"a{i:03d}", name=f"Aluno {i}", credits=10) for i in range(400)]
@@ -561,7 +561,7 @@ def _config_for(disciplines, **overrides):
     base = dict(
         disciplines=disciplines,
         periods=3,
-        students_per_profile=12,
+        students_per_period=12,
         max_hours=240,
         seed=11,
         **single_axis(240),
@@ -575,52 +575,28 @@ def _rows_for(disciplines, **overrides):
     return draw_interest(generate_students(config, rng), config, rng)
 
 
-def _shifted(classes=3):
-    """Uma disciplina com turmas nos dois turnos: 3 turmas são 2 diurnas e 1
-    noturna."""
-    return [Discipline(name="X", seats=600, hours=60, classes=classes, entry=True)]
+def test_the_classes_of_a_discipline_are_not_systematically_ordered():
+    """Com o turno fora do modelo, nada separa as turmas de uma disciplina de
+    forma **correlacionada** entre alunos: o que resta é o desvio sorteado por
+    `class_stability`, independente de aluno para aluno.
+
+    O teste guarda a consequência: a razão **mediana** entre duas turmas irmãs
+    fica em 1, em vez de refletir uma ordem fixa da grade. A mediana e não a
+    média porque a razão entre duas log-normais independentes tem cauda
+    pesada — a média dela é e^(σ²), e não 1, sem que nada esteja enviesado.
+    """
+    disciplinas = [Discipline(name="X", seats=600, hours=60, classes=3, entry=True)]
+    rows = _rows_for(disciplinas, class_stability=0.0, students_per_period=60)
+    razoes = [row["X T3"] / row["X T1"] for row in rows.values()]
+    assert np.median(razoes) == pytest.approx(1.0, abs=0.15)
 
 
-def test_the_routine_moves_the_interest_between_the_shifts():
-    """O perfil de rotina multiplica o interesse das turmas de um turno, e é
-    isso que o distingue de μ: ele varia **dentro** da linha, então não se
-    cancela na normalização."""
-    diurno = RoutineProfile(name="Diurno", day=2.0, night=1.0)
-    noturno = RoutineProfile(name="Noturno", day=1.0, night=2.0)
-    rows = _rows_for(
-        _shifted(), routine_profiles=(diurno, noturno), students_per_profile=20
-    )
-    config = _config_for(_shifted(), routine_profiles=(diurno, noturno))
-    students = generate_students(config, np.random.default_rng(config.seed))
-    por_rotina = {"Diurno": [], "Noturno": []}
-    for student in students:
-        row = rows[(student.id, 1)]
-        por_rotina[student.routine.name].append(row["X T3"] / row["X T1"])
-    assert np.mean(por_rotina["Noturno"]) > 2 * np.mean(por_rotina["Diurno"])
-
-
-def test_the_indifferent_routine_is_the_neutral():
-    """Peso igual nos dois turnos não move nada: ele vira constante da linha,
-    e a normalização desfaz constante — como faz com μ."""
-    indiferente = _rows_for(
-        _shifted(), routine_profiles=(RoutineProfile(name="R", day=1.0, night=1.0),)
-    )
-    gemeo = _rows_for(
-        _shifted(), routine_profiles=(RoutineProfile(name="R", day=3.0, night=3.0),)
-    )
-    assert set(indiferente) == set(gemeo)
-    for key, row in indiferente.items():
-        assert row == pytest.approx(gemeo[key])
-
-
-def test_the_routine_weight_does_not_zero_anything():
-    """O peso é multiplicador positivo: ele reordena os turnos e não tira
-    turma nenhuma do conjunto de escolha."""
-    rows = _rows_for(
-        _shifted(), routine_profiles=(RoutineProfile(name="D", day=50.0, night=1.0),)
-    )
+def test_every_class_keeps_a_positive_interest():
+    """A normalização reparte, nunca zera: toda turma segue no conjunto de
+    escolha do aluno."""
+    disciplinas = [Discipline(name="X", seats=600, hours=60, classes=3, entry=True)]
+    rows = _rows_for(disciplinas, class_stability=0.0)
     assert all(row["X T3"] > 0 for row in rows.values())
-    assert all(row["X T3"] < row["X T1"] for row in rows.values())
 
 
 def test_the_performance_profile_does_not_move_anyone_elses_draw():
@@ -640,7 +616,7 @@ def test_the_performance_profile_does_not_move_anyone_elses_draw():
     first = draw_base_quantiles(students, disciplines, config, np.random.default_rng(0))
     harder = [
         Student(id=s.id, name=s.name, credits=10,
-                performance=DEFAULT_PERFORMANCE[0])
+                performance_level=0.0)
         for s in students
     ]
     second = draw_base_quantiles(harder, disciplines, config, np.random.default_rng(0))

@@ -28,7 +28,7 @@ def make_config(**overrides) -> SimulationConfig:
         ("D6", 5, 60, ("D4",)),
     )
     base = dict(
-        disciplines=disciplines, students_per_profile=3, **single_axis(360)
+        disciplines=disciplines, students_per_period=3, **single_axis(360)
     )
     return SimulationConfig(**{**base, **overrides})
 
@@ -71,7 +71,7 @@ def test_a_root_without_the_entry_flag_stays_eligible():
             ("Livre", 5, 60, False),
             ("Seguinte", 5, 60, ("Entrada",)),
         ),
-        students_per_profile=2,
+        students_per_period=2,
         max_hours=120,
         **single_axis(120),
     )
@@ -87,7 +87,7 @@ def test_an_entry_discipline_cannot_have_a_prerequisite():
                 ("Base", 5, 60),
                 ("Depende", 5, 60, ("Base",), True),
             ),
-            students_per_profile=2,
+            students_per_period=2,
             max_hours=120,
             **single_axis(120),
         )
@@ -97,7 +97,7 @@ def test_a_scenario_without_entry_disciplines_is_rejected():
     with pytest.raises(ValueError, match="disciplina de entrada"):
         SimulationConfig(
             disciplines=disciplines_from_predecessors(("Livre", 5, 60, False)),
-            students_per_profile=1,
+            students_per_period=1,
             max_hours=60,
             **single_axis(60),
         )
@@ -462,33 +462,67 @@ def test_the_bid_is_proportional_to_the_utility():
     assert bids == {"D1": 10, "D2": 6, "D3": 4}
 
 
-def test_selectivity_is_shared_between_the_eligible_disciplines():
-    """Com duas elegiveis, S = 1 da reserva 0,5 e corta a segunda; S = 0,5
-    da 0,25 e nao corta nenhuma."""
+def test_the_reserve_is_the_share_of_the_outside_option():
+    """A reserva e a fatia que a opcao externa fica no bolo:
+
+        s = S / (S + SI)
+
+    Com interesse somado 1, S = 1 da reserva 0,5 e corta a segunda; S = 0,25
+    da 0,2 e nao corta nenhuma.
+    """
     utilities = {"D1": 0.6, "D2": 0.4}
 
     admitted, _scores, reserve = decide(
-        utilities=utilities, behavior=Behavior(selectivity=1.0)
+        utilities=utilities, behavior=Behavior(selectivity=1.0), interest=1.0
     )
     assert reserve == pytest.approx(0.5)
     assert set(admitted) == {"D1"}
 
-    folgado, _scores, _r = decide(
-        utilities=utilities, behavior=Behavior(selectivity=0.5)
+    folgado, _scores, solto = decide(
+        utilities=utilities, behavior=Behavior(selectivity=0.25), interest=1.0
     )
+    assert solto == pytest.approx(0.2)
     assert set(folgado) == {"D1", "D2"}
 
 
-def test_selectivity_survives_the_catalogue_growing():
-    """O corte e em multiplos da indiferenca: dobrar o catalogo com a mesma
-    forma nao muda quem passa, o que um limiar absoluto nao daria."""
-    pequeno = {"D1": 0.6, "D2": 0.4}
-    grande = {name: value / 2 for name, value in
-              list(pequeno.items()) + [("D3", 0.6), ("D4", 0.4)]}
+def test_without_eligible_interest_there_is_no_reserve():
+    """Sem elegiveis o limiar sai 0, e nao 1: nao ha o que cortar."""
+    _admitted, _scores, reserve = decide(
+        utilities={"D1": 0.6}, behavior=Behavior(selectivity=2.0), interest=0.0
+    )
+    assert reserve == 0.0
 
-    perfil = Behavior(selectivity=1.0)
-    assert set(decide(utilities=pequeno, behavior=perfil)[0]) == {"D1"}
-    assert set(decide(utilities=grande, behavior=perfil)[0]) == {"D1", "D3"}
+
+def test_selectivity_survives_the_catalogue_growing():
+    """O corte e em multiplos da indiferenca, e nao absoluto: dobrar o
+    conjunto elegivel com a mesma forma mantem a mesma **fracao** admitida.
+    Um limiar absoluto cortaria tudo no catalogo maior, onde cada disciplina
+    vale metade.
+
+    Dobrar o elegivel dobra o interesse somado — a linha do interesse e
+    normalizada sobre a grade, que nao mudou —, entao a reserva encolhe na
+    mesma proporcao em que a utilidade media encolhe: `s/mediaU = S/Ibarra`
+    nao depende de `|M|`.
+    """
+    base = [0.20, 0.16, 0.13, 0.11, 0.09, 0.08, 0.07, 0.06, 0.05, 0.05]
+    pequeno = {f"D{i}": value for i, value in enumerate(base)}
+    grande = {f"G{i}": value / 2 for i, value in enumerate(base + base)}
+
+    perfil = Behavior(selectivity=0.1)
+    fracao_pequeno = len(
+        decide(utilities=pequeno, behavior=perfil, interest=1.0)[0]
+    ) / len(pequeno)
+    fracao_grande = len(
+        decide(utilities=grande, behavior=perfil, interest=2.0)[0]
+    ) / len(grande)
+    assert abs(fracao_pequeno - fracao_grande) < 0.05
+
+    # Um limiar absoluto no mesmo nivel nao sobreviveria: no catalogo grande
+    # quase nada alcanca o corte do pequeno, porque cada disciplina vale
+    # metade.
+    absoluto = 0.1 / (0.1 + 1.0)
+    acima = sum(1 for value in grande.values() if value >= absoluto)
+    assert acima / len(grande) < 0.2
 
 
 def test_the_reserve_also_stops_the_spending():
@@ -504,7 +538,7 @@ def test_the_reserve_also_stops_the_spending():
 
     picky = compute_bids(
         utilities=utilities, available=pool, budget=20,
-        behavior=Behavior(selectivity=1.0),
+        behavior=Behavior(selectivity=1.0), interest=1.0,
     )
     assert set(picky) == {"D1"}
     assert sum(picky.values()) == 1

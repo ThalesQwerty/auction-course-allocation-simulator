@@ -5,7 +5,7 @@ recorte **particiona** a população do agregado, então somá-lo reproduz
 `overall` — é isso que permite trocar de agregação sem trocar de gráfico.
 
 O eixo é genérico de propósito (`Axis`): um recorte novo é uma chave e uma
-ordem. É assim que a coorte e os quatro eixos de perfil convivem.
+ordem. É assim que a coorte e os três eixos de quantil convivem.
 """
 from __future__ import annotations
 
@@ -19,6 +19,9 @@ from ..equations import (
     credits_per_seat,
     message_fidelity,
     progress,
+    quantile_band,
+    quantile_name,
+    quantile_names,
     request_states,
     semestralization,
     utilization,
@@ -83,30 +86,37 @@ class Axis:
         )
 
     @classmethod
-    def profiles(cls, config: SimulationConfig) -> dict[str, "Axis"]:
-        """Os eixos de perfil, na ordem em que o cenário os declara.
+    def quantiles(cls, config: SimulationConfig) -> dict[str, "Axis"]:
+        """Os três eixos da população, cortados em faixas de quantil.
 
-        Ao contrário da coorte, a lista não depende do período: o grupo existe
+        O corte é sobre o **nível basilar** — o componente permanente do
+        aluno —, e não sobre o valor do período: fatiar o sorteio do semestre
+        não separaria tipos de aluno, e o mesmo aluno trocaria de faixa a cada
+        ponto do gráfico. Ver `equations.quantile_band`.
+
+        Ao contrário da coorte, a lista não depende do período: a faixa existe
         desde o primeiro ingresso, e um recorte vazio sai com métrica `None`,
         como qualquer outro.
+
+        Houve **perfis** nomeados aqui até 19/11/2026. A diferença que importa
+        é que o quantil é um corte *a posteriori* de uma população contínua, e
+        o perfil era um grupo declarado antes dela existir.
         """
+        bands = config.quantiles
+        order = quantile_names(bands)
+
+        def axis(level: Callable[[Student], float]) -> "Axis":
+            return cls(
+                key=lambda s: quantile_name(
+                    band=quantile_band(level=level(s), bands=bands), bands=bands
+                ),
+                order=list(order),
+            )
+
         return {
-            "performance": cls(
-                key=lambda s: s.performance.name,
-                order=[p.name for p in config.performance_profiles],
-            ),
-            "availability": cls(
-                key=lambda s: s.availability.name,
-                order=[p.name for p in config.availability_profiles],
-            ),
-            "selectivity": cls(
-                key=lambda s: s.selectivity.name,
-                order=[p.name for p in config.selectivity_profiles],
-            ),
-            "routine": cls(
-                key=lambda s: s.routine.name,
-                order=[p.name for p in config.routine_profiles],
-            ),
+            "performance": axis(lambda s: s.performance_level),
+            "availability": axis(lambda s: s.availability_level),
+            "selectivity": axis(lambda s: s.selectivity_level),
         }
 
 
@@ -133,6 +143,12 @@ class Measurements:
     # de período tem o que contar.
     excluded: dict[str, list[str]] | None
     effective_utilizations: dict[str, float] | None
+    # ψ sobre o **alocado**, antes da exclusão. `None` em plena rodada, onde
+    # as duas leituras ainda são a mesma. O vão para `satisfactions` é a
+    # dissipação — ver `equations.dissipation`.
+    allocated_satisfactions: dict[str, float] | None
+    # S_a^(t) — a seletividade do período, para a grade de correlações.
+    selectivities: dict[str, float]
     request_states: dict[str, RequestStates] | None
     credits: dict[str, int]  # saldo no instante
     supply: dict[str, int]  # C_a^(t,1), a oferta do início do período
@@ -158,6 +174,8 @@ def measure(
     hours: dict[str, int],  # por turma: pesa o que foi alocado
     discipline_hours: dict[str, int],  # por disciplina: pesa o histórico
     credit_returns: dict[str, int] | None,
+    selectivities: dict[str, float] | None = None,
+    allocated_satisfactions: dict[str, float] | None = None,
     retained: dict[str, set[str]] | None = None,
     excluded: dict[str, list[str]] | None = None,
     requested: dict[str, set[str]] | None = None,
@@ -252,6 +270,8 @@ def measure(
             if retained is not None and requested is not None
             else None
         ),
+        allocated_satisfactions=allocated_satisfactions,
+        selectivities=selectivities or {s.id: 0.0 for s in active},
         credits=credits,
         supply=supply,
         bids=bids,
@@ -320,6 +340,12 @@ def snapshot(
             contentions=pick(values.contentions),
             allocated=sum(len(values.won[i]) for i in ids),
             total_seats=total_seats,
+            selectivities=pick(values.selectivities),
+            allocated_satisfactions=(
+                pick(values.allocated_satisfactions)
+                if values.allocated_satisfactions is not None
+                else None
+            ),
             excluded=(
                 sum(len(values.excluded[i]) for i in ids)
                 if values.excluded is not None

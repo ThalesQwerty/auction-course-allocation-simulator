@@ -139,7 +139,6 @@ def run_auction(auction_input: AuctionInput, *, resolver: Resolver = "ilp") -> A
         good_ids=[g.id for g in auction_input.goods],
         bids=bids,
         allocation=allocation,
-        conflicts=auction_input.conflicts,
     )
     consumed = consumption(bids=bids, allocation=allocation, prices=prices)
 

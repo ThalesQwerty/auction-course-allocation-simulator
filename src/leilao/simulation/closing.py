@@ -78,7 +78,7 @@ def _grade(
     recursada já usa, agora num segundo eixo.
     """
     mode, left_sd, right_sd = draws.grade_shapes.of(
-        student.performance, draws.difficulty[name], attempt
+        draws.performance, draws.difficulty[name], attempt
     )
     return grade_for_attempt(
         quantile=draws.base_quantiles[(student.id, discipline)],

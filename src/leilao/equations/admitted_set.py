@@ -2,8 +2,8 @@
 
     admitidas = { X : U_{a,X} ≥ s_a^(t) }
 
-O limiar vem de `equations.reserve_threshold`: a seletividade do perfil
-repartida entre as elegíveis do período. O termo "reserva" é o da literatura
+O limiar vem de `equations.reserve_threshold`: a seletividade do aluno contra
+o interesse das elegíveis do período. O termo "reserva" é o da literatura
 de desenho de mecanismos — o payoff da opção externa, contra o qual se
 escreve a restrição de participação. Não é o preço de reserva do vendedor: é
 o lado do agente.

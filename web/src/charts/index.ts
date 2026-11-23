@@ -10,6 +10,8 @@
  */
 export { AllocationTimeChart, formatSeconds } from "./AllocationTimeChart";
 export type { AllocationTimeLine } from "./AllocationTimeChart";
+export { BoxPlot } from "./BoxPlot";
+export type { BoxRow } from "./BoxPlot";
 export { DensityChart } from "./DensityChart";
 export type { DensitySplit } from "./DensityChart";
 export { Histogram } from "./Histogram";

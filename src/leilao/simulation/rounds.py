@@ -83,6 +83,7 @@ def _run_credit_round(
     draws: Draws,
     active: list[Student],
     utilities: dict[str, dict[str, float]],
+    interests: dict[str, float],
     state: PeriodState,
     available: dict[str, list[str]],
     round_number: int,
@@ -100,6 +101,7 @@ def _run_credit_round(
             budget=state.budget[student.id],
             behavior=student.behavior,
             classes=draws.classes,
+            interest=interests[student.id],
         )
         for name, credits in posted.items():
             state.record_bid(student.id, name, round_number, credits)
@@ -151,6 +153,7 @@ def _run_ranking_round(
     draws: Draws,
     active: list[Student],
     utilities: dict[str, dict[str, float]],
+    interests: dict[str, float],
     grade_averages: dict[str, float],
     state: PeriodState,
     available: dict[str, list[str]],
@@ -170,6 +173,7 @@ def _run_ranking_round(
             behavior=student.behavior,
             classes=draws.classes,
             conflicts=draws.conflicts,
+            interest=interests[student.id],
         ):
             state.record_bid(student.id, name, round_number, 1)
             requests.append((student.id, name))
@@ -204,6 +208,7 @@ def run_round(
     draws: Draws,
     active: list[Student],
     utilities: dict[str, dict[str, float]],
+    interests: dict[str, float],
     grade_averages: dict[str, float],
     state: PeriodState,
     round_number: int,
@@ -229,6 +234,7 @@ def run_round(
             draws=draws,
             active=active,
             utilities=utilities,
+            interests=interests,
             state=state,
             available=available,
             round_number=round_number,
@@ -240,6 +246,7 @@ def run_round(
             draws=draws,
             active=active,
             utilities=utilities,
+            interests=interests,
             grade_averages=grade_averages,
             state=state,
             available=available,

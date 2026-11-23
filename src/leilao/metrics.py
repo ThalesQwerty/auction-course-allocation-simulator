@@ -8,9 +8,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .equations import (
+    Correlations,
     RequestStates,
+    correlations,
     demand_per_seat,
     exclusion_rate,
+    dissipation,
     jain_index,
     mean_grade_average,
     mean_satisfaction,
@@ -26,6 +29,8 @@ __all__ = [
     "compute_metrics",
     "demand_per_seat",
     "exclusion_rate",
+    "Correlations",
+    "dissipation",
     "jain_index",
     "pearson",
     "progress",
@@ -71,6 +76,13 @@ class Metrics:
     # Os seis estados de solicitação, em **média por aluno** — a seção
     # "Solicitações de disciplinas". Ver `equations.request_states`.
     request_states: RequestStates | None
+    # **Dissipação** (Δψ): a satisfação que foi alocada e não chegou a ser
+    # consumida — `equations.dissipation`. Como as outras grandezas da
+    # exclusão, sai `None` em plena rodada.
+    dissipation: float | None
+    # A grade de correlações — `equations.correlations`. `None` em plena
+    # rodada, porque duas das seis células leem a dissipação.
+    correlations: Correlations | None
     scarcity: float  # demanda potencial — `demand_per_seat`
     contention: float  # demanda efetiva — `demand_per_seat`
     mean_grade_average: float  # N̄ — `mean_grade_average`
@@ -90,6 +102,8 @@ def compute_metrics(
     contentions: list[float],
     allocated: int,
     total_seats: int,
+    selectivities: list[float] | None = None,
+    allocated_satisfactions: list[float] | None = None,
     excluded: int | None = None,
     effective_utilizations: list[float] | None = None,
     states: list[RequestStates] | None = None,
@@ -121,6 +135,31 @@ def compute_metrics(
             mean(effective_utilizations) if effective_utilizations is not None else None
         ),
         request_states=RequestStates.average(states) if states is not None else None,
+        # ψ sobre o **alocado** só existe no fechamento do período: antes da
+        # exclusão as duas leituras são a mesma, e a dissipação seria zero por
+        # construção em vez de por resultado.
+        dissipation=(
+            mean(
+                [
+                    dissipation(allocated=a, retained=r)
+                    for a, r in zip(allocated_satisfactions, satisfactions)
+                ]
+            )
+            if allocated_satisfactions is not None
+            else None
+        ),
+        correlations=(
+            correlations(
+                grade_averages=grade_averages,
+                selectivities=selectivities or [0.0] * len(satisfactions),
+                satisfactions=satisfactions,
+                occupancies=utilizations,
+                allocated_satisfactions=allocated_satisfactions,
+                retained_satisfactions=satisfactions,
+            )
+            if allocated_satisfactions is not None
+            else None
+        ),
         scarcity=mean(scarcities),
         contention=mean(contentions),
         mean_grade_average=mean_grade_average(grade_averages),

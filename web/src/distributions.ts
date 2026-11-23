@@ -21,7 +21,7 @@ import {
   lognormalQuantile,
 } from "./equations";
 import type { Curve } from "./equations";
-import type { PerformanceProfile, Profile, Scenario } from "./types";
+import type { AvailabilityShape, PerformanceShape, Scenario } from "./types";
 
 export type { Curve, DensityPoint } from "./equations";
 
@@ -59,7 +59,7 @@ export type GradePreview =
 export function gradeCurve(
   scenario: Scenario,
   { difficulty, attempt }: GradeCase,
-  profile: PerformanceProfile
+  profile: PerformanceShape
 ): GradePreview {
   const base = gradeShape(
     profile.mode_grade,
@@ -101,7 +101,7 @@ export function gradeCurve(
  * cima ou acima de W_a.
  */
 export function availabilityCurve(
-  profile: Profile,
+  profile: AvailabilityShape,
   maxHours: number
 ): (Curve & { fullLoad: number; top: number }) | null {
   const shape = availabilityShape(
@@ -142,7 +142,7 @@ const INTEREST_TOP = 0.95;
  * a massa se espreme entre 0 e 1 e a forma não se lê. O que σ faz aparece aqui
  * do mesmo jeito que na linha normalizada: grande concentra, pequeno achata.
  *
- * O **peso do turno** (`routine_profiles`) não entra: ele multiplica a linha
+ * O peso do turno não entra, porque não existe mais: ele multiplicava a linha
  * por turma e o que ele faz é redistribuir interesse entre diurnas e
  * noturnas, não mudar a forma da fonte.
  *

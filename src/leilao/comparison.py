@@ -20,18 +20,16 @@ Juntas, as duas isolam o nexo causal no mecanismo. Uma simulação só não diri
 nada — a diferença poderia ser daquela população; e N simulações sem parear as
 seeds mediriam a variação entre populações junto da variação entre mecanismos.
 
-**São três braços** (`ARMS`): a ordenação por CR, o leilão igualitário e o
-leilão acumulativo. Os dois leilões são o mesmo mecanismo — mesma moeda, mesmo
-resolvedor, mesmo segundo preço — e diferem em **de onde vem o orçamento**: no
-igualitário todo aluno abre todo período com `C_min`, e no acumulativo o saldo
-atravessa o período e o retorno da eq. (34) o alimenta.
+**São dois braços** (`ARMS`): a **ordenação por CR** e o **leilão com PLI**.
+Eles são os dois modelos que o trabalho compara, e o vão entre os dois é o
+resultado.
 
-Com eles o vão se lê em duas parcelas em vez de uma: CR × igualitário diz o
-que a **moeda** compra, igualitário × acumulativo diz o que o **acúmulo**
-compra. Sobra um degrau fora dos três, em `ABLATION_ARMS`:
+Esse vão soma **três mudanças de uma vez**, e isso é escolha declarada: não
+há braço intermediário no padrão. Os degraus que as separam continuam
+escritos, em `ABLATION_ARMS`, e rodam sob demanda:
 
     CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão igualitário
-                                                   ──acúmulo──▶  Leilão acumulativo
+                                                   ──acúmulo──▶  Leilão com PLI
 
 1. **A mensagem.** O CR dá um número por *aluno*; o lance dá um número por
    *par* (aluno, disciplina). É a intensidade entrando no que o mecanismo
@@ -50,10 +48,10 @@ compra. Sobra um degrau fora dos três, em `ABLATION_ARMS`:
    `f_γ` da eq. (34) o alimenta: quem aprova recupera a fatia do preço
    correspondente à nota, de modo que ir bem compra poder de compra no período
    seguinte. É a única fonte de mérito do leilão — a ordenação por CR faz isso
-   por construção, o histórico *é* o critério, e o leilão igualitário não faz
+   por construção, o histórico *é* o critério, e o leilão sem acúmulo não faz
    de jeito nenhum.
 
-**Memória e retorno são um canal só, não dois.** O braço igualitário fixa os
+**Memória e retorno são um canal só, não dois.** Um braço sem acúmulo fixa os
 dois (`credit_memory="none"` e `k = 0`), e os dois campos dizem a mesma coisa:
 medido, `carry` com `k = 0` sai **idêntico** a `none` — relatório por
 relatório, em todas as seeds —, porque o orçamento abre em `C_min` (eq. 37) e,
@@ -62,10 +60,10 @@ enquanto não houver retorno que erga o saldo acima do piso. Fixar os dois é,
 então, redundância deliberada: o braço fica dizendo o que é em vez de depender
 dessa prova.
 
-**Por que o acúmulo virou braço e não ablação.** A sobra é a eq. (36), dada
-pelo anteprojeto; a forma do retorno a Seção 7.3.2 deixa explicitamente em
-aberto, como eixo de experimentação. Ligá-lo é decisão de quem escreve, e o
-passo 3 é onde ela se paga — cara demais para ficar fora do padrão.
+**Por que o acúmulo entra no braço padrão.** A sobra é a eq. (36), dada pelo
+anteprojeto; a forma do retorno a Seção 7.3.2 deixa explicitamente em aberto,
+como eixo de experimentação. Ligá-lo é decisão de quem escreve, e o passo 3 é
+onde ela se paga — cara demais para ficar fora do modelo proposto.
 
 Por isso o acúmulo e o resolvedor **não são do cenário aqui**: são eixos do
 experimento. O resolvedor que vier na configuração é ignorado, como a seed; o
@@ -126,7 +124,6 @@ import numpy as np
 
 from .behavior import draw_interest
 from .equations import (
-    DAY,
     RequestStates,
     grade_for_attempt,
     grade_histogram,
@@ -180,7 +177,7 @@ class Arm:
     ou lance em créditos), o **resolvedor** (varredura gulosa ou PLI global),
     a **memória do orçamento** (se a sobra atravessa o período) e o
     **retorno de créditos**. As duas últimas andam juntas: desligar uma torna
-    a outra inerte, e por isso o braço igualitário desliga as duas.
+    a outra inerte, e por isso o braço sem acúmulo desliga as duas.
 
     `return_multiplier` é o k da eq. (34) que o braço impõe ao cenário; `None`
     quer dizer "o do cenário", e é como o braço que **acumula** não fixa
@@ -204,23 +201,15 @@ class Arm:
         return self.return_multiplier
 
 
-# Os braços na ordem do caminho — é também a ordem do eixo, da legenda e das
-# cores, e nela a correlação (eq. 57) se lê de uma vez: do mecanismo em que o
-# CR é o próprio critério ao que o ignora por completo.
+# Os **dois modelos que o trabalho compara**: a ordenação por CR e o leilão
+# com PLI. A ordem é a do eixo, da legenda e das cores, e nela a correlação
+# (eq. 57) se lê de uma vez: do mecanismo em que o CR é o próprio critério ao
+# que o ignora por completo.
 #
 # **Só entra aqui o que sai nos resultados**: cada braço é um traçado dos
-# gráficos e uma linha das tabelas, e nada roda para não ser mostrado. Uma
-# célula que já foi braço saiu por não ser passo do caminho — o CR resolvido
-# por PLI, que tem defeito declarado: como todo pedido do aluno tem o mesmo
-# peso N_a, a PLI é indiferente sobre qual cortar, e o aluno não tem voz sobre
-# o que perde. Ela segue alcançável por `SimulationConfig` (`resolver="ilp"`
-# com `mechanism="ranking"`) se um dia for precisa para um apêndice.
-#
-# A chave `credits_ilp` é **histórica**: nasceu nomeando o resolvedor, quando
-# o braço existia para isolá-lo da varredura. Hoje ela nomeia o leilão
-# igualitário, e o resolvedor dele é o mesmo do acumulativo. O nome ficou
-# porque a chave é identificador estável — comparação gravada antes disto
-# continua casando com o braço.
+# gráficos e uma linha das tabelas, e nada roda para não ser mostrado. Os
+# degraus intermediários estão em `ABLATION_ARMS` e custam tempo de execução,
+# não complexidade conceitual — são a mesma simulação com um campo trocado.
 #
 # **Os dois não usam o mesmo resolvedor, e isso é deliberado.** O CR roda por
 # ditadura serial, que desempata por ε; o leilão roda por PLI, que não lê o ε
@@ -229,19 +218,20 @@ class Arm:
 # que é o que a PLI entrega e o guloso não — preferiu-se a assimetria a isso.
 ARMS: tuple[Arm, ...] = (
     Arm("ranking_greedy", "ranking", 0.0, resolver="greedy"),
-    Arm("credits_ilp", "credits", 0.0, resolver="ilp", credit_memory="none"),
     Arm("credits_return", "credits", None),
 )
 
-# O degrau que sobrou do caminho, e que **não** roda por padrão.
+# Os degraus do caminho, que **não** rodam por padrão. Entre os dois modelos
+# há três mudanças somadas, e estes dois braços as separam. Para a ablação,
+# `run_comparison(..., arms=ARMS + ABLATION_ARMS)`.
 #
-# Entre o CR e o leilão igualitário há duas mudanças de uma vez — a mensagem
-# (um número por aluno vira um por par) e a resolução (ordinal vira cardinal)
-# —, e este braço as separa: ele tem a mensagem do leilão e a resolução do CR.
-# Fica fora do padrão porque o trabalho compara três modelos e a escada
-# inteira não cabe no texto; fica aqui porque custa tempo de execução e não
-# complexidade conceitual — é a mesma simulação com um campo trocado. Para a
-# ablação, `run_comparison(..., arms=ARMS + ABLATION_ARMS)`.
+# `credits_ilp` é o **leilão igualitário**: a mesma moeda e o mesmo resolvedor
+# do braço padrão, sem acúmulo nenhum — todo aluno abre todo período em
+# `C_min`. Com ele o vão se lê em duas parcelas em vez de uma: CR × igualitário
+# diz o que a **moeda** compra, igualitário × padrão diz o que o **acúmulo**
+# compra. Saiu do padrão em 19/11/2026, quando o trabalho passou a comparar
+# dois modelos em vez de três; a chave é **histórica** — nasceu nomeando o
+# resolvedor, e comparação gravada antes disto continua casando com o braço.
 #
 # `credits_greedy` é o *bidding points* clássico — orçamento de pontos, lances
 # por disciplina, disciplina fechando no menor lance atendido (Sönmez & Ünver
@@ -252,6 +242,7 @@ ARMS: tuple[Arm, ...] = (
 # preço. É trabalho relacionado, não célula deste desenho.
 ABLATION_ARMS: tuple[Arm, ...] = (
     Arm("credits_greedy", "credits", 0.0, resolver="greedy", credit_memory="none"),
+    Arm("credits_ilp", "credits", 0.0, resolver="ilp", credit_memory="none"),
 )
 
 
@@ -351,6 +342,17 @@ class RulerSeries:
     grade_average: list[float]
     # A fração das vagas obtidas que foi largada — ver `equations.exclusion_rate`.
     exclusion_rate: list[float]
+    # Δψ — a satisfação alocada que não chegou a ser consumida. Lê-se na
+    # escala de ψ, e `ψ retida = ψ alocada − Δψ`. Ver `equations.dissipation`.
+    dissipation: list[float]
+    # As seis células da grade de correlações, na ordem de
+    # `equations.Correlations`. Cada uma é uma série como as de cima.
+    cr_satisfaction: list[float]
+    cr_occupancy: list[float]
+    cr_dissipation: list[float]
+    selectivity_satisfaction: list[float]
+    selectivity_occupancy: list[float]
+    selectivity_dissipation: list[float]
     # --- a economia de créditos, só do leilão ----------------------------
     #
     # As três saem `None` na linha de base por CR, e não zeradas: ali não há
@@ -403,7 +405,7 @@ class GroupSeries:
 RULERS: tuple[str, ...] = ("period", "age", "cohort")
 
 # Os recortes **espaciais** da tela, na ordem do seletor: os quatro eixos de
-# perfil (`simulation.Axis.profiles`). O agregado (`overall`) não está aqui
+# quantil (`simulation.Axis.quantiles`). O agregado (`overall`) não está aqui
 # porque não é recorte — é a ausência de um.
 #
 # A coorte saiu daqui em 11/11/2026 e virou régua: ela é um corte do **tempo**,
@@ -412,7 +414,6 @@ CUT_AXES: tuple[str, ...] = (
     "performance",
     "availability",
     "selectivity",
-    "routine",
 )
 
 
@@ -424,7 +425,6 @@ CLASS_CUTS: tuple[str, ...] = (
     "classes",
     "hours",
     "difficulty",
-    "shift",
     "curriculum_period",
 )
 
@@ -453,9 +453,6 @@ def _class_group(snapshot: DisciplineSnapshot, axis: str) -> tuple[float, str]:
         return (snapshot.hours, str(snapshot.hours))
     if axis == "difficulty":
         return (snapshot.difficulty, _number_key(snapshot.difficulty))
-    if axis == "shift":
-        # Diurno antes de noturno, que é a ordem da grade.
-        return (0.0 if snapshot.shift == DAY else 1.0, snapshot.shift)
     if axis == "curriculum_period":
         if snapshot.elective:
             return (float("inf"), ELECTIVE_GROUP)
@@ -526,10 +523,14 @@ class AxisBands:
 class RunSummary:
     """Uma simulação reduzida a um ponto por métrica.
 
-    `periods` é quantos períodos a simulação de fato publicou — pode ser menor
-    que |T| se a população se esvaziou antes do horizonte —, e serve para
-    conferir que todos os braços viveram o mesmo intervalo. `graduates` é o
-    contexto sem o qual `time_to_graduate` não se lê.
+    `periods` é quantos períodos a simulação **mediu** — os de depois da
+    pré-população —, e serve para conferir que todos os braços viveram o mesmo
+    intervalo. `graduates` é o contexto sem o qual `time_to_graduate` não se lê.
+
+    As três contagens de gente — `graduates`, `dismissed` e `population` — são
+    todas **da janela**: saídas que aconteceram nela, e alunos que estiveram
+    ativos nela em algum momento. Misturá-las com o aquecimento faria as duas
+    frações medirem a rampa junto com o regime.
     """
 
     seed: int
@@ -539,9 +540,9 @@ class RunSummary:
     # fechar a grade. Com `graduates`, reparte `population` em três — saiu por
     # cima, saiu por baixo, e (só se o horizonte não esgotou) continua em curso.
     dismissed: int
-    # Quantos ingressaram ao todo, que é o denominador das duas frações. Sem
-    # ele os dois números acima são contagens sem escala: 40 formados é muito
-    # ou pouco conforme a coorte tenha 60 ou 600 pessoas.
+    # Quantos estiveram ativos na janela, que é o denominador das duas
+    # frações. Sem ele os dois números acima são contagens sem escala: 40
+    # formados é muito ou pouco conforme a coorte tenha 60 ou 600 pessoas.
     population: int
     efficiency: float  # psi-barra — eq. (53)
     # Aproveitamento: a contraparte em carga do psi, que é em utilidade. As
@@ -568,6 +569,9 @@ class RunSummary:
     # aula. É a quinta métrica da comparação — e a que a disponibilidade
     # existe para produzir. Ver `equations.exclusion_rate`.
     exclusion_rate: float
+    # Δψ — a satisfação alocada que não chegou a ser consumida, na mesma média
+    # ponderada. É o custo **privado** da exclusão; o ε acima é o social.
+    dissipation: float
     # Os seis estados em média por aluno, reduzidos a um ponto cada. A série
     # sem reduzir está em `by_period` e `by_group`.
     request_states: RequestStates
@@ -640,12 +644,52 @@ class ComparisonResult:
     grade_distribution: list[float] = field(default_factory=list)
 
 
+def _within_window(result: SimulationResult, period: int | None) -> bool:
+    """O evento caiu na janela medida?
+
+    `None` é "não aconteceu". Um diploma tirado durante a pré-população é
+    história do aquecimento, não resultado: contá-lo misturaria o regime com
+    a rampa que o precede.
+    """
+    return period is not None and period > result.warmup_periods
+
+
+def _active_in_window(result: SimulationResult) -> int:
+    """Quantos alunos estiveram ativos em algum período medido.
+
+    Ativo é ter ingressado até o fim da janela e não ter saído antes do começo
+    dela. É o denominador das frações de saída: contar a população inteira
+    incluiria coortes que entraram e saíram dentro do aquecimento, que a
+    medição nunca viu.
+    """
+    if not result.observed:
+        return 0
+    first = result.observed[0].period
+    last = result.observed[-1].period
+    total = 0
+    for student in result.students:
+        if student.entry_period > last:
+            continue
+        exit_period = student.graduated_at or student.dismissed_at
+        if exit_period is not None and exit_period < first:
+            continue
+        total += 1
+    return total
+
+
 def time_to_graduate(result: SimulationResult) -> float | None:
-    """Períodos do ingresso ao diploma — ver `equations.time_to_graduate`."""
+    """Períodos do ingresso ao diploma — ver `equations.time_to_graduate`.
+
+    Só os concluintes **da janela**. Em regime estacionário eles são amostra
+    da distribuição de residência, e não "quem coube antes do corte do
+    horizonte", que era o viés da versão com fase de drenagem. O ingresso
+    pode ser anterior à janela, e deve ser: é o aluno inteiro que se mede, não
+    o pedaço dele que coube na medição.
+    """
     return mean_span(
         s.graduated_at - s.entry_period + 1
         for s in result.students
-        if s.graduated_at is not None
+        if _within_window(result, s.graduated_at)
     )
 
 
@@ -657,14 +701,14 @@ def allocations_per_round(result: SimulationResult) -> list[float | None]:
     rodada — `RoundReport` traz o `won_now` —, de modo que a série decai: a
     primeira rodada pega o que estava livre, as seguintes o que sobrou.
     """
-    rounds = max((len(period.rounds) for period in result.periods), default=0)
+    rounds = max((len(period.rounds) for period in result.observed), default=0)
     series: list[float | None] = []
     for index in range(rounds):
         series.append(
             weighted_mean(
                 [
                     (metrics.allocations_per_student, metrics.students)
-                    for period in result.periods
+                    for period in result.observed
                     if index < len(period.rounds)
                     for metrics in [period.rounds[index].overall.metrics]
                     if metrics is not None and metrics.students > 0
@@ -732,7 +776,7 @@ def class_prices(result: SimulationResult) -> list[ClassPriceSeries]:
     for axis in CLASS_CUTS:
         points: dict[str, dict[int, list[float]]] = {}
         order: dict[str, float] = {}
-        for period in result.periods:
+        for period in result.observed:
             for snapshot in period.disciplines:
                 if snapshot.mean_price is None:
                     continue
@@ -838,6 +882,15 @@ def _measured(snapshot: GroupSnapshot | None) -> bool:
     )
 
 
+def _cell(name: str):
+    """Uma célula da grade de correlações, lida de `Metrics`.
+
+    `None` em plena rodada — duas das seis leem a dissipação, que só existe
+    depois da exclusão —, e ali vale 0: não houve correlação a medir.
+    """
+    return lambda m: getattr(m.correlations, name) if m.correlations else 0.0
+
+
 def _period_series(
     instants: list[tuple[int, GroupSnapshot | None, list[GroupSnapshot | None]]],
     rounds: int,
@@ -894,6 +947,13 @@ def _period_series(
         correlation=series(lambda m: m.correlation),
         grade_average=series(lambda m: m.mean_grade_average),
         exclusion_rate=series(lambda m: m.exclusion_rate or 0.0),
+        dissipation=series(lambda m: m.dissipation or 0.0),
+        cr_satisfaction=series(_cell("cr_satisfaction")),
+        cr_occupancy=series(_cell("cr_occupancy")),
+        cr_dissipation=series(_cell("cr_dissipation")),
+        selectivity_satisfaction=series(_cell("selectivity_satisfaction")),
+        selectivity_occupancy=series(_cell("selectivity_occupancy")),
+        selectivity_dissipation=series(_cell("selectivity_dissipation")),
         credits_supply=snapshots(lambda s: s.credits_per_student),
         credits_spent=snapshots(lambda s: s.mean_credits_spent),
         credits_returned=snapshots(lambda s: s.mean_credit_return),
@@ -946,7 +1006,7 @@ def _cell_instants(
     """
     order: list[str] = []
     out: dict[str, list[Instant]] = defaultdict(list)
-    for period in result.periods:
+    for period in result.observed:
         by_round = [
             {s.group: s for s in _cells(report, axis) if s.group is not None}
             for report in period.rounds
@@ -1063,6 +1123,28 @@ def _regroup(
         correlation=[weighed(point, lambda s: s.correlation) for point in points],
         grade_average=[weighed(point, lambda s: s.grade_average) for point in points],
         exclusion_rate=[weighed(point, lambda s: s.exclusion_rate) for point in points],
+        dissipation=[weighed(point, lambda s: s.dissipation) for point in points],
+        cr_satisfaction=[
+            weighed(point, lambda s, n="cr_satisfaction": getattr(s, n)) for point in points
+        ],
+        cr_occupancy=[
+            weighed(point, lambda s, n="cr_occupancy": getattr(s, n)) for point in points
+        ],
+        cr_dissipation=[
+            weighed(point, lambda s, n="cr_dissipation": getattr(s, n)) for point in points
+        ],
+        selectivity_satisfaction=[
+            weighed(point, lambda s, n="selectivity_satisfaction": getattr(s, n))
+            for point in points
+        ],
+        selectivity_occupancy=[
+            weighed(point, lambda s, n="selectivity_occupancy": getattr(s, n))
+            for point in points
+        ],
+        selectivity_dissipation=[
+            weighed(point, lambda s, n="selectivity_dissipation": getattr(s, n))
+            for point in points
+        ],
         credits_supply=[optional(point, lambda s: s.credits_supply) for point in points],
         credits_spent=[optional(point, lambda s: s.credits_spent) for point in points],
         credits_returned=[
@@ -1086,13 +1168,13 @@ def group_series(
 
     A ordem dos grupos é a de primeira aparição, que é a do cenário.
     """
-    rounds = max((len(period.rounds) for period in result.periods), default=0)
+    rounds = max((len(period.rounds) for period in result.observed), default=0)
     out: dict[str, dict[str, list[GroupSeries]]] = {ruler: {} for ruler in RULERS}
     out["period"]["overall"] = [GroupSeries(group="overall", series=by_period)]
 
     for axis in CUT_AXES:
         order: list[str] = []
-        for period in result.periods:
+        for period in result.observed:
             for snapshot in _cut(period.aggregate, axis):
                 if snapshot.group is not None and snapshot.group not in order:
                     order.append(snapshot.group)
@@ -1110,7 +1192,7 @@ def group_series(
                             find(period.aggregate, group),
                             [find(report, group) for report in period.rounds],
                         )
-                        for period in result.periods
+                        for period in result.observed
                     ],
                     rounds,
                 ),
@@ -1184,6 +1266,13 @@ def _quantities(series: RulerSeries, index: int) -> dict[str, float | None]:
         "correlation": series.correlation[index],
         "grade_average": series.grade_average[index],
         "exclusion_rate": series.exclusion_rate[index],
+        "dissipation": series.dissipation[index],
+        "cr_satisfaction": series.cr_satisfaction[index],
+        "cr_occupancy": series.cr_occupancy[index],
+        "cr_dissipation": series.cr_dissipation[index],
+        "selectivity_satisfaction": series.selectivity_satisfaction[index],
+        "selectivity_occupancy": series.selectivity_occupancy[index],
+        "selectivity_dissipation": series.selectivity_dissipation[index],
         "credits_supply": series.credits_supply[index],
         "credits_spent": series.credits_spent[index],
         "credits_returned": series.credits_returned[index],
@@ -1273,9 +1362,9 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     mundo acabou de ingressar. Um zero ali seria um período em que ninguém ficou
     satisfeito, que é coisa diferente de um período que não se mede.
     """
-    graduates = sum(1 for s in result.students if s.graduated_at is not None)
-    dismissed = sum(1 for s in result.students if s.dismissed_at is not None)
-    rounds = max((len(period.rounds) for period in result.periods), default=0)
+    graduates = sum(1 for s in result.students if _within_window(result, s.graduated_at))
+    dismissed = sum(1 for s in result.students if _within_window(result, s.dismissed_at))
+    rounds = max((len(period.rounds) for period in result.observed), default=0)
     by_period = _period_series(
         [
             (
@@ -1283,7 +1372,7 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
                 period.aggregate.overall,
                 [report.overall for report in period.rounds],
             )
-            for period in result.periods
+            for period in result.observed
         ],
         rounds,
     )
@@ -1294,17 +1383,17 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
 
     states = [
         (metrics, metrics.students)
-        for period in result.periods
+        for period in result.observed
         for metrics in [period.aggregate.overall.metrics]
         if _measured(period.aggregate.overall)
     ]
 
     return RunSummary(
         seed=seed,
-        periods=len(result.periods),
+        periods=len(result.observed),
         graduates=graduates,
         dismissed=dismissed,
-        population=len(result.students),
+        population=_active_in_window(result),
         efficiency=mean(by_period.efficiency),
         utilization=mean(by_period.utilization),
         progress=mean(by_period.progress),
@@ -1313,6 +1402,7 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         correlation=mean(by_period.correlation),
         grade_average=mean(by_period.grade_average),
         exclusion_rate=mean(by_period.exclusion_rate),
+        dissipation=mean(by_period.dissipation),
         request_states=weighted_states(states),
         time_to_graduate=time_to_graduate(result),
         allocations_per_round=allocations_per_round(result),
@@ -1359,10 +1449,9 @@ def sample_grade_distribution(config: SimulationConfig) -> list[float]:
         students, config.disciplines, config, np.random.default_rng(SAMPLE_SEED)
     )
     shapes = GradeShapes()
-    by_id = {student.id: student for student in students}
 
     def grade(student_id: str, quantile: float) -> float:
-        mode, left_sd, right_sd = shapes.of(by_id[student_id].performance, 1.0, 1)
+        mode, left_sd, right_sd = shapes.of(config.performance, 1.0, 1)
         return grade_for_attempt(
             quantile=quantile, mode=mode, left_sd=left_sd, right_sd=right_sd
         )

@@ -1651,3 +1651,52 @@ td.failed {
 .file-item input[type="file"] {
   display: none;
 }
+
+/* O eixo X colapsado: uma caixa por modelo, sobre as seeds. Mesmo cartão dos
+   gráficos de linha, para as duas leituras ficarem lado a lado sem trocar de
+   gramática visual. */
+.boxplot {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin: 0;
+}
+
+.boxplot > figcaption {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.boxplot svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.boxplot-legend {
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.boxplot-legend > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.boxplot-legend dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.boxplot-legend dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}

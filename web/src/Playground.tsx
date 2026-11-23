@@ -34,12 +34,11 @@ export function createPlaygroundDraft(config: Scenario): PlaygroundDraft {
     rounds: 1,
     seats: 1,
     seed: 1,
-    // O playground é um leilão isolado, com uma distribuição só: parte do
-    // primeiro perfil de desempenho do cenário, e dali o usuário mexe à
-    // vontade. Aqui não há população com grupos a separar.
-    modeGrade: config.performance_profiles[0]?.mode_grade ?? 8,
-    zeroRate: config.performance_profiles[0]?.zero_rate ?? 0.005,
-    maxRate: config.performance_profiles[0]?.max_rate ?? 0.008,
+    // O playground é um leilão isolado: parte da distribuição de desempenho
+    // do cenário, e dali o usuário mexe à vontade.
+    modeGrade: config.performance?.mode_grade ?? 8,
+    zeroRate: config.performance?.zero_rate ?? 0.005,
+    maxRate: config.performance?.max_rate ?? 0.008,
     selected: 0,
     students: [newStudent("voce", "Você", config)],
   };
@@ -353,18 +352,13 @@ export function Playground({
             <input
               type="number"
               min={0}
-              step={0.5}
+              step={0.1}
               list="submochila-seletividade"
               value={selected.selectivity ?? 0}
               onChange={(e) =>
                 patchStudent((student) => ({ ...student, selectivity: Number(e.target.value) }))
               }
             />
-            <datalist id="submochila-seletividade">
-              {config.selectivity_profiles.map((profile) => (
-                <option key={profile.name} value={profile.value} label={profile.name} />
-              ))}
-            </datalist>
           </div>
         </div>
 

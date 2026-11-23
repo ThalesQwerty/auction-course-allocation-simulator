@@ -9,7 +9,6 @@
  * A chave é separada da do histórico de propósito. Limpar execuções não apaga
  * cenários, e um formato que mude de um lado não derruba o outro.
  */
-import { cohortSize } from "./equations";
 import { migrateInterest } from "./history";
 import { strategyDefaults } from "./presets";
 import { horizonFor } from "./types";
@@ -45,16 +44,10 @@ const STORAGE_KEY = "leilao.cenarios.v2";
 export const MAX_SAVED = 30;
 
 function withStrategy(config: Scenario): Scenario {
-  const defaults = strategyDefaults();
-  return {
-    ...config,
-    selectivity_profiles: Array.isArray(config.selectivity_profiles)
-      ? config.selectivity_profiles
-      : defaults.selectivity_profiles,
-    routine_profiles: Array.isArray(config.routine_profiles)
-      ? config.routine_profiles
-      : defaults.routine_profiles,
-  };
+  // Cenário salvo antes de um eixo existir volta com o padrão dele. É o que a
+  // API já assume quando o campo vem ausente, então preencher aqui não muda o
+  // que aquele cenário rodava.
+  return { ...strategyDefaults(), ...config };
 }
 
 export function loadSavedPresets(): SavedPreset[] {
@@ -146,9 +139,9 @@ const withoutGrade = (config: Scenario): SavedScenario => {
  * entra: a grade é a mesma para todos, e repeti-la em toda linha não separaria
  * nada. */
 export const describeSaved = (preset: SavedPreset): string => {
-  const entries = preset.config.entry_periods;
-  const students = cohortSize(preset.config) * entries;
-  const periods = horizonFor(entries, preset.config.max_residence);
+  const observed = preset.config.observation_periods;
+  const students = preset.config.students_per_period * preset.config.max_residence;
+  const periods = horizonFor(preset.config.max_residence, observed);
   return (
     `${students} alunos · ${periods} períodos · ` +
     `salvo em ${formatSavedDate(preset.at)}`

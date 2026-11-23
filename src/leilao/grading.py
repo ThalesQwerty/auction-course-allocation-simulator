@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from .config import Discipline, PerformanceProfile, SimulationConfig
+from .config import Discipline, PerformanceShape, SimulationConfig
 from .equations import (
     attempt_rates,
+    base_quantile,
     credit_return,
     grade_for_attempt,
     grade_sds,
@@ -51,32 +52,42 @@ def draw_base_quantiles(
 ) -> dict[tuple[str, str], float]:
     """q_{a,x} — a posição de cada par (aluno, disciplina), sorteada uma vez.
 
-    É traço, não sorte: não é resorteada por período nem por tentativa, e é o
-    que faz "este aluno é bom em matemática e ruim em escrita" significar
-    alguma coisa. O quantil é a forma certa de guardá-lo porque a distribuição
-    **muda** com a dificuldade e com a recursada: a posição relativa do aluno
-    sobrevive à mudança, e a nota que ela vale é que se move.
+        q_{a,x} = Φ( √s · Z_a + √(1−s) · Z_{a,x} )
 
-    Uniforme em (0, 1), um valor por célula — o mesmo consumo do gerador que a
-    Beta da aptidão tinha, de modo que o fluxo não depende do perfil de
-    ninguém.
+    O **nível basilar** `Z_a` é do aluno e vale em toda matéria; o desvio
+    `Z_{a,x}` é da matéria. `s` (`performance_stability`) é a correlação entre
+    os quantis dele em duas disciplinas quaisquer — ver
+    `equations.base_quantile`, onde está o porquê de ele não poder ser zero.
+
+    É traço, não sorte: não é resorteada por período nem por tentativa. O
+    quantil é a forma certa de guardá-lo porque a distribuição **muda** com a
+    dificuldade e com a recursada: a posição relativa do aluno sobrevive à
+    mudança, e a nota que ela vale é que se move.
+
+    A marginal continua **uniforme em (0, 1)** por construção, então a
+    calibragem da nota não se move com `s`.
     """
-    draws = rng.random(size=(len(students), len(disciplines)))
+    deviations = rng.normal(0.0, 1.0, size=(len(students), len(disciplines)))
+    stability = config.performance_stability
     return {
-        (student.id, discipline.name): float(draws[i, j])
+        (student.id, discipline.name): base_quantile(
+            level=student.performance_level,
+            deviation=float(deviations[i, j]),
+            stability=stability,
+        )
         for i, student in enumerate(students)
         for j, discipline in enumerate(disciplines)
     }
 
 
 class GradeShapes:
-    """A forma da normal dividida por (perfil, dificuldade, tentativa).
+    """A forma da normal dividida por (dificuldade, tentativa).
 
     A inversão de `grade_shape` é uma bisseção, e a nota é calculada uma vez
     por (aluno, disciplina, tentativa) — mas as formas **distintas** são
-    poucas: um punhado de perfis vezes as dificuldades da grade vezes as
-    tentativas que alguém chega a gastar. Memorizar troca dezenas de milhares
-    de bisseções por algumas dezenas.
+    poucas: as dificuldades da grade vezes as tentativas que alguém chega a
+    gastar. Memorizar troca dezenas de milhares de bisseções por algumas
+    dezenas.
 
     Não é estado da simulação: é cache de função pura, e dois `GradeShapes`
     devolvem exatamente a mesma coisa.
@@ -84,22 +95,22 @@ class GradeShapes:
 
     def __init__(self) -> None:
         self._shapes: dict[
-            tuple[PerformanceProfile, float, int], tuple[float, float, float]
+            tuple[PerformanceShape, float, int], tuple[float, float, float]
         ] = {}
 
-    def mode(self, profile: PerformanceProfile) -> float:
-        """A moda do perfil — fixa, e é ela que a transformação segura."""
-        return profile.mode_grade
+    def mode(self, shape: PerformanceShape) -> float:
+        """A moda da distribuição — fixa, e é ela que a transformação segura."""
+        return shape.mode_grade
 
     def of(
-        self, profile: PerformanceProfile, difficulty: float, attempt: int
+        self, shape: PerformanceShape, difficulty: float, attempt: int
     ) -> tuple[float, float, float]:
-        key = (profile, difficulty, attempt)
+        key = (shape, difficulty, attempt)
         if key not in self._shapes:
-            mode = self.mode(profile)
+            mode = self.mode(shape)
             zero_rate, max_rate = attempt_rates(
-                zero_rate=profile.zero_rate,
-                max_rate=profile.max_rate,
+                zero_rate=shape.zero_rate,
+                max_rate=shape.max_rate,
                 difficulty=difficulty,
                 attempt=attempt,
             )

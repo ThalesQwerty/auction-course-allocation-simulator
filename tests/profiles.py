@@ -1,26 +1,22 @@
-"""Perfil de disponibilidade que praticamente nunca exclui.
+"""Distribuições de população para os testes.
 
-Os três patamares do cenário padrão **não** precisam de ajuda: a configuração
-os deriva de W_a quando o cenário não declara os seus (`config.default_availability`),
-justamente porque a moda é absoluta e uma constante dimensionada para 360 h
-recusaria todo cenário de teto menor.
+A população do cenário é descrita por **três distribuições** mais o nível
+basilar de cada uma; não há mais perfis a declarar, e a configuração deriva a
+disponibilidade de W_a quando o cenário não a declara
+(`config.default_availability`) — a moda é absoluta, e uma constante
+dimensionada para 360 h recusaria todo cenário de teto menor.
 
-O que ainda precisa ser escrito à mão é o controle sem exclusão, porque ele não
-é um patamar — é o caso degenerado.
+O que ainda precisa ser escrito à mão é o controle **sem exclusão**, porque ele
+não é um patamar da calibragem: é o caso degenerado, e serve para isolar o
+mecanismo da disponibilidade.
 """
 from __future__ import annotations
 
-from leilao.config import (
-    DEFAULT_PERFORMANCE,
-    NEUTRAL_ROUTINE,
-    NEUTRAL_SELECTIVITY,
-    AvailabilityProfile,
-    default_availability,
-)
+from leilao.config import AvailabilityShape, default_availability
 
 
-def always_available(max_hours: int) -> tuple[AvailabilityProfile, ...]:
-    """Um perfil só, que praticamente nunca exclui.
+def always_available(max_hours: int) -> AvailabilityShape:
+    """A distribuição que praticamente nunca exclui.
 
     Note o que a chance tão alta custa à forma: com a moda logo abaixo de W_a,
     exigir que quase toda a massa fique **acima** dele força um desvio
@@ -28,26 +24,20 @@ def always_available(max_hours: int) -> tuple[AvailabilityProfile, ...]:
     controle é o que se quer — mas mostra que "quase sempre cheio" e
     "tipicamente perto de W_a" são pedidos incompatíveis nesta família.
     """
-    return (
-        AvailabilityProfile(
-            name="cheia", mode_hours=max_hours - 1, full_load_rate=0.9999
-        ),
-    )
+    return AvailabilityShape(mode_hours=max_hours - 1, full_load_rate=0.9999)
 
 
 def single_axis(max_hours: int) -> dict:
-    """Um perfil em cada um dos eixos.
+    """Os eixos da população num cenário de teste.
 
-    Com uma combinação só, `students_per_profile` **é** o tamanho da coorte —
-    que é o que a maioria dos testes quer dizer quando pede "N alunos por
-    período". Quem testa a repartição entre perfis declara os seus.
+    A seletividade sai **desligada** (`selectivity_median = 0`), de modo que
+    construir um cenário sem dizer nada sobre estratégia não liga o corte do
+    pedido sem avisar — era o papel do perfil neutro.
 
-    O desempenho é o do meio dos três padrões, para a nota ficar perto da
-    média da população que o cenário real produz.
+    Uma faixa de quantil só: quem testa o recorte declara as suas.
     """
     return {
-        "performance_profiles": (DEFAULT_PERFORMANCE[1],),
-        "availability_profiles": default_availability(max_hours)[1:2],
-        "selectivity_profiles": (NEUTRAL_SELECTIVITY,),
-        "routine_profiles": (NEUTRAL_ROUTINE,),
+        "availability": default_availability(max_hours),
+        "selectivity_median": 0.0,
+        "quantiles": 1,
     }

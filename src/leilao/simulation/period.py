@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..behavior import utility_matrix
+from ..behavior import interest_total, utility_matrix
 from ..config import SimulationConfig
 from ..equations import (
+    Behavior,
     demand_per_seat,
     entry_class,
     mean_price,
@@ -179,7 +180,7 @@ class _Reporter:
     period: int
     active: list[Student]
     axis: Axis
-    # Os quatro eixos de perfil (`Axis.profiles`), recortados no mesmo instante.
+    # Os três eixos de quantil (`Axis.quantiles`), no mesmo instante.
     profiles: dict[str, Axis]
     state: PeriodState
     utilities: dict[str, dict[str, float]]
@@ -206,6 +207,7 @@ class _Reporter:
         allocation_seconds: float,
         ages: dict[str, int],
         credit_returns: dict[str, int] | None,
+        allocated_satisfactions: dict[str, float] | None = None,
         retained: dict[str, set[str]] | None = None,
         excluded: dict[str, list[str]] | None = None,
     ) -> RoundReport:
@@ -229,6 +231,10 @@ class _Reporter:
             hours=self.draws.hours,
             discipline_hours=self.draws.discipline_hours,
             credit_returns=credit_returns,
+            selectivities={
+                s.id: self.draws.selectivity[(s.id, self.period)] for s in self.active
+            },
+            allocated_satisfactions=allocated_satisfactions,
             retained=retained,
             excluded=excluded,
             requested=requested,
@@ -310,7 +316,6 @@ def _discipline_snapshots(
             hours=draws.hours[name],
             difficulty=draws.difficulty[name],
             classes=by_name[draws.discipline_of[name]].classes,
-            shift=draws.shift_of[name],
             schedule=draws.schedule_of[name],
             elective=by_name[draws.discipline_of[name]].elective,
             seats=seats,
@@ -385,8 +390,26 @@ def run_period(
     registro por (aluno, disciplina de utilidade positiva), que só a tela
     individual lê — ver `run_simulation`.
     """
+    # A seletividade é **do período**: ela sai de uma log-normal com nível
+    # basilar, como o interesse, então a exigência do aluno flutua em torno do
+    # patamar permanente dele. Atribuí-la aqui, antes das rodadas, é o que faz
+    # `rounds` continuar lendo um `Behavior` só.
+    for student in active:
+        student.behavior = Behavior(
+            selectivity=draws.selectivity[(student.id, period)]
+        )
+
     utilities = {
         s.id: utility_matrix(
+            interest=draws.interest_rows[(s.id, period)], student=s, config=config
+        )
+        for s in active
+    }
+    # Σ_{X ∈ M_a^(t)} I_{a,X} — o denominador da reserva
+    # (`equations.reserve_threshold`). É do período, como a utilidade, e é a
+    # única grandeza da decisão que lê o interesse cru.
+    interests = {
+        s.id: interest_total(
             interest=draws.interest_rows[(s.id, period)], student=s, config=config
         )
         for s in active
@@ -433,6 +456,7 @@ def run_period(
             draws=draws,
             active=active,
             utilities=utilities,
+            interests=interests,
             grade_averages=grade_averages,
             state=state,
             round_number=number,
@@ -449,7 +473,7 @@ def run_period(
         period=period,
         active=active,
         axis=Axis.cohorts(draws.entry_periods, period),
-        profiles=Axis.profiles(config),
+        profiles=Axis.quantiles(config),
         state=state,
         utilities=utilities,
         grade_averages=grade_averages,
@@ -492,6 +516,16 @@ def run_period(
         )
         for s in active
     }
+    # A outra leitura do mesmo ψ: o que foi **alocado**, antes de o aluno
+    # descartar o que não cabia. O vão entre as duas é a dissipação
+    # (`equations.dissipation`), e é o custo privado da exclusão — o custo
+    # social dela é o ε, que conta vagas.
+    allocated_satisfaction = {
+        s.id: satisfaction(
+            utilities=utilities[s.id], allocated=sorted(state.won[s.id])
+        )
+        for s in active
+    }
     prices = _period_prices(config=config, state=state)
 
     # `grade_averages` continua sendo o CR vigente no **início** do período —
@@ -507,6 +541,7 @@ def run_period(
         allocation_seconds=sum(o.allocation_seconds for o in outcomes),
         ages=reporter.ages(closed=True),
         credit_returns=closing.credits_returned,
+        allocated_satisfactions=allocated_satisfaction,
         retained=closing.retained,
         excluded=closing.excluded,
     )

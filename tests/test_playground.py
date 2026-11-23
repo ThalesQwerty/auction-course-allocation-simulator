@@ -167,10 +167,10 @@ def test_a_non_positive_utility_is_rejected():
 
 def test_the_bid_reads_the_student_behavior():
     """A seletividade entra no lance como na simulação. As utilidades vêm na
-    escala do motor — somam 1 sobre as disciplinas —, que é a escala em que a
-    reserva `S/|M_a|` se lê."""
+    escala do motor — somam 1 sobre as disciplinas —, e sem grade é essa soma
+    que serve de interesse das elegíveis: `s = S/(S + 1)`, aqui 1/6."""
     utilities = {"A": 0.6, "B": 0.3, "C": 0.1}
-    behavior = Behavior(selectivity=0.5)
+    behavior = Behavior(selectivity=0.2)
     result = run_playground(
         mechanism="credits",
         rounds=1,
@@ -187,7 +187,11 @@ def test_the_bid_reads_the_student_behavior():
         ],
     )
     expected = compute_bids(
-        utilities=utilities, available=["A", "B", "C"], budget=12, behavior=behavior
+        utilities=utilities,
+        available=["A", "B", "C"],
+        budget=12,
+        behavior=behavior,
+        interest=1.0,
     )
     assert result.rounds[0].students[0].bids == expected
     assert "C" not in expected
@@ -206,7 +210,10 @@ def test_selectivity_also_cuts_the_ranking_request():
         students=[student("ana", utilities=utilities, cr=7, selectivity=1.0)],
     )
     asked = request_set(
-        utilities=utilities, available=["A", "B"], behavior=Behavior(selectivity=1.0)
+        utilities=utilities,
+        available=["A", "B"],
+        behavior=Behavior(selectivity=1.0),
+        interest=1.0,
     )
     assert asked == ["A"]
     assert list(result.rounds[0].students[0].bids) == asked

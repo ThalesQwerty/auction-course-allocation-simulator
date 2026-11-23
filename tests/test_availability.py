@@ -14,11 +14,11 @@ from disciplines import disciplines_from_predecessors
 
 from leilao.availability import draw_availability
 from leilao.config import (
+    Discipline,
     DEFAULT_AVAILABILITY,
     DEFAULT_PERFORMANCE,
-    AvailabilityProfile,
-    PerformanceProfile,
-    SelectivityProfile,
+    AvailabilityShape,
+    PerformanceShape,
     SimulationConfig,
 )
 from leilao.equations import (
@@ -33,6 +33,9 @@ from leilao.equations import (
 )
 from leilao.grading import GradeShapes, draw_base_quantiles, grade_for_attempt
 from leilao.population import Student, generate_students
+from leilao.simulation.snapshots import Axis
+from leilao.equations import quantile_names
+from collections import Counter
 from leilao.simulation import run_simulation
 
 GRADE = disciplines_from_predecessors(
@@ -47,13 +50,13 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=6,
-        entry_periods=3,
         max_residence=4,
-        students_per_profile=1,
-        selectivity_profiles=(
-            SelectivityProfile(name="Nenhuma", value=0.0),
-            SelectivityProfile(name="Alta", value=1.0),
-        ),
+        students_per_period=18,
+        # A referência da escala é `1/(turmas da grade)` — aqui 4 disciplinas
+        # de turma única —, que põe o limiar na utilidade média de uma
+        # elegível. Ver `equations.reserve_threshold`.
+        selectivity_median=0.25,
+        quantiles=3,
         rounds=2,
         max_hours=240,
         seed=7,
@@ -313,157 +316,138 @@ def test_the_attended_share_is_the_complement_of_the_exclusion_rate():
     )
 
 
-# --- os perfis -------------------------------------------------------------
+# --- os eixos da população -------------------------------------------------
 
 
-def test_the_combinations_split_the_generation_equally():
-    """Com 3 · 3 · 2 · 3 = 54 combinações e 2 exemplares de cada, a coorte tem
-    108 alunos e cada combinação aparece exatamente duas vezes. Não há
-    porcentagem a configurar nem sobra a distribuir."""
-    config = make_config(students_per_profile=2)
+def test_the_cohort_is_typed_not_derived():
+    """O tamanho da coorte é digitado. Era derivado do produto das combinações
+    de perfil até 19/11/2026, e mexer num eixo mudava a população sem que
+    ninguém pedisse."""
+    config = make_config(students_per_period=20)
     students = generate_students(config, np.random.default_rng(0))
-    first = [s for s in students if s.entry_period == 1]
-    assert len(first) == 108
-
-    combinations = [
-        (
-            s.performance.name,
-            s.availability.name,
-            s.selectivity.name,
-            s.routine.name,
-        )
-        for s in first
-    ]
-    assert len(set(combinations)) == 54
-    assert all(combinations.count(c) == 2 for c in set(combinations))
+    assert config.students_per_period == 20
+    assert len([s for s in students if s.entry_period == 1]) == 20
 
 
-def test_the_cohort_is_derived_from_the_profile_grid():
-    """O tamanho não é digitado: é exemplares × combinações. É isso que faz a
-    repartição ser exata por construção, sem sobra a girar entre coortes."""
-    config = make_config(students_per_profile=2)
-    assert config.profile_combinations() == 54
-    assert config.students_per_period == 108
-
-
-def test_the_strategy_axis_becomes_the_behaviour():
-    """Desempenho e disponibilidade são traço e ficam no sorteio; a
-    seletividade **é** a decisão do aluno."""
-    config = make_config(students_per_profile=1)
+def test_the_quantile_bands_split_the_population_evenly():
+    """O corte é teórico, não amostral: `Φ(nível)` é uniforme por construção,
+    então as faixas saem com o mesmo tamanho esperado e as **fronteiras são as
+    mesmas em toda execução** — sem isso a média entre seeds somaria faixas
+    que não são a mesma coisa."""
+    config = make_config(students_per_period=150, quantiles=4)
     students = generate_students(config, np.random.default_rng(0))
-    for student in students:
-        assert student.behavior.selectivity == student.selectivity.value
+    axis = Axis.quantiles(config)["performance"]
+    assert axis.order == ["0–25%", "25–50%", "50–75%", "75–100%"]
+
+    counts = Counter(axis.key(s) for s in students)
+    esperado = len(students) / 4
+    for name in axis.order:
+        assert abs(counts[name] - esperado) < 0.15 * esperado, name
 
 
-def test_the_profile_does_not_come_from_the_seed():
-    """Mesmo motivo do período de ingresso: duas execuções com seeds
-    diferentes têm a mesma estrutura de grupos, então a diferença entre elas
-    não é quem calhou de ser frágil nem quem calhou de ser especulador."""
+def test_one_band_is_the_whole_university():
+    config = make_config(quantiles=1)
+    axis = Axis.quantiles(config)["selectivity"]
+    assert axis.order == ["Geral"]
+    students = generate_students(config, np.random.default_rng(0))
+    assert {axis.key(s) for s in students} == {"Geral"}
+
+
+def test_the_base_levels_come_from_the_seed():
+    """Ao contrário dos perfis, que eram atribuídos por posição, o nível
+    basilar é sorteado: duas seeds dão populações diferentes, que é o que a
+    Seção 7.3 quer quando pede múltiplas configurações de entrada."""
     config = make_config()
     one = generate_students(config, np.random.default_rng(1))
     two = generate_students(config, np.random.default_rng(99))
-    assert [s.performance.name for s in one] == [s.performance.name for s in two]
-    assert [s.availability.name for s in one] == [s.availability.name for s in two]
-    assert [s.selectivity.name for s in one] == [s.selectivity.name for s in two]
-    # O que muda com a seed é o nome — e, fora daqui, os escalares de traço.
-    assert [s.name for s in one] != [s.name for s in two]
+    assert [s.performance_level for s in one] != [s.performance_level for s in two]
+    # O período de ingresso continua fora da seed.
+    assert [s.entry_period for s in one] == [s.entry_period for s in two]
 
 
-def test_the_grade_follows_the_profile_of_each_student():
-    """A heterogeneidade é sistemática: há grupos a separar, e não só
-    dispersão. O quantil sorteado é o mesmo uniforme para todo mundo — quem
-    separa os grupos é a **distribuição** em que ele é lido."""
-    config = make_config()
-    students = [
-        Student(
-            id=f"{group}-{i:03d}",
-            name=f"Aluno {group}{i}",
-            credits=10,
-            performance=profile,
-        )
-        for group, profile in enumerate(DEFAULT_PERFORMANCE)
-        for i in range(400)
-    ]
-    quantiles = draw_base_quantiles(students, GRADE, config, np.random.default_rng(0))
-    shapes = GradeShapes()
+def test_the_base_level_gives_the_cr_a_floor_to_disperse_around():
+    """Sem nível basilar a média dos quantis de um aluno converge para 0,5: a
+    dispersão cai como 1/√D e **não tem piso**. Com ele, o que sobra depois de
+    muitas disciplinas é o nível, e a ordenação por CR continua ordenando.
 
-    by_student = {s.id: s.performance for s in students}
-    for profile in DEFAULT_PERFORMANCE:
-        mode, left_sd, right_sd = shapes.of(profile, 1.0, 1)
-        # A média é derivada da forma, não é o parâmetro: o perfil declara a
-        # moda, e a cauda esquerda longa puxa a média para baixo dela.
-        expected_mean = split_normal_mean(
-            mode=mode, left_sd=left_sd, right_sd=right_sd
-        )
-        drawn = [
-            grade_for_attempt(
-                quantile=value, mode=mode, left_sd=left_sd, right_sd=right_sd
-            )
-            for (student_id, _), value in quantiles.items()
-            if by_student[student_id] is profile
+    O teste compara a mesma medida em duas grades de tamanhos diferentes: é
+    onde a diferença entre "cai" e "tem piso" aparece.
+    """
+    config = make_config(students_per_period=150)
+    students = generate_students(config, np.random.default_rng(0))
+
+    def spread(stability: float, materias: int) -> float:
+        cfg = make_config(students_per_period=150, performance_stability=stability)
+        grade = [
+            Discipline(name=f"M{i}", seats=10, hours=60) for i in range(materias)
         ]
-        assert abs(sum(drawn) / len(drawn) - expected_mean) < 0.1
+        quantis = draw_base_quantiles(students, grade, cfg, np.random.default_rng(1))
+        por_aluno: dict[str, list[float]] = {}
+        for (student_id, _), value in quantis.items():
+            por_aluno.setdefault(student_id, []).append(value)
+        medias = [sum(v) / len(v) for v in por_aluno.values()]
+        return float(np.std(medias))
+
+    # Sem nível basilar, quadruplicar a grade corta a dispersão pela metade.
+    assert spread(0.0, 40) < 0.6 * spread(0.0, 10)
+    # Com ele, ela mal se move: o que sobra é o aluno.
+    assert spread(0.8, 40) > 0.9 * spread(0.8, 10)
+    # E em qualquer tamanho ela é maior.
+    assert spread(0.8, 40) > 2 * spread(0.0, 40)
 
 
-def test_the_summary_carries_both_profiles_of_the_student():
+def test_the_marginal_of_the_quantile_stays_uniform():
+    """O nível basilar reparte a variância, não a muda: a calibragem da nota
+    não se move com ele."""
+    config = make_config(students_per_period=150, performance_stability=0.6)
+    students = generate_students(config, np.random.default_rng(0))
+    valores = list(
+        draw_base_quantiles(students, GRADE, config, np.random.default_rng(1)).values()
+    )
+    assert np.mean(valores) == pytest.approx(0.5, abs=0.02)
+    assert np.std(valores) == pytest.approx(1 / np.sqrt(12), abs=0.02)
+
+
+def test_the_summary_carries_the_band_of_the_student():
     """A tela individual é onde se pergunta "por que *este* aluno foi assim",
-    e o perfil é metade da resposta — a seed é a outra."""
+    e a faixa é metade da resposta — a seed é a outra."""
     config = make_config()
     result = run_simulation(config)
-    desempenho = {p.name for p in config.performance_profiles}
-    disponibilidade = {p.name for p in config.availability_profiles}
-    seletividade = {p.name for p in config.selectivity_profiles}
-    rotina = {p.name for p in config.routine_profiles}
+    faixas = set(quantile_names(config.quantiles))
 
     assert result.students
     for summary in result.students:
-        assert summary.performance in desempenho
-        assert summary.availability in disponibilidade
-        assert summary.selectivity in seletividade
-        assert summary.routine in rotina
-    # A repartição igualitária aparece no resumo, não só na população — e
-    # nos quatro eixos, que é o que o relatório recorta.
-    combinacoes = {
-        (s.performance, s.availability, s.selectivity, s.routine)
-        for s in result.students
-    }
-    assert len(combinacoes) == config.profile_combinations()
+        assert summary.performance in faixas
+        assert summary.availability in faixas
+        assert summary.selectivity in faixas
 
 
-def test_a_student_built_by_hand_gets_the_neutral_profile():
-    """Quem constrói um aluno à mão não está escolhendo um grupo: herdar o
-    primeiro da lista enviesaria o teste sem avisar."""
+def test_a_student_built_by_hand_sits_at_the_median():
+    """Quem constrói um aluno à mão não está escolhendo uma ponta."""
     student = Student(id="x", name="X", credits=10)
-    assert student.performance.name == "—"
-    assert student.availability.name == "—"
-    assert student.performance not in DEFAULT_PERFORMANCE
-    assert student.availability not in DEFAULT_AVAILABILITY
+    assert student.performance_level == 0.0
+    assert student.availability_level == 0.0
+    assert student.selectivity_level == 0.0
 
 
-def test_the_scenario_rejects_profiles_that_would_not_describe_a_group():
-    with pytest.raises(ValueError, match="pelo menos um perfil"):
-        make_config(performance_profiles=())
-    with pytest.raises(ValueError, match="únicos"):
-        make_config(
-            availability_profiles=(
-                AvailabilityProfile("igual", 200.0, 0.1),
-                AvailabilityProfile("igual", 150.0, 0.1),
-            )
-        )
+def test_the_scenario_rejects_distributions_that_do_not_exist():
     # A moda tem de caber abaixo de W_a: com o pico no teto não existe
     # log-normal que ainda o alcance com a frequência pedida.
     with pytest.raises(ValueError, match="abaixo da carga"):
-        make_config(availability_profiles=(AvailabilityProfile("no teto", 240.0, 0.1),))
+        make_config(availability=AvailabilityShape(240.0, 0.1))
     with pytest.raises(ValueError, match="chance"):
-        make_config(availability_profiles=(AvailabilityProfile("certa", 200.0, 1.0),))
+        make_config(availability=AvailabilityShape(200.0, 1.0))
     # No desempenho a moda sempre cabe; o que pode não caber são as chances.
     with pytest.raises(ValueError, match="escala"):
         make_config(
-            performance_profiles=(
-                PerformanceProfile("fora", mode_grade=10.0, zero_rate=0.01,
-                                   max_rate=0.01),
+            performance=PerformanceShape(
+                mode_grade=10.0, zero_rate=0.01, max_rate=0.01
             )
         )
+    with pytest.raises(ValueError, match="quantis"):
+        make_config(quantiles=9)
+    with pytest.raises(ValueError, match="nível basilar"):
+        make_config(performance_stability=1.5)
 
 
 # --- o sorteio -------------------------------------------------------------
@@ -481,9 +465,9 @@ def test_availability_is_drawn_once_per_student_and_period():
     # de modo que passar de W_a é legítimo.
     assert all(value > 0.0 for value in drawn.values())
     assert any(value > config.max_hours for value in drawn.values())
-    # Um aluno de disponibilidade reduzida varia entre os períodos — não é
-    # um valor fixo repetido.
-    reduced = next(s for s in students if s.availability.name.startswith("Baixa"))
+    # O valor varia entre os períodos — o nível basilar é o patamar em torno
+    # do qual ele flutua, não um valor fixo repetido.
+    reduced = min(students, key=lambda s: s.availability_level)
     row = [drawn[(reduced.id, t)] for t in range(1, config.periods + 1)]
     assert len(set(row)) == len(row)
 
@@ -579,7 +563,7 @@ def test_a_full_availability_scenario_never_excludes():
     pedidos incompatíveis nesta família.
     """
     result = run_simulation(
-        make_config(availability_profiles=always_available(240))
+        make_config(availability=always_available(240))
     )
     for history in result.histories:
         for record in history.periods:

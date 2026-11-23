@@ -15,10 +15,13 @@ circular sobre a grade inteira (`equations.class_schedule`), e sem grade a
 única exclusão mútua que resta é a disciplina.
 
 As utilidades chegam **na escala do motor**: lá `equations.utility` faz a
-melhor turma de cada disciplina somar 1 sobre o elegível, e é nessa escala que
-a reserva `S_a / |M_a|` se lê. Digitar utilidades numa escala própria muda o
-que a seletividade corta — o lance e o pedido, que só leem a ordem e as
-razões, não se mexem.
+melhor turma de cada disciplina somar 1 sobre o elegível. Sem grade não há
+interesse separado da utilidade — a herança de pré-requisito é o que os
+distingue, e aqui ela não existe —, então o denominador da reserva é a soma
+das próprias utilidades digitadas, por disciplina (`eligible_interest`):
+`s_a = S_a / (S_a + ΣU)`. Digitar utilidades numa escala própria muda o que a
+seletividade corta — o lance e o pedido, que só leem a ordem e as razões, não
+se mexem.
 
 Cada aluno traz o eixo de **estratégia** — a seletividade, que é o
 `Behavior` com que ele decide — e a **disponibilidade**, que na
@@ -43,6 +46,7 @@ from .entities import Agent, Good, MutualExclusion
 from .equations import (
     Behavior,
     available_goods,
+    eligible_interest,
     effective_load,
     grade_for_attempt,
     grade_shape,
@@ -204,6 +208,8 @@ class _Table:
     # único grupo é a disciplina.
     conflicts: dict[str, tuple[str, ...]]
     classes: dict[str, tuple[str, ...]]
+    # Σ_{X ∈ M_a} I_{a,X}, por aluno — o denominador da reserva.
+    interests: dict[str, float]
 
     def available(self, student_id: str) -> list[str]:
         """B_a^(r) — ver `equations.available_goods`: há vaga, cabe na carga e
@@ -247,6 +253,7 @@ def _auction_round(
             budget=table.budget[student.id],
             behavior=student.behavior,
             classes=table.classes,
+            interest=table.interests[student.id],
         )
         for student in students
     }
@@ -301,6 +308,7 @@ def _ranking_round(
             behavior=student.behavior,
             classes=table.classes,
             conflicts=table.conflicts,
+            interest=table.interests[student.id],
         )
         posted[student.id] = {name: 1 for name in asked}
         requests.extend((student.id, name) for name in asked)
@@ -417,6 +425,26 @@ def _grades(
     return tuple(grades)
 
 
+def _interest_total(
+    student: PlaygroundStudent,
+    *,
+    names: list[str],
+    groups: dict[str, str],
+) -> float:
+    """Σ_{X ∈ M_a} I_{a,X} do aluno — só sobre as turmas elegíveis a ele, e na
+    ordem da mesa."""
+    own: dict[str, list[str]] = {}
+    eligible = set(student.eligible)
+    for name in names:
+        if name in eligible:
+            own.setdefault(groups[name], []).append(name)
+    return eligible_interest(
+        interest=student.utilities,
+        eligible=list(own),
+        classes={group: tuple(members) for group, members in own.items()},
+    )
+
+
 def run_playground(
     *,
     mechanism: Mechanism,
@@ -452,6 +480,10 @@ def run_playground(
         },
         conflicts={name: (group,) for name, group in groups.items()},
         classes={group: tuple(names) for group, names in by_discipline.items()},
+        interests={
+            student.id: _interest_total(student, names=names, groups=groups)
+            for student in students
+        },
     )
     normalized = {
         student.id: normalized_utilities(table.utilities[student.id])

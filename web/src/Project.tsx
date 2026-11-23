@@ -29,12 +29,11 @@ export function Project() {
         O simulador implementa os <strong>dois</strong> mecanismos sobre o mesmo modelo de
         universidade, e é essa a razão de existir do modo de <strong>comparação</strong>: a
         hipótese não se verifica olhando um mecanismo isolado, só na diferença entre ele e a linha
-        de base rodando o mesmo cenário. A comparação põe <strong>três modelos</strong> lado a
-        lado, porque o leilão entra duas vezes — <strong>igualitário</strong>, com todo aluno
-        abrindo todo período no mesmo orçamento, e <strong>acumulativo</strong>, em que o saldo
-        atravessa o período e o retorno de créditos o alimenta. O acúmulo é o que pode devolver ao
-        mecanismo algum senso meritocrático, e os dois leilões rodando a mesma população isolam
-        exatamente o quanto.
+        de base rodando o mesmo cenário. A comparação põe os <strong>dois modelos</strong> lado a
+        lado: a <strong>ordenação por CR</strong> e o <strong>leilão com PLI</strong>, em que o
+        aluno reparte um orçamento de créditos em lances, o saldo atravessa o período e o retorno
+        de créditos o alimenta. O vão entre os dois soma três mudanças — a mensagem, a resolução e
+        o acúmulo —, e os degraus que as separam existem como ablação, fora do padrão.
       </p>
 
       <h2>A formalização</h2>
@@ -376,8 +375,8 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         <li>
           <strong>O eixo de estratégia:</strong> além do desempenho e da
           disponibilidade, que são traço, o perfil declara{" "}
-          <strong>seletividade</strong> — a exigência repartida entre as elegíveis
-          do período, com 0 no especulador. É valor fixo, não distribuição: um
+          <strong>seletividade</strong> — o valor da opção externa, medido contra
+          o interesse das elegíveis do período, com 0 no especulador. É valor fixo, não distribuição: um
           perfil de estratégia é tratamento, não descrição.
         </li>
         <li>
@@ -444,7 +443,7 @@ Quem <strong>ingressa</strong> recebe vaga garantida nas disciplinas de entrada 
         período. A linha é a mediana entre as simulações e a faixa é o intervalo interquartil.
         A cor é o grupo do <strong>recorte</strong> escolhido — a universidade inteira, a
         coorte ou um dos quatro eixos de perfil — e o traçado é o modelo: pontilhado para o CR,
-        tracejado para o leilão igualitário, contínuo para o acumulativo. A legenda esconde cores
+        contínuo para o leilão. A legenda esconde cores
         e traçados separadamente. O que se
         lê é a sobreposição das faixas: faixas que não se tocam separam os mecanismos; faixas
         sobrepostas dizem que a diferença cabe dentro da variação entre populações. As tabelas

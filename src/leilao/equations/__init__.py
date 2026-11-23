@@ -27,7 +27,8 @@ Uma rodada de leilão (Seção 7.1)
 
 Decisão do aluno (Seção 7.2.4)
 
-    reserve_threshold         s_a = S_a / |M_a|                   —
+    eligible_interest         Σ_{X ∈ M_a} I_{a,X}                 —
+    reserve_threshold         s_a = S_a / (S_a + Σ I_{a,X})       —
     available_goods           B_a^(t,r)                           eq. (15)
     concave_bids              mochila côncava do lance        substitui 44-46
                               (em dois níveis: disciplina, depois turma)
@@ -36,9 +37,7 @@ Decisão do aluno (Seção 7.2.4)
 
 Turmas, turnos e horários
 
-    class_shift               N = ⌊k/3⌋ noturnas, D = k − N        —
     class_schedule            a varredura circular por horário    —
-    routine_weight            o peso do turno no interesse        —
     entry_class               o bloco girado da coorte em cada turma —
     best_class                a turma pedida na linha de base     —
 
@@ -64,11 +63,12 @@ Interesse, utilidade e grade
     interest_row              normalização do interesse     substitui 41
     eligible_set              não aprovada, liberada, X em aberto eq. (42)
     utility                   interesse → utilidade      substitui 41 e 43
-                              (média das turmas, herança de um nível)
+                              (média das turmas, herança transitiva)
     admitted_set              corte da utilidade de reserva       —
     curriculum_height         s_x, a cadeia à frente          substitui 38
     curriculum_period         o período induzido dos pré-req.     —
     curriculum_reach          quantas destrava, transitivamente   —
+    curriculum_closure        seq e req, o fecho e a inversa dele  —
 
 Notas, créditos e saída (Seção 7.2.2)
 
@@ -132,7 +132,10 @@ Não implementadas, e por quê
                (35) fica sendo só o somatório — ver `next_budget`
     eq. (41)   a invariante de altura saiu: punha valor curricular dentro do
                gosto. `utility` a substitui fazendo a elegível herdar o
-               interesse do que ela destrava um período à frente
+               interesse de tudo que ela destrava, pelo fecho transitivo da
+               cadeia — a porteira vale mais porque acumulou o interesse do
+               aluno pelo que vem adiante, e não porque uma desigualdade
+               ordenou por altura
     eq. (43)   U_a, a utilidade alcançável, saiu de denominador: com
                `Σ_X U_{a,X} = 1` por construção, ψ é a soma simples das
                utilidades atendidas — ver `satisfaction`
@@ -156,13 +159,13 @@ from .admitted_set import admitted_set
 from .attempt_rates import attempt_rates
 from .availability_shape import availability_shape
 from .available_goods import available_goods
+from .base_quantile import base_quantile
 from .best_class import best_class
 from .class_schedule import (
     class_schedules,
     schedule_cliques,
     schedule_names,
 )
-from .class_shift import DAY, NIGHT, class_shifts
 from .entry_class import (
     entry_block,
     entry_class,
@@ -173,11 +176,15 @@ from .concave_bids import concave_bids
 from .credit_consumption import consumption
 from .credit_return import DEFAULT_MULTIPLIER, credit_return
 from .credits_per_seat import credits_per_seat
+from .curriculum_closure import inverse_edges, transitive_closure
 from .curriculum_height import curriculum_heights
 from .curriculum_period import curriculum_periods
 from .curriculum_reach import curriculum_reach
 from .demand_per_seat import demand_per_seat
+from .correlations import Correlations, correlations
+from .dissipation import dissipation
 from .effective_load import effective_load
+from .eligible_interest import eligible_interest
 from .eligible_set import eligible_set
 from .exclusion_refund import DEFAULT_RATE, exclusion_refund
 from .exclusion_rate import exclusion_rate
@@ -200,6 +207,7 @@ from .message_fidelity import message_fidelity
 from .next_budget import next_budget
 from .occupancy import occupancy
 from .progress import progress
+from .quantile_band import quantile_band, quantile_name, quantile_names
 from .pearson_correlation import pearson
 from .period_return import period_return
 from .preference_split import preference_split
@@ -211,7 +219,6 @@ from .request_set import request_set
 from .reserve_threshold import NEUTRAL, Behavior, reserve_threshold
 from .request_states import RequestStates, request_states
 from .retained_set import retained_set
-from .routine_weight import routine_weights
 from .satisfaction import satisfaction
 from .semestralization import semestralization
 from .serial_dictatorship import serial_dictatorship
@@ -235,12 +242,9 @@ __all__ = [
     "available_goods",
     "admitted_set",
     "availability_shape",
+    "base_quantile",
     "best_class",
-    "DAY",
-    "NIGHT",
     "class_schedules",
-    "class_shifts",
-    "routine_weights",
     "schedule_cliques",
     "schedule_names",
     "entry_block",
@@ -250,13 +254,19 @@ __all__ = [
     "concave_bids",
     "consumption",
     "DEFAULT_MULTIPLIER",
+    "Correlations",
+    "correlations",
     "credit_return",
     "credits_per_seat",
     "curriculum_heights",
+    "inverse_edges",
+    "transitive_closure",
     "curriculum_periods",
     "curriculum_reach",
     "demand_per_seat",
+    "dissipation",
     "effective_load",
+    "eligible_interest",
     "eligible_set",
     "exclusion_rate",
     "DEFAULT_RATE",
@@ -284,6 +294,9 @@ __all__ = [
     "normalize_rows",
     "occupancy",
     "progress",
+    "quantile_band",
+    "quantile_name",
+    "quantile_names",
     "pearson",
     "period_return",
     "preference_split",

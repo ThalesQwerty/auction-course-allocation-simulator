@@ -1,9 +1,6 @@
 import { withUnlocks } from "./curriculum";
-import { cohortSize } from "./equations";
 import { readEntries, requestPersistence, writeEntries } from "./historyStore";
-import { strategyDefaults } from "./presets";
 import { COMPARISON_ARMS, horizonFor } from "./types";
-import type { PerformanceProfile, Profile } from "./types";
 import type { CompareRequest, CompareResponse, Scenario } from "./types";
 
 export interface ComparisonRun {
@@ -133,18 +130,8 @@ export function migrateInterest<T extends object>(config: T): T {
  * O eixo de desempenho não aparece aqui: a chave de armazenamento sobe quando
  * ele muda de família, porque traduzir média de Beta em nota média seria
  * inventar um cenário que ninguém rodou. */
-function migrateScenario<
-  T extends {
-    performance_profiles: PerformanceProfile[];
-    availability_profiles: Profile[];
-  }
->(config: T): T {
+function migrateScenario<T extends Record<string, unknown>>(config: T): T {
   const migrated = migrateInterest(config);
-  if (!Array.isArray(config.availability_profiles)) {
-    migrated.availability_profiles = [
-      { name: "cheia", mode_hours: 1, full_load_rate: 0.999 },
-    ];
-  }
   const campos = migrated as Record<string, unknown>;
   if (typeof campos.min_credits !== "number") {
     campos.min_credits =
@@ -159,12 +146,28 @@ function migrateScenario<
   // num modelo em que a turma não tinha nenhum dos dois. Reexecutá-la dará
   // outro resultado — o que os padrões fazem aqui é só impedir que a API caia
   // calada em outro cenário ainda.
-  if (!Array.isArray(campos.routine_profiles)) {
-    campos.routine_profiles = strategyDefaults().routine_profiles;
+  if (typeof campos.slots !== "number") {
+    // Execução gravada com os dois turnos traz `day_slots`/`night_slots`; o
+    // modelo de régua única soma os dois, que é o número de horários que
+    // aquela grade de fato tinha.
+    const dia = typeof campos.day_slots === "number" ? campos.day_slots : 12;
+    const noite = typeof campos.night_slots === "number" ? campos.night_slots : 6;
+    campos.slots = dia + noite;
   }
-  if (typeof campos.day_slots !== "number") campos.day_slots = 12;
-  if (typeof campos.night_slots !== "number") campos.night_slots = 6;
+  delete campos.day_slots;
+  delete campos.night_slots;
+  delete campos.routine_profiles;
   delete campos.class_difficulty_levels;
+  // Execução gravada antes da janela estacionária (19/11/2026) traz
+  // `entry_periods` e um horizonte de ciclo de vida. O que mais se aproxima
+  // dela é observar o que sobrava depois da residência; reexecutá-la dará
+  // outro resultado de qualquer modo, porque o ingresso passou a ser contínuo.
+  if (typeof campos.observation_periods !== "number") {
+    const entradas =
+      typeof campos.entry_periods === "number" ? campos.entry_periods : 8;
+    campos.observation_periods = Math.max(1, entradas);
+  }
+  delete campos.entry_periods;
   return migrated;
 }
 
@@ -303,30 +306,32 @@ export function formatRunDate(at: string): string {
 /** Resumo de uma linha do cenário, para distinguir execuções do mesmo minuto. */
 function describeScenario(config: Scenario | CompareRequest): string {
   const { rounds, disciplines } = config;
-  const periods = horizonFor(config.entry_periods, config.max_residence);
-  // Uma coorte por período *com ingresso*: a população é a coorte vezes a
-  // quantidade desses períodos, não vezes |T|. E a coorte é derivada dos
-  // perfis — ver `equations.cohortSize`.
-  const students = cohortSize(config) * config.entry_periods;
+  const periods = horizonFor(config.max_residence, config.observation_periods);
+  // Em regime a população é a coorte vezes o prazo de jubilamento: entra uma
+  // por período e sai uma, de `t = max_residence` em diante.
+  const students = config.students_per_period * config.max_residence;
   const rodadas = rounds === 1 ? "1 rodada" : `${rounds} rodadas`;
   // O ciclo de vida muda o resultado inteiro, não só a escala: duas execuções
   // que só diferem nele precisam se distinguir. E como |T| é derivado dos dois
   // números, mostrá-lo sozinho esconderia qual deles mudou.
   const horizonte =
-    config.entry_periods < periods
-      ? `${periods} períodos (${config.entry_periods} com ingresso, jubila em ${config.max_residence})`
+    config.max_residence > 0
+      ? `${periods} períodos (${config.max_residence} de pré-população, ${config.observation_periods} medidos)`
       : `${periods} períodos`;
   // Os perfis entram pela contagem, não pelos parâmetros: o que distingue
   // duas execuções à primeira vista é quantos grupos a população tinha, e a
   // lista inteira não caberia num rótulo de uma linha.
-  const perfis = (axis: readonly unknown[]) =>
-    `${axis.length} ${axis.length === 1 ? "perfil" : "perfis"}`;
+  const numero = (value: number) => value.toLocaleString("pt-BR");
   const populacao = [
-    `desempenho: ${perfis(config.performance_profiles)}`,
-    `disponibilidade: ${perfis(config.availability_profiles)}`,
-    `seletividade: ${perfis(config.selectivity_profiles)}`,
-    `rotina: ${perfis(config.routine_profiles)}`,
-    `interesse σ ${config.interest_sigma.toLocaleString("pt-BR")}`,
+    `nota ${numero(config.performance.mode_grade)}`,
+    `carga ${numero(config.availability.mode_hours)} h`,
+    // A seletividade vive em milésimos — `numero` arredondaria a três casas
+    // e apagaria a diferença entre dois cenários.
+    `seletividade ${config.selectivity_median.toLocaleString("pt-BR", {
+      maximumFractionDigits: 5,
+    })}`,
+    `interesse σ ${numero(config.interest_sigma)}`,
+    `${config.quantiles} ${config.quantiles === 1 ? "faixa" : "faixas"}`,
   ];
   return (
     `${horizonte} × ${rodadas} · ${disciplines.length} disciplinas · ${students} alunos` +

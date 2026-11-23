@@ -34,6 +34,7 @@ def request_set(
     behavior: Behavior = NEUTRAL,
     classes: dict[str, tuple[str, ...]] | None = None,
     conflicts: dict[str, tuple[str, ...]] | None = None,
+    interest: float = 0.0,
 ) -> list[str]:
     """D_a^(t,r) — ver `equations.request_set`.
 
@@ -67,7 +68,7 @@ def request_set(
     `available_goods` devolve as irmãs na rodada 2.
     """
     groups, scores, _reserve = decide(
-        utilities=utilities, behavior=behavior, classes=classes
+        utilities=utilities, behavior=behavior, classes=classes, interest=interest
     )
     if not classes:
         return rank_requests(scores=groups, available=available)

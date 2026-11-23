@@ -129,7 +129,7 @@ class RoundReport:
     # o que é determinístico.
     allocation_seconds: float = field(compare=False)
     # O mesmo instante por perfil, um recorte por eixo — `performance`,
-    # `availability`, `selectivity` e `routine` —, cada um na ordem em
+    # `availability` e `selectivity` —, cada um na ordem em
     # que o cenário declara os grupos. Também particiona `overall`. A API de
     # traço não o publica: quem o lê é a comparação, que o reduz por período.
     by_profile: dict[str, list[GroupSnapshot]] = field(default_factory=dict)
@@ -168,10 +168,9 @@ class DisciplineSnapshot:
     # consultar o cenário de volta.
     difficulty: float
     classes: int  # em quantas turmas a disciplina foi repartida
-    # O **turno** é da turma, e é o único atributo que varia dentro de uma
-    # disciplina — é por isso que o recorte por turno tem o que mostrar onde
-    # o recorte por dificuldade não tem mais.
-    shift: str
+    # O **horário** é da turma, e é o único atributo que varia dentro de uma
+    # disciplina: carga, dificuldade e pré-requisito são todos herdados
+    # inteiros da disciplina.
     schedule: str
     elective: bool
     seats: int  # q_x no início do período
@@ -269,14 +268,13 @@ class StudentSummary:
     id: str
     name: str
     entry_period: int  # t_a
-    # Os **quatro** grupos a que ele pertence, pelo nome. Três são traço e
+    # Os **três** grupos a que ele pertence, pelo nome. Dois são traço e
     # não entram em decisão nenhuma; a seletividade é a estratégia dele.
     # Estão aqui porque a tela individual é onde se pergunta "por que *este*
     # aluno foi assim", e porque o relatório recorta por eles.
     performance: str
     availability: str
     selectivity: str
-    routine: str
     grade_average: float  # N_a
     approved_hours: int
     hours_to_graduate: int  # S — igual para todos
@@ -305,3 +303,16 @@ class SimulationResult:
     # A primeira é do interesse, não da utilidade: é o que σ governa.
     interest_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)
+    # Quantos períodos iniciais são **pré-população**. Eles estão em `periods`
+    # como todos os outros — o motor não joga nada fora —, e o que este campo
+    # faz é dizer a quem lê onde a janela medida começa.
+    warmup_periods: int = 0
+
+    @property
+    def observed(self) -> list[PeriodReport]:
+        """Os períodos **medidos** — os de depois da pré-população.
+
+        É o que a comparação reduz e desenha. Com `warmup_periods = 0` são
+        todos, que é o caso de uma simulação isolada.
+        """
+        return [p for p in self.periods if p.period > self.warmup_periods]

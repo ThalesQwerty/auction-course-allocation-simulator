@@ -64,10 +64,10 @@ from .equations import (
     Behavior,
     admitted_set,
     concave_bids,
+    eligible_interest,
     normalize_rows,
     preference_split,
     reserve_threshold,
-    routine_weights,
     utility,
 )
 from .equations.interest_histogram import BINS as DISTRIBUTION_BINS
@@ -115,40 +115,6 @@ def _stability_by_discipline(config: SimulationConfig) -> np.ndarray:
         ],
         dtype=float,
     ).reshape(1, 1, -1)
-
-
-def _routine_log_weights(
-    students: list["Student"], shifts: list[str]
-) -> np.ndarray:
-    """ln do multiplicador de turno de cada par (aluno, turma).
-
-    É a **componente privada do turno**: dois alunos com a mesma rotina a
-    recebem igual, e é por isso que ela não se cancela na normalização —
-    varia dentro da linha, entre turmas diurnas e noturnas. Ver
-    `equations.routine_weight`.
-
-    O cálculo é cacheado por par (diurno, noturno) porque são três perfis
-    para milhares de alunos; o `np.log` entra porque é lá que a log-normal
-    mora, e multiplicar o sorteio por `m` é somar `ln m` ao expoente.
-    """
-    cache: dict[tuple[float, float], np.ndarray] = {}
-
-    def row(profile) -> np.ndarray:
-        key = (profile.day, profile.night)
-        cached = cache.get(key)
-        if cached is None:
-            cached = np.log(
-                np.array(
-                    routine_weights(
-                        shifts=shifts, day=profile.day, night=profile.night
-                    ),
-                    dtype=float,
-                )
-            )
-            cache[key] = cached
-        return cached
-
-    return np.array([row(student.routine) for student in students])[:, None, :]
 
 
 class InterestMatrix(Mapping[tuple[str, int], dict[str, float]]):
@@ -232,12 +198,12 @@ def draw_interest(
     abaixo daqui o vê. Existe para a prévia da interface desenhar a fonte numa
     escala que se lê.
 
-    **O que sobra da média desse logaritmo é o peso do turno**
-    (`_routine_log_weights`): o perfil de rotina do aluno multiplica o
-    interesse das turmas diurnas ou das noturnas, conforme a vida que ele tem
-    fora da grade. Ao contrário de μ, ele não se cancela na normalização —
-    varia dentro da linha, e é exatamente isso que o faz redistribuir o
-    interesse entre os turnos.
+    Houve um terceiro termo no expoente até 19/11/2026: o peso do **turno**,
+    que o perfil de rotina do aluno aplicava às turmas diurnas ou às
+    noturnas. Ele saiu com o turno, e com ele saiu a única fonte de
+    heterogeneidade **correlacionada** entre turmas de uma mesma disciplina —
+    o que distingue uma turma da outra passou a ser só o desvio sorteado
+    abaixo, que é independente entre alunos.
 
     A linha é sobre **turmas**, e o sorteio é composto em dois níveis: o valor
     da disciplina, comum às turmas dela, mais um desvio por turma, repartidos
@@ -285,12 +251,7 @@ def draw_interest(
         )
         level = np.sqrt(stability) * level + np.sqrt(1.0 - stability) * deviation
 
-    shifts = config.shift_by_class()
-    log = (
-        config.interest_sigma * level
-        + config.interest_mean
-        + _routine_log_weights(students, [shifts[name] for name in columns])
-    )
+    log = config.interest_sigma * level + config.interest_mean
     normalized = normalize_rows(np.maximum(np.exp(log), UNDERFLOW_GUARD))
     return InterestMatrix(
         values=normalized,
@@ -316,7 +277,8 @@ def utility_matrix(
     Devolve só as turmas das disciplinas do conjunto elegível
     (`equations.eligible_set`); as já aprovadas e as ainda bloqueadas têm
     utilidade zero por definição e não aparecem, e a elegível herda o
-    interesse do que ela destrava um período à frente (`equations.utility`).
+    interesse de tudo que ela destrava, transitivamente
+    (`equations.utility`).
 
     A soma sobre as **disciplinas** — a melhor turma de cada uma — é 1, e é
     essa invariante que dispensa o denominador de ψ. Sobre as *turmas* a soma
@@ -332,8 +294,26 @@ def utility_matrix(
     return utility(
         interest=interest,
         eligible=config.eligible_disciplines(approved),
-        successors=config.successors_by_discipline(),
-        prerequisites=config.prerequisites_by_discipline(),
+        reachable=config.reachable_by_discipline(),
+        required=config.required_by_discipline(),
+        classes=config.classes_by_discipline(),
+    )
+
+
+def interest_total(
+    *, interest: dict[str, float], student: "Student", config: SimulationConfig
+) -> float:
+    """Σ_{X ∈ M_a^(t)} I_{a,X}: o denominador da reserva — ver
+    `equations.eligible_interest`.
+
+    Mesmo conjunto elegível de `utility_matrix` e mesma linha de interesse,
+    lida crua: é a **única** grandeza da decisão que não passa pela utilidade,
+    e é o que a reserva precisa para ter escala contra a opção externa.
+    """
+    approved = student.approved(config.min_grade)
+    return eligible_interest(
+        interest=interest,
+        eligible=config.eligible_disciplines(approved),
         classes=config.classes_by_discipline(),
     )
 
@@ -343,6 +323,7 @@ def decide(
     utilities: dict[str, float],
     behavior: Behavior = NEUTRAL,
     classes: dict[str, tuple[str, ...]] | None = None,
+    interest: float = 0.0,
 ) -> tuple[dict[str, float], dict[str, float], float]:
     """A mensagem do aluno, antes de o mecanismo lê-la.
 
@@ -364,8 +345,12 @@ def decide(
     corta e que a mochila de fora reparte. Cortar no nível da turma faria o
     número de turmas decidir o que ele pede.
 
-    Dois passos, um por equação: `reserve_threshold` reparte a seletividade
-    entre as disciplinas elegíveis, e `admitted_set` corta.
+    `interest` é `Σ_{X ∈ M_a^(t)} I_{a,X}` — o interesse total das elegíveis,
+    de `equations.eligible_interest`, e o único número aqui que não é
+    utilidade. Em 0 não há reserva, e o aluno pede tudo.
+
+    Dois passos, um por equação: `reserve_threshold` põe a seletividade no
+    bolo das elegíveis, e `admitted_set` corta.
     """
     scores = {name: value for name, value in utilities.items() if value > 0.0}
     if classes:
@@ -378,10 +363,10 @@ def decide(
         groups = {name: value for name, value in groups.items() if value > 0.0}
     else:
         groups = scores
-    # |M_a^(t)| é contado **antes** do corte: a reserva reparte a seletividade
-    # entre o que o aluno podia cursar, não entre o que sobrou dela.
+    # O interesse somado é o de **antes** do corte: a reserva mede a opção
+    # externa contra o que o aluno podia cursar, não contra o que sobrou dela.
     reserve = reserve_threshold(
-        selectivity=behavior.selectivity, eligible=len(groups)
+        selectivity=behavior.selectivity, interest=interest
     )
     return admitted_set(scores=groups, reserve=reserve), scores, reserve
 
@@ -393,6 +378,7 @@ def compute_bids(
     budget: int,
     behavior: Behavior = NEUTRAL,
     classes: dict[str, tuple[str, ...]] | None = None,
+    interest: float = 0.0,
 ) -> dict[str, int]:
     """c_{a,·}^(t,r): a estratégia do aluno no leilão.
 
@@ -428,7 +414,7 @@ def compute_bids(
     do nível de fora, crédito a crédito.
     """
     groups, scores, reserve = decide(
-        utilities=utilities, behavior=behavior, classes=classes
+        utilities=utilities, behavior=behavior, classes=classes, interest=interest
     )
     if not classes:
         return concave_bids(

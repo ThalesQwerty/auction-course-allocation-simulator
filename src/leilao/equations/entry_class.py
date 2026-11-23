@@ -61,8 +61,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .class_shift import NIGHT, class_shifts
-
 
 def entry_block(*, ordinal: int, cohort: int, classes: int) -> int:
     """O bloco da coorte a que o ordinal pertence."""
@@ -74,13 +72,15 @@ def entry_block(*, ordinal: int, cohort: int, classes: int) -> int:
 
 
 def rotated_index(*, block: int, offset: int, classes: int) -> int:
-    """O índice da turma que o bloco recebe, girado `offset` posições **dentro
-    do turno** dele."""
-    night = class_shifts(classes).count(NIGHT)
-    day = classes - night
-    if block < day:
-        return (block + offset) % day
-    return day + ((block - day) + offset) % night
+    """O índice da turma que o bloco recebe, girado `offset` posições.
+
+    O giro é sobre a lista inteira de turmas. Houve um giro **dentro do
+    turno**, enquanto as turmas eram repartidas entre diurnas e noturnas; com
+    o turno fora do modelo (19/11/2026) não há mais sublista a respeitar.
+    """
+    if classes <= 0:
+        raise ValueError("uma disciplina de entrada precisa de pelo menos uma turma")
+    return (block + offset) % classes
 
 
 def entry_class(

@@ -17,18 +17,17 @@ import type {
   SeriesGroupStyle,
   SeriesLine,
 } from "./charts";
+import { BoxPlot } from "./charts";
 import {
-  AMPLITUDE,
+  AGGREGATE,
   CUTS,
   RULERS,
-  amplitudeGroups,
-  amplitudeLines,
   cutGroups,
   pointsOf,
   rulerOf,
   seriesOf,
 } from "./bands";
-import type { CutChoice } from "./bands";
+import type { CutChoice, RulerChoice } from "./bands";
 import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
 import { Trace } from "./Trace";
@@ -111,7 +110,6 @@ const CLASS_CUTS: { axis: ClassCut; label: string }[] = [
   { axis: "classes", label: "Turmas" },
   { axis: "hours", label: "Carga horária" },
   { axis: "difficulty", label: "Dificuldade" },
-  { axis: "shift", label: "Turno" },
   { axis: "curriculum_period", label: "Período" },
 ];
 
@@ -128,8 +126,6 @@ const classGroupLabel = (axis: ClassCut, key: string): string => {
       return `${number} h`;
     case "difficulty":
       return `dificuldade ${number}`;
-    case "shift":
-      return key === "night" ? "noturna" : "diurna";
     case "curriculum_period":
       return `${number}º período`;
   }
@@ -211,6 +207,19 @@ const METRICS: Metric[] = [
     band: "exclusion_rate",
     bounds: [0, 1],
     // A vaga que ninguém cursou é perda pura: saiu da oferta e não virou aula.
+    betterWhen: "lower",
+    format: formatRatio,
+  },
+  {
+    id: "dissipation",
+    title: "Dissipação (Δψ)",
+    short: "Dissipação (Δψ)",
+    of: (run) => run.dissipation,
+    band: "dissipation",
+    bounds: [0, 1],
+    // Valor que foi alocado e não chegou a ser consumido: menos é melhor, e
+    // `ψ retida = ψ alocada − Δψ`. Custo **privado** da exclusão — o social
+    // é o desperdício de vaga, logo acima.
     betterWhen: "lower",
     format: formatRatio,
   },
@@ -322,17 +331,61 @@ const WITHOUT_ACCUMULATION = "credits_ilp";
  * universidades brasileiras. */
 const BASELINE = "ranking_greedy";
 
-/** O que a amplitude muda em todo gráfico da tela.
+/** A grade de correlações: duas grandezas **do aluno** contra três do
+ * resultado dele. Seis células, e cada uma tem previsão — é isso que faz a
+ * tabela valer leitura.
  *
- * A régua passa a se ajustar aos dados: o vão entre perfis é pequeno perto do
- * contradomínio da grandeza, e desenhá-lo em [0, 1] o colaria no eixo. Ele
- * também não tem sinal — é uma distância —, então a marca do zero sai mesmo
- * onde a grandeza a pedia. */
-const AMPLITUDE_CHART = {
-  bounds: [0, Infinity] as [number, number],
-  zeroLine: false,
-  foot: "vão entre os grupos do eixo",
-};
+ * A **carga efetiva** não entra como eixo: o aluno não conhece a própria
+ * disponibilidade na hora de pedir, então nenhum canal do mecanismo responde
+ * a ela e o coeficiente seria zero por construção, não por resultado.
+ *
+ * A dissipação entra pela **razão** `ψ retida / ψ alocada`, e não pela
+ * diferença que a métrica publica: aqui se quer condicionar em quanto o aluno
+ * ganhou, senão o coeficiente mede em parte "ganhou mais", que já está na
+ * coluna da ocupação.
+ *
+ * A previsão de cada célula, na ordem abaixo:
+ *
+ * 1. **CR × satisfação** é a eq. (57) — positiva por construção na ordenação
+ *    por CR, onde o histórico é o critério.
+ * 2. **CR × ocupação**: mérito compra carga?
+ * 3. **CR × retenção**: quem é servido primeiro ganha mais e esbarra mais na
+ *    própria disponibilidade — espera-se negativa nos dois modelos.
+ * 4. **Seletividade × satisfação** é a que mais informa: o retorno da
+ *    estratégia. No CR o filtro só encolhe o pedido e não há intensidade a
+ *    expressar, então deve ser nula ou negativa; no leilão, positiva.
+ * 5. **Seletividade × ocupação**: negativa dos dois lados — é a patologia
+ *    "ψ alto, aproveitamento baixo" virando número.
+ * 6. **Seletividade × retenção**: a seletividade é autodefesa contra ganhar
+ *    mais do que cabe, então deve ser positiva.
+ *
+ * Espelha `equations.Correlations`. */
+const CORRELATIONS: { key: string; title: string }[] = [
+  {
+    key: "cr_satisfaction",
+    title: "CR × satisfação (λ)",
+  },
+  {
+    key: "cr_occupancy",
+    title: "CR × ocupação",
+  },
+  {
+    key: "cr_dissipation",
+    title: "CR × retenção",
+  },
+  {
+    key: "selectivity_satisfaction",
+    title: "Seletividade × satisfação",
+  },
+  {
+    key: "selectivity_occupancy",
+    title: "Seletividade × ocupação",
+  },
+  {
+    key: "selectivity_dissipation",
+    title: "Seletividade × retenção",
+  },
+];
 
 /** Sinal explícito: numa coluna de diferenças, "+0,04" e "−0,04" se distinguem
  * de relance e "0,04" não. */
@@ -357,7 +410,7 @@ export function Comparison({
    * Uma só de cada para a tela inteira: o que elas trocam são os eixos de
    * todos os gráficos, e lê-los com recortes diferentes lado a lado é o que
    * não se quer. */
-  const [rulerChoice, setRuler] = useState<Ruler>("period");
+  const [rulerChoice, setRuler] = useState<RulerChoice>("period");
   const [cutChoice, setCut] = useState<CutChoice>("overall");
   /** O recorte da oferta no gráfico de preço. Ele é independente do recorte
    * das demais linhas: um reparte turmas, o outro reparte alunos. */
@@ -466,28 +519,26 @@ export function Comparison({
       axes.some((a) => rulerOf(a) === option.ruler && a.groups.length)
     )
   );
-  const ruler = rulers.some((r) => r.ruler === rulerChoice)
-    ? rulerChoice
-    : (rulers[0]?.ruler ?? "period");
+  /** O que o eixo X está mostrando. `AGGREGATE` não é régua: é o colapso
+   * dela, e vale sempre — o número da tabela existe em qualquer comparação. */
+  const view: RulerChoice =
+    rulerChoice === AGGREGATE || rulers.some((r) => r.ruler === rulerChoice)
+      ? rulerChoice
+      : (rulers[0]?.ruler ?? "period");
+  const aggregated = view === AGGREGATE;
+  const ruler: Ruler = aggregated ? (rulers[0]?.ruler ?? "period") : (view as Ruler);
   const scale = RULERS.find((option) => option.ruler === ruler) ?? RULERS[0];
 
-  /** Os eixos de todos os braços nesta régua — o material de que saem os
-   * recortes disponíveis e as linhas da amplitude. */
+  /** Os eixos de todos os braços nesta régua. */
   const rulerAxes = useMemo(
     () => Object.values(series).flat().filter((a) => rulerOf(a) === ruler),
     [series, ruler]
   );
 
-  /** Os eixos de perfil que a amplitude mede nesta régua. Vazio, o botão
-   * "Amplitude" some: sem dois grupos não há vão. */
-  const amplitudeStyles = useMemo(() => amplitudeGroups(rulerAxes), [rulerAxes]);
-
   /** Os recortes que esta comparação traz **nesta régua**. Uma gravada antes
-   * dos recortes por perfil só tem o "Geral", e os outros botões somem. */
+   * dos recortes por quantil só tem o "Geral", e os outros botões somem. */
   const cuts = CUTS.filter((option) =>
-    option.axis === AMPLITUDE
-      ? amplitudeStyles.length > 0
-      : rulerAxes.some((a) => a.axis === option.axis && a.groups.length)
+    rulerAxes.some((a) => a.axis === option.axis && a.groups.length)
   );
   const cut: CutChoice = cuts.some((c) => c.axis === cutChoice)
     ? cutChoice
@@ -497,10 +548,8 @@ export function Comparison({
   const axisOf = (armKey: string) =>
     series[armKey]?.find((a) => rulerOf(a) === ruler && a.axis === cut);
 
-  /** Os grupos do recorte, com cor e rótulo. Na amplitude eles são os eixos,
-   * e a cor é do eixo. */
+  /** Os grupos do recorte, com cor e rótulo. */
   const groups = useMemo(() => {
-    if (cut === AMPLITUDE) return amplitudeStyles;
     const present = [
       ...new Set(
         rulerAxes.flatMap(
@@ -509,7 +558,7 @@ export function Comparison({
       ),
     ];
     return cutGroups(cut, run.config, present, { solo: soloColor(dark) });
-  }, [rulerAxes, amplitudeStyles, cut, run.config, dark]);
+  }, [rulerAxes, cut, run.config, dark]);
 
   /** A seção da economia só aparece com leilão na comparação **e** com dado
    * dela: as gravadas antes de 14/11/2026 não a têm, e um gráfico vazio diria
@@ -522,18 +571,9 @@ export function Comparison({
     )
   );
 
-  /** As linhas de uma grandeza: um grupo do recorte sob um modelo — ou, na
-   * amplitude, um eixo de perfil sob um modelo. */
+  /** As linhas de uma grandeza: um grupo do recorte sob um modelo. */
   const linesOf = (key: string): SeriesLine[] =>
-    cut === AMPLITUDE
-      ? arms.flatMap((arm) =>
-          amplitudeLines(
-            series[arm.key]?.filter((a) => rulerOf(a) === ruler) ?? [],
-            arm.key,
-            key
-          )
-        )
-      : arms.flatMap((arm) =>
+    arms.flatMap((arm) =>
           (axisOf(arm.key)?.groups ?? []).map((group) => ({
             arm: arm.key,
             group: group.group,
@@ -551,6 +591,14 @@ export function Comparison({
    * derrubar a tela. */
   const runsOf = (key: string): RunSummary[] =>
     result.arms.find((arm) => arm.key === key)?.runs ?? [];
+
+  /** A cor de cada modelo no agregado. Nos gráficos de linha o modelo é o
+   * traçado e a cor é do recorte; sem eixo X não há recorte, e a cor volta
+   * para o modelo. */
+  const armColors = useMemo(
+    () => categoricalColors(arms.map((arm) => arm.label), dark),
+    [arms, dark]
+  );
 
   /** As duas distribuições de entrada do cenário. Não variam entre braços nem
    * entre seeds: são do cenário, não da simulação. */
@@ -722,18 +770,40 @@ export function Comparison({
       runs={result.runs}
       xLabel={scale.point}
       {...extra}
-      {...(cut === AMPLITUDE ? AMPLITUDE_CHART : {})}
+    />
+  );
+
+  /** Uma caixa por modelo, sobre as seeds. É o mesmo número da tabela, visto
+   * como distribuição em vez de como ponto. */
+  const metricBox = (metric: Metric) => (
+    <BoxPlot
+      key={metric.id}
+      title={metric.title}
+      bounds={metric.bounds ?? [0, 1]}
+      format={metric.format ?? formatRatio}
+      rows={arms.map((arm) => ({
+        key: arm.key,
+        label: arm.label,
+        // No agregado não há recorte, então a cor volta a distinguir o
+        // **modelo** — é a única dimensão que sobra quando o eixo X some.
+        color: armColors[arm.label] ?? soloColor(dark),
+        values: runsOf(arm.key)
+          .map((entry) => metric.of(entry))
+          .filter((value): value is number => typeof value === "number"),
+      }))}
     />
   );
 
   const metricChart = (metric: Metric) =>
-    metric.band
-      ? chart(metric.id, metric.title, metric.band, {
-          bounds: metric.bounds,
-          format: metric.format,
-          zeroLine: metric.zeroLine,
-        })
-      : null;
+    aggregated
+      ? metricBox(metric)
+      : metric.band
+        ? chart(metric.id, metric.title, metric.band, {
+            bounds: metric.bounds,
+            format: metric.format,
+            zeroLine: metric.zeroLine,
+          })
+        : null;
 
   return (
     <div>
@@ -753,17 +823,23 @@ export function Comparison({
           simulações
         </h2>
         <div className="switch-set">
-          {rulers.length > 1 && (
+          {(rulers.length > 1 || true) && (
             <div className="switch-group" role="group" aria-label="Eixo">
               <span>Eixo</span>
               <div className="view-switch">
-                {rulers.map((option) => (
+                {[
+                  ...rulers.map((option) => ({
+                    key: option.ruler as RulerChoice,
+                    label: option.label,
+                  })),
+                  { key: AGGREGATE as RulerChoice, label: "Agregado" },
+                ].map((option) => (
                   <button
-                    key={option.ruler}
+                    key={option.key}
                     type="button"
-                    className={ruler === option.ruler ? "on" : ""}
-                    aria-pressed={ruler === option.ruler}
-                    onClick={() => setRuler(option.ruler)}
+                    className={view === option.key ? "on" : ""}
+                    aria-pressed={view === option.key}
+                    onClick={() => setRuler(option.key)}
                   >
                     {option.label}
                   </button>
@@ -796,19 +872,17 @@ export function Comparison({
         <header className="chart-section-head">
           <h2>Métricas de alocação</h2>
           <p>
-            {cut === AMPLITUDE
-              ? "O vão entre o grupo que mais colheu e o que menos colheu em cada eixo de perfil, ponto a ponto. "
-              : "A mediana entre as simulações em cada ponto do eixo, com o intervalo interquartil em faixa. "}
-            O tempo de formatura não entra: é da simulação inteira, não de um
-            ponto dela.
+            A mediana entre as simulações em cada ponto do eixo, com o
+            intervalo interquartil em faixa. O tempo de formatura não entra: é
+            da simulação inteira, não de um ponto dela.
           </p>
         </header>
         <div className="chart-grid">
           {METRICS.map(metricChart)}
-          {/* O peso de cada ponto, no fim da grade. Ele mostra as três fases
-              do horizonte — a universidade enchendo, o estado estacionário e
-              a drenagem —, e sem ele a queda das curvas no fim se leria como
-              mudança de mecanismo. */}
+          {/* O peso de cada ponto, no fim da grade — e o **teste de validade
+              da janela**: em regime ele é plano, porque entra uma coorte e sai
+              outra. Se subir ao longo da janela, a pré-população foi curta e
+              o que as curvas mostram é a rampa, não o mecanismo. */}
           {chart("students", scale.weight, "students", {
             bounds: [0, Infinity],
             format: formatCount,
@@ -829,6 +903,27 @@ export function Comparison({
           <div className="chart-grid">{saturation.map(metricChart)}</div>
         </section>
       )}
+
+      <section className="chart-section">
+        <header className="chart-section-head">
+          <h2>Correlações</h2>
+          <p>
+            O que anda junto com o quê: duas grandezas do aluno — o CR e a
+            seletividade — contra três do resultado dele. Descrevem, não
+            pontuam: qual lado é melhor depende de alocar por mérito passado
+            ou por necessidade, e essa é escolha de quem lê.
+          </p>
+        </header>
+        <div className="chart-grid">
+          {CORRELATIONS.map((cell) =>
+            chart(cell.key, cell.title, cell.key, {
+              bounds: [-1, 1],
+              format: formatRatio,
+              zeroLine: true,
+            })
+          )}
+        </div>
+      </section>
 
       <section className="chart-section">
         <header className="chart-section-head">
@@ -927,7 +1022,7 @@ export function Comparison({
             <tr>
               <th>Métrica</th>
               <th>Igualitário</th>
-              <th>Acumulativo</th>
+              <th>Com PLI</th>
               <th>Efeito do acúmulo</th>
               <th>Subiu em</th>
               <th>CR (referência)</th>

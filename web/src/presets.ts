@@ -1,82 +1,69 @@
-import { PALETTE } from "./profileColors";
 import type { SavedPreset } from "./savedPresets";
 import type { DisciplineInput, Scenario } from "./types";
 
 /** A população: os quatro eixos de perfil mais o sigma do interesse.
  *
- * Três são **traço** — desempenho, disponibilidade e rotina governam
+ * Dois são **traço** — desempenho e disponibilidade governam
  * sorteios, e o aluno não os conhece. O outro é **estratégia**: a
  * seletividade entra na decisão dele, e é por isso que vale valor fixo em vez
  * de distribuição. Um perfil de estratégia é tratamento, não descrição.
  *
- * A repartição entre as combinações é **igualitária** — 3 × 3 × 5 × 3 = 135
- * combinações —, de modo que o que o cenário escolhe é quantos grupos
- * existem, não que fatia cada um leva.
+ * Cada eixo é **uma distribuição só** mais um nível basilar: a fração da
+ * variância que é permanente do aluno. Os perfis declarados saíram em
+ * 19/11/2026, e com eles a coorte derivada do produto das combinações.
  *
  * `max_hours` não está aqui: é do cenário, porque é a soma de um período da
  * grade. */
 const POPULATION: Pick<
   Scenario,
-  | "performance_profiles"
-  | "availability_profiles"
-  | "selectivity_profiles"
-  | "routine_profiles"
+  | "performance"
+  | "performance_stability"
+  | "availability"
+  | "availability_stability"
+  | "selectivity_median"
+  | "selectivity_sigma"
+  | "selectivity_stability"
+  | "quantiles"
   | "interest_mean"
   | "interest_sigma"
 > = {
   // A nota mais provável é o pico da curva numa disciplina de dificuldade
   // padrão, de primeira. A **média** sai 1 a 2 pontos abaixo dela, porque a
-  // cauda esquerda é longa, e é por ela que o "baixo" está calibrado: moda 6,5
-  // dá média 4,96, que encosta em n_min = 5 — aquele grupo reprova em torno de
-  // metade das vezes. Sem dispersão de desempenho ninguém reprova, a recursada
-  // some do cenário e o CR vira ruído.
+  // cauda esquerda é longa: moda 8 dá média em torno de 6,4, bem acima de
+  // n_min = 5, e quem reprova é a cauda.
+  performance: { mode_grade: 8, zero_rate: 0.005, max_rate: 0.008 },
+  // **Sem este número não há CR que ordene.** O quantil do aluno é sorteado
+  // por matéria; se nada o amarrasse, a média dos quantis de quem cursou
+  // muita disciplina convergiria para 0,5 e a dispersão do CR entre alunos
+  // cairia como 1/√D, sem piso. Medido na grade de 36 obrigatórias: o desvio
+  // padrão do CR cai de ~1,05 para ~0,37, e continua caindo.
   //
-  // As duas chances de ponta separam os grupos onde a moda sozinha não separa,
-  // e são o que torna 0 e 10 alcançáveis: o forte quase nunca zera e tira 10
-  // em 3% das disciplinas; o fraco zera em 3% e quase nunca tira 10.
-  performance_profiles: [
-    { name: "Alto desempenho", color: PALETTE.green, mode_grade: 9, zero_rate: 0.0005, max_rate: 0.03 },
-    { name: "Médio desempenho", color: PALETTE.yellow, mode_grade: 8, zero_rate: 0.005, max_rate: 0.008 },
-    { name: "Baixo desempenho", color: PALETTE.red, mode_grade: 6.5, zero_rate: 0.03, max_rate: 0.0015 },
-  ],
-  // As horas que o aluno tem para o período, resorteadas a cada semestre. As
-  // modas são W_a, dois terços e um terço — 28 h, 20 h e 10 h —, e o que de
-  // fato separa os três é a **chance de encher a carga**: a alta não exclui
-  // nada em metade dos semestres, a baixa quase nunca chega lá.
-  //
-  // A moda fica logo abaixo de W_a na alta, e não em cima: com o pico no teto
-  // não existe log-normal que ainda o alcance com a frequência pedida.
-  availability_profiles: [
-    { name: "Alta disponibilidade", color: PALETTE.green, mode_hours: 22, full_load_rate: 0.5 },
-    { name: "Média disponibilidade", color: PALETTE.yellow, mode_hours: 16, full_load_rate: 0.05 },
-    { name: "Baixa disponibilidade", color: PALETTE.red, mode_hours: 8, full_load_rate: 0.001 },
-  ],
-  // S_a, repartido entre as elegíveis do período: o aluno não pede nem
-  // financia nada abaixo de `S_a / |M_a|`. Em 0 não há corte — é o
-  // **especulador**, que pede tudo e gasta o orçamento inteiro; acima de 1
-  // ele poupa, e o crédito não investido fica para o período seguinte. É o
-  // eixo que torna observável se especular compensa.
-  //
-  // Os nomes **são** os valores: o que separa os grupos é quantas
-  // disciplinas cada um pede, e na grade padrão (33 elegíveis por período)
-  // isso dá 33; 20,5; 11,7; 6,7 e 4,0.
-  selectivity_profiles: [
-    { name: "0", color: PALETTE.gray, value: 0 },
-    { name: "0,5", color: PALETTE.red, value: 0.5 },
-    { name: "1", color: PALETTE.yellow, value: 1 },
-    { name: "1,5", color: PALETTE.green, value: 1.5 },
-    { name: "2", color: PALETTE.blue, value: 2 },
-  ],
-  // A vida fora da grade: quem trabalha de dia prefere as turmas noturnas,
-  // e vice-versa. Os pesos **dobram** o lado conveniente em vez de penalizar
-  // o outro — depois da normalização da linha as duas formas dão a mesma
-  // preferência, e dobrar é a que se lê sem decimal. O indiferente é o
-  // neutro, e é o grupo de controle do eixo.
-  routine_profiles: [
-    { name: "Diurno", color: PALETTE.yellow, day: 2, night: 1 },
-    { name: "Noturno", color: PALETTE.blue, day: 1, night: 2 },
-    { name: "Indiferente", color: PALETTE.gray, day: 1, night: 1 },
-  ],
+  // 0,6 deixa espaço para "bom em cálculo e ruim em escrita" sem que o CR
+  // deixe de separar as pessoas.
+  performance_stability: 0.6,
+  // As horas que o aluno tem para o período. A moda fica logo abaixo de W_a,
+  // e não em cima: com o pico no teto não existe log-normal que ainda o
+  // alcance com a frequência pedida. O que governa a exclusão é a **chance de
+  // encher a carga**, não a moda.
+  availability: { mode_hours: 16, full_load_rate: 0.05 },
+  // Quanto do tempo livre é circunstância e quanto é vida: em 0 ninguém é
+  // sistematicamente mais ocupado que ninguém, e o recorte por quantil
+  // fatiaria o sorteio do semestre.
+  availability_stability: 0.5,
+  // A opção externa, na **escala do interesse**: a reserva do aluno é
+  // `S / (S + ΣI)` sobre o interesse das elegíveis. A referência para
+  // calibrar é `1/(turmas da grade)` — 1/288 aqui —, que põe o limiar na
+  // utilidade média de uma elegível; medido, este valor admite 29% delas.
+  // Perto de 0 está o **especulador**, que pede tudo e gasta o orçamento
+  // inteiro; acima da referência o aluno poupa, e o crédito não investido
+  // fica para o período seguinte. É o eixo que torna observável se especular
+  // compensa.
+  selectivity_median: 0.0035,
+  selectivity_sigma: 0.6,
+  // Mais estável que os outros dois: exigência é feitio, não semestre.
+  selectivity_stability: 0.7,
+  // Três faixas: o semáforo, que é a escada que mais se lê de relance.
+  quantiles: 3,
   // μ = 1 põe a moda da fonte em e^{μ−σ²} = 1, e a prévia se lê; ele não mexe
   // em alocação, porque some na normalização. σ = 1 dá coeficiente de variação
   // ~1,3: o aluno distingue as disciplinas sem desprezar quase todas.
@@ -84,16 +71,10 @@ const POPULATION: Pick<
   interest_sigma: 1,
 };
 
-/** Os eixos de perfil que um cenário salvo antes deles pode não trazer. É o
- * que a API já assume quando o campo vem ausente, então preencher aqui não
+/** Os eixos da população que um cenário salvo antes deles pode não trazer. É
+ * o que a API já assume quando o campo vem ausente, então preencher aqui não
  * muda o que aquele cenário rodava. */
-export const strategyDefaults = (): Pick<
-  Scenario,
-  "selectivity_profiles" | "routine_profiles"
-> => ({
-  selectivity_profiles: POPULATION.selectivity_profiles.map((p) => ({ ...p })),
-  routine_profiles: POPULATION.routine_profiles.map((p) => ({ ...p })),
-});
+export const strategyDefaults = () => ({ ...POPULATION });
 
 // ---------------------------------------------------------------------------
 // O fatorial — a grade como instrumento, não como retrato
@@ -293,7 +274,7 @@ const FACTORIAL_ELECTIVE_HOURS = 24;
  * É o que dimensiona `class_size`. As 9 turmas de cada disciplina de entrada
  * precisam comportar a coorte repartida entre elas — 270/9 = 30 por turma —,
  * e a 45 sobram 15 por turma para quem recursa. */
-const FACTORIAL_STUDENTS_PER_PROFILE = 2;
+const FACTORIAL_STUDENTS_PER_PERIOD = 2;
 
 /** **A grade, única para todo o aplicativo.**
  *
@@ -311,13 +292,13 @@ export const GRADE: DisciplineInput[] = [...FACTORIAL_REQUIRED, ...FACTORIAL_ELE
  * que cria alternativa é salvar.
  *
  * O horizonte **não entra aqui**: |T| deixou de ser escolha e passou a sair do
- * ciclo de vida da população (`horizonFor`), que é o par ingresso × residência.
+ * janela estacionária (`horizonFor`), que é o par jubilamento × observação.
  * O que se declara é quantos períodos recebem coorte nova e quantos o aluno
  * tem para concluir antes de ser jubilado. */
 export const defaultScenario = (): Scenario => ({
   disciplines: GRADE,
   class_size: DEFAULT_CLASS_SIZE,
-  students_per_profile: FACTORIAL_STUDENTS_PER_PROFILE,
+  students_per_period: FACTORIAL_STUDENTS_PER_PERIOD,
   elective_hours: FACTORIAL_ELECTIVE_HOURS,
   max_hours: FACTORIAL_MAX_HOURS,
   // Depois do último ingresso vem a drenagem: ninguém mais entra e a população
@@ -326,7 +307,7 @@ export const defaultScenario = (): Scenario => ({
   // media quanto tempo de simulação sobrou, não o mecanismo. Agora a drenagem é
   // consequência aritmética: o horizonte é ingresso + residência − 1, então ela
   // dura exatamente o que a última coorte precisa para terminar.
-  entry_periods: 8,
+  observation_periods: 10,
   // Residência: 16 períodos. São 150 h a aprovar (120 de optativa) e ~1,5
   // tentativa por disciplina na média do fatorial — metade dele é dificuldade
   // 2, que exige aptidão >= 0,707 e só passa ~35% de primeira —, mais a espera
@@ -355,13 +336,11 @@ export const defaultScenario = (): Scenario => ({
   // turma deixa de ser decisão —, mas a disciplina continua mandando: é dela
   // que vem a maior parte do valor.
   class_stability: 0.7,
-  // Os horários: 12 diurnos e 6 noturnos. Cada um é um grupo de exclusão
-  // mútua, e as turmas da grade caem neles em círculo — 17 a 18 por horário
-  // diurno, 12 a 13 por noturno. O par é o maior que ainda garante uma grade
-  // sem choque em todo período, inclusive só num dos turnos; reduzi-lo é o
-  // botão para o conflito pesar mais.
-  day_slots: 12,
-  night_slots: 6,
+  // Os horários. Cada um é um grupo de exclusão mútua, e as turmas da grade
+  // caem neles em círculo. O piso é o maior número de turmas de uma
+  // disciplina — 9 na grade padrão —, e reduzi-los é o botão para o conflito
+  // pesar mais.
+  slots: 12,
   return_multiplier: 2,
   exclusion_refund_rate: 0,
   seed: 42,

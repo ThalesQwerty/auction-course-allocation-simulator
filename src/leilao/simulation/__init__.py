@@ -26,7 +26,12 @@ diferença entre eles é atribuível ao mecanismo.
 from __future__ import annotations
 
 from ..config import SimulationConfig
-from ..equations import grade_histogram, interest_histogram
+from ..equations import (
+    grade_histogram,
+    interest_histogram,
+    quantile_band,
+    quantile_name,
+)
 from ..equations._mean import mean
 from .period import run_period
 from .reports import (
@@ -118,6 +123,14 @@ def run_simulation(
         for student_id, record in outcome.records.items():
             history[student_id].append(record)
 
+    # A faixa de quantil de cada aluno, pelo nível basilar dele. É o rótulo
+    # que a tela individual mostra e por onde o relatório recorta.
+    def band(level: float) -> str:
+        return quantile_name(
+            band=quantile_band(level=level, bands=config.quantiles),
+            bands=config.quantiles,
+        )
+
     return SimulationResult(
         periods=periods,
         students=[
@@ -125,10 +138,9 @@ def run_simulation(
                 id=s.id,
                 name=s.name,
                 entry_period=s.entry_period,
-                performance=s.performance.name,
-                availability=s.availability.name,
-                selectivity=s.selectivity.name,
-                routine=s.routine.name,
+                performance=band(s.performance_level),
+                availability=band(s.availability_level),
+                selectivity=band(s.selectivity_level),
                 grade_average=s.grade_average(draws.discipline_hours),
                 approved_hours=s.approved_hours(
                     draws.discipline_hours, config.min_grade
@@ -153,4 +165,5 @@ def run_simulation(
         curriculum_periods=draws.curriculum,
         interest_distribution=interest_histogram(draws.interest_rows.values()),
         grade_distribution=grade_histogram(first_grades),
+        warmup_periods=config.warmup_periods,
     )

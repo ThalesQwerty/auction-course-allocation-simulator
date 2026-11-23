@@ -15,9 +15,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..availability import draw_availability
+from ..availability import draw_availability, draw_selectivity
 from ..behavior import InterestMatrix, draw_interest
-from ..config import SimulationConfig
+from ..config import PerformanceShape, SimulationConfig
 from ..grading import GradeShapes, draw_base_quantiles
 from ..equations import per_agent, stochastic_perturbations
 from ..population import Student, generate_students
@@ -35,6 +35,12 @@ class Draws:
     # q_{a,x} — traço, não sorte: uma posição por par, persistente. A nota
     # sai de ler este quantil na distribuição da tentativa.
     base_quantiles: dict[tuple[str, str], float]
+    # A distribuição de desempenho do cenário — uma só, e é ela que a nota de
+    # toda tentativa lê. Fica aqui para o fechamento não voltar ao `config`.
+    performance: PerformanceShape
+    # S_{a,t} — a seletividade de cada par (aluno, período). O período a
+    # transforma no `Behavior` do aluno antes das rodadas.
+    selectivity: dict[tuple[str, int], float]
     # A forma da normal dividida por (perfil, dificuldade, tentativa). Cache
     # de função pura, não estado: ver `grading.GradeShapes`.
     grade_shapes: GradeShapes
@@ -66,7 +72,6 @@ class Draws:
     discipline_hours: dict[str, int]  # por disciplina, para o histórico
     classes: dict[str, tuple[str, ...]]  # grupo -> turmas
     discipline_of: dict[str, str]  # turma -> grupo
-    shift_of: dict[str, str]  # turma -> turno
     schedule_of: dict[str, str]  # turma -> horário
     # Turma -> os grupos de `E = M ∪ G` a que ela pertence. É a forma que a
     # varredura usa; os cliques abaixo são a forma que a PLI usa.
@@ -101,6 +106,8 @@ def prepare(config: SimulationConfig) -> Draws:
     return Draws(
         students=students,
         base_quantiles=base_quantiles,
+        performance=config.performance,
+        selectivity=draw_selectivity(students, config, rng),
         grade_shapes=GradeShapes(),
         availability=availability,
         interest_rows=interest_rows,
@@ -112,7 +119,6 @@ def prepare(config: SimulationConfig) -> Draws:
         discipline_hours=config.hours_by_discipline(),
         classes=config.classes_by_discipline(),
         discipline_of=config.discipline_by_class(),
-        shift_of=config.shift_by_class(),
         schedule_of=config.schedule_by_class(),
         conflicts=config.conflict_groups(),
         exclusions=config.exclusion_cliques(),

@@ -411,7 +411,6 @@ function StudentTrace({
             <span className="chip">{student.performance}</span>
             <span className="chip">{student.availability}</span>
             <span className="chip">seletividade {student.selectivity}</span>
-            <span className="chip">{student.routine}</span>
           </p>
         </div>
         <dl className="stat-row">

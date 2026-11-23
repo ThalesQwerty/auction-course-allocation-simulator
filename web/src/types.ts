@@ -36,77 +36,35 @@ export interface DisciplineInput {
  * pré-requisitos é o que de fato distingue um aluno de outro aqui. */
 export const cohortLabel = (entryPeriod: number): string => `Coorte ${entryPeriod}`;
 
-/** Um grupo da população no eixo de **desempenho**.
+/** A distribuição de **desempenho** da população — uma só.
  *
  * A nota sai de uma normal dividida censurada em [0, 10], descrita pelas três
  * grandezas que se leem: nota mais provável, chance de tirar 0 e chance de
- * tirar 10. A moda é a locação — o número digitado é o pico da curva —, a
- * chance de zero fixa a cauda esquerda e a de dez fixa a direita. A média sai
- * derivada, 1 a 2 pontos abaixo da moda.
+ * tirar 10. A média sai derivada, 1 a 2 pontos abaixo da moda, porque a cauda
+ * esquerda é longa.
  *
- * As três valem para a **disciplina de dificuldade 1 na primeira tentativa**.
- *
- * Espelha `api.schemas.PerformanceProfileIn`. */
-export interface PerformanceProfile {
-  /** Rótulo de relatório; precisa ser único dentro do seu eixo. */
-  name: string;
-  /** Cor do grupo nos gráficos. Ausente em cenário gravado antes dela: a tela
-   * cai na paleta por posição (`profileColor`). */
-  color?: string;
+ * Espelha `api.schemas.PerformanceIn`. */
+export interface PerformanceShape {
   mode_grade: number; // em (0, 10)
   zero_rate: number; // em (0, 1)
   max_rate: number; // em (0, 1)
 }
 
-/** Um grupo da população no eixo de **disponibilidade**.
+/** A distribuição de **disponibilidade** da população — uma só.
  *
  * A disponibilidade é a carga que o aluno tem para o período, **em horas**, e
  * sai de uma log-normal — suporte (0, ∞), sem máximo artificial e nunca
- * negativa. O grupo a descreve pela **moda** (o pico da curva, em horas) e
- * pela **chance de alcançar a carga máxima**, que é a frequência com que ele
- * não precisa excluir nada.
+ * negativa. Duas grandezas a descrevem: a **moda** (o pico da curva, em
+ * horas) e a **chance de alcançar a carga máxima**, que é a frequência com
+ * que o aluno não precisa excluir nada.
  *
  * Passar de W_a é legítimo: o teto de carga é do sistema, não do aluno, e quem
  * o aplica é o alocador. A moda, essa sim, tem de ficar abaixo de W_a.
  *
- * Espelha `api.schemas.ProfileIn`. */
-export interface Profile {
-  /** Rótulo de relatório; precisa ser único dentro do seu eixo. */
-  name: string;
-  color?: string;
+ * Espelha `api.schemas.AvailabilityIn`. */
+export interface AvailabilityShape {
   mode_hours: number; // > 0, abaixo de W_a
   full_load_rate: number; // em (0, 1)
-}
-
-/** Um grupo da população no eixo de **seletividade** — o primeiro dos dois
- * eixos de *estratégia*, que o aluno conhece e usa, ao contrário dos dois de
- * traço (desempenho e disponibilidade), que governam sorteios por trás dele.
- *
- * O valor é um múltiplo do score médio das disciplinas elegíveis: abaixo de
- * `valor × média` o aluno não pede nem financia. Em 0 não há corte — é o
- * especulador, que pede tudo e gasta o orçamento inteiro. Acima de 1 ele
- * poupa: o crédito não investido fica para o período seguinte.
- *
- * Espelha `api.schemas.SelectivityProfileIn`. */
-export interface SelectivityProfile {
-  name: string;
-  color?: string;
-  value: number; // >= 0
-}
-
-/** Um grupo da população no eixo de **rotina** — a vida fora da grade.
- *
- * Os dois valores multiplicam o interesse das turmas de cada turno. O
- * indiferente é o neutro (1 e 1); quem tem rotina diurna dobra o peso das
- * turmas diurnas, e vice-versa. É **traço**: o aluno não escolhe trabalhar de
- * dia, e o turno não entra em decisão de lance.
- *
- * Espelha `api.schemas.RoutineProfileIn`. */
-export interface RoutineProfile {
-  name: string;
-  color?: string;
-  day: number; // > 0
-  night: number; // > 0
 }
 
 export interface Scenario {
@@ -115,34 +73,35 @@ export interface Scenario {
    * cenário: a mesma grade sob 20 ou 40 por turma é o mesmo currículo com o
    * dobro de aperto. */
   class_size: number;
-  /** Perfis de **desempenho**: governam a normal dividida da nota, e por aí a
-   * frequência com que o aluno reprova. O que o aluno carrega por disciplina é
-   * o **quantil** dele naquela matéria, sorteado uma vez e persistente — traço,
-   * não sorte. A dificuldade e a tentativa movem a distribuição sob esse
-   * quantil, transformando as duas chances de ponta por expoentes recíprocos.
+  /** A distribuição de **desempenho** da população — uma só. */
+  performance: PerformanceShape;
+  /** Quanto do desempenho é **do aluno** e não da matéria: a correlação entre
+   * os quantis dele em duas disciplinas quaisquer.
    *
-   * O latente é ilimitado; o que limita é o instrumento. A nota é arredondada
-   * em décimos e clipada em [0, 10], e é essa censura que torna o 0 e o 10
-   * alcançáveis — com a frequência que o perfil declarou. */
-  performance_profiles: PerformanceProfile[];
-  /** Perfis de **disponibilidade**: governam a log-normal das horas que o
-   * aluno tem para o período, sorteada **a cada período** — ao contrário do
-   * quantil de desempenho, que é um só para o curso inteiro. O tempo disponível é
-   * circunstância; o que é traço é a média de onde ela sai.
-   *
-   * Depois da última rodada o aluno descarta o que não couber nessa fração, e
-   * o descartado vira solicitação **excluída**: não conta carga, não conta
-   * tentativa, não mexe no CR, e no leilão devolve metade do preço pago. A
-   * vaga não volta para a oferta. */
-  availability_profiles: Profile[];
-  /** Perfis de **seletividade**: o eixo de estratégia. Com os de traço ele
-   * dá as combinações de perfil, e a coorte é `students_per_profile` vezes
-   * esse número. */
-  selectivity_profiles: SelectivityProfile[];
-  /** Perfis de **rotina**: o terceiro eixo de traço. Multiplicam o interesse
-   * das turmas de cada turno, de modo que quem trabalha de dia prefere as
-   * noturnas sem ficar proibido das diurnas. */
-  routine_profiles: RoutineProfile[];
+   * Em 0 o quantil é resorteado em cada matéria, a média dos quantis converge
+   * para 0,5 e a dispersão do CR entre alunos **não tem piso** — ela cai como
+   * 1/√D e a ordenação por CR passa a ordenar acúmulo de sorte. Em 1 o aluno
+   * tem uma posição só, igual em tudo. */
+  performance_stability: number;
+  /** A distribuição de **disponibilidade** — a log-normal das horas do
+   * período. */
+  availability: AvailabilityShape;
+  /** Quanto da disponibilidade é permanente: a correlação entre dois períodos
+   * do mesmo aluno. */
+  availability_stability: number;
+  /** A mediana da **seletividade**, na *escala do interesse*: quanto vale,
+   * para o aluno, não estudar. A reserva dele é `S / (S + ΣI)` sobre o
+   * interesse das elegíveis. 0 desliga o corte — é o especulador. */
+  selectivity_median: number;
+  /** O desvio em log da log-normal da seletividade. */
+  selectivity_sigma: number;
+  /** Quanto da seletividade é permanente, entre períodos. */
+  selectivity_stability: number;
+  /** Em quantas faixas os relatórios recortam a população, de 1 a 5. O corte
+   * é sobre o **nível basilar** de cada eixo — o componente permanente —, e
+   * não sobre o valor do período: fatiar o sorteio do semestre não separaria
+   * tipos de aluno. Em 1 há uma faixa só, que é a universidade inteira. */
+  quantiles: number;
   /** Quanto do interesse do aluno é permanente, de 0 a 1 — a fração da
    * variância que não é resorteada a cada período. 0 reproduz o modelo
    * anterior; 1 congela o interesse. Ortogonal ao σ: a divisão preserva a dispersão de
@@ -154,13 +113,12 @@ export interface Scenario {
    * disciplina, de modo que estabilidade entre períodos igual a 1 congela
    * também as turmas. */
   class_stability: number;
-  /** Quantos **horários** existem em cada turno. Cada horário é um grupo de
-   * exclusão mútua entre turmas — ninguém cursa duas disciplinas no mesmo
-   * horário —, e as turmas da grade são repartidas entre eles circularmente.
-   * Menos horários é mais turma por horário, e mais escolha travada por
-   * conflito. */
-  day_slots: number;
-  night_slots: number;
+  /** Quantos **horários** o cenário tem. Cada horário é um grupo de exclusão
+   * mútua entre turmas — ninguém cursa duas disciplinas no mesmo horário —, e
+   * as turmas da grade são repartidas entre eles circularmente. Menos
+   * horários é mais turma por horário, e mais escolha travada por conflito.
+   * O piso é o maior número de turmas de uma disciplina. */
+  slots: number;
   /** μ — média do logaritmo da log-normal de onde sai o **interesse**. Não
    * mexe em alocação nenhuma: soma-se ao log de toda a linha, o que a
    * multiplica por e^μ, e a normalização desfaz o fator. Existe para a prévia
@@ -174,28 +132,26 @@ export interface Scenario {
   interest_sigma: number; // > 0
   /** W_a — carga horária máxima por período, eq. (4). Igual para todos. */
   max_hours: number;
-  /** Em quantos períodos entra coorte nova, contados do primeiro. Depois do
-   * último ingresso vem a drenagem: ninguém mais entra e a população só
-   * diminui, o que dá às coortes tardias tempo de chegar ao fim do curso.
-   * **Só há uma coorte por período com ingresso** — os de drenagem não têm
-   * coorte correspondente. */
-  entry_periods: number;
   /** Períodos que o aluno tem para concluir, contados do ingresso. Quem chega
-   * ao fim do último sem fechar a grade é **jubilado** e sai da simulação. Com
-   * `entry_periods`, fecha o ciclo de vida da população e determina |T|
+   * ao fim do último sem fechar a grade é **jubilado** e sai da simulação.
+   *
+   * É também o tamanho da **pré-população**, e não por acaso: com ingresso em
+   * todo período e residência R, no período t estão vivas as coortes que
+   * entraram em t, t−1, …, t−R+1, de modo que antes de t = R ninguém é velho
+   * o bastante para sair e a população cresce uma coorte por período. Só de R
+   * em diante ela é constante. */
+  max_residence: number;
+  /** Quantos períodos são **medidos**, depois da pré-população. São os que as
+   * tabelas e os gráficos mostram. Com `max_residence` determina |T|
    * (`horizonFor`): o motor recebe o horizonte, mas quem o escolhe são estes
    * dois. */
-  max_residence: number;
-  /** Exemplares de cada combinação de perfil em cada coorte. A coorte é isto
-   * vezes o número de combinações, e a população é a coorte vezes os períodos
-   * com ingresso.
+  observation_periods: number;
+  /** Quantos alunos ingressam **por período**. Em regime a população é isto
+   * vezes o prazo de jubilamento.
    *
-   * O tamanho da coorte não é digitado: ele é derivado, e é assim que toda
-   * combinação de perfil recebe o mesmo número de exemplares em toda coorte,
-   * sem sobra a girar. O bloco da coorte que cai em cada turma de entrada não
-   * pode passar das vagas dela, porque o ingressante tem vaga garantida em
-   * toda disciplina de entrada. */
-  students_per_profile: number;
+   * Era derivado do produto das combinações de perfil até 19/11/2026, e mexer
+   * num eixo mudava o tamanho da coorte sem que ninguém pedisse. */
+  students_per_period: number;
   rounds: number; // |R|
   min_grade: number; // n_min
   /** Quem decide a alocação — o segundo eixo da comparação. Cruzado com o
@@ -235,7 +191,7 @@ export type Mechanism = "credits" | "ranking";
  * vão atribuível: comparar o CR direto com o leilão acumulativo mediria
  * mensagem, resolução e acúmulo somados, sem dizer qual pesou.
  *
- *     CR ──mensagem──▶ Bidding points ──resolução──▶ igualitário ──acúmulo──▶ acumulativo
+ *     CR ──mensagem──▶ Bidding points ──resolução──▶ igualitário ──acúmulo──▶ Leilão com PLI
  *
  * 1. **Mensagem**: o CR dá um número por *aluno*, o lance dá um número por
  *    *par* (aluno, disciplina). Os dois resolvem ordinalmente.
@@ -261,18 +217,13 @@ interface ArmDescription {
   hint: string;
 }
 
-/** Os três modelos comparados, na ordem do eixo.
+/** Os **dois modelos comparados**, na ordem do eixo.
  *
- * Os dois leilões são o **mesmo** mecanismo — mesma moeda, mesmo resolvedor,
- * mesmo segundo preço — e diferem em de onde vem o orçamento. Com os três o
- * vão se lê em duas parcelas: CR × igualitário diz o que a moeda compra,
- * igualitário × acumulativo diz o que o acúmulo compra. Fora deles fica a
- * mensagem, em `ABLATION_ARMS`.
+ * O vão entre eles soma as três mudanças do caminho, e isso é escolha
+ * declarada: não há braço intermediário no padrão. Os degraus continuam em
+ * `ABLATION_ARMS` e rodam sob demanda.
  *
- * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas, e
- * `credits_ilp` é **histórico** — nomeia o resolvedor porque nasceu para
- * isolá-lo, e hoje nomeia o leilão igualitário. A chave ficou para que
- * comparação gravada antes disto continue casando com o braço. */
+ * Espelha `leilao.comparison.ARMS`; o `key` é o que casa as duas pontas. */
 export const COMPARISON_ARMS: ArmDescription[] = [
   {
     key: "ranking_greedy",
@@ -282,27 +233,19 @@ export const COMPARISON_ARMS: ArmDescription[] = [
     hint: "a linha de base: matrícula por histórico. Os alunos entram em ordem decrescente de CR e cada um leva o que quer, na própria ordem de preferência, enquanto houver vaga e carga — eqs. (49)-(50). Ordinal: a alocação usa só a ordem, nunca a magnitude. Excluir não custa nada aqui — não há moeda a perder",
   },
   {
-    key: "credits_ilp",
-    label: "Leilão igualitário",
-    short: "Igualitário",
-    dash: "7 4",
-    hint: "o mesmo leilão, com o orçamento fixo: todo aluno abre todo período com C_min, nada atravessa o período e o f_γ da eq. (34) fica desligado (k = 0). Sem acúmulo, o poder de compra não guarda traço nenhum do passado do aluno — o lance diz só o quanto ele quer aquela disciplina agora",
-  },
-  {
     key: "credits_return",
-    label: "Leilão acumulativo",
-    short: "Acumulativo",
+    label: "Leilão com PLI",
+    short: "Leilão",
     dash: "",
     hint: "o modelo proposto (Seção 7.1): o aluno reparte um orçamento de créditos em lances por disciplina, um PLI resolve a alocação e o segundo preço cobra. O saldo atravessa o período (eq. 36) e o f_γ da eq. (34) o alimenta — round(nota/10 · k · preço) do que pagou, de modo que a vaga só rende mais do que custou com nota bem acima da de corte. É a única fonte de mérito do leilão, e quem exclui não recupera nada",
   },
 ];
 
-/** O degrau que sobrou do caminho, e que **não** roda por padrão.
+/** Os degraus do caminho, que **não** rodam por padrão.
  *
- * Separa a mensagem da resolução entre o CR e o leilão igualitário, e o motor
- * o alcança por `run_comparison(..., arms=ARMS + ABLATION_ARMS)`. Fica aqui
- * também para que o traço de uma simulação antiga continue com rótulo
- * legível. */
+ * O motor os alcança por `run_comparison(..., arms=ARMS + ABLATION_ARMS)`.
+ * Ficam aqui também para que o traço de uma simulação antiga continue com
+ * rótulo legível. */
 export const ABLATION_ARMS: ArmDescription[] = [
   {
     key: "credits_greedy",
@@ -310,6 +253,13 @@ export const ABLATION_ARMS: ArmDescription[] = [
     short: "Bidding points",
     dash: "1 3",
     hint: "o mecanismo de pontos das business schools (Sönmez & Ünver 2010): lances repartidos de um orçamento, atendidos em ordem decrescente. Ordinal como o CR — o que muda é só a mensagem, que passa a ser um número por disciplina em vez de um por aluno",
+  },
+  {
+    key: "credits_ilp",
+    label: "Leilão igualitário",
+    short: "Igualitário",
+    dash: "7 4",
+    hint: "o mesmo leilão, com o orçamento fixo: todo aluno abre todo período com C_min, nada atravessa o período e o f_γ da eq. (34) fica desligado (k = 0). Separa o que a moeda compra do que o acúmulo compra. Saiu do padrão em 19/11/2026, quando o trabalho passou a comparar dois modelos",
   },
 ];
 
@@ -424,6 +374,11 @@ export interface RunSummary {
    * aula. É a quinta métrica da comparação, e a que a disponibilidade existe
    * para produzir. */
   exclusion_rate: number;
+  /** Δψ — a **dissipação**: a satisfação que foi alocada e não chegou a ser
+   * consumida, porque o aluno descartou o que não cabia na carga efetiva.
+   * `ψ retida = ψ alocada − Δψ`, e é o custo **privado** da exclusão, contra
+   * o ε, que conta vagas e é o social. */
+  dissipation: number;
   /** Os seis estados em média por aluno, reduzidos a um ponto cada. A série
    * por período está em `ArmResult.series`. */
   request_states: RequestStates;
@@ -499,11 +454,10 @@ export type ClassCut =
   | "classes"
   | "hours"
   | "difficulty"
-  | "shift"
   | "curriculum_period";
 
 /** Os recortes **espaciais** da tela de comparação — as cores das linhas.
- * `overall` é a universidade inteira, um grupo só; os outros quatro são os
+ * `overall` é a universidade inteira, um grupo só; os outros três são os
  * eixos de perfil.
  *
  * A coorte saiu daqui e virou régua (`Ruler`): ela é um corte do tempo, e
@@ -512,8 +466,7 @@ export type CutAxis =
   | "overall"
   | "performance"
   | "availability"
-  | "selectivity"
-  | "routine";
+  | "selectivity";
 
 /** As réguas do eixo X — `leilao.comparison.RULERS`.
  *
@@ -795,7 +748,6 @@ export interface StudentSummary {
   performance: string;
   availability: string;
   selectivity: string;
-  routine: string;
   grade_average: number; // N_a — eq. (49)
   approved_hours: number;
   /** S — a carga da grade inteira. Toda disciplina é obrigatória, então é a
@@ -956,13 +908,14 @@ export interface PlaygroundResponse {
   grades: { student_id: string; name: string; grade: number }[];
 }
 
-/** |T| — o horizonte que esgota a população, dado o ciclo de vida dela.
+/** |T| — o horizonte da janela estacionária.
  *
- * Espelha `config.horizon_for_lifecycle` do motor, porque a tela de
- * configuração precisa do número ao vivo, enquanto o usuário mexe nos dois
- * controles de que ele sai. O **menos um** é a sobreposição do primeiro
- * período: a coorte que entra em t = 1 já gasta ali o primeiro período de
- * residência dela.
+ * Espelha `config.horizon_for_window` do motor, porque a tela de configuração
+ * precisa do número ao vivo, enquanto o usuário mexe nos dois controles de
+ * que ele sai. A pré-população **é** o prazo de jubilamento; depois dela vêm
+ * os períodos observados.
  */
-export const horizonFor = (entryPeriods: number, maxResidence: number): number =>
-  entryPeriods + maxResidence - 1;
+export const horizonFor = (
+  maxResidence: number,
+  observationPeriods: number
+): number => maxResidence + observationPeriods;

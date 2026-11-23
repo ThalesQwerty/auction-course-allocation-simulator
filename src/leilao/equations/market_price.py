@@ -2,32 +2,40 @@
 
     π_x = max{ c_{a,x} : z_{a,x} = 0 }     (1 se ninguém perdeu)
 
-O preço é o **maior lance mal-sucedido**: quem vence paga o que teria sido
-preciso para deslocá-lo, e não o que ofereceu. Sem lance perdedor não houve
-disputa, e o piso de 1 crédito é o valor da equação nesse caso — inclusive
-quando o bem não recebeu lance nenhum.
+O preço é o **maior lance mal-sucedido** naquele bem: quem vence paga o que
+teria sido preciso para deslocá-lo, e não o que ofereceu. Sem lance perdedor
+não houve disputa, e o piso de 1 crédito é o valor da equação nesse caso —
+inclusive quando o bem não recebeu lance nenhum.
 
-QUEM CONTA COMO PERDEDOR, COM TURMAS E HORÁRIOS
-------------------------------------------------
+QUEM CONTA COMO PERDEDOR
+------------------------
 
-Só quem **não ganhou nada que conflite** com a turma. Quem apostou nas turmas
-A, B e C de uma disciplina e foi roteado para C não foi recusado em A e B:
-foi atendido. O mesmo vale para o horário — quem levou uma turma às terças de
-manhã não foi recusado na outra que acontece no mesmo horário, porque não
-poderia cursá-la de todo modo.
+**Quem não levou aquela turma, e ponto.** Não importa se o autor do lance
+levou outra turma da mesma disciplina, nem se levou outra turma no mesmo
+horário: o lance foi feito naquela turma e não foi atendido nela, então ele
+é o que um vencedor dali teve de superar.
 
-Contá-lo como perdedor ali faria cada membro do grupo inflar o preço das
-turmas do próprio grupo, e o efeito apareceria como "turmas encarecem tudo" —
-artefato, não resultado.
+Houve uma regra mais fina até 19/11/2026: quem fosse servido em qualquer
+grupo de `E = M ∪ G` saía do conjunto de perdedores das turmas conflitantes,
+sob o argumento de que ele não tinha sido *recusado* — tinha sido atendido.
+Ela saiu por duas razões. A primeira é que o argumento só se sustenta em `M`:
+quem queria a disciplina e levou outra turma dela está atendido, mas quem
+levou uma disciplina às terças de manhã e perdeu outra no mesmo horário
+**continua querendo a que perdeu**. A segunda é que a regra fazia o preço
+depender de um emparelhamento alheio ao bem, e com isso o mesmo lance
+contava ou não contava conforme o que o seu autor tivesse ganho em outro
+lugar.
 
-Os grupos são os de `E = M ∪ G`. Sem `conflicts` cada bem é o próprio grupo e
-a regra volta a ser a de antes: perdeu quem não levou aquele bem.
+O efeito da troca é conhecido e aceito: o preço sobe mais nas disciplinas com
+muitas turmas, porque é lá que existem lances irmãos a rejeitar. Como o lance
+é repartido pela mochila côncava (`equations.concave_bids`), a turma preferida
+leva o maior deles — e é ele que passa a precificar as irmãs quando o aluno é
+roteado para outra.
 
 Sempre inteiro: os lances (eq. 18) e o piso já o são.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 
 FLOOR = 1
 
@@ -37,18 +45,10 @@ def market_prices(
     good_ids: list[str],
     bids: dict[tuple[str, str], int],
     allocation: dict[tuple[str, str], int],
-    conflicts: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, int]:
-    served: set[tuple[str, str]] = set()
-    for (agent_id, good_id), taken in allocation.items():
-        if not taken:
-            continue
-        for group in conflicts[good_id] if conflicts else (good_id,):
-            served.add((agent_id, group))
     highest_loser: dict[str, int] = {}
     for (agent_id, good_id), credits in bids.items():
-        groups = conflicts[good_id] if conflicts else (good_id,)
-        if any((agent_id, group) in served for group in groups):
+        if allocation.get((agent_id, good_id)):
             continue
         highest_loser[good_id] = max(highest_loser.get(good_id, 0), credits)
     return {good_id: highest_loser.get(good_id, FLOOR) for good_id in good_ids}

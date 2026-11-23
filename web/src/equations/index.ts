@@ -40,7 +40,6 @@
  *     paddedScale        a régua de um gráfico: o contradomínio, ou os dados
  *
  * A população
- *     cohortSize         |A| = exemplares × combinações de perfil
  *     entryClassLoad     o bloco da coorte que cai em cada turma de entrada
  *
  * Solicitações
@@ -50,15 +49,14 @@
  *     induct             a travessia das duas induções
  *     curriculumPeriods  o período induzido dos pré-requisitos
  *     curriculumHeights  a altura na DAG de sucessores
- *     classShifts        N = ⌊k/3⌋ noturnas, D = k − N
  *     schedulePressure   quantas turmas caem em cada horário
  */
 export { amplitude } from "./amplitude";
 export { approvalShare } from "./approvalShare";
 export { availabilityShape, fullLoadThreshold } from "./availabilityShape";
 export { boxStats } from "./boxStats";
-export { DAY, NIGHT, classShifts, schedulePressure } from "./classSchedule";
-export { cohortSize, entryClassLoad, profileCombinations } from "./cohort";
+export { schedulePressure } from "./classSchedule";
+export { entryClassLoad } from "./cohort";
 export type { BoxStats } from "./boxStats";
 export { CYCLIC, curriculumPeriods } from "./curriculumPeriods";
 export { HEIGHT_CYCLE, curriculumHeights } from "./curriculumHeights";

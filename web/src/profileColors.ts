@@ -1,9 +1,22 @@
-/** As cores dos grupos de perfil nos gráficos.
+/** As cores das faixas de quantil nos gráficos.
  *
- * A cor é **do grupo**, escolhida no cenário, e não da posição na legenda:
- * esconder um grupo ou trocar de recorte não repinta os outros. Fixa nos dois
- * temas, como `STATUS` — vermelho, amarelo e verde são os mesmos tons, para
- * que "baixo" e "reprova" não tenham duas cores no mesmo aplicativo.
+ * A cor é **da posição**, e não do grupo: as faixas são um corte ordenado de
+ * uma população contínua, da mais baixa para a mais alta, e a rampa diz essa
+ * ordem. Era o contrário enquanto havia perfis declarados — lá a cor era do
+ * grupo, escolhida no cenário, para que esconder um grupo não repintasse os
+ * outros.
+ *
+ * A escada é aninhada: cada nível é o anterior com uma cor a mais no topo
+ * frio. Fora dela fica o caso de **uma faixa só**, que é a universidade
+ * inteira e não tem ordem a codificar — ali vale o azul de série solitária,
+ * que é o mesmo `PALETTE.blue`.
+ *
+ * O amarelo fica abaixo de 3:1 na superfície clara (ver `charts/theme`), e a
+ * mitigação prevista é rótulo em palavras ao lado: aqui ela está satisfeita
+ * por construção, porque o nome da faixa é o intervalo que ela cobre.
+ *
+ * As cores são fixas nos dois temas, como `STATUS`, para que "faixa baixa" e
+ * "reprova" não tenham duas cores no mesmo aplicativo.
  */
 import { STATUS } from "./charts";
 
@@ -20,44 +33,24 @@ export const PALETTE = {
   brown: "#8b5a2b",
 } as const;
 
-/** As opções do seletor, na ordem em que aparecem. */
-export const PRESET_COLORS: { name: string; value: string }[] = [
-  { name: "cinza", value: PALETTE.gray },
-  { name: "vermelho", value: PALETTE.red },
-  { name: "laranja", value: PALETTE.orange },
-  { name: "amarelo", value: PALETTE.yellow },
-  { name: "verde", value: PALETTE.green },
-  { name: "verde-azulado", value: PALETTE.teal },
-  { name: "azul", value: PALETTE.blue },
-  { name: "violeta", value: PALETTE.violet },
-  { name: "rosa", value: PALETTE.pink },
-  { name: "marrom", value: PALETTE.brown },
-];
+/** A rampa de cada número de faixas, **do mais alto para o mais baixo** — que
+ * é a ordem em que a legenda as lista. */
+const RAMPS: Record<number, string[]> = {
+  1: [PALETTE.blue],
+  2: [PALETTE.green, PALETTE.red],
+  3: [PALETTE.green, PALETTE.yellow, PALETTE.red],
+  4: [PALETTE.blue, PALETTE.green, PALETTE.yellow, PALETTE.red],
+  5: [PALETTE.violet, PALETTE.blue, PALETTE.green, PALETTE.yellow, PALETTE.red],
+};
 
-/** A cor de reserva por posição, para perfil gravado antes de a cor existir
- * ou criado sem ela. Começa pelos três de semáforo, que é a ordem dos eixos
- * de traço (alto, médio, baixo). */
-const FALLBACK = [
-  PALETTE.green,
-  PALETTE.yellow,
-  PALETTE.red,
-  PALETTE.blue,
-  PALETTE.violet,
-  PALETTE.orange,
-  PALETTE.pink,
-  PALETTE.teal,
-  PALETTE.brown,
-  PALETTE.gray,
-];
+export const MAX_QUANTILES = 5;
 
-export const profileColor = (
-  profile: { color?: string },
-  index: number
-): string => profile.color ?? FALLBACK[index % FALLBACK.length];
-
-/** A primeira cor da paleta que nenhum perfil do eixo usa — a do perfil
- * novo. Com todas em uso, recomeça pela posição. */
-export const nextColor = (taken: { color?: string }[]): string => {
-  const used = new Set(taken.map((p, i) => profileColor(p, i)));
-  return FALLBACK.find((c) => !used.has(c)) ?? FALLBACK[taken.length % FALLBACK.length];
+/** A cor da faixa de índice `band` (0 é a mais **baixa**) numa escada de
+ * `bands` faixas.
+ *
+ * O índice vem de baixo porque é assim que a API ordena as faixas; a rampa
+ * está escrita de cima para baixo porque é assim que ela se lê. */
+export const bandColor = (band: number, bands: number): string => {
+  const ramp = RAMPS[Math.min(Math.max(bands, 1), MAX_QUANTILES)] ?? RAMPS[1];
+  return ramp[ramp.length - 1 - band] ?? ramp[ramp.length - 1];
 };

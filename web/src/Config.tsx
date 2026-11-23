@@ -3,45 +3,33 @@ import { DensityChart, LineSample, STATUS } from "./charts";
 import { entryDisciplines } from "./curriculum";
 import { availabilityCurve, gradeCurve, interestCurve } from "./distributions";
 import {
-  cohortSize,
   entryClassLoad,
   fullLoadThreshold,
-  profileCombinations,
   schedulePressure,
 } from "./equations";
 import { PresetList } from "./PresetList";
 import { nameExists } from "./savedPresets";
 import type { SavedPreset } from "./savedPresets";
-import {
-  AvailabilityProfileList,
-  PerformanceProfileList,
-  RoutineProfileList,
-  StrategyProfileList,
-  axisShare,
-} from "./ProfileList";
 import { SaveScenario } from "./SaveScenario";
-import { COMPARISON_ARMS, MAX_COMPARISON_RUNS } from "./types";
+import { COMPARISON_ARMS, MAX_COMPARISON_RUNS, horizonFor } from "./types";
+import { MAX_QUANTILES } from "./profileColors";
 import type { Scenario } from "./types";
 
 /** Quantas turmas caem em cada horário, lido como faixa. É o número que diz
  * se mexer nos horários apertou o conflito: menos horários é mais turma por
  * horário, e mais escolha do aluno travada por choque. */
 const scheduleLoad = (config: Scenario): string => {
-  const load = schedulePressure(
-    config.disciplines,
-    config.day_slots,
-    config.night_slots
-  );
-  const faixa = (counts: number[]) => {
-    const low = Math.min(...counts);
-    const high = Math.max(...counts);
-    return low === high ? `${low}` : `${low}–${high}`;
-  };
-  return (
-    `${faixa(load.day)} turmas por horário diurno · ` +
-    `${faixa(load.night)} por noturno`
-  );
+  const load = schedulePressure(config.disciplines, config.slots);
+  const low = Math.min(...load);
+  const high = Math.max(...load);
+  const faixa = low === high ? `${low}` : `${low}–${high}`;
+  return `${faixa} turmas por horário`;
 };
+
+/** O piso dos horários: duas turmas da mesma disciplina não podem dividir um,
+ * senão a oferta efetiva encolhe sem avisar. Espelha a validação do motor. */
+const minSlots = (config: Scenario): number =>
+  Math.max(1, ...config.disciplines.map((d) => d.classes));
 
 export function Config({
   config,
@@ -88,7 +76,7 @@ export function Config({
   // aceita, e o erro cresceria com o tamanho do catálogo de optativas.
   const entryCourses = entryDisciplines(config.disciplines);
   const entryHours = entryCourses.reduce((sum, d) => sum + d.hours, 0);
-  const cohort = cohortSize(config);
+  const cohort = config.students_per_period;
   // Por **turma**: a matrícula garantida reparte a coorte entre as turmas de
   // cada disciplina de entrada, e o que precisa caber é o maior desses
   // blocos — não a coorte inteira.
@@ -115,15 +103,10 @@ export function Config({
   // vai para a API, e por isso mora aqui e não em `Scenario`.
   const [difficulty, setDifficulty] = useState(1);
   const [attempt, setAttempt] = useState(1);
-  // Qual linha do editor a prévia ao lado desenha. Uma curva por vez, em vez
-  // de todas sobrepostas: com cinco ou seis grupos aquilo vira emaranhado.
-  const [performanceIndex, setPerformanceIndex] = useState(0);
-  const [availabilityIndex, setAvailabilityIndex] = useState(0);
-
-  const performance =
-    config.performance_profiles[performanceIndex] ?? config.performance_profiles[0];
-  const availability =
-    config.availability_profiles[availabilityIndex] ?? config.availability_profiles[0];
+  // Uma distribuição por eixo, então não há linha a escolher: a prévia é
+  // sempre a da população inteira.
+  const performance = config.performance;
+  const availability = config.availability;
 
   // As duas distribuições de entrada, recalculadas a cada tecla. São curvas, e
   // não barras: aqui não há dado contado, e sim a forma que os parâmetros
@@ -162,11 +145,6 @@ export function Config({
     saved.find((entry) => entry.id === presetId)?.name ??
     `Cenário de ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
 
-  // O rodapé de cada seção fala do **próprio** eixo: a lista ali edita os
-  // grupos de um só, e a fatia que interessa é a dele. A contagem de
-  // combinações vem junto, nomeando o outro eixo.
-  const performanceShare = axisShare(config.performance_profiles.length);
-  const availabilityShare = axisShare(config.availability_profiles.length);
 
   // O catálogo de optativas é maior que a exigência de propósito — é a folga
   // que dá ao aluno o que escolher —, e exigir mais do que se oferta deixaria
@@ -234,16 +212,6 @@ export function Config({
 
           <div className="field-row">
             <div className="field">
-              <label>Períodos com ingresso</label>
-              <input
-                type="number"
-                min={1}
-                max={40}
-                value={config.entry_periods}
-                onChange={(e) => patch({ entry_periods: Number(e.target.value) })}
-              />
-            </div>
-            <div className="field">
               <label>Jubilamento</label>
               <input
                 type="number"
@@ -251,6 +219,18 @@ export function Config({
                 max={40}
                 value={config.max_residence}
                 onChange={(e) => patch({ max_residence: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Períodos observados</label>
+              <input
+                type="number"
+                min={1}
+                max={40}
+                value={config.observation_periods}
+                onChange={(e) =>
+                  patch({ observation_periods: Number(e.target.value) })
+                }
               />
             </div>
             <div className="field">
@@ -272,13 +252,13 @@ export function Config({
               )}
             </div>
             <div className="field">
-              <label>Exemplares por perfil</label>
+              <label>Ingressantes por período</label>
               <input
                 type="number"
                 min={1}
                 className={entryTooLarge ? "invalid" : undefined}
-                value={config.students_per_profile}
-                onChange={(e) => patch({ students_per_profile: Number(e.target.value) })}
+                value={config.students_per_period}
+                onChange={(e) => patch({ students_per_period: Number(e.target.value) })}
               />
               {entryTooLarge && (
                 <span className="field-hint invalid-text">
@@ -359,9 +339,10 @@ export function Config({
           </div>
 
           <p className="note">
-            Coorte de {cohort} ({profileCombinations(config)} combinações de
-            perfil) · {entrySeats} vagas de ingresso ·{" "}
-            {cohort * config.entry_periods} alunos no total
+            Coorte de {cohort} · {entrySeats} vagas de ingresso ·{" "}
+            {horizonFor(config.max_residence, config.observation_periods)}{" "}
+            períodos, dos quais {config.max_residence} de pré-população ·{" "}
+            {cohort * config.max_residence} alunos em regime
           </p>
         </div>
 
@@ -458,19 +439,62 @@ export function Config({
                 </p>
               )}
 
-              <AvailabilityProfileList
-                profiles={config.availability_profiles}
-                onChange={(availability_profiles) => patch({ availability_profiles })}
-                selected={availabilityIndex}
-                onSelect={setAvailabilityIndex}
-                top={config.max_hours}
-              />
+              <div className="field-row">
+                <div className="field">
+                  <label>Carga mais provável</label>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={config.availability.mode_hours}
+                    onChange={(e) =>
+                      patch({
+                        availability: {
+                          ...config.availability,
+                          mode_hours: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Chance de alcançar a CH máx</label>
+                  <input
+                    type="number"
+                    min={0.001}
+                    max={0.999}
+                    step={0.001}
+                    value={config.availability.full_load_rate}
+                    onChange={(e) =>
+                      patch({
+                        availability: {
+                          ...config.availability,
+                          full_load_rate: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Nível basilar</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={config.availability_stability}
+                    onChange={(e) =>
+                      patch({ availability_stability: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="config-preview">
               <DensityChart
                 id="curva-disponibilidade"
-                title={`Disponibilidade — ${availability.name}`}
+                title="Disponibilidade"
                 points={availabilities?.points ?? []}
                 /* O eixo **passa de W_a** de propósito: a massa à direita da
                    carga máxima é justamente a chance de alcançá-la. Parar no
@@ -503,19 +527,81 @@ export function Config({
               />
             </div>
           </div>
-          <p className="note">{availabilityShare}</p>
         </div>
 
         <div className="panel">
           <h2>Notas</h2>
           <div className="config-split">
             <div>
-              <PerformanceProfileList
-                profiles={config.performance_profiles}
-                onChange={(performance_profiles) => patch({ performance_profiles })}
-                selected={performanceIndex}
-                onSelect={setPerformanceIndex}
-              />
+              <div className="field-row">
+                <div className="field">
+                  <label>Nota mais provável</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={10}
+                    step={0.1}
+                    value={config.performance.mode_grade}
+                    onChange={(e) =>
+                      patch({
+                        performance: {
+                          ...config.performance,
+                          mode_grade: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Chance de tirar 0</label>
+                  <input
+                    type="number"
+                    min={0.0001}
+                    max={0.999}
+                    step={0.0005}
+                    value={config.performance.zero_rate}
+                    onChange={(e) =>
+                      patch({
+                        performance: {
+                          ...config.performance,
+                          zero_rate: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Chance de tirar 10</label>
+                  <input
+                    type="number"
+                    min={0.0001}
+                    max={0.999}
+                    step={0.0005}
+                    value={config.performance.max_rate}
+                    onChange={(e) =>
+                      patch({
+                        performance: {
+                          ...config.performance,
+                          max_rate: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Nível basilar</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={config.performance_stability}
+                    onChange={(e) =>
+                      patch({ performance_stability: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
 
               <div className="field-row">
                 <div className="field">
@@ -538,7 +624,7 @@ export function Config({
             <div className="config-preview">
               <DensityChart
                 id="curva-notas"
-                title={`Notas — ${performance.name}`}
+                title="Notas"
                 points={grades?.points ?? []}
                 domain={[0, 10]}
                 /* As duas chances de ponta vão no rodapé, e não ao lado dos
@@ -596,58 +682,82 @@ export function Config({
               />
             </div>
           </div>
-          <p className="note">{performanceShare}</p>
         </div>
 
-        {/* O eixo de estratégia, com seu painel como os de traço. Sem
-            prévia: o valor é uma regra de decisão, não uma distribuição, e
-            não há curva a desenhar. */}
+        {/* O eixo de estratégia. Sem prévia: o número é uma regra de
+            decisão, não uma distribuição que a tela precise desenhar. */}
         <div className="panel">
           <h2>Seletividade</h2>
-          <StrategyProfileList
-            profiles={config.selectivity_profiles}
-            onChange={(selectivity_profiles) => patch({ selectivity_profiles })}
-            label="Seletividade"
-            base="seletividade"
-            min={0}
-            step={0.5}
-            fallback={0}
-          />
-          <p className="note">{axisShare(config.selectivity_profiles.length)}</p>
+          <div className="field-row">
+            <div className="field">
+              <label>Mediana</label>
+              <input
+                type="number"
+                min={0}
+                step={0.0005}
+                value={config.selectivity_median}
+                onChange={(e) =>
+                  patch({ selectivity_median: Number(e.target.value) })
+                }
+              />
+            </div>
+            <div className="field">
+              <label>Desvio (σ)</label>
+              <input
+                type="number"
+                min={0.05}
+                step={0.05}
+                value={config.selectivity_sigma}
+                onChange={(e) =>
+                  patch({ selectivity_sigma: Number(e.target.value) })
+                }
+              />
+            </div>
+            <div className="field">
+              <label>Nível basilar</label>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={config.selectivity_stability}
+                onChange={(e) =>
+                  patch({ selectivity_stability: Number(e.target.value) })
+                }
+              />
+            </div>
+          </div>
         </div>
 
         <div className="panel">
-          <h2>Rotina</h2>
-          <RoutineProfileList
-            profiles={config.routine_profiles}
-            onChange={(routine_profiles) => patch({ routine_profiles })}
-          />
-          <p className="note">{axisShare(config.routine_profiles.length)}</p>
+          <h2>Recorte dos gráficos</h2>
+          <div className="field-row">
+            <div className="field">
+              <label>Faixas de quantil</label>
+              <input
+                type="number"
+                min={1}
+                max={MAX_QUANTILES}
+                step={1}
+                value={config.quantiles}
+                onChange={(e) => patch({ quantiles: Number(e.target.value) })}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="panel">
           <h2>Horários</h2>
           <div className="field-row">
             <div className="field">
-              <label>Horários diurnos</label>
+              <label>Horários</label>
               <input
                 type="number"
-                min={1}
+                min={minSlots(config)}
                 max={48}
                 step={1}
-                value={config.day_slots}
-                onChange={(e) => patch({ day_slots: Number(e.target.value) })}
-              />
-            </div>
-            <div className="field">
-              <label>Horários noturnos</label>
-              <input
-                type="number"
-                min={1}
-                max={48}
-                step={1}
-                value={config.night_slots}
-                onChange={(e) => patch({ night_slots: Number(e.target.value) })}
+                value={config.slots}
+                onChange={(e) => patch({ slots: Number(e.target.value) })}
               />
             </div>
           </div>
