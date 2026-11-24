@@ -598,7 +598,7 @@ Cada disciplina, $X \in M$, é composta por suas turmas, $x \in X$. Por razões 
 \subsubsection{Conclusão do curso}
 
 O estudante precisa ser aprovado em todas as disciplinas obrigatórias e em uma carga horária total mínima de optativas, denotada por $W_\text{opt}$, para concluir o curso e, consequentemente, sair da universidade no período seguinte:
-\begin{equation}
+\begin{equation} \label{eq:conclusao}
 M_\text{obg} \subseteq H_a^{(t)} 
 \land \sum_{X \in M_\text{opt} \cup H_a^{(t)}} w_{X} \geq W_\text{opt} 
 \implies t + 1 = T^{\prime}_a
@@ -632,14 +632,31 @@ Quando o aluno cumpre a carga horária optativa exigida para a conclusão, todas
 
 \subsubsection{Pré-requisitos e pós-requisitos}
 
-Cada disciplina pode ter um conjunto de pré-requisitos, denotados pela função $\mathrm{pre}: M \xrightarrow{} \mathcal{P}(M)$, que define o fecho transitivo de tais pré-requisitos. Disciplinas com pré-requisitos só tornam-se elegíveis uma vez que o aluno é aprovado em todos eles.
+Cada disciplina pode ter um conjunto de pré-requisitos, denotados pela função $\mathrm{pre}: M \xrightarrow{} \mathcal{P}(M)$. 
+
+Uma disciplina não pode ser pré-requisito de si mesma.
+\begin{equation}
+    X \notin \mathrm{pre}(X) \quad \forall X \in M
+\end{equation}
+
+A função gera um fecho transitivo.
+\begin{equation}
+     \mathrm{pre}(X) \subset \mathrm{pre}(Y) \quad \forall X, Y \in M : X \in  \mathrm{pre}(Y)
+\end{equation}
+
+Toda disciplina possui ao menos uma disciplina sem pré-requisitos em sua cadeia de pré-requisitos, caso haja.
+\begin{equation}
+     \exists Y \in \mathrm{pre}(X) : \mathrm{pre}(Y) = \emptyset \quad \forall X \in M : \mathrm{pre}(X) \neq \emptyset
+\end{equation}
+
+Disciplinas com pré-requisitos só tornam-se elegíveis uma vez que o aluno é aprovado em todos eles.
 \begin{equation}
     \exists Y \in \mathrm{pre}(X) : Y \notin H^{(t - 1)}_a
     \implies x \notin M_a^{(t)}
     \quad \forall X, Y \in M, \forall x \in X, \forall a \in A^{(t)}
 \end{equation}
 
-A função $\mathrm{pos}: M \xrightarrow{} \mathcal{P}(M)$, por sua vez, obtém o fecho transitivo de pós-requisitos na grade a partir de uma disciplina, isto é, o conjunto de disciplinas que são desbloqueadas por ela:
+A função $\mathrm{pos}: M \xrightarrow{} \mathcal{P}(M)$, por sua vez, obtém o fecho transitivo dos pós-requisitos na grade a partir de uma disciplina, isto é, o conjunto de disciplinas que são desbloqueadas, direta ou indiretamente, por ela:
 \begin{equation}
     Y \in \mathrm{pos}(X) \iff X \in \mathrm{pre}(Y)
     \quad \forall X, Y \in M
@@ -660,7 +677,7 @@ Disciplinas optativas não possuirão pré-requisitos na grade da simulação:
     \mathrm{pre}(X) = \emptyset \quad \forall X \in M_\text{opt} 
 \end{equation}
 
-Para as disciplinas obrigatórias, o nível da disciplina, denotado pela função $\mathrm{niv}: M_\text{obg} \xrightarrow{} \mathbb{N}^*$, decorre por indução da cadeia de pré-requisitos:
+Para as disciplinas obrigatórias, o nível da disciplina, denotado pela função $\mathrm{niv}: M_\text{obg} \xrightarrow{} \mathbb{N}^*$, decorre por indução da sua cadeia de pré-requisitos:
 \begin{equation} \label{eq:periodo-disciplina}
     \mathrm{niv}(X) =
     \begin{cases}
@@ -701,6 +718,12 @@ Além disso, para todos os níveis da grade obrigatória, há ao menos uma combi
 \begin{equation}
     \exists x \in X, y \in Y : \left(\nexists Q_1 \in Q : \{x, y\} \subseteq Q_1 \right)
     \quad \forall X, Y \in M_\text{obg} : \mathrm{niv}(X) = \mathrm{niv}(Y)
+\end{equation}
+
+A carga horária máxima também não impede, por si somente, que um estudante curse todas as disciplinas de um nível no mesmo período.
+\begin{equation}
+    \sum_{X \in M : \mathrm{niv}(X) = k} w_X \leq W_a
+    \quad \forall a \in A, \forall k \in \mathbb{N^*}
 \end{equation}
 
 \section{Simulação do comportamento dos estudantes}
@@ -926,6 +949,46 @@ Determina-se o \textbf{desperdício}, $\omega_a^{(t)} \in [0, 1]$, como a soma t
     \sum_{a \in A^{(t)}} {\omega_a^{(t)}}
 \end{equation}
 
+\subsubsection{Aproveitamento}
+
+Determina-se o \textbf{aproveitamento}, $\eta_a^{(t)} \in [0, 1]$, como a fração da carga horária máxima do estudante que a alocação efetivamente preencheu:
+\begin{equation}
+    \eta_a^{(t)} = \frac{1}{W_a^{(t, 1)}} \cdot \sum_{x \in B} w_{x} \cdot z_{a, x}^{(t, *)}
+    \quad \forall a \in A^{(t)}
+\end{equation}
+\begin{equation}
+    \bar{\eta}^{(t)} =
+    \frac{1}{|A^{(t)}|} \cdot
+    \sum_{a \in A^{(t)}} {\eta_a^{(t)}}
+\end{equation}
+
+Trata-se da contraparte em carga horária da satisfação, que é em utilidade, e as duas separam-se exatamente onde está o efeito que interessa medir: o estudante que concentra os lances, obtém a turma que mais queria e deixa ocioso o restante de $W_a^{(t, 1)}$ pontua satisfação alta e aproveitamento baixo. O limite superior decorre da equação \eqref{eq:capacidade}, que restringe ambos os mecanismos.
+
+\subsubsection{Progresso}
+
+Determina-se o \textbf{progresso}, $\rho_a^{(t)} \in [0, 1]$, como a fração da exigência do curso que o estudante já cumpriu. As duas parcelas do numerador contam de formas distintas, pois a conclusão as exige de formas distintas: a carga obrigatória aprovada entra integralmente, ao passo que a optativa entra limitada superiormente pela exigência $W_\text{opt}$:
+\begin{equation}
+    \rho_a^{(t)} = \frac{
+        \sum_{X \in H_a^{(t)} \cap M_\text{obg}} w_{X}
+        + \min \left(
+            \sum_{X \in H_a^{(t)} \cap M_\text{opt}} w_{X},
+            \; W_\text{opt}
+        \right)
+    }{
+        W_\text{obg} + W_\text{opt}
+    }
+    \quad \forall a \in A^{(t)}
+\end{equation}
+\begin{equation}
+    \bar{\rho}^{(t)} =
+    \frac{1}{|A^{(t)}|} \cdot
+    \sum_{a \in A^{(t)}} {\rho_a^{(t)}}
+\end{equation}
+
+Com esse recorte, $\rho_a^{(t)} = 1$ equivale à conclusão do curso: a primeira parcela só atinge $W_\text{obg}$ quando nenhuma obrigatória ficou para trás, e a segunda só atinge $W_\text{opt}$ quando a exigência optativa foi cumprida --- que são exatamente as duas condições da equação \eqref{eq:conclusao}. Aprovar optativas além da exigência, portanto, não aumenta o progresso, do mesmo modo que não antecipa a formatura.
+
+O progresso mede quanto falta do curso inteiro, e não o ritmo com que o estudante avança: o calouro bem-sucedido pontua baixo por definição. A média carrega viés de sobrevivência, visto que o estudante deixa de ser medido no período seguinte ao da conclusão. Lê-se, portanto, ao lado da fração de concluintes de cada coorte, e não isoladamente.
+
 \subsubsection{Equidade}
 
 A equidade (\textit{fairness}), denotada por $\phi^{(t)} \in \{0\} \cup [\frac{1}{|A^{(t)}|}, 1]$, por sua vez, mede a proximidade entre as satisfações dos estudantes, por meio do Índice de Equidade de Jain, no qual o limite inferior, $\frac{1}{|A^{(t)}|}$, indica um cenário onde um único agente concentra todos os bens alocados, e o limite superior, $1$, indica um cenário onde todos os agentes obtém exatamente a mesma satisfação da alocação dos bens \cite{jain1984quantitative}:
@@ -939,27 +1002,53 @@ A equidade (\textit{fairness}), denotada por $\phi^{(t)} \in \{0\} \cup [\frac{1
 
 Caso a fração resulte na indeterminação $\frac{0}{0}$, assume-se que $\phi^{(t)} = 0$.
 
-Por fim, para mensurar o grau de dependência linear entre o CR dos discentes e suas respectivas satisfações com a alocação, aplica-se o coeficiente de correlação de Pearson, denotado por $\lambda^{(t, r)} \in [-1, 1]$. Seja $\bar{N}^{(t)}$ o CR médio dos alunos ativos no período $t$, formalizado por:
-\begin{equation}
-    \bar{N}^{(t)} = \frac{\sum_{a \in A^{(t)}} N_a^{(t)}}{|A^{(t)}|}
-\end{equation}
+\subsubsection{Correlações}
 
-Tem-se que $\lambda^{(t, r)}$ estabelece-se pela covariância entre o CR individual, $N_a^{(t)}$, e a satisfação obtida por rodada, $\psi_a^{(t, r)}$, normalizada pelo produto de seus respectivos desvios padrão \cite{montgomery2010applied}:
+Por fim, para mensurar o grau de dependência linear entre duas grandezas definidas por estudante, aplica-se o coeficiente de correlação de Pearson \cite{montgomery2010applied}. Sejam $f_a^{(t)}$ e $g_a^{(t)}$ duas dessas grandezas, e $\bar{f}^{(t)}$ e $\bar{g}^{(t)}$ as suas médias sobre os alunos ativos no período; o coeficiente, denotado por $\lambda^{(t)}(f, g) \in [-1, 1]$, estabelece-se pela covariância entre elas, normalizada pelo produto de seus respectivos desvios padrão:
 \begin{equation}
-    \lambda^{(t)} = 
+    \bar{f}^{(t)} = \frac{\sum_{a \in A^{(t)}} f_a^{(t)}}{|A^{(t)}|}
+\end{equation}
+\begin{equation}
+    \lambda^{(t)}(f, g) =
     \frac{
-        \sum_{a \in A^{(t)}} 
-            \left( N_a^{(t)} - \bar{N}^{(t)} \right) \cdot
-            \left( \psi_a^{(t, r)} - \bar{\psi}^{(t)} \right)
+        \sum_{a \in A^{(t)}}
+            \left( f_a^{(t)} - \bar{f}^{(t)} \right) \cdot
+            \left( g_a^{(t)} - \bar{g}^{(t)} \right)
     }{
         \sqrt{
-            \sum_{a \in A^{(t)}} \left( N_a^{(t)} - \bar{N}^{(t)} \right)^2 \cdot
-            \sum_{a \in A^{(t)}} \left( \psi_a^{(t)} - \bar{\psi}^{(t)} \right)^2
+            \sum_{a \in A^{(t)}} \left( f_a^{(t)} - \bar{f}^{(t)} \right)^2 \cdot
+            \sum_{a \in A^{(t)}} \left( g_a^{(t)} - \bar{g}^{(t)} \right)^2
         }
     }
 \end{equation}
 
-Quando $\lambda^{(t)}$ é positivo, indica uma correlação linear positiva entre o CR dos estudantes e sua satisfação obtida na alocação, ou seja, estudantes com melhor desempenho acadêmico tendem a ser mais beneficiados na distribuição das vagas; quando $\lambda^{(t)}$ é negativo, indica o oposto: uma correlação linear negativa, na qual estudantes com pior desempenho são mais beneficiados na alocação; por fim, $\lambda^{(t)} = 0$ indica ausência de correlação. Além disso, o valor absoluto de $\lambda^{(t)}$ mensura a intensidade dessa correlação: quanto mais próximo de $1$, mais forte é a correlação; quanto mais próximo de $0$, mais fraca é a correlação.
+Quando $\lambda^{(t)}$ é positivo, indica uma correlação linear positiva entre as duas grandezas; quando é negativo, indica o oposto; por fim, $\lambda^{(t)} = 0$ indica ausência de correlação. Além disso, o valor absoluto de $\lambda^{(t)}$ mensura a intensidade dessa correlação: quanto mais próximo de $1$, mais forte ela é. Caso alguma das grandezas não apresente variância no período, o coeficiente não existe, e assume-se $\lambda^{(t)} = 0$.
+
+Medem-se seis correlações, cruzando duas grandezas \textbf{declaradas} pelo estudante — o CR, $N_a^{(t)}$, e a seletividade, $S_a^{(t)}$ — contra três \textbf{resultados} da alocação dele: a satisfação, $\psi_a^{(t)}$; o aproveitamento, $\eta_a^{(t)}$; e a \textbf{retenção}, $\tau_a^{(t)} \in [0, 1]$, definida como a fração da satisfação alocada que o estudante não descartou:
+\begin{equation}
+    \tau_a^{(t)} = 1 - \frac{\omega_a^{(t)}}{\psi_a^{(t)}}
+    \quad \forall a \in A^{(t)} : \psi_a^{(t)} > 0
+\end{equation}
+
+A retenção entra como razão, e não como a diferença que o desperdício já publica, porque aqui se quer condicionar em quanto o estudante obteve: sem isso o coeficiente mediria em parte "obteve mais", que é justamente o que a coluna do aproveitamento mede. O preço é que ela não existe para quem nada obteve, e esses estudantes saem da amostra das duas células correspondentes.
+
+A Tabela \ref{tab:correlacoes} reúne as seis células e a pergunta que cada uma responde.
+
+\begin{table}[htbp]
+\centering
+\caption{As seis correlações medidas e a pergunta de cada uma}
+\label{tab:correlacoes}
+\begin{tabularx}{\textwidth}{lXXX}
+\toprule
+ & \textbf{Satisfação} & \textbf{Aproveitamento} & \textbf{Retenção} \\
+\midrule
+\textbf{CR}           & A alocação acompanha o histórico? & O mérito compra carga horária? & Quem mais obtém mais descarta? \\
+\textbf{Seletividade} & Concentrar os lances compensa?    & Concentrar custa carga horária? & Exigir mais protege de descartar? \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+A célula $\lambda^{(t)}(N, \psi)$ é a que a hipótese nomeia: é por ela que se verifica se a influência do desempenho acadêmico sobre a alocação diminui sob o leilão. As outras cinco não têm predição declarada na hipótese e cumprem papel descritivo, pois qual dos dois sentidos é preferível depende de alocar por mérito passado ou por necessidade presente, e essa é uma escolha normativa externa ao modelo.
 
 \chapter{Resultados e discussão}
 

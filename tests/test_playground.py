@@ -212,6 +212,8 @@ def test_selectivity_also_cuts_the_ranking_request():
     asked = request_set(
         utilities=utilities,
         available=["A", "B"],
+        hours={"A": 60, "B": 60},
+        capacity=120,
         behavior=Behavior(selectivity=1.0),
         interest=1.0,
     )

@@ -305,6 +305,8 @@ def _ranking_round(
         asked = request_set(
             utilities=table.utilities[student.id],
             available=table.available(student.id),
+            hours=table.hours,
+            capacity=table.capacity[student.id],
             behavior=student.behavior,
             classes=table.classes,
             conflicts=table.conflicts,

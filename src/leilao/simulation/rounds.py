@@ -160,8 +160,8 @@ def _run_ranking_round(
     round_number: int,
     won_now: dict[str, list[str]],
 ) -> float:
-    """A linha de base: o aluno pede tudo que lhe é elegível, na própria ordem
-    de preferência, e a restrição de carga (eq. 4) é resolvida pelo alocador.
+    """A linha de base: o aluno resolve a carga (eq. 4) em casa, numa mochila
+    0-1 sobre o que ainda cabe, e pede na própria ordem de preferência.
 
     Não há lance, orçamento nem preço. Devolve os segundos do alocador.
     """
@@ -170,6 +170,8 @@ def _run_ranking_round(
         for name in request_set(
             utilities=utilities[student.id],
             available=available[student.id],
+            hours=draws.hours,
+            capacity=int(state.capacity[student.id]),
             behavior=student.behavior,
             classes=draws.classes,
             conflicts=draws.conflicts,

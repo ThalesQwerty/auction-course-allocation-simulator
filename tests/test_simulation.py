@@ -1324,6 +1324,26 @@ def test_electives_leave_the_eligible_set_once_the_requirement_is_met():
     assert "D1" in met  # a obrigatória continua elegível
 
 
+def test_progress_tops_out_at_one_even_with_elective_hours_to_spare():
+    """Quem passa da exigência optativa não passa de 1 no progresso: a parcela
+    optativa é cortada em X, e 1 continua querendo dizer "concluiu"."""
+    config = make_elective_config()
+    result = run_simulation(config)
+    sobrando = [
+        s for s in result.students if s.approved_hours > config.hours_to_graduate()
+    ]
+    assert sobrando, "ninguém passou da exigência — o corte não é exercitado"
+
+    medidos = 0
+    for report in result.periods:
+        metrics = report.aggregate.overall.metrics
+        if metrics is None:
+            continue
+        medidos += 1
+        assert 0.0 <= metrics.progress <= 1.0
+    assert medidos, "nenhum período publicou métrica"
+
+
 def test_hours_to_graduate_counts_required_plus_the_quota():
     """Não é a carga da grade inteira: o catálogo de optativas é maior que a
     exigência de propósito."""
@@ -1464,11 +1484,42 @@ def test_progress_is_the_approved_hours_over_the_hours_to_graduate():
 
 
 def test_progress_without_a_curriculum_to_close_is_zero_not_a_division():
-    """S = 0 não é cenário do simulador — a validação exige grade —, mas a
-    equação é pura e responde sozinha: sem curso a fechar não há fração."""
-    assert progress(approved_hours=0, hours_to_graduate=0) == 0.0
-    assert progress(approved_hours=30, hours_to_graduate=0) == 0.0
-    assert progress(approved_hours=30, hours_to_graduate=120) == 0.25
+    """W_obg + X = 0 não é cenário do simulador — a validação exige grade —,
+    mas a equação é pura e responde sozinha: sem curso a fechar não há
+    fração."""
+    def progresso(obrigatoria=0, optativa=0, exige_obrigatoria=0, exige_optativa=0):
+        return progress(
+            approved_required_hours=obrigatoria,
+            approved_elective_hours=optativa,
+            required_hours=exige_obrigatoria,
+            elective_hours_needed=exige_optativa,
+        )
+
+    assert progresso() == 0.0
+    assert progresso(obrigatoria=30) == 0.0
+    assert progresso(obrigatoria=30, exige_obrigatoria=120) == 0.25
+
+
+def test_the_elective_counts_only_up_to_the_quota():
+    """O teto é 1, e chegar a 1 é a eq. (40): a obrigatória entra inteira, a
+    optativa só até X. Sem o corte, quem aprova o catálogo passaria de 1 sem
+    ter concluído — e o progresso mediria carga, não progresso."""
+    def progresso(obrigatoria, optativa):
+        return progress(
+            approved_required_hours=obrigatoria,
+            approved_elective_hours=optativa,
+            required_hours=360,
+            elective_hours_needed=120,
+        )
+
+    # 360 h de obrigatória e 120 h de optativa: concluiu, e marca exatamente 1.
+    assert progresso(360, 120) == 1.0
+    # Mais optativa que a exigência não adianta nada: o teto continua em 1, e
+    # faltando obrigatória ele não é alcançado.
+    assert progresso(360, 480) == 1.0
+    assert progresso(300, 480) == pytest.approx(420 / 480)
+    # Metade de cada parcela é meio curso.
+    assert progresso(180, 60) == 0.5
 
 
 # --- o jubilamento ---------------------------------------------------------

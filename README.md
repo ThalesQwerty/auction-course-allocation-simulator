@@ -472,14 +472,22 @@ nível de fora. O aluno aposta mais na turma que prefere e guarda apostas
 menores nas irmãs: ele só pode **levar** uma (eq. 5), mas pode **pedir** em
 várias, e é esse hedge dentro da rodada que o segundo nível expressa.
 
-Na linha de base ele é uma **escolha** (`equations.best_class`): uma turma por
-disciplina, a melhor disponível que não choca com o que ele já pediu. Não há
-*quanto* a dizer, só *qual*, e pedir duas turmas da mesma disciplina — ou duas
-no mesmo horário — seria pedir o que ele não pode cursar junto. **O aluno
-resolve o conflito em casa**, na ordem de preferência dele; do lado do leilão
-quem resolve é o clique dentro da PLI, globalmente. Perdida
-a turma na rodada 1, `available_goods` devolve as irmãs na rodada 2 — do lado
-do CR o seguro é a rodada; do lado do leilão, a repartição e a rodada.
+Na linha de base não há segundo nível: a mochila da eq. (50) é **uma só**, e
+os cliques de `E = M ∪ G` são o grafo de conflito dela. Carga e horário saem da
+mesma tabela, de modo que o aluno não escolhe a seção antes de saber se ela
+cabe — ele escolhe o pacote inteiro de uma vez. Não há *quanto* a dizer, só
+*qual*, e pedir duas turmas da mesma disciplina — ou duas no mesmo horário —
+seria pedir o que ele não pode cursar junto. **O aluno resolve o conflito em
+casa**; do lado do leilão quem resolve é o clique dentro da PLI, globalmente.
+Perdida a turma na rodada 1, `available_goods` devolve as irmãs na rodada 2 —
+do lado do CR o seguro é a rodada; do lado do leilão, a repartição e a rodada.
+
+Houve um `equations.best_class` aqui até 23/11/2026: ele escolhia a melhor
+turma de cada disciplina em ordem de preferência, e só então a mochila decidia
+quais candidatas cabiam. Resolver o choque antes da carga **descarta cedo
+demais** — a disciplina cortada por colidir com a preferida sumia antes de se
+ver que a preferida nem cabia. Medido contra a força bruta em instâncias
+sorteadas, o vão médio até o ótimo caiu de 5,7% para 1,8%.
 
 É a mesma assimetria que separa as duas mochilas um nível acima — mensagem
 cara contra mensagem gratuita: no leilão cada crédito posto numa turma é um
@@ -646,9 +654,12 @@ grandeza continua existindo e continua se chamando `occupancy` na API, mas
 não é desenhada em lugar nenhum da tela e, na interface, passou a ser o
 **preenchimento das vagas**.
 
-O **progresso** é novo: a carga aprovada do histórico sobre a carga que fecha
-o curso (`config.hours_to_graduate()` — todas as obrigatórias mais a exigência
-optativa X). É a única métrica de recorte que **acumula**, de modo que sobe ao
+O **progresso** é novo: o que o histórico já fechou do curso sobre a carga que
+o curso pede (`config.hours_to_graduate()` — todas as obrigatórias mais a
+exigência optativa X). As duas parcelas do numerador contam diferente porque a
+conclusão as exige diferente: a obrigatória entra inteira e a optativa entra
+**só até X**, de modo que o teto é 1 e chegar a 1 **é** concluir (eq. 40).
+Aprovar o catálogo de optativas não adianta nada. É a única métrica de recorte que **acumula**, de modo que sobe ao
 longo do horizonte em qualquer mecanismo e o que separa os braços é a
 inclinação. Tem o mesmo viés de seleção do tempo de formatura, e pela mesma
 razão: quem fecha a grade sai da simulação, então a média dos que ficam é

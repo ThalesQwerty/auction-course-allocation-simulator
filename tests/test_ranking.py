@@ -57,34 +57,50 @@ def make_config(**overrides) -> SimulationConfig:
 # --- o pedido do aluno: mochila 0-1 sobre a carga horária, eq. (50) ---------
 
 
-def test_the_request_is_everything_eligible_in_preference_order():
-    """A mochila 0-1 saiu: o aluno pede tudo que lhe é elegível, da que mais
-    quer para a que menos quer, e a carga horária é resolvida na concessão.
-    Sem isso o eixo ordenação × PLI não existe do lado do CR — o pedido já
-    caberia em W_a por construção e os dois resolvedores empatariam sempre."""
+def ask(utilities, available=None, capacity=WORKLOAD, **kwargs):
+    return request_set(
+        utilities=utilities,
+        available=list(utilities) if available is None else available,
+        hours=HOURS,
+        capacity=capacity,
+        **kwargs,
+    )
+
+
+def test_the_request_fits_the_workload_ex_ante():
+    """A auto-restrição que o trabalho aponta como a primeira deficiência do
+    CR: o aluno resolve a eq. (4) **em casa**, antes de saber o que vai
+    conseguir, e pede só o que cabe. Com 180 h de teto e cinco elegíveis, ele
+    leva as três melhores de 60 h."""
     utilities = {"D1": 0.3, "D2": 0.25, "D3": 0.2, "D4": 0.15, "D5": 0.1}
-    wanted = request_set(utilities=utilities, available=list(utilities))
-    assert wanted == ["D1", "D2", "D3", "D4", "D5"]
-    # E ele pede muito mais do que cabe: é esse excesso que dá o que decidir
-    # ao alocador.
-    assert sum(HOURS[name] for name in wanted) > WORKLOAD
+    wanted = ask(utilities)
+    assert wanted == ["D1", "D2", "D3"]
+    assert sum(HOURS[name] for name in wanted) <= WORKLOAD
+
+
+def test_the_request_is_a_knapsack_and_not_an_ordering():
+    """A ordenação por utilidade erra assim que as cargas diferem: com 120 h de
+    teto ela toma D4 (90 h) e empaca, enquanto a mochila toma as duas de 60 h e
+    extrai mais utilidade."""
+    utilities = {"D1": 0.25, "D2": 0.25, "D4": 0.40}
+    assert ask(utilities, capacity=120) == ["D1", "D2"]
 
 
 def test_the_request_covers_only_what_is_available_and_wanted():
     utilities = {"D1": 0.6, "D2": 0.0, "D3": 0.4}
-    assert request_set(utilities=utilities, available=["D1", "D3"]) == ["D1", "D3"]
+    assert ask(utilities, available=["D1", "D3"]) == ["D1", "D3"]
     # Utilidade zero é o que marca o inelegível, e não entra no pedido.
-    assert request_set(utilities=utilities, available=list(utilities)) == ["D1", "D3"]
-    assert request_set(utilities={"D1": 0.5}, available=[]) == []
+    assert ask(utilities) == ["D1", "D3"]
+    assert ask({"D1": 0.5}, available=[]) == []
 
 
 def test_a_tie_in_the_request_goes_to_the_discipline_listed_first():
     """Empate sai na ordem da grade, a mesma que desempata o lance — e não na
-    ordem alfabética nem na de `available`."""
+    ordem alfabética nem na de `available`. Com 180 h cabem três das quatro, e
+    quem fica de fora é a última da grade."""
     tied = {"D2": 0.25, "D1": 0.25, "D5": 0.25, "D3": 0.25}
-    assert request_set(utilities=tied, available=list(tied)) == ["D2", "D1", "D5", "D3"]
-    shuffled = request_set(utilities=tied, available=["D5", "D3", "D1", "D2"])
-    assert shuffled == ["D2", "D1", "D5", "D3"]
+    assert ask(tied) == ["D2", "D1", "D5"]
+    assert ask(tied, available=["D5", "D3", "D1", "D2"]) == ["D2", "D1", "D5"]
 
 
 # --- a alocação: ditadura serial por CR, carga resolvida ex-post -----------
@@ -102,9 +118,9 @@ def test_the_higher_grade_average_takes_the_last_seat():
 
 
 def test_the_student_loses_what_he_wanted_least_when_the_workload_binds():
-    """Ditadura serial: o aluno entra na ordem do CR e leva o que quer, na
-    própria ordem. Com 120 h de teto e três pedidos de 60 h, ele fica com os
-    dois primeiros da *lista dele* — não com os que calharem."""
+    """A guarda de carga da caminhada: o pedido da eq. (50) já cabe em W_a, mas
+    se vier maior o aluno fica com os primeiros da *lista dele* — não com os
+    que calharem. Com 120 h de teto e três pedidos de 60 h, leva dois."""
     granted = allocate_by_ranking(
         requests=[("a", "D1"), ("a", "D2"), ("a", "D3")],
         priority={"a": 7.0},

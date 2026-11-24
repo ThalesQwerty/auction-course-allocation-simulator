@@ -3,7 +3,9 @@
 É o mecanismo tradicional contra o qual o leilão é comparado. Nenhuma das
 inovações propostas está presente: não há lance, orçamento nem preço. O que
 substitui o orçamento é a carga horária — o aluno gasta W_a em horas, e gasta
-tudo, porque hora não cursada não passa para o período seguinte.
+tudo, porque hora não cursada não passa para o período seguinte. E ele a gasta
+**em casa**: a restrição da eq. (4) é resolvida no pedido, antes da concessão,
+que é a auto-restrição *ex-ante* que o leilão dispensa.
 
 A diferença de fundo entre os dois mecanismos é **o que o aluno consegue
 dizer**. Aqui ele diz um *conjunto ordenado*: a utilidade só ordena. No
@@ -18,7 +20,7 @@ from __future__ import annotations
 
 from .behavior import decide
 from .entities import Agent, Demand, Good, MutualExclusion, Problem
-from .equations import NEUTRAL, Behavior, best_class, serial_dictatorship
+from .equations import NEUTRAL, Behavior, serial_dictatorship
 from .equations import request_set as rank_requests
 from .wdp_solver import solve_wdp
 
@@ -31,6 +33,8 @@ def request_set(
     *,
     utilities: dict[str, float],
     available: list[str],
+    hours: dict[str, int],
+    capacity: int,
     behavior: Behavior = NEUTRAL,
     classes: dict[str, tuple[str, ...]] | None = None,
     conflicts: dict[str, tuple[str, ...]] | None = None,
@@ -39,63 +43,47 @@ def request_set(
     """D_a^(t,r) — ver `equations.request_set`.
 
     A mensagem sai de `behavior.decide`, a mesma que o leilão usa: o que o CR
-    faz com ela é só ordenar. O limiar que o leilão usa para parar o gasto
-    não tem análogo aqui — lá não há investimento marginal que se interrompa.
+    faz com ela é cortar pela seletividade e resolver a mochila. O limiar que
+    o leilão usa para parar o gasto não tem análogo aqui — lá não há
+    investimento marginal que se interrompa.
 
-    **Ordenar com sinceridade é dominante** neste braço: pedido recusado não
-    custa nada e a prioridade do aluno não depende do que ele pede. É a mesma
-    justificativa que a docstring de `equations.request_set` dá.
+    **Dois níveis.** O de fora é o corte da seletividade, sobre as
+    **disciplinas**, igual ao do leilão: o grupo inteiro entra ou sai, e é por
+    isso que o número de turmas não decide o que o aluno pede. O de dentro é a
+    **mochila 0-1 com grafo de conflito** da eq. (50), direto sobre as turmas
+    das disciplinas admitidas — carga e choque de horário na mesma tabela.
 
-    **Dois níveis**, como no leilão. De fora, as disciplinas na ordem de
-    preferência; de dentro, **uma turma por disciplina** — a melhor
-    disponível que ainda não choca com o que ele já pediu
-    (`equations.best_class`). Aqui o aluno escolhe a seção em que quer se
-    matricular, e o pedido é por ela: pedir duas turmas da mesma disciplina
-    seria pedir duas vezes a mesma vaga, e pedir duas no mesmo horário seria
-    pedir o que ele não pode cursar junto.
-
-    **O pedido sai sem choque**, e isso é do mecanismo: deste lado o aluno
-    resolve o conflito de horário *em casa*, na ordem de preferência dele —
-    a disciplina que ele quer mais escolhe primeiro, e a seguinte se acomoda
-    no que sobrou. Do lado do leilão quem resolve é o clique dentro da PLI,
-    globalmente.
-
-    É aí que a assimetria com o leilão aparece, e ela é do mecanismo: lá o
-    nível de dentro é **outra mochila côncava**, porque há *quanto* a dizer e
-    o aluno reparte a fatia da disciplina entre as turmas dela — inclusive
-    entre turmas que colidem, já que apostar não é levar. Aqui só há *qual*,
-    e o aluno diz a melhor que ainda cabe. Perdida ela na rodada 1,
-    `available_goods` devolve as irmãs na rodada 2.
+    Com `classes` ausente a grade é de turma única e os dois níveis coincidem;
+    com `conflicts` ausente os cliques saem de `classes`, de modo que `M` vale
+    sempre e `G` só quando o cenário declara horário.
     """
     groups, scores, _reserve = decide(
         utilities=utilities, behavior=behavior, classes=classes, interest=interest
     )
     if not classes:
-        return rank_requests(scores=groups, available=available)
-
-    reachable = set(available)
-    open_classes = {
-        discipline: [name for name in classes[discipline] if name in reachable]
-        for discipline in groups
-    }
-    ordered = rank_requests(
-        scores=groups,
-        available=[d for d, names in open_classes.items() if names],
-    )
-    blocked: set[str] = set()
-    chosen: list[str] = []
-    for discipline in ordered:
-        name = best_class(
-            scores=scores,
-            available=open_classes[discipline],
-            blocked=blocked,
+        return rank_requests(
+            utilities=groups,
+            available=available,
+            hours=hours,
+            capacity=capacity,
             conflicts=conflicts,
         )
-        if name is None:
-            continue
-        blocked.update(conflicts[name] if conflicts else (name,))
-        chosen.append(name)
-    return chosen
+
+    # Só as turmas das disciplinas que passaram no corte: a seletividade é do
+    # grupo, e a mochila escolhe entre turmas de grupos já admitidos.
+    admitted = {name for discipline in groups for name in classes[discipline]}
+    return rank_requests(
+        utilities=scores,
+        available=[name for name in available if name in admitted],
+        hours=hours,
+        capacity=capacity,
+        conflicts=conflicts
+        or {
+            name: (discipline,)
+            for discipline, names in classes.items()
+            for name in names
+        },
+    )
 
 
 def allocate_by_ilp(

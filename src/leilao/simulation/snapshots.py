@@ -191,11 +191,24 @@ def measure(
     """
     # A carga aprovada é do **histórico**, que é por disciplina: o aluno
     # aprovou a matéria, não a seção em que a cursou.
+    approved = {s.id: s.approved(config.min_grade) for s in active}
     approved_hours = {
-        s.id: s.approved_hours(discipline_hours, config.min_grade) for s in active
+        student_id: sum(discipline_hours[name] for name in names)
+        for student_id, names in approved.items()
     }
-    # S e do cenario, nao do aluno: uma conta so para todo mundo.
-    hours_to_graduate = config.hours_to_graduate()
+    # O progresso separa as duas parcelas porque a conclusão as exige
+    # diferente: a obrigatória inteira, a optativa só até X.
+    elective_hours_of = config.elective_hours_by_discipline()
+    approved_elective_hours = {
+        student_id: sum(
+            discipline_hours[name] for name in names if name in elective_hours_of
+        )
+        for student_id, names in approved.items()
+    }
+    # W_obg e X sao do cenario, nao do aluno: uma conta so para todo mundo.
+    required_hours = sum(
+        discipline_hours[name] for name in config.required_disciplines()
+    )
     # Turma → disciplina, uma vez: os seis estados são por disciplina.
     discipline_of = config.discipline_by_class()
     return Measurements(
@@ -207,13 +220,17 @@ def measure(
             s.id: utilization(won=won[s.id], hours=hours, max_hours=config.max_hours)
             for s in active
         },
-        # O progresso, ao contrario, sai do **historico**: e a carga aprovada
-        # desde o ingresso sobre a carga que fecha a grade, e por isso e a
-        # unica grandeza por aluno daqui que nao zera no comeco do periodo.
+        # O progresso, ao contrario, sai do **historico**: e o que fecha a
+        # grade sobre a carga que a grade pede, e por isso e a unica grandeza
+        # por aluno daqui que nao zera no comeco do periodo. Chegar a 1 e
+        # exatamente concluir o curso.
         progresses={
             s.id: progress(
-                approved_hours=approved_hours[s.id],
-                hours_to_graduate=hours_to_graduate,
+                approved_required_hours=approved_hours[s.id]
+                - approved_elective_hours[s.id],
+                approved_elective_hours=approved_elective_hours[s.id],
+                required_hours=required_hours,
+                elective_hours_needed=config.elective_hours,
             )
             for s in active
         },

@@ -306,7 +306,13 @@ def test_the_request_is_one_class_per_discipline():
     utilities = {"A T1": 0.2, "A T2": 0.5, "B T1": 0.4, "B T2": 0.1}
     pool = [name for names in classes.values() for name in names]
 
-    pedido = request_set(utilities=utilities, available=pool, classes=classes)
+    pedido = request_set(
+        utilities=utilities,
+        available=pool,
+        hours=dict.fromkeys(pool, 60),
+        capacity=WORKLOAD,
+        classes=classes,
+    )
 
     # Alta vale 0,5 (a melhor turma dela) contra 0,4 de Baixa: vem primeiro,
     # apesar de "B T1" valer mais que "A T1". E só a melhor turma de cada uma.
@@ -314,9 +320,8 @@ def test_the_request_is_one_class_per_discipline():
 
 
 def test_the_ranking_request_comes_out_without_a_clash():
-    """O aluno resolve o conflito de horário **em casa**, na ordem de
-    preferência dele: a disciplina que ele quer mais escolhe primeiro, e a
-    seguinte se acomoda no que sobrou."""
+    """A outra metade de `E` dentro da mesma tabela: o aluno resolve o choque
+    de horário **em casa**, e o pedido sai com um horário por turma."""
     classes = {"Alta": ("A T1", "A T2"), "Baixa": ("B T1", "B T2")}
     conflicts = {
         "A T1": ("Alta", "Diurno 1"),
@@ -328,12 +333,50 @@ def test_the_ranking_request_comes_out_without_a_clash():
     pool = [name for names in classes.values() for name in names]
 
     pedido = request_set(
-        utilities=utilities, available=pool, classes=classes, conflicts=conflicts
+        utilities=utilities,
+        available=pool,
+        hours=dict.fromkeys(pool, 60),
+        capacity=WORKLOAD,
+        classes=classes,
+        conflicts=conflicts,
     )
 
     # Alta leva "A T1" (Diurno 1); Baixa preferia "B T1", que choca, e fica
     # com "B T2".
     assert pedido == ["A T1", "B T2"]
+
+
+def test_the_clash_and_the_workload_are_decided_together():
+    """A mochila da eq. (50) é **uma só**: carga e horário saem da mesma
+    tabela.
+
+    Resolver o choque antes, escolhendo uma turma por disciplina em ordem de
+    preferência, descartaria Baixa por colidir com Alta — e só então veria que
+    Alta nem cabia junto com Média. O aluno largaria Alta inteira e ficaria com
+    0,40 numa carga de 90 h. Decidindo junto, ele troca Alta por Média + Baixa:
+    0,65 nas 120 h cheias.
+    """
+    classes = {"Alta": ("A T1", "A T2"), "Média": ("M T1",), "Baixa": ("B T1",)}
+    conflicts = {
+        "A T1": ("Alta", "Diurno 1"),
+        "A T2": ("Alta", "Diurno 2"),
+        "M T1": ("Média", "Diurno 2"),
+        "B T1": ("Baixa", "Diurno 1"),
+    }
+    utilities = {"A T1": 0.40, "A T2": 0.05, "M T1": 0.35, "B T1": 0.30}
+    hours = {"A T1": 90, "A T2": 90, "M T1": 60, "B T1": 60}
+
+    pedido = request_set(
+        utilities=utilities,
+        available=list(utilities),
+        hours=hours,
+        capacity=120,
+        classes=classes,
+        conflicts=conflicts,
+    )
+
+    assert pedido == ["M T1", "B T1"]
+    assert sum(hours[name] for name in pedido) == 120
 
 
 @pytest.mark.parametrize("mechanism", ["credits", "ranking"])
@@ -365,6 +408,8 @@ def test_selectivity_cuts_disciplines_not_classes():
     pedido = request_set(
         utilities=utilities,
         available=pool,
+        hours=dict.fromkeys(pool, 60),
+        capacity=WORKLOAD,
         behavior=Behavior(selectivity=0.8),
         classes=classes,
         interest=0.8,

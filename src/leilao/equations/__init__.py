@@ -32,20 +32,26 @@ Decisão do aluno (Seção 7.2.4)
     available_goods           B_a^(t,r)                           eq. (15)
     concave_bids              mochila côncava do lance        substitui 44-46
                               (em dois níveis: disciplina, depois turma)
-    request_set               D_a^(t,r), tudo em ordem            eq. (50)
+    request_set               D_a^(t,r), mochila 0-1 da carga      eq. (50)
+                              (com grafo de conflito: E = M ∪ G)
     serial_dictatorship       ditadura serial por CR              7.3.1
 
 Turmas, turnos e horários
 
     class_schedule            a varredura circular por horário    —
     entry_class               o bloco girado da coorte em cada turma —
-    best_class                a turma pedida na linha de base     —
 
     A exclusão mútua (eq. 5) não tem arquivo próprio: ela é a restrição de
-    clique montada em `wdp_solver`, o filtro por grupo de `available_goods`
-    e a caminhada de `serial_dictatorship` — três lugares, uma regra. O que
-    ela proíbe é `E = M ∪ G`: duas turmas da mesma disciplina ou duas turmas
-    no mesmo horário.
+    clique montada em `wdp_solver`, o grafo de conflito da mochila de
+    `request_set`, o filtro por grupo de `available_goods` e a caminhada de
+    `serial_dictatorship` — quatro lugares, uma regra. O que ela proíbe é
+    `E = M ∪ G`: duas turmas da mesma disciplina ou duas turmas no mesmo
+    horário.
+
+    Houve um `best_class` aqui até 23/11/2026: ele escolhia a melhor turma de
+    cada disciplina antes de a mochila abrir, e os cliques ficavam resolvidos
+    fora dela. A mochila passou a ler o grafo de conflito direto, como manda a
+    eq. (50), e a escolha da seção virou parte da mesma tabela.
 
 Interesse, utilidade e grade
 
@@ -91,6 +97,7 @@ Disponibilidade e exclusão
     lognormal_cdf             F da log-normal                     —
     effective_load            Ŵ_a = round(δ), sem teto            —
     retained_set              mochila 0-1 do que ele leva         —
+                              (a mesma tabela da eq. 50 — `_knapsack`)
     exclusion_refund          γ = round(fração · preço)            —
     exclusion_rate            ε = excluídas / obtidas             —
     request_states            os seis estados de uma solicitação  —
@@ -107,7 +114,7 @@ Métricas de um recorte (Seção 7.3.3)
     utilization               carga obtida / W_a                  —
     message_fidelity          cosseno(mensagem, preferência)      —
     semestralization          σ_a = H̃/(W·idade)                   —
-    progress                  H̃_a / S — quanto da grade já fechou  —
+    progress                  quanto do curso já fechou, teto 1      —
     demand_per_seat           escassez e concorrência             —
     credits_per_seat          oferta de crédito / vagas           —
     mean_price                π̄ sobre as rodadas com vaga         —
@@ -160,7 +167,6 @@ from .attempt_rates import attempt_rates
 from .availability_shape import availability_shape
 from .available_goods import available_goods
 from .base_quantile import base_quantile
-from .best_class import best_class
 from .class_schedule import (
     class_schedules,
     schedule_cliques,
@@ -243,7 +249,6 @@ __all__ = [
     "admitted_set",
     "availability_shape",
     "base_quantile",
-    "best_class",
     "class_schedules",
     "schedule_cliques",
     "schedule_names",

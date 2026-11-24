@@ -1,44 +1,84 @@
 """O que o aluno solicita na linha de base — anteprojeto, eq. (50).
 
-    D_a^(t,r) = { x ∈ B_a^(t,r) : score_x > r },  ordenado por score decrescente
+    D_a^(t,r) = argmax { Σ_{x ∈ K} u_{a,x} : K ⊆ B_a^(t,r),
+                         Σ_{x ∈ K} w_x ≤ W_a^(t,r),
+                         |K ∩ X| ≤ 1 ∀ X ∈ E }
 
-Ele pede **tudo** que lhe é elegível, da que mais quer para a que menos quer.
-A restrição de carga (eq. 4) não é resolvida aqui — é resolvida na concessão.
+Uma **Mochila 0-1 com Grafo de Conflito** resolvida em casa: a carga horária
+`w_x` é o peso, a utilidade `u_{a,x}` é o ganho, a carga máxima restante
+`W_a^(t,r)` é a capacidade, e os cliques de `E = M ∪ G` são o grafo de
+conflito. As turmas que entram na mochila são as turmas solicitadas; a saída
+sai ordenada por utilidade decrescente, que é a ordem de preferência que a
+caminhada de `equations.serial_dictatorship` consome.
 
-Com turmas, isto é o nível de fora: pede toda disciplina elegível, e de cada
-uma **uma** turma, a melhor disponível (`equations.best_class`).
+É aqui que está a **primeira deficiência do CR**: o aluno é obrigado a
+resolver a restrição de carga *ex-ante*, sobre o que ele ainda não sabe que
+vai conseguir. Ele auto-restringe o pedido a uma grade que caiba, perde parte
+dela na concessão, e só recupera a carga liberada na rodada seguinte. É essa
+auto-restrição heurística sob incerteza que o leilão dispensa, ao mandar a
+restrição para o resolvedor global — e é o que a comparação mede.
 
-**A mochila 0-1 saiu daqui**, e três razões sustentam isso:
+A MOCHILA É UMA SÓ, E É SOBRE TURMAS
+-------------------------------------
 
-1. **Sem isso o eixo ordenação × PLI não existe deste lado.** Com o pedido já
-   cabendo em W_a por construção, a carga nunca apertava no alocador, o
-   problema se separava por disciplina e os dois resolvedores davam sempre a
-   mesma alocação.
-2. **É à prova de estratégia.** Pedido recusado não custa nada e a prioridade
-   do aluno não depende do que ele pede, então listar tudo na ordem verdadeira
-   é dominante.
-3. **É o que a universidade real faz**: o aluno se inscreve numa lista
-   ordenada maior do que cabe, e o sistema para quando a grade enche.
+Carga e choque de horário saem da **mesma** tabela: os itens são as turmas, e
+os dois cliques de `E` são o grafo de conflito dela — `M` garante uma turma
+por disciplina, `G` garante um horário por turma. O aluno não escolhe a seção
+antes de ver se ela cabe; ele escolhe o pacote inteiro de uma vez, que é o que
+a eq. (50) pede.
 
-Pedir tudo não é levar tudo: quem corta é o alocador, e o aluno perde o que
-menos queria (na ditadura serial) ou o que o ótimo global dispensar (na PLI).
+Deste lado o aluno resolve as duas restrições **em casa**, antes de saber o
+que vai conseguir. Do lado do leilão quem resolve as duas é a PLI,
+globalmente, depois de ver a demanda inteira. É aí também que a assimetria no
+nível da turma aparece: no leilão há *quanto* a dizer, e o aluno reparte a
+fatia da disciplina entre as turmas dela — inclusive entre turmas que colidem,
+já que apostar não é levar. Aqui só há *qual*, e a mochila diz uma. Perdida
+ela na rodada 1, `available_goods` devolve as irmãs na rodada 2.
 
-A ordenação é **estável** sobre um dicionário que já vem na ordem da grade,
-de modo que scores empatados saem na ordem de listagem do cenário — a mesma
-que desempata o lance. Pôr o nome na chave desempataria por alfabeto, que não
-é critério nenhum.
+O que a mochila **não** faz é ordenar: ela só lê os pesos e a soma das
+utilidades, não *quanto* cada disciplina vale em relação às outras. Essa perda
+de expressividade é a hipótese que a comparação testa.
+
+A tabela em si está em `equations._knapsack`, compartilhada com
+`equations.retained_set` — a mesma mochila, sobre o que foi conquistado em vez
+do que é elegível, e lá sem conflito a respeitar. É lá que estão o desempate
+pela ordem da grade, o corte pelo MDC dos pesos e a razão de o conflito tornar
+a resposta um ótimo local.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
+
+from ._knapsack import knapsack
 
 
 def request_set(
-    *, scores: dict[str, float], available: Iterable[str]
+    *,
+    utilities: Mapping[str, float],
+    available: Iterable[str],
+    hours: Mapping[str, int],
+    capacity: int,
+    conflicts: Mapping[str, Sequence[str]] | None = None,
 ) -> list[str]:
+    """`available` é B_a^(t,r), `capacity` é W_a^(t,r) e `conflicts` mapeia
+    cada turma nos cliques de `E` a que ela pertence.
+
+    A ordem de `utilities` é a da grade no cenário, e é dela que sai o
+    desempate — tanto o da mochila quanto o da ordenação final, que é estável.
+    """
     wanted = set(available)
-    ordered = sorted(
-        ((name, score) for name, score in scores.items() if name in wanted),
-        key=lambda item: -item[1],
+    items: Sequence[str] = [
+        name
+        for name in utilities
+        if name in wanted and utilities[name] > 0.0
+    ]
+    if not items:
+        return []
+    chosen = knapsack(
+        items=items,
+        values=utilities,
+        weights=hours,
+        capacity=capacity,
+        conflicts=conflicts,
     )
-    return [name for name, _score in ordered]
+    return sorted(chosen, key=lambda name: -utilities[name])
