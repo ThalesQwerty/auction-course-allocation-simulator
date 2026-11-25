@@ -15,7 +15,6 @@ número está na primeira linha da docstring.
 Uma rodada de leilão (Seção 7.1)
 
     stochastic_perturbation   ε ∈ (0, 1/(|A|²·|B|)), distintos    7.1.2
-    greedy_allocation         varredura por preferência           —
     market_price              π = maior lance perdedor            eq. (24)
     credit_consumption        δ = min(c, π)                       eq. (25)
     remaining_seats           q − Σz                              eq. (13)
@@ -84,7 +83,7 @@ Notas, créditos e saída (Seção 7.2.2)
     grade_shape               (moda, P₀, P₁₀) → forma       substitui 32
     attempt_rates             P₀^(t/d) e P₁₀^(d/t)                —
     grade_for_attempt         quantil → nota, censurada     substitui 33
-    credit_return             γ = round(nota/10 · k · preço)      eq. (34)
+    credit_return             γ = round(nota/10 · 2 · preço)      eq. (34)
     guaranteed_share          ⌊C / |entrada|⌋                     —
     period_return             Γ = Σγ                        substitui 35
     next_budget               clamp(C − gasto + Γ, C_min, C_max) eqs. (36)-(37)
@@ -98,7 +97,6 @@ Disponibilidade e exclusão
     effective_load            Ŵ_a = round(δ), sem teto            —
     retained_set              mochila 0-1 do que ele leva         —
                               (a mesma tabela da eq. 50 — `_knapsack`)
-    exclusion_refund          γ = round(fração · preço)            —
     exclusion_rate            ε = excluídas / obtidas             —
     request_states            os seis estados de uma solicitação  —
     request_funnel            as quatro frações condicionais      —
@@ -125,6 +123,22 @@ Agregação de uma simulação (Seção 7.3)
     time_to_graduate          períodos do ingresso ao diploma     —
     grade_histogram           faixas de [0, 10]                   —
     interest_histogram        faixas da linha, escala por linha   —
+    value_band                faixa de valor do recorte           —
+
+Substituídas
+
+    `greedy_allocation` era a varredura por preferência decrescente do WDP — o
+    *bidding points* clássico —, e saiu em 24/11/2026 com o fechamento do
+    escopo: o leilão deste trabalho resolve por PLI, e a varredura era degrau
+    de ablação. A linha de base por CR varre por `serial_dictatorship`, que é
+    outra regra (ela lê o ε; a PLI não).
+
+    `quantile_band` recortava a população em faixas de **quantil sobre o
+    nível basilar** — o componente permanente do aluno —, e saiu em
+    24/11/2026 com os três eixos que a usavam (desempenho, disponibilidade,
+    seletividade). `value_band` a substitui cortando o **valor corrente**: o
+    CR, a utilidade de reserva e o orçamento de crédito. A troca é de
+    pergunta, não de escala — ver o cabeçalho de `value_band`.
 
 Não implementadas, e por quê
 
@@ -180,7 +194,7 @@ from .entry_class import (
 )
 from .concave_bids import concave_bids
 from .credit_consumption import consumption
-from .credit_return import DEFAULT_MULTIPLIER, credit_return
+from .credit_return import credit_return
 from .credits_per_seat import credits_per_seat
 from .curriculum_closure import inverse_edges, transitive_closure
 from .curriculum_height import curriculum_heights
@@ -192,7 +206,6 @@ from .dissipation import dissipation
 from .effective_load import effective_load
 from .eligible_interest import eligible_interest
 from .eligible_set import eligible_set
-from .exclusion_refund import DEFAULT_RATE, exclusion_refund
 from .exclusion_rate import exclusion_rate
 from .grade_average import grade_average
 from .grade_for_attempt import MAX_GRADE, MIN_GRADE, grade_for_attempt
@@ -200,7 +213,6 @@ from .grade_histogram import grade_histogram
 from .grade_shape import grade_shape, grade_sds
 from .lognormal_cdf import lognormal_cdf
 from .graduation import has_graduated
-from .greedy_allocation import greedy_allocation
 from .guaranteed_share import guaranteed_share
 from .interest_histogram import interest_histogram
 from .interest_row import normalize_rows
@@ -213,7 +225,12 @@ from .message_fidelity import message_fidelity
 from .next_budget import next_budget
 from .occupancy import occupancy
 from .progress import progress
-from .quantile_band import quantile_band, quantile_name, quantile_names
+from .value_band import (
+    ordered_cuts,
+    value_band,
+    value_band_name,
+    value_band_names,
+)
 from .pearson_correlation import pearson
 from .period_return import period_return
 from .preference_split import preference_split
@@ -258,7 +275,6 @@ __all__ = [
     "rotated_index",
     "concave_bids",
     "consumption",
-    "DEFAULT_MULTIPLIER",
     "Correlations",
     "correlations",
     "credit_return",
@@ -274,15 +290,12 @@ __all__ = [
     "eligible_interest",
     "eligible_set",
     "exclusion_rate",
-    "DEFAULT_RATE",
-    "exclusion_refund",
     "grade_average",
     "grade_for_attempt",
     "grade_histogram",
     "grade_sds",
     "lognormal_cdf",
     "grade_shape",
-    "greedy_allocation",
     "guaranteed_share",
     "has_graduated",
     "interest_histogram",
@@ -299,9 +312,7 @@ __all__ = [
     "normalize_rows",
     "occupancy",
     "progress",
-    "quantile_band",
-    "quantile_name",
-    "quantile_names",
+    "ordered_cuts",
     "pearson",
     "period_return",
     "preference_split",
@@ -321,5 +332,8 @@ __all__ = [
     "time_to_graduate",
     "utility",
     "utilization",
+    "value_band",
+    "value_band_name",
+    "value_band_names",
     "weighted_mean",
 ]

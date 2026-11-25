@@ -17,11 +17,12 @@ import {
   newComparison,
   saveHistory,
 } from "./history";
+import type { ComparisonRun } from "./history";
 import { GradeGraph } from "./GradeGraph";
 import { createPlaygroundDraft, Playground, PlaygroundDraft } from "./Playground";
-import { Project } from "./Project";
 import { Sidebar, View } from "./Sidebar";
 import { COMPARISON_ARMS } from "./types";
+import type { CompareRequest } from "./types";
 
 export default function App() {
   const [choice, setChoice] = useState<PresetChoice>(initialChoice);
@@ -104,6 +105,28 @@ export default function App() {
       const entry = newComparison(request, await compare(request));
       setHistory((current) => [entry, ...current].slice(0, MAX_RUNS));
       navigate({ kind: "run", id: entry.id });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  /** Roda de novo a mesma execução com outros pontos de corte.
+   *
+   * As faixas são montadas pelo **motor**, a partir dos valores por aluno que a
+   * resposta não carrega — só os quartis entre as seeds. Então mudar um corte
+   * não é recorte de tela: é outra execução, e entra no histórico como tal.
+   * Daí o botão: disparar a cada tecla custaria N simulações por braço.
+   */
+  async function handleRecut(entry: ComparisonRun, cuts: Partial<CompareRequest>) {
+    setRunning(true);
+    setError(null);
+    try {
+      const request = { ...entry.config, ...cuts };
+      const next = newComparison(request, await compare(request));
+      setHistory((current) => [next, ...current].slice(0, MAX_RUNS));
+      navigate({ kind: "run", id: next.id });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -197,7 +220,6 @@ export default function App() {
             }}
           />
         )}
-        {view.kind === "project" && <Project />}
         {view.kind === "graph" && (
           <GradeGraph disciplines={config.disciplines} classSize={config.class_size} />
         )}
@@ -213,6 +235,8 @@ export default function App() {
             key={current.id}
             run={current}
             onReuseConfig={() => reuseConfig(current)}
+            onRecut={(cuts) => handleRecut(current, cuts)}
+            recutting={running}
           />
         )}
       </main>

@@ -3,8 +3,8 @@
 A população do cenário é descrita por **três distribuições** mais o nível
 basilar de cada uma; não há mais perfis a declarar, e a configuração deriva a
 disponibilidade de W_a quando o cenário não a declara
-(`config.default_availability`) — a moda é absoluta, e uma constante
-dimensionada para 360 h recusaria todo cenário de teto menor.
+(`config.default_availability`) — a moda é absoluta, e uma constante fixa
+recusaria todo cenário de teto menor.
 
 O que ainda precisa ser escrito à mão é o controle **sem exclusão**, porque ele
 não é um patamar da calibragem: é o caso degenerado, e serve para isolar o
@@ -34,10 +34,12 @@ def single_axis(max_hours: int) -> dict:
     construir um cenário sem dizer nada sobre estratégia não liga o corte do
     pedido sem avisar — era o papel do perfil neutro.
 
-    Uma faixa de quantil só: quem testa o recorte declara as suas.
+    Uma faixa só em cada eixo de estado: quem testa o recorte declara os seus cortes.
     """
     return {
         "availability": default_availability(max_hours),
         "selectivity_median": 0.0,
-        "quantiles": 1,
+        "grade_cuts": (),
+        "reserve_cuts": (),
+        "credit_cuts": (),
     }

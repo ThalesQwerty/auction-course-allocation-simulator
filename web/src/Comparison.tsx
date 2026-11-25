@@ -22,6 +22,7 @@ import {
   AGGREGATE,
   CUTS,
   RULERS,
+  cutDomain,
   cutGroups,
   pointsOf,
   rulerOf,
@@ -32,7 +33,8 @@ import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
 import { Trace } from "./Trace";
 import { COMPARISON_ARMS } from "./types";
-import type { ClassCut, Ruler, RunSummary } from "./types";
+import { MAX_CUTS, readBandColors, writeBandColor } from "./profileColors";
+import type { ClassCut, CompareRequest, Ruler, RunSummary } from "./types";
 
 /** Períodos com uma casa: o tempo de formatura anda em frações de período, e
  * duas casas sugeririam uma precisão que a amostra não tem. */
@@ -395,9 +397,16 @@ const formatDelta = (value: number, format: (v: number) => string) =>
 export function Comparison({
   run,
   onReuseConfig,
+  onRecut,
+  recutting,
 }: {
   run: ComparisonRun;
   onReuseConfig: () => void;
+  /** Roda de novo com outros cortes. Não é recorte de tela: quem monta as
+   * faixas é o motor, a partir de valores por aluno que a resposta não carrega
+   * — ver `App.handleRecut`. */
+  onRecut: (cuts: Partial<CompareRequest>) => void;
+  recutting: boolean;
 }) {
   const dark = usePrefersDark();
   const result = run.result;
@@ -412,6 +421,14 @@ export function Comparison({
    * não se quer. */
   const [rulerChoice, setRuler] = useState<RulerChoice>("period");
   const [cutChoice, setCut] = useState<CutChoice>("overall");
+  /** As cores escolhidas para as faixas, por eixo. Vivem no `localStorage` e
+   * não no cenário — ver `profileColors`. O estado em memória é a fonte da
+   * tela, de modo que a escolha valha mesmo onde gravar falhou. */
+  const [bandColors, setBandColors] = useState(readBandColors);
+  /** Os cortes em edição, por eixo. Vazio significa "os da execução": o
+   * rascunho só existe entre a edição e o Aplicar, e some quando a execução
+   * nova chega, porque o componente é remontado por `key`. */
+  const [cutDraft, setCutDraft] = useState<Record<string, number[]>>({});
   /** O recorte da oferta no gráfico de preço. Ele é independente do recorte
    * das demais linhas: um reparte turmas, o outro reparte alunos. */
   const [priceCutChoice, setPriceCut] = useState<ClassCut>("curriculum_period");
@@ -421,6 +438,7 @@ export function Comparison({
   const hasBothAuctions = [WITH_ACCUMULATION, WITHOUT_ACCUMULATION].every((key) =>
     result.arms.some((arm) => arm.key === key)
   );
+
 
   /** Os modelos que rodaram, com o traçado de cada um. */
   const arms: SeriesArmStyle[] = useMemo(
@@ -544,6 +562,54 @@ export function Comparison({
     ? cutChoice
     : (cuts[0]?.axis ?? "overall");
 
+
+  /** Os modelos que produziram **o recorte escolhido** — os que o gráfico de
+   * faixas desenha, e os únicos que entram na legenda dele.
+   *
+   * É o que tira o CR do recorte por créditos: a grandeza só existe de um
+   * lado, e deixar o modelo na legenda sem linha diria que ele ficou zerado,
+   * que é a leitura errada — ali não há moeda, não há zero. Vale para qualquer
+   * eixo que um só mecanismo produza. */
+  const axisArms: SeriesArmStyle[] = useMemo(
+    () =>
+      arms.filter(
+        (arm) =>
+          cut === "overall" ||
+          (series[arm.key] ?? []).some(
+            (a) => rulerOf(a) === ruler && a.axis === cut && a.groups.length
+          )
+      ),
+    [arms, series, ruler, cut]
+  );
+
+  /** O eixo escolhido no catálogo de recortes, com domínio, passo e os cortes
+   * em vigor — os do rascunho, se houver, senão os da execução. */
+  const cutOption = CUTS.find((option) => option.axis === cut);
+  const runCuts = cutOption?.field ? (run.config[cutOption.field] ?? []) : [];
+  const cutValues = cutOption?.field
+    ? (cutDraft[cutOption.field] ?? runCuts)
+    : [];
+  const [cutLow, cutHigh] = cutDomain(cut, run.config) ?? [
+    0,
+    Number.POSITIVE_INFINITY,
+  ];
+  const cutsValid =
+    cutValues.every((value) => value > cutLow && value < cutHigh) &&
+    new Set(cutValues).size === cutValues.length;
+  const cutsChanged =
+    cutValues.length !== runCuts.length ||
+    [...cutValues]
+      .sort((a, b) => a - b)
+      .some((value, index) => value !== [...runCuts].sort((a, b) => a - b)[index]);
+  // O corte novo cai no meio do que sobrou acima do maior, para ficar dentro
+  // do domínio sem o usuário ter de calcular.
+  const nextCut = (() => {
+    const step = cutOption?.step ?? 1;
+    const maior = cutValues.length ? Math.max(...cutValues) : cutLow;
+    const teto = Number.isFinite(cutHigh) ? cutHigh : maior + 10 * step;
+    return Math.round((maior + (teto - maior) / 2) / step) * step;
+  })();
+
   /** O eixo de um braço na régua e no recorte escolhidos. */
   const axisOf = (armKey: string) =>
     series[armKey]?.find((a) => rulerOf(a) === ruler && a.axis === cut);
@@ -557,8 +623,11 @@ export function Comparison({
         )
       ),
     ];
-    return cutGroups(cut, run.config, present, { solo: soloColor(dark) });
-  }, [rulerAxes, cut, run.config, dark]);
+    return cutGroups(cut, present, {
+      solo: soloColor(dark),
+      bands: bandColors[cut],
+    });
+  }, [rulerAxes, cut, dark, bandColors]);
 
   /** A seção da economia só aparece com leilão na comparação **e** com dado
    * dela: as gravadas antes de 14/11/2026 não a têm, e um gráfico vazio diria
@@ -766,7 +835,7 @@ export function Comparison({
       title={title}
       lines={linesOf(key)}
       groups={groups}
-      arms={arms}
+      arms={axisArms}
       runs={result.runs}
       xLabel={scale.point}
       {...extra}
@@ -850,19 +919,128 @@ export function Comparison({
           {cuts.length > 1 && (
             <div className="switch-group" role="group" aria-label="Linhas">
               <span>Linhas</span>
-              <div className="view-switch">
+              <select
+                value={cut}
+                onChange={(e) => setCut(e.target.value as CutChoice)}
+              >
                 {cuts.map((option) => (
-                  <button
-                    key={option.axis}
-                    type="button"
-                    className={cut === option.axis ? "on" : ""}
-                    aria-pressed={cut === option.axis}
-                    onClick={() => setCut(option.axis)}
-                  >
+                  <option key={option.axis} value={option.axis}>
                     {option.label}
-                  </button>
+                  </option>
                 ))}
-              </div>
+              </select>
+              {/* Os cortes do eixo escolhido. Um corte a mais é uma faixa a
+                  mais. Eles são do **motor**, não da tela — ver `onRecut` —,
+                  então a edição fica em rascunho e o Aplicar roda de novo; a
+                  cada tecla custaria N simulações por braço. */}
+              {cutOption?.field && (
+                <div className="cut-list">
+                  {cutValues
+                    .map((cut, index) => [cut, index] as const)
+                    .sort((a, b) => b[0] - a[0])
+                    .map(([cut, index]) => (
+                      <input
+                        key={index}
+                        type="number"
+                        min={cutLow}
+                        max={Number.isFinite(cutHigh) ? cutHigh : undefined}
+                        step={cutOption.step ?? 1}
+                        value={cut.toFixed(cutOption.decimals ?? 0)}
+                        onChange={(e) => {
+                          const next = [...cutValues];
+                          next[index] = Number(e.target.value);
+                          setCutDraft({ ...cutDraft, [cutOption.field!]: next });
+                        }}
+                      />
+                    ))}
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={cutValues.length >= MAX_CUTS}
+                    onClick={() =>
+                      setCutDraft({
+                        ...cutDraft,
+                        [cutOption.field!]: [...cutValues, nextCut],
+                      })
+                    }
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={!cutValues.length}
+                    onClick={() =>
+                      setCutDraft({
+                        ...cutDraft,
+                        [cutOption.field!]: cutValues
+                          .slice()
+                          .sort((a, b) => a - b)
+                          .slice(0, -1),
+                      })
+                    }
+                  >
+                    −
+                  </button>
+                  {cutsChanged && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={recutting || !cutsValid}
+                      onClick={() =>
+                        onRecut({
+                          [cutOption.field!]: [...cutValues].sort((a, b) => a - b),
+                        } as Partial<CompareRequest>)
+                      }
+                    >
+                      {recutting ? "Rodando…" : "Aplicar"}
+                    </button>
+                  )}
+                  {!cutsValid && (
+                    <span className="field-error">
+                      entre {cutLow.toLocaleString("pt-BR")} e{" "}
+                      {Number.isFinite(cutHigh)
+                        ? cutHigh.toLocaleString("pt-BR")
+                        : "∞"}
+                      , sem repetir
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* Uma cor por faixa, da mais baixa para a mais alta — a mesma
+                  ordem em que a API as lista. Vazia cai na rampa padrão, de
+                  modo que pintar uma faixa não repinte as outras. */}
+              {cut !== "overall" && groups.length > 1 && (
+                <div className="band-colors">
+                  {groups.map((group, index) => (
+                    <label key={group.key} title={group.label}>
+                      <input
+                        type="color"
+                        value={group.color}
+                        onChange={(e) =>
+                          setBandColors(
+                            writeBandColor(cut, index, e.target.value)
+                          )
+                        }
+                      />
+                      <span>{group.label}</span>
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => {
+                      let next = bandColors;
+                      groups.forEach((_, index) => {
+                        next = writeBandColor(cut, index, null);
+                      });
+                      setBandColors(next);
+                    }}
+                  >
+                    Padrão
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -882,11 +1060,23 @@ export function Comparison({
           {/* O peso de cada ponto, no fim da grade — e o **teste de validade
               da janela**: em regime ele é plano, porque entra uma coorte e sai
               outra. Se subir ao longo da janela, a pré-população foi curta e
-              o que as curvas mostram é a rampa, não o mecanismo. */}
-          {chart("students", scale.weight, "students", {
-            bounds: [0, Infinity],
-            format: formatCount,
-          })}
+              o que as curvas mostram é a rampa, não o mecanismo.
+
+              Num eixo de estado este é o gráfico de **alunos ativos por
+              faixa**, e o rótulo muda para dizê-lo: ali o calouro fica fora da
+              faixa (CR 0 é ausência de medida, não medida de 0), então medido
+              e ativo são o mesmo conjunto. No "Geral" não são — o calouro
+              conta como ativo e sai das médias —, e o rótulo da régua continua
+              sendo o certo. */}
+          {chart(
+            "students",
+            cut === "overall" ? scale.weight : "Alunos ativos na faixa",
+            "students",
+            {
+              bounds: [0, Infinity],
+              format: formatCount,
+            }
+          )}
         </div>
       </section>
 

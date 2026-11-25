@@ -83,8 +83,19 @@ export function curriculumPeriods(
 
 /** As disciplinas de entrada: a matrícula garantida de quem ingressa. Vem da
  * flag, e **não** de não ter pré-requisito — a optativa também não tem e não
- * é entrada. É este conjunto que dimensiona `students_per_period` e
- * `max_hours`. Espelha `SimulationConfig.entry_disciplines`. */
+ * é entrada. É este conjunto que dimensiona a coorte e `max_hours`. Espelha
+ * `SimulationConfig.entry_disciplines`. */
 export function entryDisciplines(disciplines: DisciplineInput[]): DisciplineInput[] {
   return disciplines.filter((d) => d.entry);
+}
+
+/** Em quantas turmas cada disciplina de entrada está repartida — o fator que
+ * leva o ingresso por turma à coorte (`equations.cohortSize`).
+ *
+ * É um número só: o motor recusa a grade cujas disciplinas de entrada discordem
+ * no número de turmas, porque aí cada uma implicaria uma coorte. Zero quando
+ * não há disciplina de entrada, que é grade que o motor também recusa.
+ * Espelha `SimulationConfig.entry_classes`. */
+export function entryClasses(disciplines: DisciplineInput[]): number {
+  return entryDisciplines(disciplines)[0]?.classes ?? 0;
 }

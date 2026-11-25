@@ -19,12 +19,12 @@ from ..equations import (
     credits_per_seat,
     message_fidelity,
     progress,
-    quantile_band,
-    quantile_name,
-    quantile_names,
     request_states,
     semestralization,
     utilization,
+    value_band,
+    value_band_name,
+    value_band_names,
 )
 from ..equations._mean import mean
 from ..metrics import compute_metrics
@@ -37,13 +37,33 @@ from .reports import GroupSnapshot
 # `rpartition` a recupera mesmo que o nome de um perfil traga o separador.
 CELL_SEP = "|"
 
+# O rótulo de quem **não está em faixa nenhuma** num eixo de estado: o aluno
+# sem valor medido no instante. É o calouro, que não disputou nada, e é quem
+# já saiu — formado ou jubilado — e portanto não tem CR corrente. Não é uma
+# faixa: `snapshot_groups` o descarta em vez de somá-lo em algum lugar.
+OUTSIDE = "\x00fora"
+
 
 @dataclass(frozen=True)
 class Axis:
-    """Como rotular cada aluno e em que ordem as séries saem."""
+    """Como rotular cada aluno e em que ordem as séries saem.
 
-    key: Callable[[Student], str]
+    A chave lê o aluno **e o instante**: um eixo de coorte só precisa do
+    primeiro, mas um eixo de estado (`Axis.states`) rotula pelo valor medido
+    agora, que não está no aluno.
+
+    `partitions` diz se o eixo reparte a população **inteira** ou só quem foi
+    medido. A coorte reparte: o aluno pertence à sua desde o ingresso e
+    continua nela depois de sair, então as contagens de pessoas por coorte
+    existem. Um eixo de estado não: formado e jubilado não têm CR corrente,
+    nem reserva, nem saldo. Ali `population`, `graduated` e `dismissed` saem
+    `None` — zeradas se leriam como "ninguém se formou", que é a mesma
+    armadilha das grandezas de crédito no `ranking`.
+    """
+
+    key: Callable[[Student, "Measurements"], str]
     order: list[str]
+    partitions: bool = True
 
     @classmethod
     def crossed(cls, spatial: "Axis", cohort: "Axis") -> "Axis":
@@ -64,12 +84,17 @@ class Axis:
         que é a ordem em que a tela lista os grupos.
         """
         return cls(
-            key=lambda s: f"{spatial.key(s)}{CELL_SEP}{cohort.key(s)}",
+            key=lambda s, v: (
+                OUTSIDE
+                if spatial.key(s, v) == OUTSIDE
+                else f"{spatial.key(s, v)}{CELL_SEP}{cohort.key(s, v)}"
+            ),
             order=[
                 f"{group}{CELL_SEP}{entry}"
                 for group in spatial.order
                 for entry in cohort.order
             ],
+            partitions=spatial.partitions and cohort.partitions,
         )
 
     @classmethod
@@ -81,43 +106,79 @@ class Axis:
         justamente quando termina de contar por onde cada um saiu.
         """
         return cls(
-            key=lambda s: str(s.entry_period),
+            key=lambda s, v: str(s.entry_period),
             order=[str(entry) for entry in entry_periods if entry <= period],
         )
 
     @classmethod
-    def quantiles(cls, config: SimulationConfig) -> dict[str, "Axis"]:
-        """Os três eixos da população, cortados em faixas de quantil.
+    def states(cls, config: SimulationConfig) -> dict[str, "Axis"]:
+        """Os eixos de **estado**, cortados em faixas de valor corrente.
 
-        O corte é sobre o **nível basilar** — o componente permanente do
-        aluno —, e não sobre o valor do período: fatiar o sorteio do semestre
-        não separaria tipos de aluno, e o mesmo aluno trocaria de faixa a cada
-        ponto do gráfico. Ver `equations.quantile_band`.
+        Três grandezas que o sistema de fato lê: o CR, a utilidade de reserva
+        e o orçamento de crédito. O corte é no valor de agora, com fronteira
+        declarada pelo cenário — ver `equations.value_band` para por que a
+        fronteira é fixa e a população é que se move.
 
-        Ao contrário da coorte, a lista não depende do período: a faixa existe
-        desde o primeiro ingresso, e um recorte vazio sai com métrica `None`,
-        como qualquer outro.
+        Houve, até 24/11/2026, três eixos de **quantil sobre o nível
+        basilar** — desempenho, disponibilidade e seletividade. Eles
+        respondiam outra pergunta ("o mecanismo trata melhor quem tem pouca
+        aptidão?", com a mesma gente nos dois braços) e saíram junto com ela.
+        O que fica é a função de resposta: o que acontece com quem chega com
+        CR alto, venha ele de onde vier.
 
-        Houve **perfis** nomeados aqui até 19/11/2026. A diferença que importa
-        é que o quantil é um corte *a posteriori* de uma população contínua, e
-        o perfil era um grupo declarado antes dela existir.
+        O eixo do **crédito só existe no leilão**. No `ranking` não há moeda,
+        então ele sai da lista inteiro em vez de sair zerado — e a interface
+        omite as linhas e a legenda dele daquele lado.
+
+        A disponibilidade não tem eixo aqui, e a falta é de propósito: o aluno
+        não conhece a própria disponibilidade na hora de pedir (ver
+        `availability`), então não há canal do mecanismo que possa responder a
+        ela, e um eixo de estado sobre ela mediria o sorteio do semestre.
         """
-        bands = config.quantiles
-        order = quantile_names(bands)
-
-        def axis(level: Callable[[Student], float]) -> "Axis":
-            return cls(
-                key=lambda s: quantile_name(
-                    band=quantile_band(level=level(s), bands=bands), bands=bands
-                ),
-                order=list(order),
-            )
-
-        return {
-            "performance": axis(lambda s: s.performance_level),
-            "availability": axis(lambda s: s.availability_level),
-            "selectivity": axis(lambda s: s.selectivity_level),
+        axes = {
+            "grade_average": _state_axis(
+                config, "grade_average", lambda v: v.grade_averages, decimals=1
+            ),
+            "reserve": _state_axis(
+                config, "reserve", lambda v: v.reserves, decimals=3
+            ),
         }
+        if config.uses_credits:
+            axes["credits"] = _state_axis(
+                config, "credits", lambda v: v.supply, decimals=0
+            )
+        return axes
+
+
+def _state_axis(
+    config: SimulationConfig,
+    axis: str,
+    source: Callable[["Measurements"], dict[str, float]],
+    *,
+    decimals: int,
+) -> Axis:
+    """Um eixo de estado: rotula pelo valor medido, com os cortes do cenário.
+
+    `source` é de onde o valor sai em `Measurements`. Quem não está lá não tem
+    valor no instante e sai como `OUTSIDE` — ver a constante.
+    """
+    cuts = config.band_cuts(axis)
+    low, high = config.band_domain(axis)
+    order = value_band_names(cuts=cuts, low=low, high=high, decimals=decimals)
+
+    def key(student: Student, values: "Measurements") -> str:
+        measured = source(values)
+        if student.id not in measured:
+            return OUTSIDE
+        return value_band_name(
+            band=value_band(value=measured[student.id], cuts=cuts),
+            cuts=cuts,
+            low=low,
+            high=high,
+            decimals=decimals,
+        )
+
+    return Axis(key=key, order=order, partitions=False)
 
 
 @dataclass(frozen=True)
@@ -149,6 +210,12 @@ class Measurements:
     allocated_satisfactions: dict[str, float] | None
     # S_a^(t) — a seletividade do período, para a grade de correlações.
     selectivities: dict[str, float]
+    # s_a^(t) — a utilidade de reserva (`equations.reserve_threshold`): a
+    # seletividade já posta no bolo das elegíveis. É ela, e não `S`, que serve
+    # de eixo de recorte e de correlação: `S` está na escala do interesse, que
+    # a normalização da linha faz depender da grade, enquanto `s` é uma
+    # participação em [0, 1) e é o limiar que a decisão de fato lê.
+    reserves: dict[str, float]
     request_states: dict[str, RequestStates] | None
     credits: dict[str, int]  # saldo no instante
     supply: dict[str, int]  # C_a^(t,1), a oferta do início do período
@@ -175,6 +242,7 @@ def measure(
     discipline_hours: dict[str, int],  # por disciplina: pesa o histórico
     credit_returns: dict[str, int] | None,
     selectivities: dict[str, float] | None = None,
+    reserves: dict[str, float] | None = None,
     allocated_satisfactions: dict[str, float] | None = None,
     retained: dict[str, set[str]] | None = None,
     excluded: dict[str, list[str]] | None = None,
@@ -289,6 +357,7 @@ def measure(
         ),
         allocated_satisfactions=allocated_satisfactions,
         selectivities=selectivities or {s.id: 0.0 for s in active},
+        reserves=reserves or {s.id: 0.0 for s in active},
         credits=credits,
         supply=supply,
         bids=bids,
@@ -303,9 +372,9 @@ def snapshot(
     measured: list[Student],
     values: Measurements,
     total_seats: int,
-    population: int,
-    graduated: int,
-    dismissed: int,
+    population: int | None,
+    graduated: int | None,
+    dismissed: int | None,
     uses_credits: bool,
 ) -> GroupSnapshot:
     """Um recorte qualquer: a universidade inteira ou uma coorte.
@@ -357,7 +426,10 @@ def snapshot(
             contentions=pick(values.contentions),
             allocated=sum(len(values.won[i]) for i in ids),
             total_seats=total_seats,
-            selectivities=pick(values.selectivities),
+            reserves=pick(values.reserves),
+            # A oferta é `None` onde não há moeda, e é só isso que apaga a
+            # linha de crédito da grade de correlações.
+            supplies=pick(values.supply) if uses_credits else None,
             allocated_satisfactions=(
                 pick(values.allocated_satisfactions)
                 if values.allocated_satisfactions is not None
@@ -427,18 +499,21 @@ def snapshot_groups(
     livro por eixo que pudesse divergir do estado real.
     """
 
+    def measured_of(students_: list[Student]) -> list[Student]:
+        """O calouro do período sai de toda média: ele não disputou nada."""
+        return [s for s in students_ if s.entry_period != period]
+
     def take(
         group: str | None,
         members: list[Student],
-        population: int,
-        graduated: int,
-        dismissed: int,
+        population: int | None,
+        graduated: int | None,
+        dismissed: int | None,
     ):
         return snapshot(
             group=group,
             members=members,
-            # O calouro do período sai de toda média: ele não disputou nada.
-            measured=[s for s in members if s.entry_period != period],
+            measured=measured_of(members),
             values=values,
             total_seats=total_seats,
             population=population,
@@ -458,11 +533,26 @@ def snapshot_groups(
 
     def split(axis: Axis) -> list[GroupSnapshot]:
         members: dict[str, list[Student]] = {key: [] for key in axis.order}
-        for student in active:
-            members[axis.key(student)].append(student)
-        population = Counter(axis.key(s) for s in entered)
-        graduated = Counter(axis.key(s) for s in entered if s.graduated_at is not None)
-        dismissed = Counter(axis.key(s) for s in entered if s.dismissed_at is not None)
+        # Num eixo de estado o calouro fica de fora: ele não disputou nada, e o
+        # CR 0 dele é ausência de medida, não medida de 0 — somá-lo empilharia
+        # toda a coorte de entrada na faixa mais baixa. Num eixo que reparte a
+        # população ele continua contando, como manda `GroupSnapshot`.
+        labelled = active if axis.partitions else measured_of(active)
+        for student in labelled:
+            label = axis.key(student, values)
+            if label in members:
+                members[label].append(student)
+        if not axis.partitions:
+            # As contagens de pessoas não existem por faixa de estado — ver
+            # `Axis.partitions`.
+            return [take(key, members[key], None, None, None) for key in axis.order]
+        population = Counter(axis.key(s, values) for s in entered)
+        graduated = Counter(
+            axis.key(s, values) for s in entered if s.graduated_at is not None
+        )
+        dismissed = Counter(
+            axis.key(s, values) for s in entered if s.dismissed_at is not None
+        )
         return [
             take(key, members[key], population[key], graduated[key], dismissed[key])
             for key in axis.order

@@ -123,6 +123,13 @@ class PeriodState:
         tem para trabalhar. A validação do cenário garante que a coorte cabe
         na menor dessas ofertas e que a carga somada respeita W_a.
 
+        A vaga **sai da oferta da turma**, como qualquer outra: o que a
+        distingue é só ter `z = 1` fixado antes de a primeira rodada abrir.
+        Tirá-la de `q_x` abriria duas incoerências piores que a que resolveria
+        — o aluno cursando uma turma que não recebeu, e recebendo uma turma
+        que não pediu. Por isso a concessão aqui passa por `grant`, que
+        desconta, e a solicitação é lançada no `bid_log` logo abaixo.
+
         A garantia vale só no ingresso: recursar uma dessas disciplinas é
         disputá-la no leilão como qualquer outra.
         """

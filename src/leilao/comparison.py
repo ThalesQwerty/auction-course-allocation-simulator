@@ -24,41 +24,26 @@ seeds mediriam a variação entre populações junto da variação entre mecanis
 Eles são os dois modelos que o trabalho compara, e o vão entre os dois é o
 resultado.
 
-Esse vão soma **três mudanças de uma vez**, e isso é escolha declarada: não
-há braço intermediário no padrão. Os degraus que as separam continuam
-escritos, em `ABLATION_ARMS`, e rodam sob demanda:
-
-    CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão igualitário
-                                                   ──acúmulo──▶  Leilão com PLI
+Esse vão soma **três mudanças de uma vez**, e isso é escolha declarada:
 
 1. **A mensagem.** O CR dá um número por *aluno*; o lance dá um número por
    *par* (aluno, disciplina). É a intensidade entrando no que o mecanismo
-   recebe. Os dois lados resolvem ordinalmente, então o passo isola a moeda.
-   Não é o mesmo algoritmo dos dois lados (`serial_dictatorship` contra
-   `greedy_allocation`), e não poderia ser: um número por aluno não dá para
-   ordenar pares. "Ordinal" descreve a **propriedade** — nenhum dos dois
-   troca magnitudes —, não a implementação.
-2. **A resolução.** Ordinal usa só a *ordem* dos lances: qualquer
-   transformação monótona do vetor dá a mesma alocação. Cardinal (PLI) usa as
-   *magnitudes*, e derruba um lance alto para acomodar dois médios, o que a
-   varredura nunca faz. Os dois só divergem onde a carga horária aperta — sem
-   ela o problema se separa por disciplina e a varredura é ótima —, então o
-   passo só tem conteúdo em cenário com conjunto elegível maior que W_a.
+   recebe.
+2. **A resolução.** A ditadura serial usa só a *ordem*: qualquer transformação
+   monótona do vetor dá a mesma alocação. A PLI usa as *magnitudes*, e derruba
+   um lance alto para acomodar dois médios, o que uma varredura nunca faz. As
+   duas só divergem onde a carga horária aperta — sem ela o problema se separa
+   por disciplina e a varredura é ótima.
 3. **O acúmulo.** A eq. (36) carrega o saldo de um período para o outro e o
    `f_γ` da eq. (34) o alimenta: quem aprova recupera a fatia do preço
    correspondente à nota, de modo que ir bem compra poder de compra no período
    seguinte. É a única fonte de mérito do leilão — a ordenação por CR faz isso
-   por construção, o histórico *é* o critério, e o leilão sem acúmulo não faz
-   de jeito nenhum.
+   por construção, porque o histórico *é* o critério.
 
-**Memória e retorno são um canal só, não dois.** Um braço sem acúmulo fixa os
-dois (`credit_memory="none"` e `k = 0`), e os dois campos dizem a mesma coisa:
-medido, `carry` com `k = 0` sai **idêntico** a `none` — relatório por
-relatório, em todas as seeds —, porque o orçamento abre em `C_min` (eq. 37) e,
-sem retorno, só pode cair; o piso o traz de volta. Não há sobra a carregar
-enquanto não houver retorno que erga o saldo acima do piso. Fixar os dois é,
-então, redundância deliberada: o braço fica dizendo o que é em vez de depender
-dessa prova.
+Houve braços intermediários que separavam os três passos — o *bidding points*
+clássico e o leilão igualitário — até 24/11/2026. Saíram com o fechamento do
+escopo do trabalho, que compara estes dois modelos e mais nada; o vão passa a
+ser lido como uma parcela só.
 
 **Por que o acúmulo entra no braço padrão.** A sobra é a eq. (36), dada pelo
 anteprojeto; a forma do retorno a Seção 7.3.2 deixa explicitamente em aberto,
@@ -66,9 +51,7 @@ como eixo de experimentação. Ligá-lo é decisão de quem escreve, e o passo 3
 onde ela se paga — cara demais para ficar fora do modelo proposto.
 
 Por isso o acúmulo e o resolvedor **não são do cenário aqui**: são eixos do
-experimento. O resolvedor que vier na configuração é ignorado, como a seed; o
-multiplicador do retorno vale onde o braço não o fixa, e os demais o fixam em
-0 — ver `Arm.multiplier_over`.
+experimento, e o que vier na configuração é ignorado, como a seed.
 
 **Uma simulação vira um número por métrica**, que é a linha das tabelas. Para as
 três métricas de período a redução é a média **ponderada pelos alunos medidos**:
@@ -134,9 +117,7 @@ from .equations import (
 from .equations import time_to_graduate as mean_span
 from .grading import GradeShapes, draw_base_quantiles
 from .config import (
-    CreditMemory,
     Mechanism,
-    Resolver,
     SimulationConfig,
 )
 from .metrics import Metrics
@@ -171,34 +152,24 @@ RunDone = Callable[["Arm", int], None]
 
 @dataclass(frozen=True)
 class Arm:
-    """Um dos modelos comparados.
+    """Um dos dois modelos comparados.
 
-    Um modelo é a combinação de quatro escolhas: a **moeda** (ordenação por CR
-    ou lance em créditos), o **resolvedor** (varredura gulosa ou PLI global),
-    a **memória do orçamento** (se a sobra atravessa o período) e o
-    **retorno de créditos**. As duas últimas andam juntas: desligar uma torna
-    a outra inerte, e por isso o braço sem acúmulo desliga as duas.
+    Um modelo é **uma** escolha: a moeda. Ou a vaga sai por ordenação de CR, e
+    aí o resolvedor é a ditadura serial; ou sai por lance em créditos, e aí é a
+    PLI, com acúmulo (eq. 36) e retorno (eq. 34).
 
-    `return_multiplier` é o k da eq. (34) que o braço impõe ao cenário; `None`
-    quer dizer "o do cenário", e é como o braço que **acumula** não fixa
-    quanto. Zero desliga o retorno, e é assim que um braço fica sem acúmulo
-    sem deixar de ser o mesmo modelo — ver `multiplier_over`.
+    Era a combinação de três escolhas — moeda, resolvedor e memória do
+    orçamento — até 24/11/2026. O escopo fechou nos dois modelos, e as outras
+    duas deixaram de ser eixo: o resolvedor passou a ser consequência da moeda
+    (`simulation.rounds`) e a memória, que podia abrir todo período em `C_min`,
+    saiu junto com os braços de ablação que a usavam.
 
-    `key` é o identificador estável que a interface usa para rotular a série —
+    `key` é o identificador estável que a interface usa para rotular a série;
     o rótulo em si é dela, não daqui.
     """
 
     key: str
     mechanism: Mechanism
-    return_multiplier: float | None
-    resolver: Resolver = "ilp"
-    credit_memory: CreditMemory = "carry"
-
-    def multiplier_over(self, config: SimulationConfig) -> float:
-        """O k que este braço roda sobre este cenário."""
-        if self.return_multiplier is None:
-            return config.return_multiplier
-        return self.return_multiplier
 
 
 # Os **dois modelos que o trabalho compara**: a ordenação por CR e o leilão
@@ -207,49 +178,30 @@ class Arm:
 # que o ignora por completo.
 #
 # **Só entra aqui o que sai nos resultados**: cada braço é um traçado dos
-# gráficos e uma linha das tabelas, e nada roda para não ser mostrado. Os
-# degraus intermediários estão em `ABLATION_ARMS` e custam tempo de execução,
-# não complexidade conceitual — são a mesma simulação com um campo trocado.
+# gráficos e uma linha das tabelas, e nada roda para não ser mostrado.
 #
 # **Os dois não usam o mesmo resolvedor, e isso é deliberado.** O CR roda por
 # ditadura serial, que desempata por ε; o leilão roda por PLI, que não lê o ε
 # (ver `wdp_solver`) e deixa a escolha entre ótimos de mesmo valor para a
 # busca do CBC. Igualar os resolvedores custaria a maximização de bem-estar,
 # que é o que a PLI entrega e o guloso não — preferiu-se a assimetria a isso.
+#
+# Houve `ABLATION_ARMS` aqui até 24/11/2026: o leilão igualitário (sem
+# acúmulo) e o *bidding points* clássico (guloso, sem acúmulo), que separavam
+# o que a moeda compra do que o acúmulo compra. Saíram com o fechamento do
+# escopo, junto com os dois campos de `Arm` que os definiam. A chave
+# `credits_return` é **histórica** — nasceu nomeando o retorno, quando havia um
+# braço sem ele — e fica como está, para que comparação gravada antes disto
+# continue casando com o braço.
 ARMS: tuple[Arm, ...] = (
-    Arm("ranking_greedy", "ranking", 0.0, resolver="greedy"),
-    Arm("credits_return", "credits", None),
-)
-
-# Os degraus do caminho, que **não** rodam por padrão. Entre os dois modelos
-# há três mudanças somadas, e estes dois braços as separam. Para a ablação,
-# `run_comparison(..., arms=ARMS + ABLATION_ARMS)`.
-#
-# `credits_ilp` é o **leilão igualitário**: a mesma moeda e o mesmo resolvedor
-# do braço padrão, sem acúmulo nenhum — todo aluno abre todo período em
-# `C_min`. Com ele o vão se lê em duas parcelas em vez de uma: CR × igualitário
-# diz o que a **moeda** compra, igualitário × padrão diz o que o **acúmulo**
-# compra. Saiu do padrão em 19/11/2026, quando o trabalho passou a comparar
-# dois modelos em vez de três; a chave é **histórica** — nasceu nomeando o
-# resolvedor, e comparação gravada antes disto continua casando com o braço.
-#
-# `credits_greedy` é o *bidding points* clássico — orçamento de pontos, lances
-# por disciplina, disciplina fechando no menor lance atendido (Sönmez & Ünver
-# 2010, sobre Michigan e Yale SOM). Não confundir com o **Course Match** de
-# Wharton, que substituiu o bidding points de lá: aquele é cardinal e resolve
-# por MIP, mas é outro mecanismo — preferências sobre *cestas*, orçamentos
-# aproximadamente iguais e preços de equilíbrio, não lance pago a segundo
-# preço. É trabalho relacionado, não célula deste desenho.
-ABLATION_ARMS: tuple[Arm, ...] = (
-    Arm("credits_greedy", "credits", 0.0, resolver="greedy", credit_memory="none"),
-    Arm("credits_ilp", "credits", 0.0, resolver="ilp", credit_memory="none"),
+    Arm("ranking_greedy", "ranking"),
+    Arm("credits_return", "credits"),
 )
 
 
 # Os braços por chave — como a interface se refere a um deles ao pedir o traço
-# de uma simulação. Inclui a ablação: o traço de um braço que não rodou por
-# padrão continua reproduzível.
-ARM_BY_KEY: dict[str, Arm] = {arm.key: arm for arm in ARMS + ABLATION_ARMS}
+# de uma simulação.
+ARM_BY_KEY: dict[str, Arm] = {arm.key: arm for arm in ARMS}
 
 
 def arms_from_keys(keys: list[str]) -> tuple[Arm, ...]:
@@ -348,11 +300,15 @@ class RulerSeries:
     # As seis células da grade de correlações, na ordem de
     # `equations.Correlations`. Cada uma é uma série como as de cima.
     cr_satisfaction: list[float]
-    cr_occupancy: list[float]
+    cr_progress: list[float]
     cr_dissipation: list[float]
-    selectivity_satisfaction: list[float]
-    selectivity_occupancy: list[float]
-    selectivity_dissipation: list[float]
+    reserve_satisfaction: list[float]
+    reserve_progress: list[float]
+    reserve_dissipation: list[float]
+    # As três do crédito saem `None` no `ranking`: não há moeda.
+    credits_satisfaction: list[float | None]
+    credits_progress: list[float | None]
+    credits_dissipation: list[float | None]
     # --- a economia de créditos, só do leilão ----------------------------
     #
     # As três saem `None` na linha de base por CR, e não zeradas: ali não há
@@ -404,16 +360,24 @@ class GroupSeries:
 #   horizonte muda o que a pessoa recebeu.
 RULERS: tuple[str, ...] = ("period", "age", "cohort")
 
-# Os recortes **espaciais** da tela, na ordem do seletor: os quatro eixos de
-# quantil (`simulation.Axis.quantiles`). O agregado (`overall`) não está aqui
-# porque não é recorte — é a ausência de um.
+# Os recortes **espaciais** da tela, na ordem do seletor: os eixos de estado
+# (`simulation.Axis.states`). O agregado (`overall`) não está aqui porque não
+# é recorte — é a ausência de um.
 #
 # A coorte saiu daqui em 11/11/2026 e virou régua: ela é um corte do **tempo**,
 # e tê-la como cor obrigava a ler duas dimensões temporais no mesmo gráfico.
+#
+# Os três eixos de **quantil sobre o nível basilar** — desempenho,
+# disponibilidade e seletividade — saíram em 24/11/2026: eles nomeavam um tipo
+# de aluno, e o que ficou nomeia um estado do sistema. Ver `equations.value_band`.
+#
+# `credits` está na lista, mas **só existe no leilão**: no `ranking` o eixo não
+# é produzido, e quem lê precisa tolerar a ausência dele em vez de supor as
+# três chaves. É o que `summarize` faz.
 CUT_AXES: tuple[str, ...] = (
-    "performance",
-    "availability",
-    "selectivity",
+    "grade_average",
+    "reserve",
+    "credits",
 )
 
 
@@ -610,9 +574,6 @@ class ArmResult:
 
     key: str
     mechanism: Mechanism
-    # O k efetivamente rodado, já resolvido contra o cenário — e não o `None`
-    # que o braço carrega. Quem lê um resultado quer saber o que rodou.
-    return_multiplier: float
     runs: list[RunSummary]
     # As séries reduzidas entre as seeds: cada régua cruzada com cada recorte.
     # É o que os gráficos desenham — ver `bands`.
@@ -885,10 +846,19 @@ def _measured(snapshot: GroupSnapshot | None) -> bool:
 def _cell(name: str):
     """Uma célula da grade de correlações, lida de `Metrics`.
 
-    `None` em plena rodada — duas das seis leem a dissipação, que só existe
+    `None` em plena rodada — três das nove leem o desperdício, que só existe
     depois da exclusão —, e ali vale 0: não houve correlação a medir.
     """
     return lambda m: getattr(m.correlations, name) if m.correlations else 0.0
+
+
+def _credit_cell(name: str):
+    """Uma célula de **crédito** da grade: `None` onde não há moeda.
+
+    Distinta de `_cell` porque o neutro aqui não é 0. Zero se leria como "o
+    orçamento não anda com nada", e no `ranking` o certo é "não há orçamento".
+    """
+    return lambda m: getattr(m.correlations, name) if m.correlations else None
 
 
 def _period_series(
@@ -949,11 +919,14 @@ def _period_series(
         exclusion_rate=series(lambda m: m.exclusion_rate or 0.0),
         dissipation=series(lambda m: m.dissipation or 0.0),
         cr_satisfaction=series(_cell("cr_satisfaction")),
-        cr_occupancy=series(_cell("cr_occupancy")),
+        cr_progress=series(_cell("cr_progress")),
         cr_dissipation=series(_cell("cr_dissipation")),
-        selectivity_satisfaction=series(_cell("selectivity_satisfaction")),
-        selectivity_occupancy=series(_cell("selectivity_occupancy")),
-        selectivity_dissipation=series(_cell("selectivity_dissipation")),
+        reserve_satisfaction=series(_cell("reserve_satisfaction")),
+        reserve_progress=series(_cell("reserve_progress")),
+        reserve_dissipation=series(_cell("reserve_dissipation")),
+        credits_satisfaction=series(_credit_cell("credits_satisfaction")),
+        credits_progress=series(_credit_cell("credits_progress")),
+        credits_dissipation=series(_credit_cell("credits_dissipation")),
         credits_supply=snapshots(lambda s: s.credits_per_student),
         credits_spent=snapshots(lambda s: s.mean_credits_spent),
         credits_returned=snapshots(lambda s: s.mean_credit_return),
@@ -1127,25 +1100,34 @@ def _regroup(
         cr_satisfaction=[
             weighed(point, lambda s, n="cr_satisfaction": getattr(s, n)) for point in points
         ],
-        cr_occupancy=[
-            weighed(point, lambda s, n="cr_occupancy": getattr(s, n)) for point in points
+        cr_progress=[
+            weighed(point, lambda s, n="cr_progress": getattr(s, n)) for point in points
         ],
         cr_dissipation=[
             weighed(point, lambda s, n="cr_dissipation": getattr(s, n)) for point in points
         ],
-        selectivity_satisfaction=[
-            weighed(point, lambda s, n="selectivity_satisfaction": getattr(s, n))
+        reserve_satisfaction=[
+            weighed(point, lambda s, n="reserve_satisfaction": getattr(s, n))
             for point in points
         ],
-        selectivity_occupancy=[
-            weighed(point, lambda s, n="selectivity_occupancy": getattr(s, n))
+        reserve_progress=[
+            weighed(point, lambda s, n="reserve_progress": getattr(s, n))
             for point in points
         ],
-        selectivity_dissipation=[
-            weighed(point, lambda s, n="selectivity_dissipation": getattr(s, n))
+        reserve_dissipation=[
+            weighed(point, lambda s, n="reserve_dissipation": getattr(s, n))
             for point in points
         ],
         credits_supply=[optional(point, lambda s: s.credits_supply) for point in points],
+        credits_satisfaction=[
+            optional(point, lambda s: s.credits_satisfaction) for point in points
+        ],
+        credits_progress=[
+            optional(point, lambda s: s.credits_progress) for point in points
+        ],
+        credits_dissipation=[
+            optional(point, lambda s: s.credits_dissipation) for point in points
+        ],
         credits_spent=[optional(point, lambda s: s.credits_spent) for point in points],
         credits_returned=[
             optional(point, lambda s: s.credits_returned) for point in points
@@ -1179,6 +1161,10 @@ def group_series(
                 if snapshot.group is not None and snapshot.group not in order:
                     order.append(snapshot.group)
 
+        # O eixo que este braço não produziu não entra — ver `bands`.
+        if not order:
+            continue
+
         def find(report, group: str, axis: str = axis) -> GroupSnapshot | None:
             return next((s for s in _cut(report, axis) if s.group == group), None)
 
@@ -1202,6 +1188,10 @@ def group_series(
 
     for axis in ("overall", *CUT_AXES):
         order, instants = _cell_instants(result, axis)
+        # O eixo que este braço não produziu não entra — ver `bands`. Sem isso
+        # o `ranking` publicaria um eixo de crédito com zero grupos.
+        if not order:
+            continue
         for ruler in ("age", "cohort"):
             out[ruler][axis] = [
                 GroupSeries(
@@ -1268,12 +1258,15 @@ def _quantities(series: RulerSeries, index: int) -> dict[str, float | None]:
         "exclusion_rate": series.exclusion_rate[index],
         "dissipation": series.dissipation[index],
         "cr_satisfaction": series.cr_satisfaction[index],
-        "cr_occupancy": series.cr_occupancy[index],
+        "cr_progress": series.cr_progress[index],
         "cr_dissipation": series.cr_dissipation[index],
-        "selectivity_satisfaction": series.selectivity_satisfaction[index],
-        "selectivity_occupancy": series.selectivity_occupancy[index],
-        "selectivity_dissipation": series.selectivity_dissipation[index],
+        "reserve_satisfaction": series.reserve_satisfaction[index],
+        "reserve_progress": series.reserve_progress[index],
+        "reserve_dissipation": series.reserve_dissipation[index],
         "credits_supply": series.credits_supply[index],
+        "credits_satisfaction": series.credits_satisfaction[index],
+        "credits_progress": series.credits_progress[index],
+        "credits_dissipation": series.credits_dissipation[index],
         "credits_spent": series.credits_spent[index],
         "credits_returned": series.credits_returned[index],
     }
@@ -1328,6 +1321,10 @@ def bands(runs: list[RunSummary]) -> list[AxisBands]:
     Sai uma entrada por combinação: as réguas de `RULERS` cruzadas com
     `overall` e os recortes de `CUT_AXES`. Um grupo que falte numa seed entra
     com as seeds que o têm.
+
+    O recorte que o braço **não produziu** sai da lista inteiro, em vez de
+    entrar com zero grupos: é o caso do crédito no `ranking`, e uma entrada
+    vazia faria a tela oferecer no seletor um eixo sem linha nenhuma.
     """
     out: list[AxisBands] = []
     for ruler in RULERS:
@@ -1339,6 +1336,8 @@ def bands(runs: list[RunSummary]) -> list[AxisBands]:
                     if entry.group not in order:
                         order.append(entry.group)
                     samples[entry.group].append(entry.series)
+            if not order:
+                continue
             out.append(
                 AxisBands(
                     ruler=ruler,
@@ -1474,9 +1473,6 @@ def arm_config(config: SimulationConfig, *, arm: Arm, seed: int) -> SimulationCo
     return dataclasses.replace(
         config,
         mechanism=arm.mechanism,
-        return_multiplier=arm.multiplier_over(config),
-        resolver=arm.resolver,
-        credit_memory=arm.credit_memory,
         seed=seed,
     )
 
@@ -1540,10 +1536,8 @@ def run_comparison(
 ) -> ComparisonResult:
     """Roda `runs` simulações em cada braço, com as seeds de 1 a `runs`.
 
-    `arms` é o conjunto comparado, e o padrão são os dois do trabalho. Para a
-    ablação que separa mensagem, resolução e retorno, passe
-    `arms=ARMS + ABLATION_ARMS` — custa uma simulação a mais por braço e por
-    seed, e nada mais.
+    `arms` é o conjunto comparado, e o padrão são os dois do trabalho — que
+    hoje são os únicos que existem.
 
     Dois campos do cenário recebido são ignorados de propósito. A **seed**,
     porque numa comparação ela deixa de ser parâmetro e passa a ser o eixo da
@@ -1586,8 +1580,7 @@ def run_comparison(
             ArmResult(
                 key=arm.key,
                 mechanism=arm.mechanism,
-                return_multiplier=arm.multiplier_over(config),
-                runs=summaries,
+                        runs=summaries,
                 series=bands(summaries),
                 allocation_seconds=mean_allocation_seconds(summaries),
                 class_prices=class_price_bands(summaries),

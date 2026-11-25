@@ -40,7 +40,7 @@
  *     paddedScale        a régua de um gráfico: o contradomínio, ou os dados
  *
  * A população
- *     entryClassLoad     o bloco da coorte que cai em cada turma de entrada
+ *     cohortSize         a coorte: o ingresso por turma de entrada vezes as turmas
  *
  * Solicitações
  *     requestFunnel      as quatro frações condicionais do funil
@@ -56,7 +56,7 @@ export { approvalShare } from "./approvalShare";
 export { availabilityShape, fullLoadThreshold } from "./availabilityShape";
 export { boxStats } from "./boxStats";
 export { schedulePressure } from "./classSchedule";
-export { entryClassLoad } from "./cohort";
+export { cohortSize } from "./cohort";
 export type { BoxStats } from "./boxStats";
 export { CYCLIC, curriculumPeriods } from "./curriculumPeriods";
 export { HEIGHT_CYCLE, curriculumHeights } from "./curriculumHeights";

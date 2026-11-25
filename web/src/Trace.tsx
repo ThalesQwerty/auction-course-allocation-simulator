@@ -70,6 +70,12 @@ function outcomeOf(record: RequestRecord, round: number): Outcome | null {
 /** Quem vale a pena ver nesta rodada quando as cinzas estão escondidas. */
 const isLive = (outcome: Outcome) => outcome.tone !== "idle";
 
+/** O nível basilar como a tela o escreve: z-score com sinal, uma casa. O sinal
+ * é o que se lê de relance — de que lado da mediana da população o aluno
+ * está —, e é por isso que o `+` é explícito. */
+const nivel = (value: number) =>
+  `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1).replace(".", ",")}`;
+
 const Chip = ({ outcome }: { outcome: Outcome }) => (
   <span className={`outcome ${outcome.tone}`}>{outcome.label}</span>
 );
@@ -139,7 +145,9 @@ export function Trace({ run }: { run: ComparisonRun }) {
    * quando o traço novo chega. */
   const loadedArm = data ? result.arms.find((arm) => arm.key === data.arm) : undefined;
   const usesCredits = loadedArm ? loadedArm.mechanism === "credits" : true;
-  const hasReturn = loadedArm ? (loadedArm.return_multiplier ?? 0) > 0 : false;
+  // O acúmulo e o retorno deixaram de ser eixo em 24/11/2026: todo braço de
+  // crédito os tem, então quem os tem é exatamente quem usa moeda.
+  const hasReturn = usesCredits;
   const rounds = run.config.rounds;
 
   /** O sujeito sai do que está carregado: se o escolhido não existe mais —
@@ -404,13 +412,19 @@ function StudentTrace({
           <p className="note">
             {cohortLabel(student.entry_period)} · {student.id}
           </p>
-          {/* Os perfis ficam junto do nome, e não na régua de números: eles
-              não são resultado, são o que o aluno trouxe de fábrica. É metade
-              da resposta a "por que este aluno foi assim" — a seed é a outra. */}
+          {/* Os níveis basilares ficam junto do nome, e não na régua de
+              números: eles não são resultado, são o que o aluno trouxe de
+              fábrica. É metade da resposta a "por que este aluno foi assim" —
+              a seed é a outra. São z-scores: 0 é a mediana da população, e o
+              sinal diz de que lado dela o aluno está. */}
           <p className="trace-profiles">
-            <span className="chip">{student.performance}</span>
-            <span className="chip">{student.availability}</span>
-            <span className="chip">seletividade {student.selectivity}</span>
+            <span className="chip">desempenho {nivel(student.performance_level)}</span>
+            <span className="chip">
+              disponibilidade {nivel(student.availability_level)}
+            </span>
+            <span className="chip">
+              seletividade {nivel(student.selectivity_level)}
+            </span>
           </p>
         </div>
         <dl className="stat-row">

@@ -72,13 +72,66 @@ export const RULERS: {
  * como número. */
 export type CutChoice = CutAxis;
 
-/** Os recortes na ordem do seletor, com o rótulo da tela. */
-export const CUTS: { axis: CutChoice; label: string }[] = [
+/** Os recortes na ordem do seletor, com o rótulo da tela, o campo de cortes
+ * do cenário e o domínio em que esses cortes valem.
+ *
+ * Os três eixos de quantil sobre o nível basilar — desempenho, disponibilidade
+ * e seletividade — saíram em 24/11/2026 e deram lugar a estes, que cortam o
+ * **valor corrente**. A disponibilidade não tem sucessor aqui de propósito: o
+ * aluno não a conhece na hora de pedir, então nenhum canal do mecanismo
+ * responde a ela e um eixo de estado sobre ela fatiaria o sorteio do semestre.
+ *
+ * `domain` é `null` no crédito porque ele não é fixo — sai de C_min e C_max do
+ * próprio cenário. */
+export const CUTS: {
+  axis: CutChoice;
+  label: string;
+  field?: "grade_cuts" | "reserve_cuts" | "credit_cuts";
+  domain?: [number, number];
+  /** Teto de casas decimais do campo e do rótulo. */
+  decimals?: number;
+  /** Passo do campo numérico. O `min` do domínio é a base da escada. */
+  step?: number;
+}[] = [
   { axis: "overall", label: "Geral" },
-  { axis: "performance", label: "Desempenho" },
-  { axis: "availability", label: "Disponibilidade" },
-  { axis: "selectivity", label: "Seletividade" },
+  {
+    axis: "grade_average",
+    label: "CR",
+    field: "grade_cuts",
+    domain: [0, 10],
+    decimals: 1,
+    step: 0.1,
+  },
+  {
+    axis: "reserve",
+    label: "Utilidade de reserva",
+    field: "reserve_cuts",
+    domain: [0, 1],
+    decimals: 3,
+    // A reserva ocupa os milésimos — mediana medida em 0,015, p90 em 0,056 —,
+    // então um passo de centésimo pularia a faixa inteira em que há gente.
+    step: 0.001,
+  },
+  {
+    axis: "credits",
+    label: "Créditos",
+    field: "credit_cuts",
+    decimals: 0,
+    step: 1,
+  },
 ];
+
+/** O domínio em que os cortes de um eixo valem, para este cenário. O do
+ * crédito sai do orçamento configurado; os outros dois são fixos. */
+export function cutDomain(
+  axis: CutChoice,
+  config: Pick<CompareRequest, "min_credits" | "max_credits">
+): [number, number] | null {
+  const cut = CUTS.find((option) => option.axis === axis);
+  if (!cut?.field) return null;
+  if (cut.domain) return cut.domain;
+  return [config.min_credits, config.max_credits ?? Number.POSITIVE_INFINITY];
+}
 
 const STATE_KEYS = [
   "not_eligible",
@@ -158,19 +211,19 @@ export const seriesOf = (arm: ArmResult | undefined): AxisBands[] =>
 /** Os grupos de um recorte com a cor e o rótulo da tela. */
 export function cutGroups(
   cut: CutAxis,
-  config: CompareRequest,
   present: string[],
-  palette: { solo: string }
+  palette: { solo: string; bands?: (string | undefined)[] }
 ): SeriesGroupStyle[] {
   if (cut === "overall") {
     return [{ key: "overall", label: "Geral", color: palette.solo }];
   }
   // As faixas vêm na ordem da API — da mais baixa para a mais alta —, e a
-  // cor é da **posição**, não do nome: a rampa codifica essa ordem.
-  const bands = Math.max(config.quantiles ?? present.length, present.length, 1);
+  // cor é da **posição**, não do nome: a rampa codifica essa ordem. Uma cor
+  // escolhida pelo usuário sobrepõe a rampa naquela posição.
+  const bands = Math.max(present.length, 1);
   return present.map((key, index) => ({
     key,
     label: key,
-    color: bandColor(index, bands),
+    color: palette.bands?.[index] ?? bandColor(index, bands),
   }));
 }

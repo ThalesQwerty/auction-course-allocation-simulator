@@ -72,13 +72,18 @@ class GroupSnapshot:
     # `active + graduated`: quem se forma ao fim de t conta nos dois lados
     # dessa soma, porque disputou o período inteiro antes de sair. É sobre
     # este número que se tira a fração de formados.
-    population: int
-    graduated: int  # concluintes acumulados até aqui
+    #
+    # **`None` num eixo de estado** (`snapshots.Axis.partitions`): formado e
+    # jubilado não têm CR corrente, nem reserva, nem saldo, então a faixa de
+    # valor não os rotula e as três contagens não existem ali. Zeradas se
+    # leriam como "ninguém se formou".
+    population: int | None
+    graduated: int | None  # concluintes acumulados até aqui
     # Jubilados acumulados até aqui. Com `graduated`, reparte `population` em
     # três: quem saiu por cima, quem saiu por baixo e quem ainda disputa. As
     # duas frações que a tela mostra saem daqui, e somam 1 só no fim do
     # horizonte — antes dele o resto ainda está em curso.
-    dismissed: int
+    dismissed: int | None
     mean_credits: float | None  # saldo médio ao fim do recorte
     mean_approved_hours: float | None
     # Oferta de crédito do início do período (C_a^(t,1), antes de qualquer
@@ -268,13 +273,18 @@ class StudentSummary:
     id: str
     name: str
     entry_period: int  # t_a
-    # Os **três** grupos a que ele pertence, pelo nome. Dois são traço e
-    # não entram em decisão nenhuma; a seletividade é a estratégia dele.
-    # Estão aqui porque a tela individual é onde se pergunta "por que *este*
-    # aluno foi assim", e porque o relatório recorta por eles.
-    performance: str
-    availability: str
-    selectivity: str
+    # Os **níveis basilares** dele nos três eixos, na normal padrão. Dois são
+    # traço e não entram em decisão nenhuma; a seletividade é a estratégia
+    # dele. Estão aqui porque a tela individual é onde se pergunta "por que
+    # *este* aluno foi assim".
+    #
+    # Eram o **nome da faixa** de quantil de cada eixo até 24/11/2026. O
+    # recorte dos relatórios passou a ser por valor corrente
+    # (`snapshots.Axis.states`), e um rótulo de faixa que nenhum relatório mais
+    # usa não diria nada; o nível cru diz, e não depende de corte nenhum.
+    performance_level: float
+    availability_level: float
+    selectivity_level: float
     grade_average: float  # N_a
     approved_hours: int
     hours_to_graduate: int  # S — igual para todos

@@ -10,8 +10,8 @@ mochilas filtram por `utilidade > 0`.
 **O teto nas optativas** não é calibragem, é o que faz X significar alguma
 coisa. Sem ele a optativa fica elegível para sempre (nunca aprovada, sem
 pré-requisito), o aluno continua apostando nela por utilidade, e medindo-se o
-cenário quem conclui tinha aprovado o catálogo inteiro — 1 560 h de optativa
-onde 480 h eram exigidas. A exigência não restringia nada, e a
+cenário quem conclui tinha aprovado o catálogo inteiro — as 54 h do catálogo
+onde 24 h eram exigidas. A exigência não restringia nada, e a
 substituibilidade nunca chegava a ser exercida.
 
 Com `X = 0` nenhuma optativa é elegível, que é a leitura consistente: sem

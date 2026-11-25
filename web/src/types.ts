@@ -97,11 +97,23 @@ export interface Scenario {
   selectivity_sigma: number;
   /** Quanto da seletividade é permanente, entre períodos. */
   selectivity_stability: number;
-  /** Em quantas faixas os relatórios recortam a população, de 1 a 5. O corte
-   * é sobre o **nível basilar** de cada eixo — o componente permanente —, e
-   * não sobre o valor do período: fatiar o sorteio do semestre não separaria
-   * tipos de aluno. Em 1 há uma faixa só, que é a universidade inteira. */
-  quantiles: number;
+  /** Os pontos de corte de cada eixo de recorte. Com `q` cortes saem `q + 1`
+   * faixas, e a lista vazia dá uma faixa só, que é a universidade inteira.
+   *
+   * O corte é no **valor corrente** — o CR, a reserva, o saldo —, e não no
+   * quantil do nível basilar: a pergunta é o que acontece com quem *chega*
+   * com CR alto, venha ele de onde vier. A fronteira é declarada porque, sendo
+   * amostral, ela mudaria a cada seed e a média entre execuções somaria faixas
+   * que não são a mesma coisa. Ver `leilao.equations.value_band`.
+   *
+   * Os domínios: CR em [0, 10], reserva em [0, 1), saldo entre C_min e C_max.
+   * Não são portáveis entre cenários — a reserva se mede em milésimos e
+   * desloca com o tamanho da grade —, então trocar de cenário pede
+   * recalibrá-los. */
+  grade_cuts: number[];
+  reserve_cuts: number[];
+  /** Só se aplica ao leilão: no CR não há moeda, e o eixo não é produzido. */
+  credit_cuts: number[];
   /** Quanto do interesse do aluno é permanente, de 0 a 1 — a fração da
    * variância que não é resorteada a cada período. 0 reproduz o modelo
    * anterior; 1 congela o interesse. Ortogonal ao σ: a divisão preserva a dispersão de
@@ -146,35 +158,22 @@ export interface Scenario {
    * (`horizonFor`): o motor recebe o horizonte, mas quem o escolhe são estes
    * dois. */
   observation_periods: number;
-  /** Quantos alunos ingressam **por período**. Em regime a população é isto
-   * vezes o prazo de jubilamento.
+  /** Quantos ingressantes entram em **cada turma de disciplina de entrada**,
+   * no máximo `class_size`. São as vagas da turma que abrem o período já
+   * concedidas, e a coorte é isto vezes as turmas de uma disciplina de
+   * entrada.
    *
-   * Era derivado do produto das combinações de perfil até 19/11/2026, e mexer
-   * num eixo mudava o tamanho da coorte sem que ninguém pedisse. */
-  students_per_period: number;
+   * Era a coorte que se digitava até 24/11/2026, e ela saía repartida entre as
+   * turmas com resto, de modo que o número não se comparava com a lotação. */
+  students_per_entry_class: number;
   rounds: number; // |R|
   min_grade: number; // n_min
-  /** Quem decide a alocação — o segundo eixo da comparação. Cruzado com o
-   * mecanismo dá as quatro células; os dois resolvedores só divergem onde a
-   * carga horária aperta. */
-  resolver: "ilp" | "greedy";
-  /** Se o orçamento carrega entre períodos (eq. 36) ou recomeça em C_min. */
-  credit_memory: "none" | "carry";
   /** X — carga horária optativa exigida para concluir, somada entre as
    * optativas aprovadas. Concluir é aprovar em todas as obrigatórias e chegar
    * a este total; o aluno escolhe *quais* optativas. */
   elective_hours: number;
   min_credits: number; // C_min — orçamento mínimo do período
   max_credits: number | null; // C_max — orçamento máximo do período
-  /** k — o multiplicador do retorno, eq. (34): γ = round(nota/10 · k · preço).
-   * Zero desliga o retorno; com 1 ele nunca supera o gasto e o orçamento trava
-   * em C_min; com 2 a nota de corte é o ponto neutro da conta contínua, e o
-   * prêmio máximo (2 · preço) começa na nota 10 · (1 − 1/(4 · preço)) — 7,5
-   * num lance de 1 crédito, 9,5 num de 5. */
-  return_multiplier: number;
-  /** Fração do preço pago que a disciplina excluída devolve. Zero — o padrão —
-   * é "excluir não devolve nada", qualquer que seja a política de retorno. */
-  exclusion_refund_rate: number;
   seed: number;
 }
 
@@ -229,7 +228,7 @@ export const COMPARISON_ARMS: ArmDescription[] = [
     key: "ranking_greedy",
     label: "Ordenação por CR",
     short: "CR",
-    dash: "2 3",
+    dash: "1 3",
     hint: "a linha de base: matrícula por histórico. Os alunos entram em ordem decrescente de CR e cada um leva o que quer, na própria ordem de preferência, enquanto houver vaga e carga — eqs. (49)-(50). Ordinal: a alocação usa só a ordem, nunca a magnitude. Excluir não custa nada aqui — não há moeda a perder",
   },
   {
@@ -272,8 +271,8 @@ export const armLabel = (key: string): string =>
  * modo que a i-ésima simulação de cada braço parte da mesma população, das
  * mesmas utilidades e das mesmas notas (condição metodológica da Seção 7.3).
  *
- * O `return_multiplier` entra e vale — mas só onde o braço não o fixa. O
- * retorno é o eixo do experimento, e o braço de ablação o desliga impondo 0. */
+ * O retorno de créditos também não entra: o multiplicador da eq. (34) é
+ * constante, e quem o desliga é a memória do orçamento do braço. */
 export interface CompareRequest extends Omit<Scenario, "seed"> {
   runs: number; // N
   /** Quais braços rodar, pelas chaves de `COMPARISON_ARMS`. Rodar um só custa
@@ -408,10 +407,6 @@ export interface RunSummary {
 export interface ArmResult {
   key: string;
   mechanism: Mechanism;
-  /** O k efetivamente rodado neste braço, e não o do cenário: o braço de
-   * ablação o impõe em 0 para desligar o retorno. Ausente em comparação
-   * gravada antes de 15/11/2026, que trazia a política por nome. */
-  return_multiplier?: number;
   runs: RunSummary[];
   /** As séries reduzidas entre as seeds: cada régua do eixo X cruzada com o
    * agregado e com cada recorte. Ausente em comparação gravada antes de
@@ -464,9 +459,11 @@ export type ClassCut =
  * tê-la como cor obrigava a ler duas dimensões temporais no mesmo gráfico. */
 export type CutAxis =
   | "overall"
-  | "performance"
-  | "availability"
-  | "selectivity";
+  | "grade_average"
+  | "reserve"
+  /** Só existe no leilão: no `ranking` o braço não produz o eixo, e a série
+   * dele não vem na resposta. A tela omite a opção e a legenda. */
+  | "credits";
 
 /** As réguas do eixo X — `leilao.comparison.RULERS`.
  *
@@ -710,8 +707,8 @@ export interface DisciplineSnapshot {
   schedule: string;
   seats: number;
   filled: number;
-  /** Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
-   * Só é diferente de zero nas disciplinas de entrada. */
+  /** Vagas entregues à matrícula garantida, antes da primeira rodada. Saem da
+   * mesma oferta, então são parcela de `filled`. */
   granted: number;
   /** Quantos alunos pediram a disciplina no período — deram lance em alguma
    * rodada, ou a receberam na matrícula garantida. Dividido por `seats` dá a
@@ -740,14 +737,18 @@ export interface StudentSummary {
   id: string;
   name: string;
   entry_period: number; // t_a — eq. (31)
-  /** Os grupos a que ele pertence, pelo nome. Os dois primeiros são
-   * **traço** e não entram em decisão nenhuma dele; o último é
+  /** Os níveis basilares dele nos três eixos, na normal padrão. Os dois
+   * primeiros são **traço** e não entram em decisão nenhuma dele; o último é
    * **estratégia** e é exatamente o que ele decide. Estão aqui porque a tela
-   * individual é onde se pergunta "por que *este* aluno foi assim" — e o
-   * perfil é metade da resposta, com a seed sendo a outra. */
-  performance: string;
-  availability: string;
-  selectivity: string;
+   * individual é onde se pergunta "por que *este* aluno foi assim" — e o nível
+   * é metade da resposta, com a seed sendo a outra.
+   *
+   * Eram o nome da faixa de quantil de cada eixo até 24/11/2026; o recorte
+   * passou a ser por valor corrente, e um rótulo de faixa que nenhum relatório
+   * usa não diria nada. */
+  performance_level: number;
+  availability_level: number;
+  selectivity_level: number;
   grade_average: number; // N_a — eq. (49)
   approved_hours: number;
   /** S — a carga da grade inteira. Toda disciplina é obrigatória, então é a

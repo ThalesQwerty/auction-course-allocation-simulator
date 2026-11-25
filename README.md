@@ -16,7 +16,7 @@ São **dois mecanismos de alocação** sobre o mesmo modelo de universidade: o
 **leilão por créditos** proposto (Seção 7.1) e a **ordenação por CR** que serve
 de linha de base (Seção 7.3.1, eqs. 49-50). A **comparação** roda o mesmo
 cenário em cada **braço**, N vezes, e mostra as métricas de alocação período a
-período, recortadas por faixa de quantil da população.
+período, recortadas por faixa de valor das grandezas de estado do aluno.
 
 São **dois braços**, que são os dois modelos que o trabalho compara:
 
@@ -27,35 +27,32 @@ São **dois braços**, que são os dois modelos que o trabalho compara:
   alimenta. Traçado **contínuo**.
 
 O vão entre os dois soma **três mudanças de uma vez**, e isso é escolha
-declarada: não há braço intermediário no padrão.
+declarada — o escopo do trabalho é esta comparação, e o vão se lê como uma
+parcela só:
 
-    CR  ──mensagem──▶  Bidding points  ──resolução──▶  Leilão igualitário
-                                                   ──acúmulo──▶  Leilão com PLI
+1. **A mensagem** é um número por *aluno* (o CR) contra um por *par*
+   aluno-disciplina (o lance). É a intensidade entrando no que o mecanismo
+   recebe.
+2. **A resolução** é ordinal — a ditadura serial usa só a ordem, e qualquer
+   transformação monótona dá a mesma alocação — contra cardinal: a PLI usa as
+   magnitudes e derruba um lance alto para acomodar dois médios. As duas só
+   divergem onde a carga horária aperta.
+3. **O acúmulo** é a memória do orçamento (eq. 36) com o f_γ que a alimenta
+   (eq. 34), a única fonte de mérito do leilão — a ordenação por CR faz isso
+   por construção, porque o histórico *é* o critério.
 
-A **mensagem** é um número por *aluno* (o CR) contra um por *par* aluno-disciplina
-(o lance). A **resolução** é ordinal (só a ordem dos lances importa; qualquer
-transformação monótona dá a mesma alocação) contra cardinal (a PLI usa as
-magnitudes e derruba um lance alto para acomodar dois médios). O **acúmulo** é
-a memória do orçamento com o f_γ que a alimenta, a única fonte de mérito do
-leilão.
+**O resolvedor é consequência da moeda, e não escolha de cenário.** O CR roda
+por ditadura serial, que desempata por ε; o leilão roda por PLI, que ignora o ε
+e maximiza o bem-estar. A assimetria é deliberada: igualar os resolvedores
+custaria a maximização, que é o que a PLI entrega e uma varredura não.
 
-Os dois degraus que separam essas três mudanças continuam no motor, em
-`comparison.ABLATION_ARMS`, e rodam por `run_comparison(..., arms=ARMS +
-ABLATION_ARMS)`: custam tempo de execução e não complexidade conceitual — são
-a mesma simulação com um campo trocado.
-
-- `credits_greedy` é o *bidding points* clássico das business schools —
-  orçamento de pontos, lances por disciplina, disciplina fechando no menor
-  lance atendido (Sönmez & Ünver 2010, sobre Michigan e Yale SOM). Não
-  confundir com o **Course Match** de Wharton, que substituiu o bidding points
-  de lá: aquele também é cardinal e resolve por MIP, mas é outro mecanismo —
-  preferências sobre *cestas*, orçamentos aproximadamente iguais e preços de
-  equilíbrio. É trabalho relacionado, não célula deste desenho.
-- `credits_ilp` é o **leilão igualitário**: a mesma moeda e o mesmo resolvedor
-  do braço padrão, sem acúmulo nenhum. Com ele o vão se lê em duas parcelas —
-  CR × igualitário diz o que a **moeda** compra, igualitário × padrão diz o
-  que o **acúmulo** compra. Saiu do padrão em 19/11/2026, quando o trabalho
-  passou a comparar dois modelos em vez de três.
+Houve braços de ablação que separavam os três degraus — o *bidding points*
+clássico das business schools e o leilão igualitário, sem acúmulo — até
+24/11/2026, junto com os campos `resolver` e `credit_memory` que os definiam.
+Saíram com o fechamento do escopo. O **Course Match** de Wharton continua sendo
+trabalho relacionado, e não célula deste desenho: aquele também é cardinal e
+resolve por MIP, mas é outro mecanismo — preferências sobre *cestas*,
+orçamentos aproximadamente iguais e preços de equilíbrio.
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade, e **toda
 disciplina é obrigatória** — conclui quem aprova em todas. O que ordena a grade
@@ -80,7 +77,7 @@ Simulador/
 ├── src/leilao/
 │   ├── equations/        # UMA fórmula por arquivo, uma função pura por fórmula
 │   ├── entities.py       # Problema central P = (A, B, D, p, q, w, W, X) — Seção 3
-│   ├── wdp_solver.py     # Os dois resolvedores: PLI exata e varredura gulosa
+│   ├── wdp_solver.py     # O resolvedor do WDP: a PLI exata
 │   ├── auction.py        # Uma rodada do leilão por créditos — Seção 7.1
 │   ├── ranking.py        # Linha de base por CR — Seção 7.3.1
 │   ├── config.py         # Cenário: geral, grade, pré-requisitos e as duas distribuições
@@ -419,7 +416,7 @@ invariante.
 
 Sobre poupar: **depende da seletividade**. No leilão o aluno investe enquanto o
 ganho marginal do próximo crédito ficar acima da reserva, e abaixo dela para de
-gastar; com `credit_memory = "carry"` (eq. 36) o saldo passa para o período
+gastar; pela eq. (36) o saldo passa para o período
 seguinte, então poupar é decisão. Em seletividade 0 — o especulador — não há
 corte e ele gasta tudo. Na linha de base não há nada a poupar: carga horária
 não passa de um período para o outro, e ele pede até o `W_a` cheio.
@@ -448,7 +445,7 @@ diferença entre eles se lê como efeito do mecanismo.
 | **A exclusão mútua `E = M ∪ G` (eq. 5)** | restrições de clique dentro da PLI, sobre as apostas repartidas | o pedido já sai sem irmã e sem choque de horário; o roteamento da caminhada é a guarda |
 | **Preço** | 2º preço, eq. (24) | não existe |
 | **Retorno de créditos** | `f_γ`, eq. (34) | não existe — não houve preço a devolver |
-| **Custo de excluir** | o preço pago se perde por inteiro (`exclusion_refund_rate`, padrão 0) | nenhum — não há moeda a perder |
+| **Custo de excluir** | o preço pago se perde por inteiro | nenhum — não há moeda a perder |
 
 Em **empate de utilidade**, as duas mochilas preferem a disciplina **listada
 primeiro** no cenário — ver abaixo. A perda de expressividade é o ponto da
@@ -599,36 +596,27 @@ Duas consequências visíveis:
 `run_comparison` roda o mesmo cenário em cada braço (`ARMS`), `N` vezes em
 cada um, com as **seeds de 1 a N**:
 
-| Braço | Interface | Moeda | Resolvedor | Memória | `k` da eq. (34) | Roda |
-|---|---|---|---|---|---|---|
-| `ranking_greedy` | Ordenação por CR | CR | varredura | — | 0 (inerte: não há crédito) | **sempre** |
-| `credits_return` | Leilão com PLI | lance | PLI | `carry` | o do cenário (padrão 2) | **sempre** |
-| `credits_greedy` | Bidding points | lance | varredura | `none` | 0 | ablação |
-| `credits_ilp` | Leilão igualitário | lance | PLI | `none` | 0 | ablação |
+| Braço | Interface | Moeda | Resolvedor | `k` da eq. (34) |
+|---|---|---|---|---|
+| `ranking_greedy` | Ordenação por CR | CR | ditadura serial | 0 (inerte: não há crédito) |
+| `credits_return` | Leilão com PLI | lance | PLI | o do cenário (padrão 2) |
 
-Os dois de ablação estão em `ABLATION_ARMS` e não rodam por padrão.
-`credits_greedy` separa as duas mudanças que há entre o CR e o leilão sem
-acúmulo — mensagem e resolução —, e é a resposta pronta para "o ganho vem da
-moeda ou do resolvedor?". `credits_ilp` difere de `credits_return` em **uma
-única coisa**, o acúmulo de créditos, de modo que a diferença entre eles *é* o
-efeito do acúmulo, isolado — e o acúmulo é a única parte do leilão que premia
-desempenho.
+Os dois rodam sempre: **só entra aqui o que sai nos resultados**, e cada braço
+é um traçado dos gráficos e uma linha das tabelas.
 
-A chave `credits_ilp` é **histórica**: nasceu nomeando o resolvedor, quando o
-braço existia para isolá-lo da varredura. Ficou porque a chave é identificador
+A chave `credits_return` é **histórica**: nasceu nomeando o retorno, quando
+havia um braço de ablação sem ele. Ficou porque a chave é identificador
 estável — comparação gravada antes disto continua casando com o braço.
 
-O `resolver` que vier na configuração é ignorado, como a seed; o
-`return_multiplier` vale onde o braço não o fixa, e os demais o fixam em 0.
+A **seed** que vier na configuração é ignorada, porque numa comparação ela
+deixa de ser parâmetro e passa a ser o eixo da repetição.
 
-**Memória e retorno são um canal só.** Um braço sem acúmulo fixa os dois
-(`credit_memory = "none"` e `k = 0`), e os dois campos dizem a mesma coisa:
-medido, `"carry"` com `k = 0` sai idêntico a `"none"` — relatório por
-relatório, em todas as seeds —, porque o orçamento abre em `C_min` (eq. 37) e,
-sem retorno, só pode cair; o piso o traz de volta. A sobra só tem o que
-carregar depois de o retorno erguer o saldo acima do piso. Fixar os dois é
-redundância deliberada: o braço fica dizendo o que é em vez de depender dessa
-prova. Há teste que guarda.
+**Memória e retorno são um canal só.** O saldo atravessa o período pela
+eq. (36) e o f_γ da eq. (34) o alimenta; um sem o outro não produz mérito
+nenhum. Havia dois campos de cenário que os desligavam — `credit_memory` e um
+multiplicador variável — e os dois diziam a mesma coisa: medido, `"carry"` com
+`k = 0` saía idêntico a `"none"`, relatório por relatório, em todas as seeds.
+Ambos saíram com o fechamento do escopo, em 24/11/2026.
 
 As duas condições da Seção 7.3 saem daí:
 
@@ -753,9 +741,66 @@ leilão.
 | período local | quantos períodos o aluno completou | o tempo do **aluno**: alinha as coortes pelo ingresso e lê "como ele se sai conforme avança" |
 | agregado | — | o eixo X **colapsado**: uma caixa por modelo, sobre as seeds |
 
-O recorte é o **Geral** (uma linha por modelo) ou um dos três eixos da
-população — desempenho, disponibilidade, seletividade —, cortado em faixas de
-quantil.
+O recorte é o **Geral** (uma linha por modelo) ou um dos **eixos de estado**,
+cortado em faixas de valor:
+
+| recorte | o que corta | domínio dos cortes |
+|---|---|---|
+| CR | `N_a^(t)`, a média ponderada das maiores notas | [0, 10] |
+| utilidade de reserva | `s_a^(t) = S/(S+ΣI)`, o limiar que a decisão lê | [0, 1) |
+| créditos | `C_a^(t,1)`, o orçamento de abertura | [`C_min`, `C_max`] |
+
+**O corte é no valor corrente, e a pergunta mudou com ele.** Havia, até
+24/11/2026, três eixos de **quantil sobre o nível basilar** — desempenho,
+disponibilidade e seletividade. Aqueles nomeavam um *tipo de aluno*: posição
+permanente, fixada pela seed, idêntica nos dois braços, e era isso que tornava
+a diferença entre mecanismos atribuível ao mecanismo. Estes nomeiam um *estado
+do sistema*: o que acontece com quem chega com CR alto, venha ele de onde vier.
+Condicionar no basilar seria errado para essa pergunta, porque o basilar é um
+latente que o mecanismo não lê — o que a alocação lê é o valor corrente.
+
+O preço é que a faixa deixa de ser a mesma gente nos dois braços: cada
+mecanismo produz CR alto em quem tem perfil diferente. A leitura que isso
+sustenta é "quem se apresenta com CR alto se sai assim de cada lado", e **não**
+"o mecanismo ajudou os alunos fortes" — essa segunda exigiria o corte por tipo,
+que saiu.
+
+**Os cortes se editam no painel de resultados, e aplicá-los roda de novo.**
+Eles parecem recorte de tela, mas não são: quem monta as faixas é o motor, a
+partir dos valores por aluno que a resposta não carrega — ela traz só os
+quartis entre as seeds. Então mudar um corte é outra execução, e entra no
+histórico como tal. Daí haver um **Aplicar** em vez de atualização a cada
+tecla, que custaria N simulações por braço.
+
+**A fronteira é declarada; quem se move é a população.** O corte por quantil
+*amostral* foi recusado nas duas versões do recorte, e pelo mesmo motivo: daria
+faixas de tamanho igual dentro de cada simulação e fronteiras diferentes a cada
+seed, e a média sobre N execuções estaria somando faixas que não designam a
+mesma coisa. O aluno mudar de faixa ao longo dos períodos, ao contrário, é o
+*conteúdo* da medida: fronteira fixa com população móvel é o que deixa a
+mobilidade visível — re-sortear a cada período pelo valor corrente a esconderia,
+porque aí a faixa persegue o aluno e a média dela fica plana por construção.
+
+Duas consequências aceitas. As faixas têm **tamanhos diferentes**, e os
+extremos costumam ser os finos — por isso o `n` de cada faixa é grandeza de
+leitura, e o gráfico de **alunos ativos por faixa** fica ao lado das métricas.
+E os cortes **não são portáveis entre cenários**: a reserva se mede em
+milésimos (mediana medida em 0,015, p90 em 0,056) e desloca com o tamanho da
+grade, o saldo depende do orçamento, então trocar de cenário pede recalibrá-los.
+
+**A disponibilidade não tem eixo de estado, e a falta é de propósito**: o aluno
+não conhece a própria disponibilidade na hora de pedir, então nenhum canal do
+mecanismo responde a ela, e um corte sobre ela fatiaria o sorteio do semestre.
+
+**O eixo do crédito só existe no leilão.** No `ranking` não há moeda, e o braço
+não produz o eixo — a interface omite a opção, as linhas e a legenda daquele
+lado, em vez de publicá-las zeradas.
+
+**Num eixo de estado as contagens de pessoas por faixa não existem**:
+`population`, `graduated` e `dismissed` saem `None`, porque formado e jubilado
+não têm CR corrente. O calouro também fica fora da faixa — CR 0 é ausência de
+medida, não medida de 0 —, de modo que, ali, medido e ativo são o mesmo
+conjunto.
 
 O **agregado** não é régua: é a ausência de uma. Ele mostra o número da tabela
 como distribuição, com uma caixa por modelo, e responde a pergunta que o texto
@@ -995,10 +1040,42 @@ sozinho.
   ainda assim lança o gasto na conta dele, repartindo o orçamento igualmente
   entre essas disciplinas e deixando o resto da divisão no saldo — e é esse
   valor que alimenta o retorno de créditos da eq. (34). A garantia vale só no
-  ingresso: recursar uma delas é disputá-la no leilão como qualquer outra. Daí
-  as duas validações do ritmo de entrada: a coorte não pode passar da menor
-  oferta entre as disciplinas de 1º período, nem a carga somada delas pode
-  passar do `W_a` — a matrícula garantida não escolhe quem a recebe.
+  ingresso: recursar uma delas é disputá-la como qualquer outra. Daí as duas
+  validações do ritmo de entrada: o ingresso por turma não pode passar da
+  lotação dela, nem a carga somada das disciplinas de entrada pode passar do
+  `W_a` — a matrícula garantida não escolhe quem a recebe.
+
+  **O que se digita é o ingresso por turma de entrada**
+  (`students_per_entry_class`); a **coorte é derivada** dele, multiplicada pelas
+  turmas de uma disciplina de entrada (`students_per_period`). Daí a exigência
+  de que as disciplinas de entrada concordem no número de turmas: com contagens
+  distintas, cada uma implicaria uma coorte. Era a coorte que se digitava até
+  24/11/2026, e ela saía repartida entre as turmas em blocos com resto — duas
+  vagas numa turma, uma na vizinha —, de modo que o número digitado não se
+  comparava com a lotação sem refazer a divisão.
+
+  **A vaga garantida sai da mesma oferta que o mecanismo distribui.** O que a
+  distingue é só ter `z = 1` fixado antes de a primeira rodada abrir: a
+  concessão passa por `grant`, que desconta `q_x`, e lança uma solicitação no
+  `bid_log` — ⌊C_min/N⌋ créditos no leilão, 1 na linha de base. Ela também
+  **gasta `W_a`**, porque a eq. (4) é sobre o aluno e não sobre a vaga, e é esse
+  desconto que limita o que o calouro ainda pede num cenário com optativa.
+
+  Pô-la numa **pilha à parte**, fora de `q_x`, foi tentado em 24/11/2026 e
+  desfeito no mesmo dia. Resolve uma incoerência de contagem — `q_x` querendo
+  dizer capacidade na disciplina de entrada e oferta nas outras — e põe duas
+  piores no lugar: o aluno passa a cursar turma que nenhum relatório diz ter
+  sido entregue, e a receber turma que ninguém pediu. O lance do ingressante já
+  resolvia a segunda, e é o que sustenta a decisão atual.
+
+  Duas consequências ficam declaradas. Oferta **colada na coorte** é cenário
+  legítimo e armadilha: com o ingresso por turma igual à lotação não sobra
+  disputa nenhuma na entrada, e quem reprova a disciplina nunca mais a cursa, o
+  que aparece como formatura lenta sem causa visível — o painel do formulário
+  mostra quantas vagas sobram em disputa por turma de entrada. E a **ocupação**
+  (eq. 54) subestima no período de ingresso: `allocated` não conta o calouro,
+  que sai de todo recorte medido, enquanto `total_seats` conta a vaga que ele
+  levou.
 - **Os dois eixos de traço**, mais o sigma do interesse:
 
   | Eixo | O que governa | Sorteio |
@@ -1017,9 +1094,10 @@ sozinho.
   de o quanto o aluno diferencia as disciplinas, e dois botões para a mesma
   coisa tornariam qualquer resultado ambíguo de ler.
 
-  O tamanho da coorte é **digitado** (`students_per_period`), e cada eixo é
-  uma distribuição só. Os **perfis** declarados — e com eles a coorte derivada
-  do produto das combinações — saíram em 19/11/2026; quem separa os alunos
+  O tamanho da coorte sai do **ingresso por turma de entrada**
+  (`students_per_entry_class`), e cada eixo é uma distribuição só. Os
+  **perfis** declarados — e com eles a coorte derivada do produto das
+  combinações — saíram em 19/11/2026; quem separa os alunos
   agora é o **nível basilar** de cada eixo, e quem os agrupa nos relatórios
   são as faixas de quantil.
 
@@ -1047,8 +1125,8 @@ sozinho.
   `availability_stability` controla.
 
   **Em horas, não em fração de `W_a`** (04/11/2026). O teto de carga é do
-  **sistema**, não do aluno: nada impede alguém de ter tempo para 400 h num
-  curso que oferece 360, e quem impede a matrícula é o alocador, que nunca
+  **sistema**, não do aluno: nada impede alguém de ter tempo para 30 h num
+  curso que oferece 24, e quem impede a matrícula é o alocador, que nunca
   entrega mais que `W_a` durante as rodadas. O dado do aluno não precisa estar
   alinhado a priori com a regra da instituição.
 
@@ -1062,7 +1140,7 @@ sozinho.
   família — forçar quase toda a massa acima do teto com a moda logo abaixo dele
   exige um desvio logarítmico enorme, e a mediana vai para longe.
 
-  Como a moda é **absoluta**, o padrão vale contra o `W_a` padrão (360 h) — e
+  Como a moda é **absoluta**, o padrão vale contra o `W_a` padrão (24 h) — e
   por isso ele é derivado de `W_a` quando o cenário não o declara. Um cenário
   que declare a sua é recusado se a moda não couber.
 
@@ -1070,21 +1148,22 @@ sozinho.
   retida caiba em `round(δ · W_a)`. Quem decide o que fica é uma **mochila 0-1**
   (`equations.retained_set`), a mesma da eq. (50): valor = utilidade, peso =
   carga. Não é uma ordenação por utilidade crescente, e a diferença é real —
-  com teto de 122 h e as obtidas Algoritmos (90 h, u 0,22), Cálculo (60 h,
-  0,13) e Física (60 h, 0,11), a heurística sacrifica as duas baratas para
-  salvar a cara e retém 0,22; a mochila retém Cálculo + Física, 120 h e 0,24.
+  com teto de 4 h e as obtidas Algoritmos (3 h, u 0,22), Cálculo (2 h, 0,13) e
+  Física (2 h, 0,11), a heurística sacrifica as duas baratas para salvar a cara
+  e retém 0,22; a mochila retém Cálculo + Física, 4 h e 0,24.
 
   O arredondamento é para o **inteiro mais próximo**, e não para baixo, porque
   hora é inteira no modelo. **Não há teto**: a carga efetiva é `round(δ)` sem
   clipe, e passar de `W_a` apenas significa não excluir nada.
 
-  É também o limiar com que a chance declarada é calibrada: como `round(29,5)`
-  já é 30, a inversão mira `W_a − 0,5`, e sem isso o valor realizado sairia
+  É também o limiar com que a chance declarada é calibrada: como `round(23,6)`
+  já é 24, a inversão mira `W_a − 0,5`, e sem isso o valor realizado sairia
   alguns pontos acima do pedido.
 
   A versão anterior media a disponibilidade como **fração** de `W_a`, e aí
   alcançar a carga cheia exigia `δ ≈ 1` — evento de borda numa Beta. O perfil
-  feito para encher a carga a enchia em 0,03% dos semestres com `W_a = 360`. O
+  feito para encher a carga a enchia em 0,03% dos semestres — medido no `W_a`
+  de então, 360 h, quando a carga era medida em horas de relógio. O
   piso sumiu com o `round`; o teto artificial só sumiu quando a disponibilidade
   deixou de ser fração.
 
@@ -1116,26 +1195,45 @@ sozinho.
   **uma forma só**, aplicada ao fim de cada período sobre o preço pago
   (`paid`) e a nota obtida:
 
-      gamma_{a,x} = round( nota / 10 · k · paid )
+      gamma_{a,x} = round( nota / 10 · 2 · paid )
 
-  O que o retorno devolve é o preço pago corrigido por dois fatores: a nota,
-  que diz quão bem o aluno usou a vaga, e o multiplicador `k`
-  (`return_multiplier`, padrão 2), que diz quanto o sistema devolve no total.
+  O que o retorno devolve é o preço pago corrigido pela nota, que diz quão bem
+  o aluno usou a vaga.
 
   **Quatro políticas discretas ocupavam este lugar** — `none` (nada volta),
   `unit` (1 crédito por aprovação), `full` (o preço inteiro a quem aprova) e
   `ratio` (a fatia correspondente à nota). Saíram em 15/11/2026: `unit` e
   `full` não liam a nota, e com elas o retorno não separava dois aprovados —
   que é justamente o que a comparação precisa demonstrar que o lance consegue e
-  a ordenação por CR dá de graça. E `none` não precisa de nome próprio: é
-  `k = 0`, que é também como um braço da comparação desliga o retorno sem
-  deixar de ser o mesmo modelo.
+  a ordenação por CR dá de graça.
 
-  **A calibragem de `k = 2`.** Sem multiplicador o sistema não injeta crédito
-  nenhum: com `k = 1` o retorno devolve no máximo o preço pago, o gasto é esse
-  mesmo preço, e o saldo nunca cresce — ver a consequência medida logo abaixo.
-  Com 2, a **nota de corte vira o ponto neutro**: nota 5 devolve exatamente o
-  que se pagou, acima disso o aluno sai ganhando e abaixo sai perdendo.
+  **Por que o multiplicador é 2, e por que deixou de ser parâmetro.** Ele foi
+  campo de cenário até 24/11/2026. Virou constante porque não havia o que
+  variar: dois argumentos independentes apontam para o mesmo valor, e a faixa
+  em volta dele é estreita.
+
+  O primeiro é de **simetria**: quem aposta `paid` perde exatamente `paid` no
+  pior caso (nota 0, ou exclusão, que não devolve nada) e ganha exatamente
+  `paid` no melhor (nota 10, que devolve `2 · paid`). Nenhum outro valor tem
+  essa propriedade, e com `n_min = 5` o ponto neutro da conta contínua cai em
+  cima da nota de corte.
+
+  O segundo é **medido**, e é o mais forte. A fração das aberturas de período
+  que caem estritamente entre `C_min` e `C_max`, que é onde o orçamento tem o
+  que discriminar (14 períodos, 24 alunos por período, 3 turmas por
+  disciplina):
+
+  | k | no piso | no teto | entre os dois |
+  | --- | --- | --- | --- |
+  | 0,0 | 100,0% | 0,0% | 0,0% |
+  | 1,0 | 100,0% | 0,0% | 0,0% |
+  | 1,5 | 56,1% | 0,0% | 43,9% |
+  | **2,0** | 23,5% | 2,7% | **73,8%** |
+  | 3,0 | 7,6% | 54,3% | 38,1% |
+
+  Com 1 o saldo desce até o piso e fica lá; com 3 metade da população encosta
+  no teto. Nos dois casos o orçamento deixa de separar aluno de aluno, pelos
+  dois lados. 2 é o único valor em que a economia de crédito não degenera.
 
   **A conta arredonda** (meio para cima). Truncava até 17/11/2026, e a troca
   é sobre a **resolução da moeda**: γ é inteiro, a conta erra, e o que mudou é
@@ -1180,30 +1278,21 @@ sozinho.
   perguntas diferentes — amarrá-las faria o degrau da aprovação aparecer duas
   vezes.
 
-  A **exclusão** tem regra própria (`equations.exclusion_refund`): devolve
-  `round(fração · paid)`, e a **fração é zero por padrão**
-  (`exclusion_refund_rate`). Excluir não devolve
-  nada — é o que torna a exclusão socialmente cara, e ela precisa ser, porque a
-  vaga não volta para a oferta. Sem isso, sob `none` — em que nada volta
-  nunca — excluir seria o melhor resultado possível do sistema. Excluir também
-  não é reprovar: é abstenção, fora da dicotomia aprovado/reprovado, e por isso
-  a regra é própria em vez de um caso particular de `f_gamma`. Em especial, o
-  multiplicador **não entra aqui**: ele premia desempenho em disciplina
-  cursada, e excluir não cursa.
+  A **excluída não devolve crédito nenhum.** O aluno perde o que investiu para
+  obter a vaga, porque não cursou a disciplina para render. É o que torna a
+  exclusão cara, e ela precisa ser, porque a vaga não volta para a oferta.
+  Excluir também não é reprovar: é abstenção, fora da dicotomia
+  aprovado/reprovado, e o multiplicador não a alcança, porque ele premia
+  desempenho em disciplina cursada.
 
-  A fração existe para quem quiser medir o degrau entre punir a exclusão por
-  inteiro e amortecê-la, e é validada em `[0, 1]`. Ela arredonda, como o
-  retorno. Uma ressalva de leitura:
-  frações pequenas **zeram em lance pequeno** — com 0,25 um lance de 1 crédito
-  devolve 0 —, e lance de 1 é o caso mais frequente, porque o orçamento limita
-  o aluno a lances em no máximo `C_a` disciplinas. A penalidade é, nesse
-  sentido, levemente regressiva: lance pequeno é punido proporcionalmente mais,
-  e lance pequeno é de quem tem pouco orçamento.
+  Houve uma `exclusion_refund_rate` aqui até 24/11/2026, zero por padrão, para
+  quem quisesse medir o degrau entre punir a exclusão por inteiro e
+  amortecê-la. Saiu: a monografia nunca a previu, e sem ela não há cenário em
+  que excluir custe menos do que gastar.
 
-  `n_min` continua validado em `[5, 10]`, agora porque é o piso que segura a
-  ordem entre aprovar e excluir: com `k = 2`, aprovar raspando devolve
-  `n_min/10 · 2 · paid`, que em `n_min = 5` é o preço inteiro — acima de
-  qualquer fração de exclusão em `[0, 1]`.
+  `n_min` continua validado em `[5, 10]`, e é o piso que mantém "aprovar não
+  custa crédito": aprovar raspando devolve `n_min/10 · 2 · paid`, que em
+  `n_min = 5` é o preço inteiro. Abaixo de 5 o aluno passaria perdendo saldo.
 
   **O retorno é a única entrada de crédito novo.** O `Gamma_min` do anteprojeto
   — um crédito base somado a todo aluno todo período, eq. (35) — saiu. O
@@ -1225,19 +1314,17 @@ sozinho.
   a **900 créditos** — quinze vezes a base — em quem é seletivo o bastante para
   não gastar, que é poder de compra vindo da abstenção e não do desempenho. Os
   dois cortam **depois** da conta, de modo que gasto e retorno continuam
-  creditados por inteiro. Com `credit_memory = "none"` ambos são inertes,
-  porque ali o orçamento é `C_min` por construção. `max_credits = None`
-  desliga o teto; o piso não se desliga.
+  creditados por inteiro. `max_credits = None` desliga o teto; o piso não se
+  desliga.
 
-  **É isso que obriga o multiplicador a existir.** Com `k = 1` o retorno
-  devolve no máximo o preço pago, e como o gasto é esse mesmo preço tem-se
+  **É isso que fixa o multiplicador em 2.** Com `k = 1` o retorno devolve no
+  máximo o preço pago, e como o gasto é esse mesmo preço tem-se
   `restante + soma gamma <= C_a^(t,1)`: o saldo nunca cresce, e como o aluno
   entra em `C_min` o orçamento fica em `C_min` para sempre. Medido no cenário
   dos testes antes do multiplicador: os 15 alunos terminavam com 12 créditos
-  nas quatro políticas de então, o teto nunca cortava e o braço
-  `credits_return` saía idêntico ao `credits_ilp` em eficiência, seed a seed —
-  o eixo de experimentação da Seção 7.3.2 desaparecia. Com `k = 2` o saldo
-  volta a subir, e com 3,5 sobe mais; há teste que guarda os dois lados.
+  nas quatro políticas de então, o teto nunca cortava e o leilão com acúmulo
+  saía idêntico ao leilão sem acúmulo em eficiência, seed a seed. Com 2 o saldo
+  volta a subir e o teto volta a cortar; há teste que guarda.
 
   O padrão passou de um ganho base de 60 sem teto para **piso 12 e teto 30**, e
   o troco está medido no cenário cheio (63 disciplinas, 288 turmas, 23
@@ -1380,8 +1467,9 @@ sozinho.
   tamanho relativo às outras. O anteprojeto trata `q_x` como dado; aqui ele é
   fatorado.
 - **Ingresso contínuo** (`t_a`, eq. 31): o cenário diz quantos alunos entram
-  **por período** (`students_per_period`), e uma coorte entra **em todo
-  período letivo**. Todas têm exatamente o mesmo tamanho. O anteprojeto não
+  em **cada turma de entrada** (`students_per_entry_class`), a coorte sai do
+  produto com o número dessas turmas, e uma coorte entra **em todo período
+  letivo**. Todas têm exatamente o mesmo tamanho. O anteprojeto não
   fixa a distribuição dos ingressos; esta é a que imita um vestibular por
   semestre.
 - **Dissipação** (Δψ, 19/11/2026): a satisfação que foi **alocada** e não
@@ -1398,19 +1486,47 @@ sozinho.
   cursou, e esse custo é **social**; a dissipação é o **privado**, em
   utilidade. Em contagem de vagas a métrica seria exatamente `1 − ε`, e em
   carga seria quase isso também, porque a mochila enche até a carga efetiva.
-- **Grade de correlações** (19/11/2026): duas grandezas do aluno — o CR e a
-  seletividade — contra três do resultado dele: satisfação, ocupação e
-  dissipação. A célula CR × satisfação é a eq. (57) e continua se chamando λ.
+- **Grade de correlações** (19/11/2026; reformada em 24/11/2026): três
+  grandezas de **estado** do aluno — o CR, a utilidade de reserva e o orçamento
+  de crédito — contra três do resultado dele: satisfação, progresso e
+  desperdício. Nove células, cada uma com previsão. A célula CR × satisfação é
+  a eq. (57) e continua se chamando λ.
+
+  | | satisfação | progresso | desperdício |
+  |---|---|---|---|
+  | **CR** | a eq. (57): a alocação segue o histórico? | mérito acelera a formatura? | quem ganha mais descarta mais? |
+  | **reserva** | o retorno da estratégia | exigir atrasa? | exigir protege de largar? |
+  | **crédito** | orçamento compra satisfação? | orçamento acelera? | quem tem mais sobra desperdiça? |
+
+  A **seletividade** `S` era o segundo eixo e deu lugar à **reserva**
+  `s = S/(S+ΣI)`, que é a mesma estratégia posta no bolo das elegíveis. Dois
+  motivos: `S` está na escala do interesse, que a normalização da linha faz
+  depender do tamanho da grade, enquanto `s` é uma participação em [0, 1); e `s`
+  é o limiar que a decisão de fato lê, nos dois mecanismos.
+
+  As três células de **crédito** saem `None` no `ranking` — não zeradas, que se
+  leriam como "não há correlação" em vez de "não há moeda". O orçamento de
+  abertura é ele próprio resultado do período anterior (eq. 36), então aquela
+  linha correlaciona um acumulado com outro: é associação, não efeito.
+
+  **Reserva × desperdício não é tautológica**, embora pareça. A reserva decide
+  quanto o aluno pede; o desperdício acontece depois, quando o que ele ganhou
+  não cabe na carga que ele tem. O canal existe — pedir menos reduz a chance de
+  estourar a carga — mas é comportamental e mediado pela alocação, não uma
+  identidade.
+
+  A **ocupação** era a coluna do meio e deu lugar ao progresso: as duas medem
+  coisas próximas no período, mas só o progresso acumula, e "o mecanismo forma
+  mais rápido?" é pergunta sobre o horizonte.
 
   A **carga efetiva** não entra como eixo: o aluno não conhece a própria
   disponibilidade na hora de pedir, então nenhum canal do mecanismo responde a
   ela e o coeficiente seria zero por construção, não por resultado.
 
-  A dissipação entra pela **razão** `ψ retida / ψ alocada`, e não pela
+  O desperdício entra pela **razão** `ψ retida / ψ alocada`, e não pela
   diferença: aqui se quer condicionar em quanto o aluno ganhou, senão o
-  coeficiente mede em parte "ganhou mais", que já está na coluna da ocupação.
-  O preço é que a razão não existe para quem não obteve nada, e esses saem da
-  amostra — daí o `n` sair junto.
+  coeficiente mede em parte "ganhou mais". O preço é que a razão não existe
+  para quem não obteve nada, e esses saem da amostra — daí o `n` sair junto.
 
 ### Ainda não incluído
 
@@ -1426,7 +1542,7 @@ sozinho.
   de 3 h. O choque é de encontro, não de minuto.
 - **Poupança entre rodadas.** Poupar *entre períodos* existe desde que a
   seletividade entrou: o aluno para de investir quando o ganho marginal cai
-  abaixo da reserva, e com `credit_memory = "carry"` o saldo passa adiante.
+  abaixo da reserva, e pela eq. (36) o saldo passa adiante.
   Poupar **entre rodadas do mesmo período** não: ele reparte na rodada 1 tudo o
   que a reserva deixa gastar. Enquanto o lance perdedor não consome crédito,
   apostar cedo não custa nada, então essa estratégia só apareceria com uma
@@ -1458,9 +1574,11 @@ A população é descrita por **três distribuições**, não por grupos declara
 Cada eixo tem uma forma e um **nível basilar**: a fração da variância que é
 permanente do aluno, contra a que é resorteada por período ou por disciplina.
 
-O tamanho da coorte é **digitado** (`students_per_period`). Era derivado do
-produto das combinações de perfil até 19/11/2026, e mexer num eixo mudava a
-população sem que ninguém pedisse.
+O tamanho da coorte sai do **ingresso por turma de entrada**
+(`students_per_entry_class`) vezes as turmas de uma disciplina de entrada. Era
+derivado do produto das combinações de perfil até 19/11/2026, e mexer num eixo
+mudava a população sem que ninguém pedisse; foi a própria coorte que se digitou
+entre aquela data e 24/11/2026.
 
 | Eixo | O que governa | Nível basilar |
 | --- | --- | --- |
@@ -1684,10 +1802,10 @@ leilões resolvem por PLI e não desempatam — entre alocações de mesmo lance
 agregado, quem escolhe é a busca do CBC. Pôr o guloso também no braço
 de créditos restauraria a simetria, a unicidade e a reprodutibilidade entre
 máquinas, mas custaria a **maximização de bem-estar**, que é o que a PLI
-entrega e o guloso não: ele nunca recusa um lance de 30 para atender dois de
-20. Entre as duas perdas, preferiu-se a assimetria. O eixo do resolvedor
-segue medível em `credits_greedy` × `credits_ilp`, que é onde ele mora por
-desenho.
+entrega e uma varredura não: ela nunca recusa um lance de 30 para atender dois
+de 20. Entre as duas perdas, preferiu-se a assimetria. O eixo do resolvedor era
+medível nos braços de ablação, que saíram em 24/11/2026 com o fechamento do
+escopo.
 
 Para a redação, afirma-se o que se tem: o **valor** alocado é único e
 reprodutível; a **alocação** é reprodutível para um mesmo binário do CBC.
@@ -1987,11 +2105,10 @@ ponta pelo mesmo motivo: a grade corre num sentido só.
 
 O botão de "Configurar" faz uma coisa só: **comparar os modelos** — o mesmo
 cenário roda em cada braço, `N` vezes, com as seeds de 1 a `N`. Três campos do
-cenário não vão para lá: a **seed** (ali ela vira o eixo da amostra) e o
-**resolvedor** (ali ele vira eixo do experimento, e cada braço impõe o seu). O
-**multiplicador do retorno** vai, mas só vale no braço que acumula — os outros
-o zeram. No lugar entram **quais modelos rodar** e **simulações por modelo
-(N)**.
+cenário não vão para lá: a **seed** (ali ela vira o eixo da amostra), o
+**resolvedor** e a **memória do orçamento** (ali os dois viram eixo do
+experimento, e cada braço impõe o seu). No lugar entram **quais modelos
+rodar** e **simulações por modelo (N)**.
 
 Os modelos são **caixas de seleção**, uma por braço, cada uma com o traçado
 com que o modelo aparece nos gráficos. Rodar menos modelos custa
@@ -2005,10 +2122,11 @@ carga das obrigatórias. O campo recusa exigir mais do que o catálogo oferta:
 a folga entre os dois é o que dá ao aluno o que escolher, e sem ela ninguém
 concluiria.
 
-O **tamanho da coorte não se digita**: ele sai de *exemplares por perfil* vezes
-o número de combinações, e o painel mostra o número derivado. É a conta que
-dimensiona `class_size` — a coorte repartida entre as turmas de cada disciplina
-de entrada tem de caber nelas, e o formulário recusa quando não cabe.
+O **tamanho da coorte não se digita**: o campo é *ingressantes por turma de
+entrada*, a coorte sai dele vezes o número dessas turmas, e o painel mostra o
+número derivado. O campo recusa passar de `class_size`, porque o ingressante
+ocupa vaga da própria turma; o painel diz quantas sobram em disputa, que é o que
+decide se o reprovado volta a cursar a disciplina.
 
 Em "Configurar", a barra lateral **direita** lista os **cenários salvos** —
 não há catálogo fixo. O formulário abre nos **valores padrão**, que são o
@@ -2051,8 +2169,8 @@ ao período quanto às vagas. Uma diferença entre grupos nos gráficos é da
 grandeza em tela, nunca de composição.
 
 São 36 obrigatórias (6 × 6) em cadeia triangular e 27 optativas, com a oferta
-em **funil** — 9 turmas no 1º período, 4 no 6º —, 270 alunos por coorte em 8
-coortes (2 160 ao todo), 3 rodadas por período e 23 períodos — 16 de
+em **funil** — 9 turmas no 1º período, 4 no 6º —, 30 ingressantes por turma de
+entrada (coorte de 270), 3 rodadas por período e 26 períodos — 16 de
 residência, o que faz o jubilamento morder. O preço do desenho é que **vagas
 sai do fatorial no obrigatório**: elas variam por período, então ali não dá
 para separar "tem poucas vagas" de "é avançada". Quem recupera o eixo são as
@@ -2344,5 +2462,7 @@ deixa cada uma testável sozinha.
 No formulário, todo `input[type=number]` precisa de `(valor − min) % step === 0`.
 O `min` é a **base** da escada do stepper, e não só um piso de validação: fora
 da grade, o primeiro clique na seta anda só até a próxima casa — era por isso
-que o σ, com `min=0,01` e `step=0,25`, saía de 1 para 1,01, e o W<sub>a</sub>,
-com `min=1` e `step=30`, saía de 450 para 451.
+que o σ, com `min=0,01` e `step=0,25`, saía de 1 para 1,01. O W<sub>a</sub>
+teve o mesmo defeito enquanto a carga era medida em horas de relógio, com
+`step=30` sobre `min=1`: saía de 450 para 451. Hoje a carga é um inteiro
+pequeno e ele anda de 1 em 1.

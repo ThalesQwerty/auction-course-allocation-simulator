@@ -8,14 +8,14 @@
 exatamente a correlação entre dois períodos do mesmo aluno.
 
 Aqui fica só o sorteio, porque é a única parte que não é pura; a conversão em
-horas inteiras, a mochila do que o aluno leva e o retorno do que ele exclui
-estão em `equations.effective_load`, `equations.retained_set` e
-`equations.exclusion_refund`; a forma da log-normal está em
+horas inteiras e a mochila do que o aluno leva estão em
+`equations.effective_load` e `equations.retained_set`. O que ele exclui não
+devolve crédito nenhum, e por isso não tem conta; a forma da log-normal está em
 `equations.availability_shape`, e a repartição da variância em
 `equations.preference_split` — a mesma do interesse.
 
 **Em horas, não em fração de W_a.** O teto de carga é do **sistema**, não do
-aluno: nada impede alguém de ter tempo para 400 h num curso que oferece 360, e
+aluno: nada impede alguém de ter tempo para 30 h num curso que oferece 24, e
 quem impede a matrícula é o alocador, que nunca entrega mais que W_a durante as
 rodadas.
 

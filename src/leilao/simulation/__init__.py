@@ -29,8 +29,6 @@ from ..config import SimulationConfig
 from ..equations import (
     grade_histogram,
     interest_histogram,
-    quantile_band,
-    quantile_name,
 )
 from ..equations._mean import mean
 from .period import run_period
@@ -123,14 +121,6 @@ def run_simulation(
         for student_id, record in outcome.records.items():
             history[student_id].append(record)
 
-    # A faixa de quantil de cada aluno, pelo nível basilar dele. É o rótulo
-    # que a tela individual mostra e por onde o relatório recorta.
-    def band(level: float) -> str:
-        return quantile_name(
-            band=quantile_band(level=level, bands=config.quantiles),
-            bands=config.quantiles,
-        )
-
     return SimulationResult(
         periods=periods,
         students=[
@@ -138,9 +128,9 @@ def run_simulation(
                 id=s.id,
                 name=s.name,
                 entry_period=s.entry_period,
-                performance=band(s.performance_level),
-                availability=band(s.availability_level),
-                selectivity=band(s.selectivity_level),
+                performance_level=s.performance_level,
+                availability_level=s.availability_level,
+                selectivity_level=s.selectivity_level,
                 grade_average=s.grade_average(draws.discipline_hours),
                 approved_hours=s.approved_hours(
                     draws.discipline_hours, config.min_grade

@@ -20,6 +20,10 @@ o bloco é o único jeito de a repartição ser **exata** sem consultar nada: a
 soma dos blocos é a coorte, e cada turma recebe ⌊|A|/k⌋ ou ⌈|A|/k⌉. Sortear
 deixaria uma turma de entrada estourada e outra vazia em coortes pequenas.
 
+Desde 24/11/2026 os dois pisos coincidem: a coorte é o **ingresso por turma de
+entrada** vezes k (`config.students_per_entry_class`), de modo que a divisão
+não tem resto e toda turma recebe exatamente o número digitado.
+
 O ordinal é a posição do aluno na coorte, e o rodízio de perfis
 (`config.profile_index`) é sobre o índice **global**, não sobre este: dois
 calouros vizinhos têm perfis diferentes, de modo que o bloco não concentra um

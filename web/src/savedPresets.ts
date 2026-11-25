@@ -10,7 +10,9 @@
  * cenários, e um formato que mude de um lado não derruba o outro.
  */
 import { migrateInterest } from "./history";
-import { strategyDefaults } from "./presets";
+import { entryClasses } from "./curriculum";
+import { cohortSize } from "./equations";
+import { GRADE, strategyDefaults } from "./presets";
 import { horizonFor } from "./types";
 import type { Scenario } from "./types";
 
@@ -140,7 +142,13 @@ const withoutGrade = (config: Scenario): SavedScenario => {
  * nada. */
 export const describeSaved = (preset: SavedPreset): string => {
   const observed = preset.config.observation_periods;
-  const students = preset.config.students_per_period * preset.config.max_residence;
+  // A grade não é gravada com o cenário (ela é a mesma para todos), então as
+  // turmas de entrada que levam o ingresso à coorte vêm dela.
+  const cohort = cohortSize(
+    preset.config.students_per_entry_class,
+    entryClasses(GRADE)
+  );
+  const students = cohort * preset.config.max_residence;
   const periods = horizonFor(preset.config.max_residence, observed);
   return (
     `${students} alunos · ${periods} períodos · ` +

@@ -165,3 +165,29 @@ export function interestCurve(scenario: Scenario): Curve {
   // e o grid o arredondaria à largura de um passo.
   return { ...densityCurve(xs, ys), mode: Math.exp(logMean - logSd * logSd) };
 }
+
+/** A curva da **seletividade**: a log-normal da opção externa do aluno.
+ *
+ * Parametrizada pela **mediana** e pelo σ, e não pela média logarítmica: numa
+ * log-normal a mediana é `e^μ`, então `μ = ln(mediana)` e o campo que o
+ * usuário digita é lido direto na escala da grandeza.
+ *
+ * A escala é a do **interesse** (ver `leilao.equations.reserve_threshold`), e
+ * por isso a mediana vive em milésimos: o valor diz quanto da grade inteira
+ * vale não estudar. É também por isso que a prévia importa — um σ alto numa
+ * mediana dessa ordem põe metade da população quase indiferente e a outra
+ * metade quase inerte, e isso não se lê dos dois números soltos.
+ *
+ * Como em `interestCurve`, a **estabilidade não entra**: ela reparte a
+ * variância entre a peça permanente e a do semestre, e a soma é sempre σ².
+ */
+export function selectivityCurve(scenario: Scenario): Curve {
+  const median = scenario.selectivity_median;
+  const logSd = scenario.selectivity_sigma;
+  if (!(median > 0) || !(logSd > 0)) return { points: [], mode: 0 };
+
+  const logMean = Math.log(median);
+  const top = lognormalQuantile(INTEREST_TOP, logMean, logSd);
+  const { xs, ys } = lognormalDensity(logMean, logSd, top);
+  return { ...densityCurve(xs, ys), mode: Math.exp(logMean - logSd * logSd) };
+}

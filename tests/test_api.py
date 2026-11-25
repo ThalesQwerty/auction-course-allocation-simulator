@@ -108,17 +108,22 @@ COMPARE_SCENARIO = {
         {"name": "Programação", "classes": 6, "hours": 60, "unlocks": [], "entry": True},
         {"name": "Física I", "classes": 6, "hours": 60, "unlocks": [], "entry": False},
     ],
-    # Uma turma por vaga: estes cenários foram calibrados em vagas, e
-    # `class_size = 1` preserva as contas de antes de a grade declarar turmas.
-    "class_size": 1,
+    # Duas vagas por turma, uma delas do ingressante: a coorte é o ingresso por
+    # turma de entrada vezes as 6 turmas, e com lotação 1 a turma de entrada
+    # abriria a primeira rodada já cheia, de modo que quem reprovasse não
+    # tornaria a cursá-la.
+    "class_size": 2,
     # Uma faixa de quantil só, e seletividade desligada: o cenário mede o
     # mecanismo, não o recorte nem a estratégia.
     "performance": {"mode_grade": 8.0, "zero_rate": 0.005, "max_rate": 0.008},
+    "max_hours": 360,
     "availability": {"mode_hours": 350.0, "full_load_rate": 0.9},
     "selectivity_median": 0.0,
-    "quantiles": 1,
+    "grade_cuts": [],
+    "reserve_cuts": [],
+    "credit_cuts": [],
     "periods": 3,
-    "students_per_period": 4,
+    "students_per_entry_class": 1,
     "rounds": 2,
     "seed": 5,
 }
@@ -255,11 +260,12 @@ def test_compare_returns_only_the_allocation_metrics(client):
     assert [(axis["ruler"], axis["axis"]) for axis in series] == [
         (ruler, axis)
         for ruler in ("period", "age", "cohort")
+        # Sem o crédito: o primeiro braço é o `ranking`, onde não há moeda e o
+        # eixo não é produzido.
         for axis in (
             "overall",
-            "performance",
-            "availability",
-            "selectivity",
+            "grade_average",
+            "reserve",
         )
     ]
     overall = series[0]["groups"][0]
@@ -326,40 +332,6 @@ def test_compare_ignores_the_scenario_seed(client):
     assert all(rounds > 0 for shape in shapes for arm in shape for rounds in arm)
 
     assert first == second
-
-
-def test_compare_lets_the_scenario_set_the_return_but_the_arm_overrides_it(client):
-    """O multiplicador do cenário chega ao braço que **tem** retorno; o de
-    ablação o impõe em 0, e é assim que ele vira o degrau sem retorno."""
-    payload = client.post(
-        "/compare",
-        json={
-            **COMPARE_SCENARIO,
-            "return_multiplier": 3,
-            "runs": 2,
-            "arms": ["credits_return", "credits_ilp"],
-        },
-    ).json()
-    efetivo = {arm["key"]: arm["return_multiplier"] for arm in payload["arms"]}
-
-    assert efetivo["credits_return"] == 3
-    assert efetivo["credits_ilp"] == 0
-
-    # E o k do cenário move o resultado de quem o herda.
-    outro = client.post(
-        "/compare",
-        json={
-            **COMPARE_SCENARIO,
-            "return_multiplier": 1,
-            "runs": 2,
-            "arms": ["credits_return"],
-        },
-    ).json()
-    com_tres = next(a for a in payload["arms"] if a["key"] == "credits_return")
-    com_um = next(a for a in outro["arms"] if a["key"] == "credits_return")
-    assert [r["efficiency"] for r in com_tres["runs"]] != [
-        r["efficiency"] for r in com_um["runs"]
-    ]
 
 
 def test_credit_quantities_exist_only_where_there_is_currency(client):
@@ -537,7 +509,7 @@ def test_compare_rejects_an_invalid_run_count(client):
 
 def test_compare_rejects_an_invalid_scenario(client):
     response = client.post(
-        "/compare", json={**COMPARE_SCENARIO, "students_per_period": 7, "runs": 2}
+        "/compare", json={**COMPARE_SCENARIO, "students_per_entry_class": 7, "runs": 2}
     )
 
     assert response.status_code == 400

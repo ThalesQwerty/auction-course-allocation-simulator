@@ -23,7 +23,9 @@ const POPULATION: Pick<
   | "selectivity_median"
   | "selectivity_sigma"
   | "selectivity_stability"
-  | "quantiles"
+  | "grade_cuts"
+  | "reserve_cuts"
+  | "credit_cuts"
   | "interest_mean"
   | "interest_sigma"
 > = {
@@ -62,8 +64,13 @@ const POPULATION: Pick<
   selectivity_sigma: 0.6,
   // Mais estável que os outros dois: exigência é feitio, não semestre.
   selectivity_stability: 0.7,
-  // Três faixas: o semáforo, que é a escada que mais se lê de relance.
-  quantiles: 3,
+  // Três faixas em cada eixo — o semáforo, que é a escada que mais se lê de
+  // relance. Os valores saem da distribuição medida no cenário calibrado: a
+  // mediana do CR fica perto de 5,6, e a da reserva em 0,015 com p90 em 0,056,
+  // daí os cortes dela caírem nos milésimos. Trocar de cenário pede recalibrar.
+  grade_cuts: [5, 7],
+  reserve_cuts: [0.01, 0.03],
+  credit_cuts: [15, 20],
   // μ = 1 põe a moda da fonte em e^{μ−σ²} = 1, e a prévia se lê; ele não mexe
   // em alocação, porque some na normalização. σ = 1 dá coeficiente de variação
   // ~1,3: o aluno distingue as disciplinas sem desprezar quase todas.
@@ -135,10 +142,11 @@ const FACTORIAL_PERIODS = 6;
  * sobe monotonicamente e a escassez fica concentrada no fim do curso.
  *
  * A ponta estreita é o que dimensiona o cenário: ela precisa entregar, por
- * período, tantas aprovações quantos alunos ingressam. Daí o teto de ingresso
- * ser `menor oferta × taxa de aprovação` — 80 × ~0,6 ≈ 48, e por isso
- * `FACTORIAL_STUDENTS` fica em 40, com folga. Acima disso a fila nos últimos
- * períodos cresce sem drenar e ninguém conclui. */
+ * período, tantas aprovações quantos alunos ingressam. O teto de ingresso é
+ * `menor oferta × taxa de aprovação`, e a menor oferta são as 4 turmas de
+ * `class_size` de cada disciplina do 6º período — contra a coorte inteira,
+ * que precisa passar em cada uma delas. Acima desse teto a fila dos últimos
+ * períodos cresce sem drenar, e quem fica nela é jubilado em vez de concluir. */
 const CLASSES_BY_PERIOD = [9, 8, 7, 6, 5, 4];
 
 /** **O sufixo é a célula.** `Obrigatória k.5` tem os mesmos três atributos em
@@ -265,16 +273,17 @@ const FACTORIAL_MAX_HOURS = 24;
  * proporção do obrigatório, que foi de 48 h para 36. */
 const FACTORIAL_ELECTIVE_HOURS = 24;
 
-/** Exemplares de cada combinação de perfil em cada coorte.
+/** Ingressantes em cada turma de disciplina de entrada.
  *
- * A coorte **não é digitada**: ela é isto vezes o número de combinações, que
- * nos padrões são 3 desempenhos × 3 disponibilidades × 5 seletividades ×
- * 3 rotinas = 135. Com 2 exemplares de cada, 270 alunos por período.
+ * A **coorte sai daqui**: 30 em cada uma das 9 turmas do 1º período dão 270
+ * alunos por período. Contra a lotação de 45, sobram 15 vagas por turma de
+ * entrada para quem recursa, e é essa folga que decide se o reprovado volta a
+ * cursar a disciplina.
  *
- * É o que dimensiona `class_size`. As 9 turmas de cada disciplina de entrada
- * precisam comportar a coorte repartida entre elas — 270/9 = 30 por turma —,
- * e a 45 sobram 15 por turma para quem recursa. */
-const FACTORIAL_STUDENTS_PER_PERIOD = 2;
+ * Eram **exemplares por combinação de perfil** até 19/11/2026, com a coorte
+ * saindo de 2 × 135 combinações. Os perfis saíram e o número ficou para trás:
+ * o cenário padrão abriu com coorte de 2 até 24/11/2026. */
+const FACTORIAL_ENTRANTS_PER_CLASS = 30;
 
 /** **A grade, única para todo o aplicativo.**
  *
@@ -298,7 +307,7 @@ export const GRADE: DisciplineInput[] = [...FACTORIAL_REQUIRED, ...FACTORIAL_ELE
 export const defaultScenario = (): Scenario => ({
   disciplines: GRADE,
   class_size: DEFAULT_CLASS_SIZE,
-  students_per_period: FACTORIAL_STUDENTS_PER_PERIOD,
+  students_per_entry_class: FACTORIAL_ENTRANTS_PER_CLASS,
   elective_hours: FACTORIAL_ELECTIVE_HOURS,
   max_hours: FACTORIAL_MAX_HOURS,
   // Depois do último ingresso vem a drenagem: ninguém mais entra e a população
@@ -308,7 +317,7 @@ export const defaultScenario = (): Scenario => ({
   // consequência aritmética: o horizonte é ingresso + residência − 1, então ela
   // dura exatamente o que a última coorte precisa para terminar.
   observation_periods: 10,
-  // Residência: 16 períodos. São 150 h a aprovar (120 de optativa) e ~1,5
+  // Residência: 16 períodos. São 60 h a aprovar (24 de optativa) e ~1,5
   // tentativa por disciplina na média do fatorial — metade dele é dificuldade
   // 2, que exige aptidão >= 0,707 e só passa ~35% de primeira —, mais a espera
   // pelo **par** de pré-requisitos que a cadeia triangular impõe.
@@ -320,10 +329,6 @@ export const defaultScenario = (): Scenario => ({
   max_residence: 16,
   rounds: 3,
   min_grade: 5,
-  // Padrões dos dois eixos novos: PLI global (o leilão do anteprojeto) e
-  // orçamento que carrega entre períodos (eq. 36). A comparação os varia.
-  resolver: "ilp",
-  credit_memory: "carry",
   // Metade do gosto persiste, metade recomeça a cada período. Em 0 — o que o
   // modelo fazia antes de a estabilidade existir — a preferência que não
   // persiste desfaz a fila sozinha, e é o valor que mais protege o lado fraco
@@ -341,8 +346,6 @@ export const defaultScenario = (): Scenario => ({
   // disciplina — 9 na grade padrão —, e reduzi-los é o botão para o conflito
   // pesar mais.
   slots: 12,
-  return_multiplier: 2,
-  exclusion_refund_rate: 0,
   seed: 42,
   ...POPULATION,
   // C_min e C_max são um par, e a escolha entre eles é um troco conhecido.

@@ -9,10 +9,9 @@ jubilamentos. É a única parte da simulação que escreve no `Student`.
 A **exclusão vem primeiro** e é o que define o escopo de todo o resto: a
 disciplina excluída não recebe nota, não entra no CR, não soma carga cursada e
 não gasta tentativa — quem exclui e refaz no semestre seguinte volta como
-primeira tentativa, sem o ganho de recursada. No leilão ela não devolve crédito
-nenhum, a menos que o cenário fixe uma fração
-(`equations.exclusion_refund`); a vaga, essa não volta para a oferta, porque a
-esta altura as alocações do período já se encerraram.
+primeira tentativa, sem o ganho de recursada. No leilão ela não devolve
+crédito nenhum; a vaga, essa não volta para a oferta, porque a esta altura as
+alocações do período já se encerraram.
 
 As duas saídas são exclusivas e **nesta ordem**: quem fecha a grade no último
 período de residência conta como concluinte, não como jubilado.
@@ -25,7 +24,6 @@ from ..config import SimulationConfig
 from ..equations import (
     credit_return,
     effective_load,
-    exclusion_refund,
     grade_for_attempt,
     has_graduated,
     next_budget,
@@ -130,18 +128,13 @@ def close_period(
         enrollments[student.id] += len(retained)
         gammas: list[int] = []
 
+        # Excluir nao devolve nada: o aluno perde o que investiu para obter a
+        # vaga, porque nao cursou a disciplina para render. E o que torna a
+        # exclusao cara, e ela precisa ser: a vaga nao volta para a oferta.
         for name in excluded:
             closing.exclusions[name] += 1
-            gamma = (
-                exclusion_refund(
-                    paid=state.paid.get((student.id, name), 0),
-                    rate=config.exclusion_refund_rate,
-                )
-                if config.uses_credits
-                else 0
-            )
-            closing.returned[(student.id, name)] = gamma
-            gammas.append(gamma)
+            closing.returned[(student.id, name)] = 0
+            gammas.append(0)
 
         # A ordem é a da grade, vinda da mochila — e não a de um conjunto, que
         # varia com o hash das strings entre simulações.
@@ -174,13 +167,11 @@ def close_period(
                 closing.approvals[name] += 1
 
             # f_γ é do leilão: devolve parte do *preço pago*. Na linha de base
-            # não houve preço nem pagamento, então não há o que devolver,
-            # qualquer que seja o multiplicador.
+            # não houve preço nem pagamento, então não há o que devolver.
             gamma = (
                 credit_return(
                     paid=state.paid.get((student.id, name), 0),
                     grade=student.grades[discipline],
-                    multiplier=config.return_multiplier,
                 )
                 if config.uses_credits
                 else 0
@@ -194,7 +185,6 @@ def close_period(
         # C_min a cada período daria um número sem significado.
         if config.uses_credits:
             student.credits = next_budget(
-                config.credit_memory,
                 started_with=student.credits,
                 spent=state.spent[student.id],
                 period_return=period_return(returns=gammas),

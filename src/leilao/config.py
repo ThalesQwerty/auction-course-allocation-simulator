@@ -18,8 +18,8 @@ relatórios cortam os **quantis**.
 
 Houve **perfis** nomeados em cada eixo até 19/11/2026, com a coorte derivada do
 produto das combinações. Os quantis os substituíram: eles saem de um valor
-contínuo, não há grupo a declarar, e o tamanho da coorte voltou a ser
-digitado (`students_per_period`).
+contínuo e não há grupo a declarar. O que se digita é o ingresso **por turma de
+entrada** (`students_per_entry_class`), e a coorte sai dele.
 
 Não há cursos: todo aluno é da universidade e cursa a mesma grade. A
 obrigatória tem de ser aprovada uma a uma; a **optativa** (`elective`) conta só
@@ -41,15 +41,12 @@ from typing import Literal
 
 from .equations import (
     Behavior,
-    DEFAULT_MULTIPLIER,
-    DEFAULT_RATE,
     availability_shape,
     class_schedules,
     curriculum_heights,
     curriculum_periods,
     curriculum_reach,
     eligible_set,
-    entry_class_load,
     inverse_edges,
     rotated_index,
     grade_shape,
@@ -81,48 +78,19 @@ def _curriculum_closures(
 # aluno, e a carga horária faz o papel do orçamento.
 Mechanism = Literal["credits", "ranking"]
 
-# Quem decide a alocação, dada a mensagem dos alunos — o passo do meio do
-# caminho da comparação (ver `comparison.ARMS`).
-#
-# A diferença é **ordinal x cardinal**, e não "guloso x exato": a varredura
-# usa só a *ordem* das preferências, de modo que qualquer transformação
-# monótona do vetor dá a mesma alocação; a PLI usa as *magnitudes*, e derruba
-# um lance alto para acomodar dois médios, o que a varredura nunca faz.
-#
-# Com lance e varredura sai o *bidding points* clássico das business schools
-# (Sönmez & Ünver 2010, sobre Michigan e Yale SOM). Cuidado com a afirmação de
-# que é "o mais implantado do mundo": Wharton o substituiu pelo **Course
-# Match** (A-CEEI resolvido por MIP), que é cardinal — então a direção
-# histórica é do ordinal para o cardinal, e não o contrário.
-#
-# Os dois resolvedores só divergem onde a restrição de carga aperta — sem ela
-# o problema se separa por disciplina e o guloso é ótimo —, então o passo só
-# tem conteúdo em cenário com conjunto elegível maior que W_a.
-Resolver = Literal["ilp", "greedy"]
-
-# Quanta memória o orçamento tem de um período para o outro — o eixo da ideia 1.
-#
-# `"none"`: o período começa sempre em C_min. O leilão não tem memória
-# nenhuma, e é o único braço em que o passado do aluno não entra no poder de
-# compra dele por via alguma.
-# `"carry"`: a eq. (36) — o que sobrou é carregado. Note que isso **não** é
-# poupança: o aluno aposta o orçamento inteiro e paga o segundo preço, então o
-# que sobra é o que ele não foi cobrado, não o que ele guardou.
-#
-# Cruzado com `return_multiplier` **não** dá quatro casos, nem três: dá dois.
-# Com multiplicador 0 a sobra não existe — o orçamento abre em C_min (eq. 37)
-# e sem retorno só pode cair, de modo que o piso o devolve a C_min todo
-# período. Medido: `"carry"` com k = 0 sai idêntico a `"none"`, relatório por
-# relatório, em todas as seeds. A sobra só tem o que carregar depois de o
-# retorno erguer o saldo acima do piso, e por isso os dois campos nomeiam um
-# canal só — ver `equations.next_budget`.
-CreditMemory = Literal["none", "carry"]
-
 # Quantas faixas os relatórios podem recortar. Cinco é o limite da paleta
 # ordenada da interface (violeta, azul, verde, amarelo, vermelho) e também o
 # ponto a partir do qual uma faixa deixa de ter gente bastante para a mediana
 # dela significar alguma coisa numa coorte típica.
-MAX_QUANTILES = 5
+MAX_BANDS = 5
+# Daí o teto de cortes: `q` cortes abrem `q + 1` faixas.
+MAX_CUTS = MAX_BANDS - 1
+
+# O domínio de cada eixo de recorte, que é contra o que os cortes se validam.
+# O do crédito não está aqui porque não é fixo: é `[min_credits, max_credits]`,
+# e sai de `credit_domain`.
+GRADE_DOMAIN = (0.0, 10.0)
+RESERVE_DOMAIN = (0.0, 1.0)
 
 
 @dataclass(frozen=True)
@@ -205,10 +173,10 @@ class AvailabilityShape:
 #
 # Na disponibilidade, a moda é **absoluta**, em horas, e por isso o padrão é
 # uma **função de W_a**: um cenário de teto menor recusaria uma constante
-# dimensionada para 360 h.
+# dimensionada para um teto maior.
 DEFAULT_PERFORMANCE = PerformanceShape()
 
-DEFAULT_MAX_HOURS = 360
+DEFAULT_MAX_HOURS = 24
 
 
 def default_availability(max_hours: float) -> AvailabilityShape:
@@ -332,15 +300,17 @@ class SimulationConfig:
     # de `students` dentro da janela é o teste de validade do aquecimento: se
     # não for plano, ele foi curto.
     warmup_periods: int = 0
-    # **Quantos alunos ingressam por período.** É digitado, e é por aqui que se
-    # controla o tamanho da população: em regime ela vale
-    # `students_per_period × max_residence`.
+    # **Quantos ingressantes entram em cada turma de disciplina de entrada.**
+    # É o que se digita, e é também quantas vagas da turma de entrada a
+    # matrícula garantida toma: o calouro não disputa a vaga de ingresso, ela
+    # abre o período com `z = 1` fixado. O teto é a lotação da turma.
     #
-    # Era derivado até 19/11/2026 — `students_per_profile × combinações de
-    # perfil` —, de modo que mexer num eixo de perfil mudava o tamanho da
-    # coorte sem que ninguém pedisse. Com os perfis fora, não há mais
-    # divisibilidade a preservar e o número volta a ser o que se lê.
-    students_per_period: int = 8
+    # A **coorte é derivada** daqui (`students_per_period`): este número vezes
+    # as turmas de uma disciplina de entrada. Era a coorte que se digitava até
+    # 24/11/2026, e a repartição dela entre as turmas saía com resto — duas
+    # vagas numa turma, uma na vizinha —, de modo que o número digitado não se
+    # comparava com a lotação sem refazer a divisão.
+    students_per_entry_class: int = 8
     # **Jubilamento**: quantos períodos o aluno tem para concluir, contados do
     # ingresso. Quem chega ao fim do último sem concluir sai da simulação e não
     # disputa mais nada. `None` desliga, e aí a conclusão (eq. 40) volta a ser a
@@ -387,16 +357,14 @@ class SimulationConfig:
     # sorteada da log-normal **a cada período**. Depois da última rodada ele
     # descarta o que não couber nela (`equations.retained_set`), e o descartado
     # vira solicitação **excluída**: não conta carga, não conta tentativa, não
-    # mexe no CR, e no leilão não devolve crédito nenhum, a menos que
-    # `exclusion_refund_rate` diga o contrário.
+    # mexe no CR, e no leilão não devolve crédito nenhum.
     #
     # A vaga excluída **não volta para a oferta** — exclui-se depois de
     # encerradas as alocações do período. É o que torna a exclusão socialmente
     # cara e dá sentido à penalidade do leilão.
     #
     # `None` quer dizer **derive de W_a** (`default_availability`): a moda é
-    # absoluta, e uma constante dimensionada para 360 h recusaria todo cenário
-    # de teto menor.
+    # absoluta, e uma constante fixa recusaria todo cenário de teto menor.
     availability: AvailabilityShape | None = None
     # Quanto da disponibilidade é **permanente**: a correlação entre dois
     # períodos do mesmo aluno. Em 0 o tempo livre é pura circunstância e
@@ -418,14 +386,24 @@ class SimulationConfig:
     selectivity_sigma: float = 0.6
     # Quanto da seletividade é permanente, entre períodos.
     selectivity_stability: float = 0.7
-    # **Quantis** em que os relatórios recortam a população, de 1 a 5. O corte
-    # é sobre o **nível basilar** de cada eixo — o componente permanente —, e
-    # não sobre o valor do período: fatiar o sorteio do semestre não separaria
-    # tipos de aluno, e o mesmo aluno trocaria de faixa a cada ponto do
-    # gráfico.
+    # Os **pontos de corte** com que os relatórios recortam a população, um
+    # eixo por grandeza de estado. Com `q` cortes saem `q + 1` faixas, e sem
+    # corte nenhum há uma faixa só, que é a universidade inteira.
     #
-    # Em 1 há uma faixa só, que é a universidade inteira.
-    quantiles: int = 3
+    # O corte é no **valor corrente**, e não no quantil do nível basilar: ver
+    # `equations.value_band` para por que a pergunta mudou e por que a
+    # fronteira tem de ser declarada em vez de amostral.
+    #
+    # Cada eixo vive no seu domínio, e é contra ele que os cortes se validam:
+    # o CR em [0, 10], a reserva em [0, 1) e o saldo entre `min_credits` e
+    # `max_credits`. Os cortes **não** são portáveis entre cenários — a
+    # reserva se mede em milésimos e desloca com o tamanho da grade (ver
+    # `equations.reserve_threshold`), e o saldo depende do orçamento —, então
+    # trocar de cenário pede recalibrá-los como já pede recalibrar a mediana
+    # da seletividade.
+    grade_cuts: tuple[float, ...] = (5.0, 7.0)
+    reserve_cuts: tuple[float, ...] = (0.01, 0.03)
+    credit_cuts: tuple[int, ...] = (15, 20)
     # **Estabilidade entre turmas**: quanto da variância do interesse fica no
     # nível da disciplina, de 0 a 1. É a irmã espacial da estabilidade entre
     # períodos — uma reparte a variância no tempo, a outra no espaço —, e as
@@ -517,17 +495,7 @@ class SimulationConfig:
     # `max_credits=None` desliga o teto. Ver `equations.next_budget`.
     min_credits: int = 12  # C_min — orçamento mínimo do período, eq. (36)/(37)
     max_credits: int | None = 30  # C_max — orçamento máximo do período
-    # k — o multiplicador do retorno, eq. (34): γ = round(nota/10 · k · preço).
-    # Zero desliga o retorno; com 1 ele nunca supera o gasto e o orçamento
-    # trava em C_min; com o padrão 2 a nota de corte vira o ponto neutro.
-    # Ver `equations.credit_return`.
-    return_multiplier: float = DEFAULT_MULTIPLIER
-    # A fração do preço pago que uma disciplina **excluída** devolve. Zero —
-    # o padrão — é "excluir não devolve nada". Ver `equations.exclusion_refund`.
-    exclusion_refund_rate: float = DEFAULT_RATE
-    credit_memory: CreditMemory = "carry"
     mechanism: Mechanism = "credits"
-    resolver: Resolver = "ilp"
     seed: int = 0
 
     @property
@@ -537,6 +505,40 @@ class SimulationConfig:
         zero se leria como "ninguém gastou", e o certo é "não há o que gastar".
         """
         return self.mechanism == "credits"
+
+    @property
+    def credit_domain(self) -> tuple[float, float]:
+        """O domínio do eixo de crédito: o orçamento de abertura vive nele.
+
+        É `C_a^(t,1)` que o eixo recorta, e não o saldo: a eq. (36) o prende
+        entre `C_min` e `C_max`, que é o que dá fronteira fixa ao corte. Com
+        `max_credits=None` o teto está desligado e o domínio não fecha — ali o
+        corte se valida só pelo piso.
+
+        """
+        return (float(self.min_credits), float(self.max_credits or math.inf))
+
+    def band_cuts(self, axis: str) -> tuple[float, ...]:
+        """Os cortes de um eixo de recorte, pelo nome com que a API o chama."""
+        cuts = {
+            "grade_average": tuple(float(c) for c in self.grade_cuts),
+            "reserve": tuple(float(c) for c in self.reserve_cuts),
+            "credits": tuple(float(c) for c in self.credit_cuts),
+        }
+        if axis not in cuts:
+            raise ValueError(f"eixo de recorte desconhecido: {axis}")
+        return cuts[axis]
+
+    def band_domain(self, axis: str) -> tuple[float, float]:
+        """O domínio de um eixo de recorte — ver `equations.value_band`."""
+        domains = {
+            "grade_average": GRADE_DOMAIN,
+            "reserve": RESERVE_DOMAIN,
+            "credits": self.credit_domain,
+        }
+        if axis not in domains:
+            raise ValueError(f"eixo de recorte desconhecido: {axis}")
+        return domains[axis]
 
     def __post_init__(self) -> None:
         """Recusa o cenário que não produziria simulação legível.
@@ -560,18 +562,13 @@ class SimulationConfig:
             raise ValueError("é preciso simular ao menos 1 período")
         if self.rounds < 1:
             raise ValueError("é preciso simular ao menos 1 rodada por período")
-        # O piso em 5 segura a ordem entre aprovar e excluir. Com o
-        # multiplicador padrão 2, aprovar raspando devolve n_min/10 · 2 · preço,
-        # que em n_min = 5 é o preço inteiro — acima de qualquer fração de
-        # exclusão em [0, 1]. Abaixo de 5 a exclusão amortecida passaria a
-        # render mais que a aprovação raspada, e excluir bateria passar.
-        # Ver `equations.exclusion_refund`.
+        # O piso em 5 é o que mantém "aprovar não custa crédito". Com o
+        # multiplicador 2 da eq. (34), aprovar raspando devolve
+        # n_min/10 · 2 · preço, que em n_min = 5 é o preço inteiro: o ponto
+        # neutro da conta cai em cima da nota de corte. Abaixo de 5 o aluno
+        # passaria perdendo saldo — ver `equations.credit_return`.
         if not 5 <= self.min_grade <= 10:
             raise ValueError("nota mínima deve estar em [5, 10]")
-        if self.return_multiplier < 0:
-            raise ValueError("o multiplicador do retorno deve ser >= 0")
-        if not 0 <= self.exclusion_refund_rate <= 1:
-            raise ValueError("a fração de retorno da exclusão deve estar em [0, 1]")
         if self.min_credits < 1:
             raise ValueError("orçamento mínimo (C_min) deve ser >= 1")
         if self.max_credits is not None and self.max_credits < self.min_credits:
@@ -589,12 +586,11 @@ class SimulationConfig:
         # produziria período nenhum, e toda métrica sairia indefinida.
         if not self.disciplines:
             raise ValueError("o cenário precisa de pelo menos uma disciplina")
-        if self.students_per_period < 1:
-            raise ValueError("o cenário precisa de pelo menos um aluno por período")
-        if not 1 <= self.quantiles <= MAX_QUANTILES:
+        if self.students_per_entry_class < 1:
             raise ValueError(
-                f"os quantis dos relatórios devem estar entre 1 e {MAX_QUANTILES}"
+                "o cenário precisa de pelo menos um ingressante por turma de entrada"
             )
+        self._check_band_cuts()
         # As duas distribuições são de famílias diferentes: a nota é uma normal
         # dividida censurada, a disponibilidade é uma log-normal.
         try:
@@ -638,6 +634,40 @@ class SimulationConfig:
             raise ValueError("desvio do interesse (sigma) deve ser > 0")
         if not math.isfinite(self.interest_mean):
             raise ValueError("a média do interesse deve ser um número finito")
+
+    def _check_band_cuts(self) -> None:
+        """Os cortes de cada eixo: distintos, dentro do domínio, e no teto.
+
+        O crédito se valida contra o orçamento configurado, e não contra um
+        teto fixo: um corte fora de `[C_min, C_max]` abriria uma faixa
+        garantidamente vazia, que é erro de cenário e não resultado.
+        """
+        for axis, nome in (
+            ("grade_average", "do CR"),
+            ("reserve", "da reserva"),
+            ("credits", "do saldo"),
+        ):
+            cuts = self.band_cuts(axis)
+            low, high = self.band_domain(axis)
+            if len(cuts) > MAX_CUTS:
+                raise ValueError(
+                    f"os cortes {nome} são no máximo {MAX_CUTS}, que abrem "
+                    f"{MAX_BANDS} faixas"
+                )
+            if len(set(cuts)) != len(cuts):
+                raise ValueError(f"há cortes {nome} repetidos")
+            for cut in cuts:
+                if not math.isfinite(cut):
+                    raise ValueError(f"os cortes {nome} devem ser números finitos")
+                # O extremo inferior é a base da faixa de baixo, então cortar
+                # nele deixaria essa faixa vazia por construção; o superior
+                # fecha a de cima pelo mesmo motivo.
+                if not low < cut < high:
+                    teto = "∞" if math.isinf(high) else f"{high:g}"
+                    raise ValueError(
+                        f"os cortes {nome} devem ficar entre {low:g} e {teto}, "
+                        f"exclusive: {cut:g} está fora"
+                    )
 
     def _check_curriculum(self) -> None:
         names = [d.name for d in self.disciplines]
@@ -686,10 +716,27 @@ class SimulationConfig:
 
     def _check_guaranteed_enrolment(self) -> None:
         """A matrícula garantida não escolhe quem a recebe, então a oferta de
-        entrada tem de comportar a coorte inteira de uma vez."""
+        entrada tem de comportar a coorte inteira de uma vez.
+
+        São três verificações: que as disciplinas de entrada concordem no
+        número de turmas, sem o que a coorte não é um produto; que o ingresso
+        por turma caiba na turma; e que o pacote inteiro caiba em W_a.
+        """
         entry = self.entry_disciplines()
         if not entry:
             raise ValueError("o cenário precisa de pelo menos uma disciplina de entrada")
+
+        # A coorte é `students_per_entry_class × turmas de entrada`. Com
+        # contagens diferentes entre as disciplinas de entrada, cada uma diria
+        # uma coorte, e o calouro do bloco excedente de uma ficaria sem vaga na
+        # outra.
+        counts = {len(self.classes_by_discipline()[name]) for name in entry}
+        if len(counts) > 1:
+            raise ValueError(
+                "as disciplinas de entrada precisam ter o mesmo número de turmas, e "
+                f"têm {sorted(counts)}: o ingresso é por turma de entrada, então "
+                "contagens distintas implicariam uma coorte por disciplina"
+            )
 
         # O pacote garantido é entregue inteiro e fora do mecanismo, então
         # ele precisa respeitar a eq. (5) por construção. `entry_offsets`
@@ -705,23 +752,19 @@ class SimulationConfig:
                 "de entrada ou o número de horários"
             )
 
-        # Por **turma**, não por disciplina: é a turma que tem vaga, e a
-        # coorte é repartida entre elas em blocos girados
-        # (`equations.entry_class`). Quando a disciplina de entrada tem turma
-        # única os dois conferem.
+        # Por **turma**, não por disciplina: é a turma que tem vaga, e a coorte
+        # é repartida entre elas em blocos girados (`equations.entry_class`) de
+        # `students_per_entry_class` cada. A oferta declarada na disciplina
+        # pode não ser divisível pelas turmas, e aí uma delas tem uma vaga a
+        # menos que as outras — é essa que manda.
+        newcomers = self.students_per_entry_class
         seats = self.seats_by_class()
         classes = self.classes_by_discipline()
-        cohort = self.students_per_period
         for discipline in entry:
-            load = entry_class_load(
-                cohort=cohort,
-                classes=classes[discipline],
-                offset=offsets[discipline],
-            )
-            for name, newcomers in load.items():
+            for name in classes[discipline]:
                 if newcomers > seats[name]:
                     raise ValueError(
-                        f"a coorte de {cohort} alunos põe {newcomers} ingressantes em "
+                        f"{newcomers} ingressantes por turma de entrada não cabem em "
                         f"{name!r}, que tem {seats[name]} vagas: o ingressante tem vaga "
                         "garantida em toda disciplina de entrada"
                     )
@@ -806,6 +849,19 @@ class SimulationConfig:
         separa o regime do transitório é a pré-população.
         """
         return self.periods
+
+    @property
+    def students_per_period(self) -> int:
+        """|A_cal| — quantos ingressam por período. **Derivado** do ingresso
+        por turma vezes as turmas de uma disciplina de entrada.
+
+        As disciplinas de entrada concordam no número de turmas (o cenário é
+        recusado se não concordarem), então o produto não depende de qual delas
+        se olha, e a coorte cabe exatamente em blocos de
+        `students_per_entry_class` por turma — sem resto, que era o que fazia o
+        bloco de uma turma não se comparar com a lotação dela.
+        """
+        return self.students_per_entry_class * self.entry_classes()
 
     def total_students(self) -> int:
         """|A| — uma coorte do mesmo tamanho em cada período."""
@@ -892,11 +948,24 @@ class SimulationConfig:
         """Disciplinas de matrícula garantida, na ordem do cenário.
 
         Vem da flag `entry`, e **não** de não ter pré-requisito: a optativa
-        também não tem e não é entrada. É este conjunto que dimensiona as
-        validações de `students_per_period` e `max_hours` — o que a oferta
-        precisa comportar é a coorte inteira entrando de uma vez.
+        também não tem e não é entrada. É este conjunto que dimensiona a coorte
+        e a validação de `max_hours` — o que a oferta precisa comportar é a
+        coorte inteira entrando de uma vez.
         """
         return [d.name for d in self.disciplines if d.entry]
+
+    def entry_classes(self) -> int:
+        """Em quantas turmas cada disciplina de entrada está repartida.
+
+        É um número só porque o cenário exige que todas concordem: o ingresso é
+        por turma de entrada, de modo que contagens distintas implicariam uma
+        coorte por disciplina. Zero quando não há disciplina de entrada, que é
+        cenário recusado.
+        """
+        entry = self.entry_disciplines()
+        if not entry:
+            return 0
+        return len(self.classes_by_discipline()[entry[0]])
 
     def eligible_disciplines(self, approved: set[str]) -> list[str]:
         """O conjunto elegível — ver `equations.eligible_set`."""
@@ -942,10 +1011,17 @@ class SimulationConfig:
         }
 
     def seats_by_class(self) -> dict[str, int]:
-        """A oferta repartida entre as turmas do grupo.
+        """q_x — a oferta repartida entre as turmas do grupo.
 
         As primeiras `seats % classes` turmas levam uma vaga a mais, de modo
         que a soma devolve exatamente a oferta declarada.
+
+        **Toda vaga entra aqui**, inclusive a que a matrícula garantida vai
+        tomar: numa turma de entrada, `students_per_entry_class` das vagas saem
+        com `z = 1` fixado na abertura do período, e o que vai a mecanismo é o
+        que resta. Separá-las em duas pilhas foi tentado em 24/11/2026 e
+        desfeito no mesmo dia: a vaga fora de `q_x` deixava o aluno cursando
+        turma que o relatório não dizia ter sido entregue.
         """
         seats: dict[str, int] = {}
         for discipline in self.disciplines:

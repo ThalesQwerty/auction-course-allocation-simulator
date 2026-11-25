@@ -8,9 +8,8 @@ import pytest
 
 from leilao.behavior import DISTRIBUTION_BINS
 from leilao.grading import DISTRIBUTION_BINS as GRADE_BINS
-from leilao.equations import quantile_names
+from leilao.equations import value_band_names
 from leilao.comparison import (
-    ABLATION_ARMS,
     ARMS,
     MAX_RUNS,
     allocations_per_round,
@@ -25,6 +24,7 @@ from leilao.config import (
     Discipline,
     SimulationConfig,
 )
+from leilao.equations import serial_dictatorship
 from leilao.ranking import allocate_by_ilp, allocate_by_ranking, request_set
 from leilao.simulation import GUARANTEED_ROUND, run_simulation
 
@@ -44,7 +44,7 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=6,
-        students_per_period=3,
+        students_per_entry_class=3,
         rounds=2,
         max_hours=WORKLOAD,
         **single_axis(WORKLOAD),
@@ -130,20 +130,6 @@ def test_the_student_loses_what_he_wanted_least_when_the_workload_binds():
     )
     assert granted == [("a", "D1"), ("a", "D2")]
 
-def test_the_two_resolvers_agree_when_the_workload_is_slack():
-    """Sem a carga apertando, o problema se separa por disciplina e o guloso é
-    ótimo — então as duas células da linha do CR coincidem. É a razão de o eixo
-    só ter conteúdo em cenário com elegível maior que W_a."""
-    requests = [("a", "D1"), ("a", "D2"), ("b", "D1"), ("b", "D2")]
-    kwargs = dict(
-        requests=requests,
-        priority={"a": 8.0, "b": 6.0},
-        seats={"D1": 1, "D2": 2},
-        hours=HOURS,
-        capacity={"a": WORKLOAD, "b": WORKLOAD},
-    )
-    assert sorted(allocate_by_ranking(**kwargs)) == sorted(allocate_by_ilp(**kwargs))
-
 
 def test_the_ilp_respects_the_workload_and_the_seats():
     granted = allocate_by_ilp(
@@ -158,6 +144,25 @@ def test_the_ilp_respects_the_workload_and_the_seats():
 
 
 # --- a simulação inteira sob a linha de base -------------------------------
+
+
+def test_the_tiebreak_decides_only_among_equals():
+    """O ε desempata quem tem o mesmo CR, e é o lado que **lê** o desempate: a
+    PLI o ignora (ver `test_wdp_solver`). Era a varredura gulosa do WDP que
+    guardava este lado até 24/11/2026; com ela fora, quem o lê é a ditadura
+    serial, e o par de testes continua cobrindo os dois lados.
+
+    Duas vagas, três alunos de CR igual: levam os dois de maior ε.
+    """
+    granted = serial_dictatorship(
+        requests=[("a1", "x1"), ("a2", "x1"), ("a3", "x1")],
+        priority={"a1": 7.0, "a2": 7.0, "a3": 7.0},
+        seats={"x1": 2},
+        hours={"x1": 60},
+        capacity={"a1": 60, "a2": 60, "a3": 60},
+        tiebreak={"a1": 0.1, "a2": 0.7, "a3": 0.4},
+    )
+    assert sorted(student for student, _ in granted) == ["a2", "a3"]
 
 
 def test_the_baseline_runs_and_respects_the_seats():
@@ -236,17 +241,6 @@ def test_the_two_mechanisms_allocate_differently():
     )
 
 
-def test_the_return_multiplier_has_no_effect_on_the_baseline():
-    """f_γ devolve parte do preço pago, e na linha de base não houve preço."""
-    sem = run_simulation(make_config(return_multiplier=0))
-    com = run_simulation(make_config(return_multiplier=3))
-    assert [s.graduated_at for s in sem.students] == [s.graduated_at for s in com.students]
-    assert sem.periods[-1].aggregate.overall == com.periods[-1].aggregate.overall
-
-
-# --- a comparação ----------------------------------------------------------
-
-
 def test_the_comparison_pairs_the_seeds_across_every_arm():
     result = run_comparison(make_config(), runs=3)
     assert result.runs == 3
@@ -254,41 +248,6 @@ def test_the_comparison_pairs_the_seeds_across_every_arm():
     for arm in result.arms:
         assert [r.seed for r in arm.runs] == [1, 2, 3]
 
-
-def test_the_comparison_fixes_the_return_per_arm():
-    """O retorno é o eixo do experimento. O braço que o tem herda o k do
-    cenário; o que não o tem o impõe em 0, e é assim que a ablação desliga o
-    retorno sem deixar de ser o mesmo modelo."""
-    config = make_config(return_multiplier=3)
-    result = run_comparison(config, runs=2, arms=ARMS + ABLATION_ARMS)
-    efetivo = {arm.key: arm.return_multiplier for arm in result.arms}
-
-    assert efetivo["credits_return"] == 3  # o k do cenário chegou ao braço
-    assert efetivo["credits_ilp"] == 0
-    assert efetivo["credits_greedy"] == 0
-    assert efetivo["ranking_greedy"] == 0
-
-
-def test_the_two_credit_arms_differ_only_by_the_accumulation():
-    """Mesma seed, mesmo mecanismo, mesma população: o que separa os dois é só
-    o acúmulo de créditos — e ele precisa separar, senão o braço é redundante.
-
-    Precisa de um cenário **apertado** para a prova fazer sentido: o retorno só
-    muda alguma coisa onde o crédito é escasso. Com os 3 alunos por período do
-    `make_config` ninguém disputa nada, todo preço fica no piso e os dois braços
-    saem idênticos — o que não diz que o retorno é inócuo, diz que ali não havia
-    o que devolver. Cinco alunos por período bastam para a disputa existir.
-    """
-    result = run_comparison(
-        make_config(students_per_period=5), runs=4, arms=ARMS + ABLATION_ARMS
-    )
-    with_return = next(a for a in result.arms if a.key == "credits_return")
-    without = next(a for a in result.arms if a.key == "credits_ilp")
-
-    assert [r.seed for r in with_return.runs] == [r.seed for r in without.runs]
-    assert [r.efficiency for r in with_return.runs] != [
-        r.efficiency for r in without.runs
-    ]
 
 def test_the_comparison_ignores_the_scenario_seed():
     """Numa comparação a seed deixa de ser parâmetro e vira o eixo da amostra.
@@ -370,16 +329,14 @@ def test_the_series_by_period_is_the_material_of_the_weighted_mean():
 # Dois grupos em dois dos eixos de perfil, para o recorte ter o que repartir.
 # A coorte (4) cabe nas 6 vagas de entrada da grade de teste.
 MIXED = dict(
-    students_per_period=1,
+    students_per_entry_class=1,
     # `1/(turmas da grade)`: 5 disciplinas de turma única.
     selectivity_median=0.2,
-    quantiles=2,
 )
 
 
-@pytest.mark.parametrize(
-    "axis", ["performance", "availability", "selectivity"]
-)
+# Sem o crédito: este arquivo é o `ranking`, e lá o eixo não existe.
+@pytest.mark.parametrize("axis", ["grade_average", "reserve"])
 def test_each_cut_partitions_the_aggregate_period_by_period(axis):
     """Em cada período, os grupos de um recorte somados com o peso deles
     reproduzem o agregado — o recorte **particiona** a população.
@@ -389,7 +346,7 @@ def test_each_cut_partitions_the_aggregate_period_by_period(axis):
     índice de Jain e a correlação de Pearson não são médias, e o valor do todo
     não se recompõe dos valores das partes.
     """
-    result = run_simulation(make_config(**MIXED))
+    result = run_simulation(make_config(**MIXED, grade_cuts=(5.0,), reserve_cuts=(0.01,)))
     summary = summarize(result, seed=3)
     groups = summary.by_group["period"][axis]
     overall = summary.by_period
@@ -428,7 +385,7 @@ def test_the_cells_partition_the_aggregate_under_every_ruler(ruler):
     overall = summary.by_group[ruler]["overall"]
     assert len(overall) == 1
     aggregate = overall[0].series
-    groups = summary.by_group[ruler]["selectivity"]
+    groups = summary.by_group[ruler]["reserve"]
     assert groups
     assert aggregate.x
 
@@ -477,15 +434,22 @@ def test_the_cohort_ruler_gives_one_point_per_entry_period():
 
 def test_the_quantile_bands_come_out_from_the_lowest_to_the_highest():
     """As faixas saem sempre na mesma ordem — a da legenda, em qualquer
-    régua —, e a ordem é a do nível basilar, da faixa mais baixa para a mais
-    alta."""
-    config = make_config(**MIXED)
+    régua —, da faixa de valor mais baixa para a mais alta.
+
+    O eixo de crédito não entra: este é o `ranking`, onde não há moeda."""
+    config = make_config(**MIXED, grade_cuts=(5.0, 7.0), reserve_cuts=(0.01, 0.03))
     summary = summarize(run_simulation(config), seed=3)
 
-    esperado = quantile_names(config.quantiles)
+    esperado = {
+        "grade_average": value_band_names(cuts=(5.0, 7.0), low=0.0, high=10.0),
+        "reserve": value_band_names(
+            cuts=(0.01, 0.03), low=0.0, high=1.0, decimals=3
+        ),
+    }
     for ruler in ("period", "age", "cohort"):
-        for axis in ("performance", "availability", "selectivity"):
-            assert [g.group for g in summary.by_group[ruler][axis]] == esperado
+        assert "credits" not in summary.by_group[ruler]
+        for axis, nomes in esperado.items():
+            assert [g.group for g in summary.by_group[ruler][axis]] == nomes
 
 
 def test_the_graduation_rate_is_cumulative_over_who_entered():
@@ -541,11 +505,12 @@ def test_the_bands_reduce_the_seeds_to_quartiles():
     summaries = [summarize(run_simulation(make_config(seed=seed)), seed=seed) for seed in (1, 2, 3)]
     axes = bands(summaries)
 
-    # Uma entrada por régua × recorte, nessa ordem.
+    # Uma entrada por régua × recorte, nessa ordem. Sem o crédito: este arquivo
+    # é o `ranking`, e lá o eixo não é produzido.
     assert [(a.ruler, a.axis) for a in axes] == [
         (ruler, axis)
         for ruler in ("period", "age", "cohort")
-        for axis in ("overall", "performance", "availability", "selectivity")
+        for axis in ("overall", "grade_average", "reserve")
     ]
     overall = axes[0].groups[0]
     for index, period in enumerate(overall.x):

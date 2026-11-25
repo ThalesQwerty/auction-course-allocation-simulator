@@ -133,7 +133,6 @@ def _run_credit_round(
             epsilon=draws.epsilon,
             seed=config.seed,
         ),
-        resolver=config.resolver,
     )
     for (student_id, name), allocated in result.allocation.items():
         if allocated:
@@ -186,7 +185,12 @@ def _run_ranking_round(
     # `requests`.
     priority = {s.id: grade_averages[s.id] for s in active}
     tiebreak = draws.student_epsilon
-    allocate = allocate_by_ilp if config.resolver == "ilp" else allocate_by_ranking
+    # O resolvedor é do **mecanismo**, e não escolha de cenário: o CR roda por
+    # ditadura serial (que desempata por ε) e o leilão por PLI (que ignora o ε
+    # e maximiza o bem-estar). Era configurável até 24/11/2026, quando o escopo
+    # fechou nos dois modelos — "CR com PLI" e "leilão guloso" deixaram de ser
+    # alcançáveis.
+    allocate = allocate_by_ilp if config.uses_credits else allocate_by_ranking
     started = perf_counter()
     allocated = allocate(
         requests=requests,

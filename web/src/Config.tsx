@@ -1,18 +1,18 @@
 import { useMemo, useState } from "react";
 import { DensityChart, LineSample, STATUS } from "./charts";
-import { entryDisciplines } from "./curriculum";
-import { availabilityCurve, gradeCurve, interestCurve } from "./distributions";
+import { entryClasses, entryDisciplines } from "./curriculum";
 import {
-  entryClassLoad,
-  fullLoadThreshold,
-  schedulePressure,
-} from "./equations";
+  availabilityCurve,
+  gradeCurve,
+  interestCurve,
+  selectivityCurve,
+} from "./distributions";
+import { cohortSize, fullLoadThreshold, schedulePressure } from "./equations";
 import { PresetList } from "./PresetList";
 import { nameExists } from "./savedPresets";
 import type { SavedPreset } from "./savedPresets";
 import { SaveScenario } from "./SaveScenario";
 import { COMPARISON_ARMS, MAX_COMPARISON_RUNS, horizonFor } from "./types";
-import { MAX_QUANTILES } from "./profileColors";
 import type { Scenario } from "./types";
 
 /** Quantas turmas caem em cada horário, lido como faixa. É o número que diz
@@ -76,22 +76,19 @@ export function Config({
   // aceita, e o erro cresceria com o tamanho do catálogo de optativas.
   const entryCourses = entryDisciplines(config.disciplines);
   const entryHours = entryCourses.reduce((sum, d) => sum + d.hours, 0);
-  const cohort = config.students_per_period;
-  // Por **turma**: a matrícula garantida reparte a coorte entre as turmas de
-  // cada disciplina de entrada, e o que precisa caber é o maior desses
-  // blocos — não a coorte inteira.
-  const biggestEntryBlock = entryCourses.length
-    ? Math.max(
-        ...entryCourses.map((d) => Math.max(...entryClassLoad(cohort, d.classes)))
-      )
-    : 0;
-  const entryTooLarge = biggestEntryBlock > config.class_size;
-  // Quantos calouros a oferta de entrada comporta: a disciplina de entrada com
-  // menos turmas é o gargalo. Os blocos são equilibrados, então a coorte cabe
-  // exatamente quando não passa disto.
-  const entrySeats = entryCourses.length
-    ? Math.min(...entryCourses.map((d) => d.classes)) * config.class_size
-    : 0;
+  // A coorte é derivada: o ingresso por turma de entrada vezes as turmas de
+  // uma delas.
+  const cohort = cohortSize(
+    config.students_per_entry_class,
+    entryClasses(config.disciplines)
+  );
+  // O ingressante ocupa vaga da própria turma, então o que precisa caber é ele
+  // contra a lotação.
+  const entryTooLarge = config.students_per_entry_class > config.class_size;
+  // O que resta em disputa em cada turma de entrada. Zero é cenário legítimo e
+  // armadilha: quem reprovar a disciplina não torna a cursá-la, porque a
+  // garantia vale só no ingresso.
+  const contestedEntrySeats = config.class_size - config.students_per_entry_class;
   const entryTooHeavy = entryHours > config.max_hours;
 
   // Porcentagem com casas suficientes para 0,05% não virar 0%: as chances de
@@ -136,6 +133,18 @@ export function Config({
     Math.max(0, Math.ceil(-Math.log10(Math.max(interestTop, 1e-9) / 10))) + 1;
   const interestValue = (value: number) =>
     value.toLocaleString("pt-BR", { maximumFractionDigits: interestDigits });
+
+  // A seletividade vive na mesma escala do interesse, mas ordens de grandeza
+  // abaixo — mediana em milésimos —, então ela precisa da própria régua e das
+  // próprias casas, e não das do interesse.
+  const selectivity = useMemo(() => selectivityCurve(config), [config]);
+  const selectivityTop = selectivity.points.length
+    ? selectivity.points[selectivity.points.length - 1].x
+    : 1;
+  const selectivityDigits =
+    Math.max(0, Math.ceil(-Math.log10(Math.max(selectivityTop, 1e-9) / 10))) + 1;
+  const selectivityValue = (value: number) =>
+    value.toLocaleString("pt-BR", { maximumFractionDigits: selectivityDigits });
 
   // O nome proposto ao salvar. Vindo de um preset carregado, é o nome dele —
   // salvar por cima de um salvo é o caminho de edição, e repetir o nome é
@@ -252,18 +261,19 @@ export function Config({
               )}
             </div>
             <div className="field">
-              <label>Ingressantes por período</label>
+              <label>Ingressantes por turma de entrada</label>
               <input
                 type="number"
                 min={1}
                 className={entryTooLarge ? "invalid" : undefined}
-                value={config.students_per_period}
-                onChange={(e) => patch({ students_per_period: Number(e.target.value) })}
+                value={config.students_per_entry_class}
+                onChange={(e) =>
+                  patch({ students_per_entry_class: Number(e.target.value) })
+                }
               />
               {entryTooLarge && (
                 <span className="field-hint invalid-text">
-                  A coorte põe {biggestEntryBlock} ingressantes numa turma de{" "}
-                  {config.class_size} vagas.
+                  A turma tem {config.class_size} vagas.
                 </span>
               )}
             </div>
@@ -311,35 +321,11 @@ export function Config({
                 onChange={(e) => patch({ max_credits: Number(e.target.value) })}
               />
             </div>
-            <div className="field">
-              <label>Multiplicador do retorno (k)</label>
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={config.return_multiplier}
-                onChange={(e) =>
-                  patch({ return_multiplier: Number(e.target.value) })
-                }
-              />
-            </div>
-            <div className="field">
-              <label>Retorno da excluída (%)</label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={5}
-                value={Math.round(config.exclusion_refund_rate * 100)}
-                onChange={(e) =>
-                  patch({ exclusion_refund_rate: Number(e.target.value) / 100 })
-                }
-              />
-            </div>
           </div>
 
           <p className="note">
-            Coorte de {cohort} · {entrySeats} vagas de ingresso ·{" "}
+            Coorte de {cohort} · {contestedEntrySeats} vagas em disputa por turma
+            de entrada ·{" "}
             {horizonFor(config.max_residence, config.observation_periods)}{" "}
             períodos, dos quais {config.max_residence} de pré-população ·{" "}
             {cohort * config.max_residence} alunos em regime
@@ -410,6 +396,63 @@ export function Config({
         </div>
 
         <div className="panel">
+          <h2>Seletividade</h2>
+          <div className="config-split">
+            <div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Mediana</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.0005}
+                    value={config.selectivity_median}
+                    onChange={(e) =>
+                      patch({ selectivity_median: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Desvio (σ)</label>
+                  <input
+                    type="number"
+                    min={0.05}
+                    step={0.05}
+                    value={config.selectivity_sigma}
+                    onChange={(e) =>
+                      patch({ selectivity_sigma: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Nível basilar</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={config.selectivity_stability}
+                    onChange={(e) =>
+                      patch({ selectivity_stability: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="config-preview">
+              <DensityChart
+                id="curva-seletividade"
+                title="Log-normal fonte da seletividade"
+                points={selectivity.points}
+                domain={[0, selectivityTop]}
+                footer={<>mais provável: {selectivityValue(selectivity.mode)}</>}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="panel">
           <h2>Disponibilidade</h2>
           <div className="config-split">
             <div>
@@ -423,8 +466,8 @@ export function Config({
                   </label>
                   <input
                     type="number"
-                    min={30}
-                    step={30}
+                    min={1}
+                    step={1}
                     className={entryTooHeavy ? "invalid" : undefined}
                     value={config.max_hours}
                     onChange={(e) => patch({ max_hours: Number(e.target.value) })}
@@ -506,7 +549,7 @@ export function Config({
                 format={(value) => `${Math.round(value)} h`}
                 split={{
                   // A divisa é `W_a − 0,5`, e não W_a: a carga efetiva
-                  // arredonda, então 29,6 h já enche uma carga de 30 h. É o
+                  // arredonda, então 23,6 h já enche uma carga de 24 h. É o
                   // limiar que a própria log-normal inverte, e é o que faz a
                   // etiqueta concordar com a hora que o tooltip mostra.
                   at: fullLoadThreshold(config.max_hours),
@@ -686,66 +729,6 @@ export function Config({
 
         {/* O eixo de estratégia. Sem prévia: o número é uma regra de
             decisão, não uma distribuição que a tela precise desenhar. */}
-        <div className="panel">
-          <h2>Seletividade</h2>
-          <div className="field-row">
-            <div className="field">
-              <label>Mediana</label>
-              <input
-                type="number"
-                min={0}
-                step={0.0005}
-                value={config.selectivity_median}
-                onChange={(e) =>
-                  patch({ selectivity_median: Number(e.target.value) })
-                }
-              />
-            </div>
-            <div className="field">
-              <label>Desvio (σ)</label>
-              <input
-                type="number"
-                min={0.05}
-                step={0.05}
-                value={config.selectivity_sigma}
-                onChange={(e) =>
-                  patch({ selectivity_sigma: Number(e.target.value) })
-                }
-              />
-            </div>
-            <div className="field">
-              <label>Nível basilar</label>
-              <input
-                type="number"
-                min={0}
-                max={1}
-                step={0.05}
-                value={config.selectivity_stability}
-                onChange={(e) =>
-                  patch({ selectivity_stability: Number(e.target.value) })
-                }
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="panel">
-          <h2>Recorte dos gráficos</h2>
-          <div className="field-row">
-            <div className="field">
-              <label>Faixas de quantil</label>
-              <input
-                type="number"
-                min={1}
-                max={MAX_QUANTILES}
-                step={1}
-                value={config.quantiles}
-                onChange={(e) => patch({ quantiles: Number(e.target.value) })}
-              />
-            </div>
-          </div>
-        </div>
-
         <div className="panel">
           <h2>Horários</h2>
           <div className="field-row">

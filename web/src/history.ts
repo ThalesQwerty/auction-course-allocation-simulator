@@ -1,4 +1,6 @@
-import { withUnlocks } from "./curriculum";
+import { entryClasses, withUnlocks } from "./curriculum";
+import { cohortSize } from "./equations";
+import { defaultScenario } from "./presets";
 import { readEntries, requestPersistence, writeEntries } from "./historyStore";
 import { COMPARISON_ARMS, horizonFor } from "./types";
 import type { CompareRequest, CompareResponse, Scenario } from "./types";
@@ -38,8 +40,8 @@ export type HistoryEntry = ComparisonRun;
  * alocado deixou de ser a disciplina e passou a ser a **turma**, e o perfil do
  * aluno ganhou dois eixos de estratégia — seletividade e concentração — no
  * lugar do algoritmo genético, que saiu do escopo. Uma execução da v5 traz
- * `students_per_period` como campo do cenário (hoje ele é derivado dos
- * exemplares por perfil) e não traz eixo de estratégia nenhum; reexecutá-la
+ * `students_per_period` como campo do cenário (hoje a coorte sai do ingresso
+ * por turma de entrada) e não traz eixo de estratégia nenhum; reexecutá-la
  * mandaria à API um cenário que ela recusa. Junto some a entrada evolutiva:
  * `kind: "evolution"` não tem mais tela.
  *
@@ -138,10 +140,10 @@ function migrateScenario<T extends Record<string, unknown>>(config: T): T {
       typeof campos.base_credits === "number" ? campos.base_credits : 12;
     delete campos.base_credits;
   }
-  if (typeof campos.return_multiplier !== "number") campos.return_multiplier = 1;
-  if (typeof campos.exclusion_refund_rate !== "number") {
-    campos.exclusion_refund_rate = 0;
-  }
+  // O multiplicador do retorno e a fração da excluída saíram do cenário em
+  // 24/11/2026: o primeiro virou constante, a segunda virou sempre zero.
+  delete campos.return_multiplier;
+  delete campos.exclusion_refund_rate;
   // Execução gravada antes de 16/11/2026 não tem turno nem horário, e rodou
   // num modelo em que a turma não tinha nenhum dos dois. Reexecutá-la dará
   // outro resultado — o que os padrões fazem aqui é só impedir que a API caia
@@ -168,6 +170,15 @@ function migrateScenario<T extends Record<string, unknown>>(config: T): T {
     campos.observation_periods = Math.max(1, entradas);
   }
   delete campos.entry_periods;
+  // A coorte deixou de ser digitada em 24/11/2026: o que se digita é o
+  // ingresso **por turma de entrada**, e a coorte sai como produto. Não há
+  // tradução — a coorte gravada não costuma ser divisível pelas turmas de
+  // entrada —, então o que havia é descartado e a execução antiga volta com o
+  // ingresso do cenário padrão. Reexecutá-la dará outra população.
+  if (typeof campos.students_per_entry_class !== "number") {
+    campos.students_per_entry_class = defaultScenario().students_per_entry_class;
+  }
+  delete campos.students_per_period;
   return migrated;
 }
 
@@ -308,8 +319,11 @@ function describeScenario(config: Scenario | CompareRequest): string {
   const { rounds, disciplines } = config;
   const periods = horizonFor(config.max_residence, config.observation_periods);
   // Em regime a população é a coorte vezes o prazo de jubilamento: entra uma
-  // por período e sai uma, de `t = max_residence` em diante.
-  const students = config.students_per_period * config.max_residence;
+  // por período e sai uma, de `t = max_residence` em diante. A coorte, por sua
+  // vez, é o ingresso por turma de entrada vezes as turmas dela.
+  const students =
+    cohortSize(config.students_per_entry_class, entryClasses(disciplines)) *
+    config.max_residence;
   const rodadas = rounds === 1 ? "1 rodada" : `${rounds} rodadas`;
   // O ciclo de vida muda o resultado inteiro, não só a escala: duas execuções
   // que só diferem nele precisam se distinguir. E como |T| é derivado dos dois
@@ -331,7 +345,11 @@ function describeScenario(config: Scenario | CompareRequest): string {
       maximumFractionDigits: 5,
     })}`,
     `interesse σ ${numero(config.interest_sigma)}`,
-    `${config.quantiles} ${config.quantiles === 1 ? "faixa" : "faixas"}`,
+    // Uma faixa a mais que os cortes, por eixo. O do crédito não entra: ele
+    // só existe no leilão, e o resumo descreve o cenário, não o braço.
+    `CR em ${config.grade_cuts.length + 1}, reserva em ${
+      config.reserve_cuts.length + 1
+    }`,
   ];
   return (
     `${horizonte} × ${rodadas} · ${disciplines.length} disciplinas · ${students} alunos` +

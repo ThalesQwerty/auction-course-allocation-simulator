@@ -126,9 +126,9 @@ A comparação empírica direta entre mecanismos de matrícula universitária é
 
 A simulação computacional, entretanto, contorna essa limitação ao permitir que exatamente a mesma população, com as mesmas preferências, no mesmo modelo de universidade, encontre mecanismos de alocação diferentes, de forma a concentrar o nexo causal da diferença entre os resultados obtidos estritamente nos mecanismos analisados.
 
-% Essa possibilidade é o que organiza a metodologia adotada. Os dois mecanismos são executados sobre um único modelo de universidade: a grade de disciplinas, a população de estudantes, suas preferências, seu desempenho acadêmico, os pré-requisitos, a matrícula garantida dos ingressantes e os critérios de conclusão são idênticos nos dois lados, e o que se substitui é apenas o núcleo decisório de cada rodada de alocação. Como toda a aleatoriedade do cenário é derivada de uma semente fixada antes da execução, rodar a mesma semente em ambos os mecanismos significa submeter literalmente os mesmos estudantes, com as mesmas preferências e as mesmas aptidões, a regras diferentes --- e é essa construção pareada que torna a diferença observada atribuível ao mecanismo, e não à amostra sorteada. A repetição do experimento sobre múltiplas sementes separa, por sua vez, o efeito do mecanismo da variabilidade de uma população específica.
+% Essa possibilidade é o que organiza a metodologia adotada. Os dois mecanismos são executados sobre um único modelo de universidade: a grade de disciplinas, a população de estudantes, suas preferências, seu desempenho acadêmico, os pré-requisitos, a matrícula garantida dos ingressantes e os critérios de conclusão são idênticos nos dois lados, e o que se substitui é apenas o núcleo decisório de cada rodada de alocação. Como toda a aleatoriedade do cenário é derivada de uma semente fixada antes da execução, rodar a mesma semente em ambos os mecanismos significa submeter literalmente os mesmos estudantes, com as mesmas preferências e as mesmas aptidões, a regras diferentes, e é essa construção pareada que torna a diferença observada atribuível ao mecanismo, e não à amostra sorteada. A repetição do experimento sobre múltiplas sementes separa, por sua vez, o efeito do mecanismo da variabilidade de uma população específica.
 
-% A dimensão temporal do modelo não é um refinamento acessório, mas condição para observar o fenômeno que motiva o trabalho. O efeito bola de neve é, por definição, cumulativo: ele se manifesta como divergência progressiva entre trajetórias, e uma única rodada de alocação --- ou mesmo um único período letivo --- não é capaz de exibi-lo. Pela mesma razão, métricas como o tempo médio até a integralização curricular e a fração de ingressantes que efetivamente concluem o curso só existem sobre um horizonte que acompanhe coortes do ingresso ao desligamento.
+% A dimensão temporal do modelo não é um refinamento acessório, mas condição para observar o fenômeno que motiva o trabalho. O efeito bola de neve é, por definição, cumulativo: ele se manifesta como divergência progressiva entre trajetórias, e uma única rodada de alocação, ou mesmo um único período letivo, não é capaz de exibi-lo. Pela mesma razão, métricas como o tempo médio até a integralização curricular e a fração de ingressantes que efetivamente concluem o curso só existem sobre um horizonte que acompanhe coortes do ingresso ao desligamento.
 
 % Por fim, o próprio simulador desenvolvido constitui contribuição secundária do trabalho. Implementado de modo que cada equação do modelo corresponda a uma função isolada e verificável, e acompanhado de uma interface de configuração que permite variar a grade curricular, o tamanho e a composição da população, a oferta de vagas e os parâmetros comportamentais, ele torna os resultados aqui apresentados reproduzíveis e permite que as conclusões sejam reexaminadas sob cenários distintos dos que foram adotados.
 
@@ -514,7 +514,7 @@ Enquanto $t$ representa o período global da simulação, a variável $t_a \in \
 
 % Medir antes disso seria medir o regime transitório em que a universidade ainda se enche, e não o estado estacionário. A distinção não é cosmética: as métricas de alocação são sensíveis ao tamanho da população que disputa as mesmas vagas, e uma curva ao longo de um horizonte que ainda cresce mostra o enchimento da universidade em vez do comportamento do mecanismo.
 
-% O jubilamento, além de regra institucional, é o que faz o estado estacionário existir. Com ingresso contínuo e sem prazo de permanência, a população só deixaria de crescer se todos os alunos concluíssem o curso dentro de um tempo esperado finito --- o que não se pode supor de antemão num cenário escassez.
+% O jubilamento, além de regra institucional, é o que faz o estado estacionário existir. Com ingresso contínuo e sem prazo de permanência, a população só deixaria de crescer se todos os alunos concluíssem o curso dentro de um tempo esperado finito, o que não se pode supor de antemão num cenário escassez.
 
 
 % Por sua vez, o valor $t^{(t)}_a$ indica por quantos perídos o aluno esteve matrículado até o período $t$:
@@ -545,12 +545,14 @@ Por consequência, dá-se que o conjunto das aprovadas de um aluno nunca perde e
     \quad \forall X \in M, \forall a \in A^{(t)}
 \end{equation}
 
-Cada disciplina cursada retorna uma quantidade de créditos, $\gamma_{a, x}^{(t)} \in \mathbb{N}$, definida em função do preço pago e da nota obtida, onde $m_\gamma$ é uma constante que atua como multiplicador máximo de retorno:
-\begin{equation}
-\gamma_{a, x}^{(t)} = m_\gamma \cdot \delta_{a, x} \cdot (\frac{n_{a, X}^{(t)}}{10}) 
+Cada disciplina cursada retorna uma quantidade de créditos, $\gamma_{a, x}^{(t)} \in \mathbb{N}$, definida em função do preço pago e da nota obtida:
+\begin{equation} \label{eq:retorno}
+\gamma_{a, x}^{(t)} = 2 \cdot \delta_{a, x} \cdot (\frac{n_{a, X}^{(t)}}{10})
 \quad
 \forall a \in A^{(t)}, \forall x \in X, \forall X \in M
 \end{equation}
+ä
+O fator $2$ torna o retorno simétrico nos extremos: o estudante que investe $\delta_{a, x}$ créditos numa vaga perde exatamente esse valor no pior caso, em que obtém nota mínima ou exclui a disciplina, e ganha exatamente esse valor no melhor, em que obtém nota máxima. Nenhum outro fator apresenta tal propriedade. Como consequência, o ponto neutro da conta é a nota $5$, que coincide com o limiar de aprovação adotado.
 
 O retorno total de créditos, $\Gamma_{a}^{(t)}$, é dado por:
 \begin{equation}
@@ -690,22 +692,34 @@ Para as disciplinas obrigatórias, o nível da disciplina, denotado pela funçã
 
 \subsubsection{Disciplinas de entrada}
 
-Dentre as disciplinas obrigatórias, haverá disciplinas de entrada, representadas pelo subconjunto $M_\text{cal} \subseteq \{X \in M_\text{obg} \mid \mathrm{niv}(X) = 1\}$. Os calouros de cada período recebem vagas garantidas nestas disciplinas, distribuídas igualmente entre suas turmas:
+Dentre as disciplinas obrigatórias, haverá disciplinas de entrada, representadas pelo subconjunto $M_\text{cal} \subseteq \{X \in M_\text{obg} \mid \mathrm{niv}(X) = 1\}$. Os calouros de cada período recebem vagas garantidas nestas disciplinas:
 \begin{equation}
     \exists! x \in X : z^{(t, 1)}_{a, x} = 1
     \quad \forall a \in A^{(t)}_\text{cal}, \forall  X \in M_\text{cal}
 \end{equation}
-\begin{equation} \label{eq:oferta-de-entrada}
-    \sum_{x \in X} q_x \geq \left| A^{(t)}_\text{cal} \right| 
+
+A vaga garantida é contabilizada na própria oferta da turma, $q_x$, e a única diferença em relação às demais é entrar na primeira rodada com $z^{(t, 1)}_{a, x} = 1$ fixado. Como o mecanismo não aloca bem que não tenha sido solicitado, o sistema lança em nome do calouro, em cada vaga garantida, a divisão inteira do seu orçamento inicial entre as disciplinas de entrada:
+\begin{equation} \label{eq:lance-de-entrada}
+    c_{a, x}^{(t, 1)} = \left\lfloor \frac{C_{\min}}{\left| M_\text{cal} \right|} \right\rfloor
+    \quad \forall a \in A^{(t)}_\text{cal},
+    \forall x \in B : z^{(t, 1)}_{a, x} = 1
+\end{equation}
+
+O resto da divisão permanece no saldo, ao passo que na ordenação por CR, onde não há crédito a lançar, registra-se a solicitação sem valor associado. É este lance que dá preço pago à vaga de entrada, sem o qual o retorno de créditos da equação \eqref{eq:retorno} não teria sobre o que incidir no primeiro período do estudante.
+
+Determina-se, por fim, o \textbf{ingresso por turma de entrada}, $q^\text{cal} \in \mathbb{N}^*$, do qual decorre o tamanho da coorte:
+\begin{equation} \label{eq:coorte}
+    \left| A^{(t)}_\text{cal} \right| = q^\text{cal} \cdot \left| X \right|
     \quad \forall X \in M_\text{cal}
 \end{equation}
-\begin{equation} \label{eq:reparticao-garantida}
-    \left|
-        \sum_{a \in A^{(t)}_\text{cal}}
-        \left( z^{(t, *)}_{a, x} - z^{(t, *)}_{a, y} \right)
-    \right| \leq 1
-    \quad \forall X \in M_\text{cal}, \; \forall x, y \in X
+\begin{equation} \label{eq:vagas-de-entrada}
+    q_x \geq q^\text{cal}
+    \quad \forall X \in M_\text{cal}, \forall x \in X
 \end{equation}
+
+A equação \eqref{eq:coorte} exige que todas as disciplinas de entrada tenham o mesmo número de turmas, visto que, do contrário, cada uma delas implicaria uma coorte de tamanho distinto. A restrição \eqref{eq:vagas-de-entrada}, por sua vez, é o que torna a garantia exequível, dado que a matrícula garantida não escolhe quem a recebe.
+
+A garantia vale somente no ingresso: o estudante que reprova uma disciplina de entrada volta a disputá-la como qualquer outra. Por consequência, $q_x = q^\text{cal}$ numa turma de entrada implica que o reprovado jamais tornará a cursá-la, o que é configuração admissível, porém indesejável.
 
 \subsubsection{Horários}
 
@@ -883,7 +897,7 @@ Para evitar que disciplinas com mais turmas tenham valores de interesse mais sim
     i_{a, x} = \sqrt{\alpha} \cdot v_{a, X} + \sqrt{1 - \alpha} \cdot \beta
 \end{equation}
 
-% Para o recorte dos resultados, a população é dividida em \textbf{faixas de quantil} sobre o nível basilar de cada eixo. O corte é teórico, e não amostral: como o nível basilar é normal padrão por construção, a sua acumulada é uniforme e as fronteiras das faixas são as mesmas em toda execução. Cortar nos quantis amostrais produziria faixas exatamente equilibradas dentro de cada simulação, mas fronteiras distintas a cada semente --- e a média sobre múltiplas execuções estaria somando faixas que não designam o mesmo conjunto de estudantes.
+% Para o recorte dos resultados, a população é dividida em \textbf{faixas de quantil} sobre o nível basilar de cada eixo. O corte é teórico, e não amostral: como o nível basilar é normal padrão por construção, a sua acumulada é uniforme e as fronteiras das faixas são as mesmas em toda execução. Cortar nos quantis amostrais produziria faixas exatamente equilibradas dentro de cada simulação, mas fronteiras distintas a cada semente, e a média sobre múltiplas execuções estaria somando faixas que não designam o mesmo conjunto de estudantes.
 
 \section{Comparação com o modelo tradicional baseado em CR}
 
@@ -908,6 +922,22 @@ As demais características do modelo de simulação, como valores de interesse, 
 
 Para a avaliação dos resultados obtidos das simulações, será analisado como que diferentes métricas do modelo evoluem no decorrer dos períodos da simulação. As métricas a serem utilizadas são especificadas a seguir.
 
+Todas elas são medidas sobre o subconjunto dos \textbf{alunos medidos} do período, $A_\text{med}^{(t)} \subseteq A^{(t)}$, que exclui os calouros:
+\begin{equation} \label{eq:medidos}
+    A_\text{med}^{(t)} = A^{(t)} \setminus A_\text{cal}^{(t)}
+\end{equation}
+
+O ingressante recebe um pacote fixo de vagas reservadas e não disputa coisa alguma, de modo que ele conta como pessoa e não como observação. Por consequência, o primeiro período letivo da simulação não publica métrica nenhuma.
+
+Para toda grandeza definida por estudante, $f_a^{(t)}$, denota-se por $\bar{f}^{(t)}$ a sua média sobre esse subconjunto. A fórmula é a mesma em todas, e por isso não se repete em cada uma delas:
+\begin{equation} \label{eq:media}
+    \bar{f}^{(t)} =
+    \frac{1}{\left| A_\text{med}^{(t)} \right|} \cdot
+    \sum_{a \in A_\text{med}^{(t)}} f_a^{(t)}
+\end{equation}
+
+Caso o subconjunto esteja vazio, nenhuma métrica é publicada para o período, e a média não chega a ser calculada.
+
 \subsubsection{Satisfação}
  
 Primeiro, determina-se a \textbf{satisfação}, $\psi_a^{(t)} \in [0, 1]$, de cada aluno $a$, como a soma total das utilidades das turmas cuja solicitação de matrícula foi deferida:
@@ -916,25 +946,7 @@ Primeiro, determina-se a \textbf{satisfação}, $\psi_a^{(t)} \in [0, 1]$, de ca
     \quad \forall a \in A^{(t)}
 \end{equation}
 
-A satisfação média, denotada por $\bar{\psi}^{(t, r)} \in [0, 1]$, dos estudantes, dá-se por:
-\begin{equation}
-    \bar{\psi}^{(t)} = 
-    \frac{1}{|A^{(t)}|} \cdot
-    \sum_{a \in A^{(t)}} {\psi_a^{(t)}}
-\end{equation}
-
-\subsubsection{Frustração}
-
-Paralelamente, determina-se a \textbf{frustração}, $\theta_a^{(t)} \in [0, 1]$, como a soma total das utilidades das turmas cuja solicitação de matrícula foi indeferida:
-\begin{equation}
-    \theta_a^{(t)} = \sum_{x \in B : (a, x) \in D^{(t)}} u_{a, x}^{(t)} \cdot \left(1 - z_{a, x}^{(t, *)}\right)
-    \quad \forall a \in A^{(t)}
-\end{equation}
-\begin{equation}
-    \bar{\theta}^{(t)} = 
-    \frac{1}{|A^{(t)}|} \cdot
-    \sum_{a \in A^{(t)}} {\theta_a^{(t)}}
-\end{equation}
+A satisfação média dos estudantes, $\bar{\psi}^{(t)} \in [0, 1]$, segue a equação \eqref{eq:media}.
 
 \subsubsection{Desperdício}
 
@@ -943,11 +955,6 @@ Determina-se o \textbf{desperdício}, $\omega_a^{(t)} \in [0, 1]$, como a soma t
     \omega_a^{(t)} = \sum_{x \in B} u_{a, x}^{(t)} \cdot \left(z_{a, x}^{(t, *)} - z_{a, x}^{[pos](t)}\right)
     \quad \forall a \in A^{(t)}
 \end{equation}
-\begin{equation}
-    \bar{\omega}^{(t)} = 
-    \frac{1}{|A^{(t)}|} \cdot
-    \sum_{a \in A^{(t)}} {\omega_a^{(t)}}
-\end{equation}
 
 \subsubsection{Aproveitamento}
 
@@ -955,11 +962,6 @@ Determina-se o \textbf{aproveitamento}, $\eta_a^{(t)} \in [0, 1]$, como a fraç�
 \begin{equation}
     \eta_a^{(t)} = \frac{1}{W_a^{(t, 1)}} \cdot \sum_{x \in B} w_{x} \cdot z_{a, x}^{(t, *)}
     \quad \forall a \in A^{(t)}
-\end{equation}
-\begin{equation}
-    \bar{\eta}^{(t)} =
-    \frac{1}{|A^{(t)}|} \cdot
-    \sum_{a \in A^{(t)}} {\eta_a^{(t)}}
 \end{equation}
 
 Trata-se da contraparte em carga horária da satisfação, que é em utilidade, e as duas separam-se exatamente onde está o efeito que interessa medir: o estudante que concentra os lances, obtém a turma que mais queria e deixa ocioso o restante de $W_a^{(t, 1)}$ pontua satisfação alta e aproveitamento baixo. O limite superior decorre da equação \eqref{eq:capacidade}, que restringe ambos os mecanismos.
@@ -979,24 +981,20 @@ Determina-se o \textbf{progresso}, $\rho_a^{(t)} \in [0, 1]$, como a fração da
     }
     \quad \forall a \in A^{(t)}
 \end{equation}
-\begin{equation}
-    \bar{\rho}^{(t)} =
-    \frac{1}{|A^{(t)}|} \cdot
-    \sum_{a \in A^{(t)}} {\rho_a^{(t)}}
-\end{equation}
 
-Com esse recorte, $\rho_a^{(t)} = 1$ equivale à conclusão do curso: a primeira parcela só atinge $W_\text{obg}$ quando nenhuma obrigatória ficou para trás, e a segunda só atinge $W_\text{opt}$ quando a exigência optativa foi cumprida --- que são exatamente as duas condições da equação \eqref{eq:conclusao}. Aprovar optativas além da exigência, portanto, não aumenta o progresso, do mesmo modo que não antecipa a formatura.
+Com esse recorte, $\rho_a^{(t)} = 1$ equivale à conclusão do curso: a primeira parcela só atinge $W_\text{obg}$ quando nenhuma obrigatória ficou para trás, e a segunda só atinge $W_\text{opt}$ quando a exigência optativa foi cumprida, que são exatamente as duas condições da equação \eqref{eq:conclusao}.Aprovar optativas além da exigência, portanto, não aumenta o progresso, do mesmo modo que não antecipa a formatura.
 
 O progresso mede quanto falta do curso inteiro, e não o ritmo com que o estudante avança: o calouro bem-sucedido pontua baixo por definição. A média carrega viés de sobrevivência, visto que o estudante deixa de ser medido no período seguinte ao da conclusão. Lê-se, portanto, ao lado da fração de concluintes de cada coorte, e não isoladamente.
 
 \subsubsection{Equidade}
 
-A equidade (\textit{fairness}), denotada por $\phi^{(t)} \in \{0\} \cup [\frac{1}{|A^{(t)}|}, 1]$, por sua vez, mede a proximidade entre as satisfações dos estudantes, por meio do Índice de Equidade de Jain, no qual o limite inferior, $\frac{1}{|A^{(t)}|}$, indica um cenário onde um único agente concentra todos os bens alocados, e o limite superior, $1$, indica um cenário onde todos os agentes obtém exatamente a mesma satisfação da alocação dos bens \cite{jain1984quantitative}:
+A equidade (\textit{fairness}), denotada por $\phi^{(t)} \in \{0\} \cup [\frac{1}{|A_\text{med}^{(t)}|}, 1]$, por sua vez, mede a proximidade entre as satisfações dos estudantes, por meio do Índice de Equidade de Jain, no qual o limite inferior, $\frac{1}{|A_\text{med}^{(t)}|}$, indica um cenário onde um único agente concentra todos os bens alocados, e o limite superior, $1$, indica um cenário onde todos os agentes obtém exatamente a mesma satisfação da alocação dos bens \cite{jain1984quantitative}. Não é uma média, mas é medida sobre o mesmo subconjunto:
 \begin{equation}
     \phi^{(t)} = \frac{
-        \left( \sum_{a \in A^{(t)}} \psi_a^{(t)} \right)^2
+        \left( \sum_{a \in A_\text{med}^{(t)}} \psi_a^{(t)} \right)^2
     }{
-        |A^{(t)}| \cdot \sum_{a \in A^{(t)}} \left(\psi_a^{(t)}\right)^2
+        \left| A_\text{med}^{(t)} \right| \cdot
+        \sum_{a \in A_\text{med}^{(t)}} \left(\psi_a^{(t)}\right)^2
     }
 \end{equation}
 
@@ -1004,27 +1002,24 @@ Caso a fração resulte na indeterminação $\frac{0}{0}$, assume-se que $\phi^{
 
 \subsubsection{Correlações}
 
-Por fim, para mensurar o grau de dependência linear entre duas grandezas definidas por estudante, aplica-se o coeficiente de correlação de Pearson \cite{montgomery2010applied}. Sejam $f_a^{(t)}$ e $g_a^{(t)}$ duas dessas grandezas, e $\bar{f}^{(t)}$ e $\bar{g}^{(t)}$ as suas médias sobre os alunos ativos no período; o coeficiente, denotado por $\lambda^{(t)}(f, g) \in [-1, 1]$, estabelece-se pela covariância entre elas, normalizada pelo produto de seus respectivos desvios padrão:
-\begin{equation}
-    \bar{f}^{(t)} = \frac{\sum_{a \in A^{(t)}} f_a^{(t)}}{|A^{(t)}|}
-\end{equation}
+Por fim, para mensurar o grau de dependência linear entre duas grandezas definidas por estudante, aplica-se o coeficiente de correlação de Pearson \cite{montgomery2010applied}. Sejam $f_a^{(t)}$ e $g_a^{(t)}$ duas dessas grandezas, e $\bar{f}^{(t)}$ e $\bar{g}^{(t)}$ as suas médias pela equação \eqref{eq:media}; o coeficiente, denotado por $\lambda^{(t)}(f, g) \in [-1, 1]$, estabelece-se pela covariância entre elas, normalizada pelo produto de seus respectivos desvios padrão:
 \begin{equation}
     \lambda^{(t)}(f, g) =
     \frac{
-        \sum_{a \in A^{(t)}}
+        \sum_{a \in A_\text{med}^{(t)}}
             \left( f_a^{(t)} - \bar{f}^{(t)} \right) \cdot
             \left( g_a^{(t)} - \bar{g}^{(t)} \right)
     }{
         \sqrt{
-            \sum_{a \in A^{(t)}} \left( f_a^{(t)} - \bar{f}^{(t)} \right)^2 \cdot
-            \sum_{a \in A^{(t)}} \left( g_a^{(t)} - \bar{g}^{(t)} \right)^2
+            \sum_{a \in A_\text{med}^{(t)}} \left( f_a^{(t)} - \bar{f}^{(t)} \right)^2 \cdot
+            \sum_{a \in A_\text{med}^{(t)}} \left( g_a^{(t)} - \bar{g}^{(t)} \right)^2
         }
     }
 \end{equation}
 
 Quando $\lambda^{(t)}$ é positivo, indica uma correlação linear positiva entre as duas grandezas; quando é negativo, indica o oposto; por fim, $\lambda^{(t)} = 0$ indica ausência de correlação. Além disso, o valor absoluto de $\lambda^{(t)}$ mensura a intensidade dessa correlação: quanto mais próximo de $1$, mais forte ela é. Caso alguma das grandezas não apresente variância no período, o coeficiente não existe, e assume-se $\lambda^{(t)} = 0$.
 
-Medem-se seis correlações, cruzando duas grandezas \textbf{declaradas} pelo estudante — o CR, $N_a^{(t)}$, e a seletividade, $S_a^{(t)}$ — contra três \textbf{resultados} da alocação dele: a satisfação, $\psi_a^{(t)}$; o aproveitamento, $\eta_a^{(t)}$; e a \textbf{retenção}, $\tau_a^{(t)} \in [0, 1]$, definida como a fração da satisfação alocada que o estudante não descartou:
+Medem-se seis correlações, cruzando duas grandezas \textbf{declaradas} pelo estudante (o CR, $N_a^{(t)}$, e a seletividade, $S_a^{(t)}$) contra três \textbf{resultados}da alocação dele: a satisfação, $\psi_a^{(t)}$; o aproveitamento, $\eta_a^{(t)}$; e a \textbf{retenção}, $\tau_a^{(t)} \in [0, 1]$, definida como a fração da satisfação alocada que o estudante não descartou:
 \begin{equation}
     \tau_a^{(t)} = 1 - \frac{\omega_a^{(t)}}{\psi_a^{(t)}}
     \quad \forall a \in A^{(t)} : \psi_a^{(t)} > 0
@@ -1052,7 +1047,29 @@ A célula $\lambda^{(t)}(N, \psi)$ é a que a hipótese nomeia: é por ela que s
 
 \chapter{Resultados e discussão}
 
-[TO-DO]
+\section{Configurações da simulação}
+
+\subsection{Grade de disciplinas}
+
+\subsection{Fluxo de alunos}
+
+\subsection{Comportamento dos alunos}
+
+\section{Verificação da hipótese}
+
+\subsection{Eficiência de alocação}
+
+\subsection{Equidade e influência do CR}
+
+\subsection{Solicitações especulativas}
+
+\section{Desafios encontrados}
+
+\section{Implicações práticas}
+
+\section{Possíveis expansões do experimento}
+
+\chapter{Conclusão}
 
 % ----------------------------------------------------------
 % ELEMENTOS PÓS-TEXTUAIS

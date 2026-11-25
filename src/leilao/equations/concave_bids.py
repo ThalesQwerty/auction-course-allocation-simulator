@@ -28,8 +28,7 @@ O CRITÉRIO DE PARADA
 O aluno **não gasta necessariamente tudo**. Ele investe o k-ésimo crédito em
 X enquanto `U_{a,X}/k ≥ s_a^(t)` — o limiar de
 `equations.reserve_threshold` —, e o que sobra fica no saldo: disponível nas
-rodadas seguintes do período e, com `credit_memory = "carry"`, no período
-seguinte.
+rodadas seguintes do período e, pela eq. (36), no período seguinte.
 
 O `break` é correto porque a comparação é contra a **própria chave do heap**:
 se o topo não passa do limiar, nada passa.

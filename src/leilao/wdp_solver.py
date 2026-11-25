@@ -1,11 +1,13 @@
-"""Resolvedores do Problema de Determinação de Vencedores (WDP).
+"""Resolvedor do Problema de Determinação de Vencedores (WDP).
 
-Dois, com a mesma assinatura — é o que faz de "quem decide a alocação" um
-eixo da comparação, e não uma diferença de implementação:
+`solve_wdp` é a função resolvedora O(P) = z_max da eq. (10), exata, por PLI.
 
-- `solve_wdp` é a função resolvedora O(P) = z_max da eq. (10), exata, por PLI;
-- `solve_wdp_greedy` é a varredura por preferência decrescente, em
-  `equations.greedy_allocation`.
+Houve um segundo resolvedor aqui até 24/11/2026 — `solve_wdp_greedy`, a
+varredura por preferência decrescente —, com a mesma assinatura, para que
+"quem decide a alocação" pudesse ser um eixo da comparação. Saiu com o
+fechamento do escopo: o leilão é o da PLI, e a varredura era degrau de
+ablação. Quem ainda varre por preferência é a linha de base por CR, mas por
+`equations.serial_dictatorship`, que é outra regra.
 
 O PLI maximiza a preferência agregada dos bens alocados:
 
@@ -61,7 +63,6 @@ from __future__ import annotations
 import pulp
 
 from .entities import Allocation, Demand, Problem
-from .equations import greedy_allocation
 
 # Quando toda preferência é inteira — o caso do leilão, em que ela é o lance
 # em créditos —, o objetivo só pode melhorar de 1 em 1. Dizer isso ao CBC o
@@ -162,16 +163,3 @@ def solve_wdp(problem: Problem, *, msg: bool = False) -> Allocation:
     return _taken(variables)
 
 
-def solve_wdp_greedy(problem: Problem, *, msg: bool = False) -> Allocation:
-    """A varredura gulosa — ver `equations.greedy_allocation`."""
-    if not problem.demands:
-        return {}
-    return greedy_allocation(
-        demands=[
-            (d.agent_id, d.good_id, d.preference, d.tiebreak) for d in problem.demands
-        ],
-        seats={g.id: g.quantity for g in problem.goods},
-        hours={g.id: g.weight for g in problem.goods},
-        capacity={a.id: a.capacity for a in problem.agents},
-        exclusions=[e.goods for e in problem.exclusions],
-    )

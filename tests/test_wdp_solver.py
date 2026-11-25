@@ -1,5 +1,5 @@
 from leilao.entities import Agent, Demand, Good, MutualExclusion, Problem
-from leilao.wdp_solver import solve_wdp, solve_wdp_greedy
+from leilao.wdp_solver import solve_wdp
 
 
 def test_single_agent_single_good_within_capacity():
@@ -84,25 +84,6 @@ def test_empty_demands_returns_empty_allocation():
 
 
 # --- as duas camadas: grandeza do mecanismo, depois desempate --------------
-
-
-def test_the_tiebreak_decides_only_among_equals():
-    # Uma turma de 2 vagas, três candidatos com o mesmo lance: quem leva são
-    # os dois de maior desempate. Quem garante isso é a varredura gulosa — a
-    # PLI ignora o desempate, ver o docstring de `wdp_solver`.
-    problem = Problem(
-        agents=[Agent("a1", 10), Agent("a2", 10), Agent("a3", 10)],
-        goods=[Good("x1", quantity=2, weight=1)],
-        demands=[
-            Demand("a1", "x1", preference=5, tiebreak=0.1),
-            Demand("a2", "x1", preference=5, tiebreak=0.7),
-            Demand("a3", "x1", preference=5, tiebreak=0.4),
-        ],
-    )
-    allocation = solve_wdp_greedy(problem)
-    assert allocation[("a2", "x1")] == 1
-    assert allocation[("a3", "x1")] == 1
-    assert allocation[("a1", "x1")] == 0
 
 
 def test_the_ilp_ignores_the_tiebreak_but_still_returns_an_optimum():

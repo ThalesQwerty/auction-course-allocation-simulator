@@ -1,30 +1,18 @@
 """O orçamento do período seguinte — anteprojeto, eqs. (36) e (37).
 
     C_a^(t+1,1) = clamp( C_a^(t,1) − gasto_a^(t) + Γ_a^(t), C_min, C_max )
-    C_a^(t+1,1) = C_min                       memória "none"
     C_a^(1,1)   = C_min                       eq. (37)
 
 O miolo é o da eq. (36) do anteprojeto: o que sobrou atravessa o período. Note
 que **não é poupança** — o aluno aposta o orçamento inteiro e paga o segundo
 preço, então o que sobra é o que ele não foi cobrado, não o que guardou.
 
-A variante `none` substitui a equação por um orçamento que recomeça em `C_min`
-todo período: o passado do aluno não entra no poder de compra dele por via
-alguma.
-
-Note que com ela **o retorno fica inerte** — `period_return` entra e não é
-usado —, de modo que a simulação é idêntica com e sem `f_γ` (medido:
-relatórios iguais, período a período). O retorno só existe onde há acúmulo, e
-é por isso que memória e retorno **não formam um cruzamento 2x2**: o segundo é
-aninhado no primeiro.
-
-**E a volta também vale**: com `k = 0`, `"carry"` é idêntico a `"none"`. O
-orçamento abre em `C_min` (eq. 37) e, sem retorno, `started_with - spent`
-nunca passa dele — o piso o traz de volta a `C_min` todo período. Medido
-também: relatórios iguais, período a período, em todas as seeds. As duas
-inércias juntas dizem que a escada tem **dois** degraus, não três ou quatro:
-ou o orçamento recomeça em `C_min`, ou o retorno o ergue acima do piso e a
-sobra passa a ter o que carregar.
+Houve uma variante `"none"` aqui até 24/11/2026 — o orçamento recomeçando em
+`C_min` todo período, sem acúmulo nenhum. Ela existia para separar o que a
+**moeda** compra do que o **acúmulo** compra, e saiu com o fechamento do
+escopo: o trabalho compara a ordenação por CR contra o leilão com acúmulo e
+retorno, e mais nada. Com ela saiu também o único jeito de tornar o retorno
+inerte, porque o retorno só existe onde há acúmulo.
 
 A FAIXA DO ORÇAMENTO (C_min, C_max)
 ------------------------------------
@@ -47,20 +35,14 @@ o aluno abre o período —, e a conta do meio é livre para passar dos dois lad
 
 Os dois cortam **depois** da conta do período, de modo que gasto e retorno
 continuam sendo creditados por inteiro — o que se perde (ou se ganha) é só a
-parte que passaria da faixa. Com `memory="none"` ambos são inertes, porque ali
-o saldo é `C_min` por construção.
+parte que passaria da faixa.
 
 `max_credits=None` desliga o teto; o piso não se desliga.
 """
 from __future__ import annotations
 
-from typing import Literal
-
-Memory = Literal["none", "carry"]
-
 
 def next_budget(
-    memory: Memory,
     *,
     started_with: int,
     spent: int,
@@ -68,11 +50,7 @@ def next_budget(
     min_credits: int,
     max_credits: int | None = None,
 ) -> int:
-    if memory == "none":
-        return min_credits
-    if memory == "carry":
-        carried = started_with - spent + period_return
-        if max_credits is not None:
-            carried = min(carried, max_credits)
-        return max(carried, min_credits)
-    raise ValueError(f"memória de crédito desconhecida: {memory!r}")
+    carried = started_with - spent + period_return
+    if max_credits is not None:
+        carried = min(carried, max_credits)
+    return max(carried, min_credits)

@@ -12,7 +12,7 @@ Arredonda-se para o **inteiro mais próximo** porque hora é inteira no modelo.
 inconsistência: o limite de carga é do **sistema**, e quem o aplica é o
 alocador, que nunca entrega mais que W_a durante as rodadas. O dado do aluno
 não precisa estar alinhado a priori com a regra da instituição — quem tem
-tempo para 400 h num curso que oferece 360 simplesmente não exclui nada.
+tempo para 30 h num curso que oferece 24 simplesmente não exclui nada.
 
 Foi justamente o alinhamento forçado que a versão anterior errava: com δ como
 fração de W_a, a carga cheia exigia `δ ≥ 1`, que numa distribuição sobre [0, 1]

@@ -13,8 +13,8 @@ quando se substitui `μ = ln(moda) + σ²` na condição `P(X ≥ teto) = p`.
 
 A disponibilidade é a carga que o aluno tem para o período, **em horas**, e não
 uma fração de W_a. A diferença é a mesma que a da nota: o teto de carga é do
-**sistema**, não do aluno. Nada impede alguém de ter tempo para 400 h num
-curso que só oferece 360 — o que impede é a matrícula, e isso o alocador já
+**sistema**, não do aluno. Nada impede alguém de ter tempo para 30 h num
+curso que só oferece 24 — o que impede é a matrícula, e isso o alocador já
 garante durante as rodadas. Modelar a disponibilidade como fração punha o
 limite da instituição dentro da pessoa, e com isso tornava a carga cheia um
 evento de probabilidade zero por construção.
@@ -32,7 +32,7 @@ contra uma carga concreta. Mudar W_a reescala o que o perfil diz, e por isso a
 forma é calculada com W_a na mão, e não guardada no perfil.
 
 O limiar é o da carga **arredondada**, não o da carga cheia: `effective_load`
-devolve `round(δ)`, então 29,5 h já conta como 30 h. Casar a inversão com ele é
+devolve `round(δ)`, então 23,6 h já conta como 24 h. Casar a inversão com ele é
 o que faz "chance de alcançar a carga máxima" significar exatamente isso — sem
 ele o valor realizado sai alguns pontos acima do declarado.
 

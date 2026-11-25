@@ -14,11 +14,9 @@ from ..auction import AuctionResult
 from ..comparison import ARMS, MAX_RUNS
 from ..config import (
     AvailabilityShape,
-    CreditMemory,
     Mechanism,
-    MAX_QUANTILES,
+    MAX_CUTS,
     PerformanceShape,
-    Resolver,
     horizon_for_window,
 )
 from ..equations import grade_shape
@@ -244,21 +242,36 @@ class ScenarioIn(BaseModel):
         le=1,
         description="quanto da seletividade é permanente, entre períodos",
     )
-    quantiles: int = Field(
-        default=3,
-        ge=1,
-        le=MAX_QUANTILES,
+    # Os cortes de cada eixo de recorte. A ordem não importa aqui — o motor os
+    # ordena (`equations.ordered_cuts`) —, e a lista vazia dá uma faixa só.
+    # O domínio de cada um é validado no `SimulationConfig`, porque o do
+    # crédito depende de `min_credits`/`max_credits` deste mesmo pedido.
+    grade_cuts: list[float] = Field(
+        default=[5.0, 7.0],
+        max_length=MAX_CUTS,
+        description="pontos de corte do recorte por CR, em [0, 10]",
+    )
+    reserve_cuts: list[float] = Field(
+        default=[0.01, 0.03],
+        max_length=MAX_CUTS,
+        description="pontos de corte do recorte por utilidade de reserva, em [0, 1)",
+    )
+    credit_cuts: list[int] = Field(
+        default=[15, 20],
+        max_length=MAX_CUTS,
         description=(
-            "em quantas faixas os relatórios recortam a população. O corte é "
-            "sobre o nível basilar de cada eixo; em 1 há uma faixa só"
+            "pontos de corte do recorte por orçamento de crédito, entre C_min "
+            "e C_max; só se aplica ao leilão"
         ),
     )
-    students_per_period: int = Field(
-        default=90,
+    students_per_entry_class: int = Field(
+        default=10,
         ge=1,
         description=(
-            "quantos alunos ingressam por período. Em regime a população é "
-            "isto vezes o prazo de jubilamento"
+            "quantos ingressantes entram em cada turma de disciplina de "
+            "entrada, no máximo `class_size`. A coorte é isto vezes as turmas "
+            "de uma disciplina de entrada, e em regime a população é a coorte "
+            "vezes o prazo de jubilamento"
         ),
     )
     class_stability: float = Field(
@@ -312,7 +325,7 @@ class ScenarioIn(BaseModel):
         ),
     )
     max_hours: int = Field(
-        default=360, ge=1, description="W_a — carga horária máxima por período"
+        default=24, ge=1, description="W_a — carga horária máxima por período"
     )
     max_residence: int = Field(
         default=12,
@@ -355,16 +368,6 @@ class ScenarioIn(BaseModel):
         )
     rounds: int = Field(default=1, ge=1, le=10, description="|R| — rodadas por período")
     min_grade: float = Field(default=5.0, gt=0, le=10, description="n_min")
-    resolver: Resolver = Field(
-        default="ilp",
-        description="quem decide a alocação: PLI global ou varredura gulosa",
-    )
-    credit_memory: CreditMemory = Field(
-        default="carry",
-        description=(
-            "se o orçamento carrega entre períodos (eq. 36) ou recomeça em C_min"
-        ),
-    )
     elective_hours: int = Field(
         default=0,
         ge=0,
@@ -378,32 +381,17 @@ class ScenarioIn(BaseModel):
         ge=1,
         description="C_max — orçamento máximo do período; nulo desliga o teto",
     )
-    # f_gamma — eq. (34): γ = round(nota/10 · k · preço). Este e o `min_credits`
-    # acima são do leilão por créditos e não têm efeito na linha de base por
-    # CR, que não tem orçamento nem preço pago.
-    return_multiplier: float = Field(
-        default=2.0,
-        ge=0,
-        description="k — multiplica o preço pago no retorno; 0 desliga",
-    )
-    exclusion_refund_rate: float = Field(
-        default=0.0,
-        ge=0,
-        le=1,
-        description="fração do preço pago que a disciplina excluída devolve",
-    )
 
 
 class CompareRequest(ScenarioIn):
-    """Uma comparação entre os três modelos sobre o mesmo cenário.
+    """Uma comparação entre os dois modelos sobre o mesmo cenário.
 
     A **seed** do cenário não tem efeito aqui, porque as seeds são 1..`runs` e
-    cada uma roda nos três braços: fixar uma só mediria aquela população, e não
+    cada uma roda nos dois braços: fixar uma só mediria aquela população, e não
     parear mediria a variação entre populações junto da variação entre modelos.
 
-    O `return_multiplier`, ao contrário, vale — mas só onde o braço não o
-    fixa. O retorno é o eixo do experimento: o braço de ablação o desliga
-    impondo 0, e o braço do trabalho roda com o do cenário.
+    Nem o resolvedor nem a memória do orçamento entram: o escopo fechou nos
+    dois modelos, e cada um traz o seu resolvedor por construção.
     """
 
     runs: int = Field(
@@ -419,13 +407,11 @@ class CompareRequest(ScenarioIn):
         default_factory=lambda: [arm.key for arm in ARMS],
         min_length=1,
         description=(
-            "Quais braços rodar. O padrão são os três do trabalho — "
-            "`ranking_greedy` (ordenação por CR), `credits_ilp` (leilão "
-            "igualitário, orçamento fixo em C_min) e `credits_return` "
-            "(leilão acumulativo). Rodar menos braços custa proporcionalmente "
-            "menos tempo e serve para calibrar cenário; os painéis que "
-            "comparam os ausentes simplesmente não aparecem. Também aceita o "
-            "braço de ablação `credits_greedy`."
+            "Quais braços rodar. O padrão são os dois do trabalho — "
+            "`ranking_greedy` (ordenação por CR) e `credits_return` (leilão "
+            "com PLI, acúmulo e retorno). Rodar um só custa metade do tempo e "
+            "serve para calibrar cenário; os painéis que comparam o ausente "
+            "simplesmente não aparecem."
         ),
     )
 
@@ -555,9 +541,6 @@ class ArmResultOut(BaseModel):
 
     key: str
     mechanism: Mechanism
-    # O k efetivamente rodado neste braço, e não o do cenário: o braço de
-    # ablação o impõe em 0 para desligar o retorno.
-    return_multiplier: float
     runs: list[RunSummaryOut]
     # As séries reduzidas entre as seeds: cada régua do eixo X cruzada com o
     # agregado e com cada recorte. A série de cada simulação não sai — só os
@@ -710,7 +693,7 @@ class DisciplineSnapshotOut(BaseModel):
     hours: int
     seats: int
     filled: int
-    # Vagas entregues à matrícula garantida dos ingressantes, antes do leilão.
+    # Vagas entregues à matrícula garantida, antes da primeira rodada.
     granted: int
     # Quantos pediram a disciplina no período; dividido por `seats` dá a
     # concorrência dela.
@@ -740,11 +723,13 @@ class StudentSummaryOut(BaseModel):
     id: str
     name: str
     entry_period: int
-    # Os perfis do aluno, pelo nome — o recorte que a tela individual
-    # mostra no cabeçalho dele, e os eixos pelos quais o relatório agrega.
-    performance: str
-    availability: str
-    selectivity: str
+    # Os níveis basilares do aluno, na normal padrão — o que a tela individual
+    # mostra no cabeçalho dele. Eram o nome da faixa de quantil de cada eixo
+    # até 24/11/2026; o recorte passou a ser por valor corrente e o rótulo
+    # antigo não dizia mais nada.
+    performance_level: float
+    availability_level: float
+    selectivity_level: float
     grade_average: float
     approved_hours: int
     hours_to_graduate: int

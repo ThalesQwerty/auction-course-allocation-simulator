@@ -2,7 +2,6 @@ import { describeEntry, formatRunDate, HistoryEntry } from "./history";
 
 export type View =
   | { kind: "config" }
-  | { kind: "project" }
   | { kind: "graph" }
   | { kind: "playground" }
   | { kind: "run"; id: string };
@@ -37,11 +36,6 @@ export function Sidebar({
         <li>
           <button className={`nav-item ${selected({ kind: "config" }) ? "current" : ""}`} onClick={() => onNavigate({ kind: "config" })}>
             Configurar
-          </button>
-        </li>
-        <li>
-          <button className={`nav-item ${selected({ kind: "project" }) ? "current" : ""}`} onClick={() => onNavigate({ kind: "project" })}>
-            Projeto
           </button>
         </li>
         <li>

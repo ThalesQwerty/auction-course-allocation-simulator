@@ -17,6 +17,7 @@ from ..equations import (
     demand_per_seat,
     entry_class,
     mean_price,
+    reserve_threshold,
     satisfaction,
 )
 from ..population import Student
@@ -180,11 +181,13 @@ class _Reporter:
     period: int
     active: list[Student]
     axis: Axis
-    # Os três eixos de quantil (`Axis.quantiles`), no mesmo instante.
+    # Os eixos de estado (`Axis.states`), no mesmo instante.
     profiles: dict[str, Axis]
     state: PeriodState
     utilities: dict[str, dict[str, float]]
     grade_averages: dict[str, float]
+    # s_a^(t) por aluno — ver `Measurements.reserves`.
+    reserves: dict[str, float]
     scarcities: dict[str, float]
     contentions: dict[str, float]
 
@@ -234,6 +237,7 @@ class _Reporter:
             selectivities={
                 s.id: self.draws.selectivity[(s.id, self.period)] for s in self.active
             },
+            reserves=self.reserves,
             allocated_satisfactions=allocated_satisfactions,
             retained=retained,
             excluded=excluded,
@@ -423,6 +427,15 @@ def run_period(
         return None
 
     grade_averages = {s.id: s.grade_average(draws.discipline_hours) for s in active}
+    # A mesma conta que `behavior` faz para decidir, guardada para o recorte e
+    # para a grade de correlações. Repeti-la aqui em vez de colhê-la de lá
+    # mantém `rounds` sem canal de saída: a decisão não precisa reportar nada.
+    reserves = {
+        s.id: reserve_threshold(
+            selectivity=draws.selectivity[(s.id, period)], interest=interests[s.id]
+        )
+        for s in active
+    }
     state = PeriodState.opening(config=config, active=active)
     scarcities = _scarcities(
         active=active, utilities=utilities, config_seats=state.config_seats
@@ -473,10 +486,11 @@ def run_period(
         period=period,
         active=active,
         axis=Axis.cohorts(draws.entry_periods, period),
-        profiles=Axis.quantiles(config),
+        profiles=Axis.states(config),
         state=state,
         utilities=utilities,
         grade_averages=grade_averages,
+        reserves=reserves,
         scarcities=scarcities,
         contentions=contentions,
     )

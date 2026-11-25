@@ -19,17 +19,23 @@ por período.
 
 Dois cortes a mantêm pequena. Se tudo cabe e nada conflita, não há escolha a
 fazer. E, como os pesos são inteiros, dividir todos eles e a capacidade pelo
-MDC dá exatamente o mesmo ótimo numa tabela MDC vezes menor — uma grade de 60
-e 90 h encolhe a capacidade de 450 para 15.
+MDC dá exatamente o mesmo ótimo numa tabela MDC vezes menor.
+
+O corte pelo MDC está **inerte** na escala atual e continua aqui só por ser
+barato de checar: as cargas são inteiros sucessivos (1, 2, 3...), então o MDC
+é 1 e não há o que dividir. Ele valia quando a carga era medida em horas de
+relógio — uma grade de 60 e 90 h contra um teto de 450 encolhia para 15. Na
+escala de agora a tabela já nasce pequena, porque quem a dimensiona é a
+capacidade, não os pesos.
 
 NÃO DEGENERA NUMA ORDENAÇÃO
 ---------------------------
 
 A heurística natural seria tomar da maior utilidade para a menor até encher, e
-ela erra assim que as cargas diferem. Com teto de 122 h e as candidatas
-Algoritmos (90 h, u 0,22), Cálculo (60 h, 0,13) e Física (60 h, 0,11): a
+ela erra assim que as cargas diferem. Com teto de 4 h e as candidatas
+Algoritmos (3 h, u 0,22), Cálculo (2 h, 0,13) e Física (2 h, 0,11): a
 ordenação toma Algoritmos e para, com 0,22; a mochila toma Cálculo + Física,
-120 h e 0,24. A ordenação sacrifica duas disciplinas baratas para salvar uma
+4 h e 0,24. A ordenação sacrifica duas disciplinas baratas para salvar uma
 cara.
 
 O CONFLITO É FILTRO, E O ÓTIMO VIRA APROXIMADO

@@ -1700,3 +1700,74 @@ td.failed {
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+
+/* O editor de cortes: uma linha de campos numéricos, do corte mais alto para o
+   mais baixo — a mesma ordem em que a legenda lista as faixas. Os dois botões
+   acrescentam e tiram um corte, que é acrescentar e tirar uma faixa. */
+.cut-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cut-list input[type="number"] {
+  width: 76px;
+}
+
+.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 9px;
+}
+
+.ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ghost:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Mensagem de validação. É erro, não explicação — por isso vive sob o campo,
+   onde nenhum subtítulo descritivo tem lugar. */
+.field-error {
+  color: var(--danger);
+  font-size: 11px;
+  margin: 0;
+}
+
+/* As cores das faixas, ao lado do seletor de linhas: um poço de cor por faixa,
+   com o nome dela do lado para que a escolha não dependa de distinguir
+   amostras pequenas de cor. */
+.band-colors {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.band-colors label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.band-colors input[type="color"] {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  padding: 1px;
+  cursor: pointer;
+}

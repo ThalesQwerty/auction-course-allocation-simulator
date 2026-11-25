@@ -102,7 +102,10 @@ def compute_metrics(
     contentions: list[float],
     allocated: int,
     total_seats: int,
-    selectivities: list[float] | None = None,
+    reserves: list[float] | None = None,
+    # O orçamento de abertura por aluno, ou `None` onde não há moeda: é o que
+    # apaga a linha de crédito da grade de correlações em vez de zerá-la.
+    supplies: list[float] | None = None,
     allocated_satisfactions: list[float] | None = None,
     excluded: int | None = None,
     effective_utilizations: list[float] | None = None,
@@ -151,9 +154,10 @@ def compute_metrics(
         correlations=(
             correlations(
                 grade_averages=grade_averages,
-                selectivities=selectivities or [0.0] * len(satisfactions),
+                reserves=reserves or [0.0] * len(satisfactions),
+                credits=supplies,
                 satisfactions=satisfactions,
-                occupancies=utilizations,
+                progresses=progresses,
                 allocated_satisfactions=allocated_satisfactions,
                 retained_satisfactions=satisfactions,
             )

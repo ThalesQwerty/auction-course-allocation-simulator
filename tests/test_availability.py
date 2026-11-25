@@ -6,6 +6,8 @@ nota e a tentativa.
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -26,7 +28,6 @@ from leilao.equations import (
     split_normal_mean,
     effective_load,
     exclusion_rate,
-    exclusion_refund,
     request_funnel,
     request_states,
     retained_set,
@@ -34,7 +35,7 @@ from leilao.equations import (
 from leilao.grading import GradeShapes, draw_base_quantiles, grade_for_attempt
 from leilao.population import Student, generate_students
 from leilao.simulation.snapshots import Axis
-from leilao.equations import quantile_names
+from leilao.equations import value_band, value_band_names
 from collections import Counter
 from leilao.simulation import run_simulation
 
@@ -51,12 +52,11 @@ def make_config(**overrides) -> SimulationConfig:
         disciplines=GRADE,
         periods=6,
         max_residence=4,
-        students_per_period=18,
+        students_per_entry_class=18,
         # A referência da escala é `1/(turmas da grade)` — aqui 4 disciplinas
         # de turma única —, que põe o limiar na utilidade média de uma
         # elegível. Ver `equations.reserve_threshold`.
         selectivity_median=0.25,
-        quantiles=3,
         rounds=2,
         max_hours=240,
         seed=7,
@@ -147,53 +147,26 @@ def test_the_knapsack_returns_nothing_when_the_load_is_zero():
 # --- o retorno da exclusão -------------------------------------------------
 
 
-def test_excluding_refunds_nothing_by_default():
-    """O padrão é o crédito gasto se perder por inteiro. Sem isso, com o
-    retorno desligado (k = 0) excluir seria o melhor resultado possível do
-    sistema: nada se perderia e a vaga ainda assim não voltaria à oferta."""
-    for paid in range(0, 21):
-        assert exclusion_refund(paid=paid) == 0
+def test_excluding_returns_no_credit_at_all():
+    """A excluída não devolve crédito nenhum: o aluno perde o que investiu para
+    obter a vaga, porque não cursou a disciplina para render.
 
-
-def test_the_exclusion_rate_scales_the_price_paid():
-    """A fração é do cenário e é a única coisa que devolve crédito à excluída."""
-    assert exclusion_refund(paid=10, rate=0.5) == 5
-    assert exclusion_refund(paid=10, rate=1.0) == 10
-    assert exclusion_refund(paid=7, rate=0.5) == 4
-    # Fração pequena zera em lance pequeno, que é o lance mais frequente.
-    assert exclusion_refund(paid=1, rate=0.25) == 0
-    assert exclusion_refund(paid=4, rate=0.25) == 1
-    # Excluir nunca devolve mais do que se pagou: a fração é limitada a [0, 1]
-    # na configuração, e aqui a conta respeita o limite.
-    for paid in range(1, 21):
-        assert exclusion_refund(paid=paid, rate=1.0) == paid
-
-    with pytest.raises(ValueError, match="negativo"):
-        exclusion_refund(paid=-1)
-
-
-def test_the_scenario_refuses_an_exclusion_rate_outside_the_unit_interval():
-    """Acima de 1 excluir renderia mais que o lance; abaixo de 0 não é fração."""
-    for rate in (-0.1, 1.5):
-        with pytest.raises(ValueError, match="fração de retorno da exclusão"):
-            make_config(exclusion_refund_rate=rate)
-
-
-def test_the_exclusion_rate_reaches_the_simulation():
-    """A fração do cenário é a que o fechamento do período aplica."""
-    sem = run_simulation(make_config(exclusion_refund_rate=0.0))
-    com = run_simulation(make_config(exclusion_refund_rate=1.0))
-
-    excluidos = [
-        (sem_req, com_req)
-        for sem_h, com_h in zip(sem.histories, com.histories)
-        for sem_p, com_p in zip(sem_h.periods, com_h.periods)
-        for sem_req, com_req in zip(sem_p.requests, com_p.requests)
-        if sem_req.excluded
+    Houve uma fração configurável até 24/11/2026, zero por padrão. Saiu: a
+    monografia nunca a previu, e sem ela não há cenário em que excluir custe
+    menos do que gastar.
+    """
+    result = run_simulation(make_config())
+    excluidas = [
+        record
+        for history in result.histories
+        for period in history.periods
+        for record in period.requests
+        if record.excluded
     ]
-    assert excluidos, "o cenário deveria ter exclusões"
-    assert all(s.returned == 0 for s, _ in excluidos)
-    assert all(c.returned == c.paid for _, c in excluidos)
+    assert excluidas, "o cenário deveria ter exclusões"
+    assert all(record.returned == 0 for record in excluidas)
+    # E elas pagaram alguma coisa: sem isso o teste passaria por vacuidade.
+    assert any(record.paid > 0 for record in excluidas)
 
 
 # --- o desperdício ---------------------------------------------------------
@@ -323,34 +296,48 @@ def test_the_cohort_is_typed_not_derived():
     """O tamanho da coorte é digitado. Era derivado do produto das combinações
     de perfil até 19/11/2026, e mexer num eixo mudava a população sem que
     ninguém pedisse."""
-    config = make_config(students_per_period=20)
+    config = make_config(students_per_entry_class=20)
     students = generate_students(config, np.random.default_rng(0))
     assert config.students_per_period == 20
     assert len([s for s in students if s.entry_period == 1]) == 20
 
 
 def test_the_quantile_bands_split_the_population_evenly():
-    """O corte é teórico, não amostral: `Φ(nível)` é uniforme por construção,
-    então as faixas saem com o mesmo tamanho esperado e as **fronteiras são as
-    mesmas em toda execução** — sem isso a média entre seeds somaria faixas
-    que não são a mesma coisa."""
-    config = make_config(students_per_period=150, quantiles=4)
-    students = generate_students(config, np.random.default_rng(0))
-    axis = Axis.quantiles(config)["performance"]
-    assert axis.order == ["0–25%", "25–50%", "50–75%", "75–100%"]
+    """A fronteira é **declarada**, não amostral: ela sai dos cortes do cenário
+    e é a mesma em toda execução — sem isso a média entre seeds somaria faixas
+    que não são a mesma coisa. O que varia é quem está em cada faixa, e isso é
+    o conteúdo da medida, não ruído nela."""
+    config = make_config(grade_cuts=(5.0, 7.0))
+    axis = Axis.states(config)["grade_average"]
+    assert axis.order == ["0–5", "5–7", "7–10"]
 
-    counts = Counter(axis.key(s) for s in students)
-    esperado = len(students) / 4
-    for name in axis.order:
-        assert abs(counts[name] - esperado) < 0.15 * esperado, name
+    # A mesma ordem com outra seed e outra população: a fronteira não se move.
+    outra = make_config(grade_cuts=(5.0, 7.0), seed=99, students_per_entry_class=6)
+    assert Axis.states(outra)["grade_average"].order == axis.order
+
+
+def test_the_cut_belongs_to_the_band_it_opens():
+    """Com cortes 5 e 7, um CR exatamente 7 está em "7–10" — a comparação é
+    `corte <= valor`, que é o que a especificação da interface pede."""
+    cuts = (5.0, 7.0)
+    assert value_band(value=4.9, cuts=cuts) == 0
+    assert value_band(value=5.0, cuts=cuts) == 1
+    assert value_band(value=6.9, cuts=cuts) == 1
+    assert value_band(value=7.0, cuts=cuts) == 2
+    assert value_band_names(cuts=cuts, low=0.0, high=10.0) == ["0–5", "5–7", "7–10"]
 
 
 def test_one_band_is_the_whole_university():
-    config = make_config(quantiles=1)
-    axis = Axis.quantiles(config)["selectivity"]
+    config = make_config(grade_cuts=(), reserve_cuts=())
+    axis = Axis.states(config)["reserve"]
     assert axis.order == ["Geral"]
-    students = generate_students(config, np.random.default_rng(0))
-    assert {axis.key(s) for s in students} == {"Geral"}
+
+
+def test_the_credit_axis_only_exists_in_the_auction():
+    """Não há moeda no `ranking`: o eixo sai da lista inteiro, em vez de sair
+    com faixa zerada."""
+    assert "credits" in Axis.states(make_config(mechanism="credits"))
+    assert "credits" not in Axis.states(make_config(mechanism="ranking"))
 
 
 def test_the_base_levels_come_from_the_seed():
@@ -373,11 +360,11 @@ def test_the_base_level_gives_the_cr_a_floor_to_disperse_around():
     O teste compara a mesma medida em duas grades de tamanhos diferentes: é
     onde a diferença entre "cai" e "tem piso" aparece.
     """
-    config = make_config(students_per_period=150)
+    config = make_config(students_per_entry_class=150)
     students = generate_students(config, np.random.default_rng(0))
 
     def spread(stability: float, materias: int) -> float:
-        cfg = make_config(students_per_period=150, performance_stability=stability)
+        cfg = make_config(students_per_entry_class=150, performance_stability=stability)
         grade = [
             Discipline(name=f"M{i}", seats=10, hours=60) for i in range(materias)
         ]
@@ -399,7 +386,7 @@ def test_the_base_level_gives_the_cr_a_floor_to_disperse_around():
 def test_the_marginal_of_the_quantile_stays_uniform():
     """O nível basilar reparte a variância, não a muda: a calibragem da nota
     não se move com ele."""
-    config = make_config(students_per_period=150, performance_stability=0.6)
+    config = make_config(students_per_entry_class=150, performance_stability=0.6)
     students = generate_students(config, np.random.default_rng(0))
     valores = list(
         draw_base_quantiles(students, GRADE, config, np.random.default_rng(1)).values()
@@ -411,15 +398,19 @@ def test_the_marginal_of_the_quantile_stays_uniform():
 def test_the_summary_carries_the_band_of_the_student():
     """A tela individual é onde se pergunta "por que *este* aluno foi assim",
     e a faixa é metade da resposta — a seed é a outra."""
-    config = make_config()
-    result = run_simulation(config)
-    faixas = set(quantile_names(config.quantiles))
+    result = run_simulation(make_config())
 
     assert result.students
     for summary in result.students:
-        assert summary.performance in faixas
-        assert summary.availability in faixas
-        assert summary.selectivity in faixas
+        # O nível basilar cru, e não mais o nome de uma faixa: o recorte dos
+        # relatórios passou a ser por valor corrente, e um rótulo de faixa que
+        # nenhum relatório usa não diria nada.
+        for level in (
+            summary.performance_level,
+            summary.availability_level,
+            summary.selectivity_level,
+        ):
+            assert math.isfinite(level)
 
 
 def test_a_student_built_by_hand_sits_at_the_median():
@@ -444,8 +435,15 @@ def test_the_scenario_rejects_distributions_that_do_not_exist():
                 mode_grade=10.0, zero_rate=0.01, max_rate=0.01
             )
         )
-    with pytest.raises(ValueError, match="quantis"):
-        make_config(quantiles=9)
+    with pytest.raises(ValueError, match="no máximo"):
+        make_config(grade_cuts=(1.0, 2.0, 3.0, 4.0, 5.0))
+    with pytest.raises(ValueError, match="devem ficar entre"):
+        make_config(grade_cuts=(11.0,))
+    with pytest.raises(ValueError, match="devem ficar entre"):
+        make_config(reserve_cuts=(1.0,))
+    # O corte de crédito se valida contra o orçamento **deste** cenário.
+    with pytest.raises(ValueError, match="devem ficar entre"):
+        make_config(min_credits=12, max_credits=30, credit_cuts=(31,))
     with pytest.raises(ValueError, match="nível basilar"):
         make_config(performance_stability=1.5)
 

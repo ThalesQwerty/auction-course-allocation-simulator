@@ -28,7 +28,7 @@ def make_config(**overrides) -> SimulationConfig:
         ("D6", 5, 60, ("D4",)),
     )
     base = dict(
-        disciplines=disciplines, students_per_period=3, **single_axis(360)
+        disciplines=disciplines, students_per_entry_class=3, max_hours=360, **single_axis(360)
     )
     return SimulationConfig(**{**base, **overrides})
 
@@ -71,7 +71,7 @@ def test_a_root_without_the_entry_flag_stays_eligible():
             ("Livre", 5, 60, False),
             ("Seguinte", 5, 60, ("Entrada",)),
         ),
-        students_per_period=2,
+        students_per_entry_class=2,
         max_hours=120,
         **single_axis(120),
     )
@@ -87,7 +87,7 @@ def test_an_entry_discipline_cannot_have_a_prerequisite():
                 ("Base", 5, 60),
                 ("Depende", 5, 60, ("Base",), True),
             ),
-            students_per_period=2,
+            students_per_entry_class=2,
             max_hours=120,
             **single_axis(120),
         )
@@ -97,7 +97,7 @@ def test_a_scenario_without_entry_disciplines_is_rejected():
     with pytest.raises(ValueError, match="disciplina de entrada"):
         SimulationConfig(
             disciplines=disciplines_from_predecessors(("Livre", 5, 60, False)),
-            students_per_period=1,
+            students_per_entry_class=1,
             max_hours=60,
             **single_axis(60),
         )

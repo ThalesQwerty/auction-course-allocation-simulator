@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from time import perf_counter
 
-from .config import Resolver
 from .entities import Agent, Allocation, Demand, Good, MutualExclusion, Problem
 from .equations import (
     consumption,
@@ -21,7 +20,7 @@ from .equations import (
     remaining_capacity,
     stochastic_perturbations,
 )
-from .wdp_solver import solve_wdp, solve_wdp_greedy
+from .wdp_solver import solve_wdp
 
 
 @dataclass(frozen=True)
@@ -112,13 +111,13 @@ def _demands(auction_input: AuctionInput, bids: dict[tuple[str, str], int]) -> l
     ]
 
 
-def run_auction(auction_input: AuctionInput, *, resolver: Resolver = "ilp") -> AuctionResult:
-    """Resolve o WDP da rodada e liquida preços, consumo e saldos.
+def run_auction(auction_input: AuctionInput) -> AuctionResult:
+    """Resolve o WDP da rodada por PLI e liquida preços, consumo e saldos.
 
-    `resolver` escolhe quem decide a alocação — a PLI global do anteprojeto ou
-    a varredura gulosa, que é o mecanismo de *bidding points*. É o **único**
-    ponto em que as duas células do leilão diferem: preferência, preço e
-    consumo são calculados igual dos dois lados.
+    Houve um parâmetro `resolver` aqui até 24/11/2026, que trocava a PLI pela
+    varredura gulosa — o mecanismo de *bidding points*. Saiu com o fechamento
+    do escopo: o leilão deste trabalho é o da PLI, e a varredura só existia
+    como degrau de ablação.
     """
     bids = {(b.agent_id, b.good_id): b.credits for b in auction_input.bids}
     capacity = {a.id: a.capacity for a in auction_input.agents}
@@ -132,7 +131,7 @@ def run_auction(auction_input: AuctionInput, *, resolver: Resolver = "ilp") -> A
         exclusions=auction_input.exclusions,
     )
     started = perf_counter()
-    allocation = (solve_wdp if resolver == "ilp" else solve_wdp_greedy)(problem)
+    allocation = solve_wdp(problem)
     solver_seconds = perf_counter() - started
 
     prices = market_prices(

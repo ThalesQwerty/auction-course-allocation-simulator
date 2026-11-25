@@ -47,7 +47,7 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=5,
-        students_per_period=8,
+        students_per_entry_class=8,
         max_hours=WORKLOAD,
         **single_axis(WORKLOAD),
         seed=7,
@@ -377,7 +377,7 @@ def test_the_eligible_sum_is_always_one():
     # Numa grade sem pré-requisito nenhum, tudo é elegível de saída e a soma é 1.
     flat = SimulationConfig(
         disciplines=[Discipline(name, seats=20, hours=60, entry=True) for name in ("A", "B", "C")],
-        students_per_period=8,
+        students_per_entry_class=8,
         max_hours=WORKLOAD,
         **single_axis(WORKLOAD),
     )
@@ -409,7 +409,7 @@ def test_the_workload_cap_bounds_the_enrolled_hours():
         config = SimulationConfig(
             disciplines=disciplines,
             periods=4,
-            students_per_period=10,
+            students_per_entry_class=10,
             max_hours=max_hours,
             **single_axis(max_hours),
             seed=5,
@@ -561,7 +561,7 @@ def _config_for(disciplines, **overrides):
     base = dict(
         disciplines=disciplines,
         periods=3,
-        students_per_period=12,
+        students_per_entry_class=12,
         max_hours=240,
         seed=11,
         **single_axis(240),
@@ -586,7 +586,7 @@ def test_the_classes_of_a_discipline_are_not_systematically_ordered():
     pesada — a média dela é e^(σ²), e não 1, sem que nada esteja enviesado.
     """
     disciplinas = [Discipline(name="X", seats=600, hours=60, classes=3, entry=True)]
-    rows = _rows_for(disciplinas, class_stability=0.0, students_per_period=60)
+    rows = _rows_for(disciplinas, class_stability=0.0, students_per_entry_class=60)
     razoes = [row["X T3"] / row["X T1"] for row in rows.values()]
     assert np.median(razoes) == pytest.approx(1.0, abs=0.15)
 

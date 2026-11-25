@@ -43,7 +43,10 @@ const RAMPS: Record<number, string[]> = {
   5: [PALETTE.violet, PALETTE.blue, PALETTE.green, PALETTE.yellow, PALETTE.red],
 };
 
-export const MAX_QUANTILES = 5;
+export const MAX_BANDS = 5;
+/** Daí o teto de cortes: `q` cortes abrem `q + 1` faixas. Espelha
+ * `leilao.config.MAX_CUTS`. */
+export const MAX_CUTS = MAX_BANDS - 1;
 
 /** A cor da faixa de índice `band` (0 é a mais **baixa**) numa escada de
  * `bands` faixas.
@@ -51,6 +54,68 @@ export const MAX_QUANTILES = 5;
  * O índice vem de baixo porque é assim que a API ordena as faixas; a rampa
  * está escrita de cima para baixo porque é assim que ela se lê. */
 export const bandColor = (band: number, bands: number): string => {
-  const ramp = RAMPS[Math.min(Math.max(bands, 1), MAX_QUANTILES)] ?? RAMPS[1];
+  const ramp = RAMPS[Math.min(Math.max(bands, 1), MAX_BANDS)] ?? RAMPS[1];
   return ramp[ramp.length - 1 - band] ?? ramp[ramp.length - 1];
 };
+
+/** AS CORES ESCOLHIDAS PELO USUÁRIO
+ * =================================
+ *
+ * A rampa acima continua sendo o padrão; o que vem daqui a sobrepõe posição a
+ * posição. Mora no `localStorage`, e **não** no cenário: a cor não entra em
+ * conta nenhuma, então mandá-la no `CompareRequest` faria o motor carregar
+ * dado de apresentação. O preço é que ela não viaja com o cenário exportado.
+ *
+ * A chave é o eixo, e o valor é uma cor por faixa, indexada **de baixo para
+ * cima** — a mesma ordem em que a API lista as faixas. Uma posição vazia cai
+ * na rampa, de modo que escolher a cor de uma faixa não repinta as outras.
+ */
+const COLOR_KEY = "leilao:band-colors";
+
+type BandColors = Record<string, (string | undefined)[]>;
+
+/** Lê o mapa inteiro. Volta vazio se o navegador recusar o acesso — janela
+ * anônima, dado do site bloqueado — ou se o conteúdo não for o que se espera:
+ * a tela tem de desenhar com a rampa padrão em vez de quebrar. */
+export function readBandColors(): BandColors {
+  try {
+    const raw = window.localStorage.getItem(COLOR_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>)
+        .filter(([, value]) => Array.isArray(value))
+        .map(([axis, value]) => [
+          axis,
+          (value as unknown[]).map((color) =>
+            typeof color === "string" && /^#[0-9a-fA-F]{6}$/.test(color)
+              ? color
+              : undefined
+          ),
+        ])
+    );
+  } catch {
+    return {};
+  }
+}
+
+/** Grava a cor de uma faixa. `color` nulo devolve a posição à rampa. */
+export function writeBandColor(
+  axis: string,
+  band: number,
+  color: string | null
+): BandColors {
+  const all = readBandColors();
+  const colors = [...(all[axis] ?? [])];
+  while (colors.length <= band) colors.push(undefined);
+  colors[band] = color ?? undefined;
+  const next = { ...all, [axis]: colors };
+  try {
+    window.localStorage.setItem(COLOR_KEY, JSON.stringify(next));
+  } catch {
+    // Sem onde gravar, a escolha vale só para esta sessão: o estado em memória
+    // já foi atualizado, e é ele que a tela desenha.
+  }
+  return next;
+}

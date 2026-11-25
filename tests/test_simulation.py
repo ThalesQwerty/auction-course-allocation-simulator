@@ -46,7 +46,7 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=5,
-        students_per_period=3,
+        students_per_entry_class=3,
         rounds=2,
         max_hours=WORKLOAD,
         **single_axis(WORKLOAD),
@@ -94,6 +94,8 @@ def test_seats_are_never_oversubscribed():
     result = run_simulation(make_config())
     for period in result.periods:
         for snapshot in period.disciplines:
+            # A vaga garantida sai da mesma oferta que o leilão distribui, e
+            # por isso entra em `filled`: `granted` é a parcela dela.
             assert snapshot.filled <= snapshot.seats
             assert snapshot.granted <= snapshot.filled
 
@@ -652,11 +654,38 @@ def test_the_entrant_share_feeds_the_credit_return():
     ]
     assert returned, "alguém deveria aprovar na matrícula garantida"
     assert all(
-        r.returned == credit_return(
-            paid=share, grade=r.grade, multiplier=config.return_multiplier
-        )
+        r.returned == credit_return(paid=share, grade=r.grade)
         for r in returned
     )
+
+
+def test_the_guaranteed_seat_comes_out_of_the_offer_and_counts_as_a_request():
+    """A vaga garantida sai da própria oferta da turma e entra com solicitação
+    lançada.
+
+    Tirá-la de `q_x` para uma segunda pilha foi tentado em 24/11/2026 e
+    desfeito no mesmo dia: fora da oferta, o relatório passava a dizer que o
+    aluno cursou uma turma que não lhe foi entregue. A incoerência que sobra —
+    vaga sem pedido — se resolve pelo lance do ingressante, ⌊C_min/N⌋ no leilão
+    e 1 na linha de base, e não tirando a vaga da conta.
+    """
+    config = make_config()
+    lotacao = config.seats_by_class()
+    entrada = set(config.entry_disciplines())
+    por_turma = config.students_per_entry_class
+
+    result = run_simulation(config)
+    for period in result.periods:
+        for snapshot in period.disciplines:
+            assert snapshot.seats == lotacao[snapshot.name]
+            if snapshot.discipline not in entrada:
+                assert snapshot.granted == 0
+                continue
+            assert snapshot.granted == por_turma
+            # A garantida é parcela da oferta, não acréscimo a ela...
+            assert por_turma <= snapshot.filled <= snapshot.seats
+            # ...e foi pedida: quem a recebeu entra na demanda da turma.
+            assert snapshot.requests >= por_turma
 
 
 def test_a_root_that_is_not_entry_is_not_granted():
@@ -695,14 +724,14 @@ def test_guaranteed_seats_leave_the_market_before_the_first_round():
 def test_a_generation_larger_than_the_smallest_entry_offer_is_rejected():
     """A garantia só é garantia se couber: o bloco da coorte que vai parar em
     cada turma de entrada não pode passar das vagas dela."""
-    with pytest.raises(ValueError, match="ingressantes em"):
+    with pytest.raises(ValueError, match="ingressantes por turma de entrada"):
         SimulationConfig(
             disciplines=[
                 Discipline("D1", seats=5, hours=60, entry=True),
                 Discipline("D2", seats=3, hours=60, entry=True),
             ],
-            students_per_period=4,
-            **single_axis(360),
+            students_per_entry_class=4,
+            max_hours=360, **single_axis(360),
         )
     # Exatamente no teto passa — e não sobra vaga nenhuma para quem recursa.
     assert SimulationConfig(
@@ -710,8 +739,8 @@ def test_a_generation_larger_than_the_smallest_entry_offer_is_rejected():
             Discipline("D1", seats=4, hours=60, entry=True),
             Discipline("D2", seats=4, hours=60, entry=True),
         ],
-        students_per_period=4,
-        **single_axis(360),
+        students_per_entry_class=4,
+        max_hours=360, **single_axis(360),
     ).students_per_period == 4
 
 
@@ -724,7 +753,7 @@ def test_entry_disciplines_heavier_than_the_workload_cap_are_rejected():
                 Discipline("D1", seats=5, hours=60, entry=True),
                 Discipline("D2", seats=5, hours=60, entry=True),
             ],
-            students_per_period=2,
+            students_per_entry_class=2,
             max_hours=100,
             **single_axis(100),
         )
@@ -905,52 +934,42 @@ def test_the_rounding_has_no_bias_and_the_top_prize_follows_the_price():
     # Python arredonda para o par, devolvendo 0.
     assert credit_return(paid=1, grade=2.5) == 1
     assert credit_return(paid=25, grade=1.4) == 7
-    assert credit_return(paid=25, grade=2.8, multiplier=3) == 21
 
 
-def test_the_multiplier_scales_the_whole_return():
-    """Zero desliga o retorno — é como um braço da comparação vira o degrau sem
-    ele —, e com 1 ele nunca supera o preço pago, que é o caso em que o
-    orçamento trava em `C_min`."""
-    for grade in (0.0, 3.3, 7.7, 10.0):
-        assert credit_return(paid=10, grade=grade, multiplier=0) == 0
-        assert credit_return(paid=4, grade=grade, multiplier=1) <= 4
-
-    assert credit_return(paid=10, grade=10.0, multiplier=0.5) == 5
-    assert credit_return(paid=10, grade=10.0, multiplier=3) == 30
-
-    assert make_config(return_multiplier=0).return_multiplier == 0
-    with pytest.raises(ValueError, match="multiplicador"):
-        make_config(return_multiplier=-1)
+def test_the_fixed_multiplier_makes_the_extremes_symmetric():
+    """Por que o multiplicador vale 2 e deixou de ser parâmetro em 24/11/2026:
+    apostando `paid`, o aluno perde exatamente `paid` no pior caso e ganha
+    exatamente `paid` no melhor. Nenhum outro valor tem essa propriedade, e com
+    `n_min = 5` o ponto neutro cai em cima da nota de corte.
+    """
+    for paid in (1, 2, 5, 10, 17):
+        assert credit_return(paid=paid, grade=0.0) == 0
+        assert credit_return(paid=paid, grade=10.0) == 2 * paid
+        assert credit_return(paid=paid, grade=5.0) == paid
 
 
 def test_credit_return_is_added_to_the_budget_of_the_next_period():
     """eq. (36): C_a^(t+1,1) = clamp(C_a^(t,1) - gasto + soma gamma, C_min, C_max).
 
     O histórico individual é a única tela em que essa conta aparece aberta,
-    então ela tem de fechar exatamente — em todo multiplicador, inclusive no
-    período de ingresso, em que o gasto é o que o sistema lançou. Aqui só o
-    piso está ligado: o teto tem teste próprio.
+    então ela tem de fechar exatamente, inclusive no período de ingresso, em
+    que o gasto é o que o sistema lançou. Aqui só o piso está ligado: o teto
+    tem teste próprio.
     """
-    for multiplicador in (0, 1, 2, 3.5):
-        config = make_config(return_multiplier=multiplicador, max_credits=None)
-        result = run_simulation(config)
-        for history in result.histories:
-            for record in history.periods:
-                assert record.credits_end == max(
-                    record.credits_start
-                    - record.credits_spent
-                    + record.credits_returned,
-                    config.min_credits,
-                )
-                # O total do período é a soma do gamma de cada disciplina, e só
-                # devolve crédito quem obteve a vaga — cursando ou excluindo.
-                assert record.credits_returned == sum(q.returned for q in record.requests)
-                assert all(
-                    q.returned == 0
-                    for q in record.requests
-                    if q.attempt is None and not q.excluded
-                )
+    config = make_config(max_credits=None)
+    result = run_simulation(config)
+    for history in result.histories:
+        for record in history.periods:
+            assert record.credits_end == max(
+                record.credits_start
+                - record.credits_spent
+                + record.credits_returned,
+                config.min_credits,
+            )
+            # O total do período é a soma do gamma de cada disciplina, e só
+            # devolve crédito quem cursou: a excluída não devolve nada.
+            assert record.credits_returned == sum(q.returned for q in record.requests)
+            assert all(q.returned == 0 for q in record.requests if q.attempt is None)
 
 
 def test_the_budget_never_leaves_the_credit_band():
@@ -963,23 +982,17 @@ def test_the_budget_never_leaves_the_credit_band():
             assert config.min_credits <= record.credits_end <= config.max_credits
 
 
-def test_the_multiplier_is_what_lets_the_balance_grow():
+def test_the_return_lets_the_balance_grow_until_the_ceiling_cuts():
     """Sem crédito base somado, o retorno é a única entrada de crédito novo, e
-    com multiplicador 1 ele nunca supera o gasto: o orçamento desce até `C_min`
-    e fica lá, e `C_max` vira letra morta. Com 2 o saldo volta a subir e o teto
-    volta a cortar. É o que justifica o padrão.
-    """
-    neutro = run_simulation(
-        make_config(return_multiplier=1, min_credits=4, max_credits=6)
-    )
-    for history in neutro.histories:
-        for record in history.periods:
-            assert record.credits_returned <= record.credits_spent
-            assert record.credits_start == 4
+    com o multiplicador 2 ele chega a superar o gasto: o saldo sobe e o teto
+    passa a cortar.
 
-    generoso = run_simulation(
-        make_config(return_multiplier=2, min_credits=4, max_credits=5)
-    )
+    Com 1 ele nunca superava o gasto, o orçamento descia até `C_min` e ficava
+    lá, e `C_max` virava letra morta — medido, o braço com retorno saindo
+    idêntico ao sem retorno, seed a seed. É metade do porquê de 2 ter virado
+    constante; a outra metade está em `equations.credit_return`.
+    """
+    generoso = run_simulation(make_config(min_credits=4, max_credits=5))
     cortou = False
     subiu = False
     for history in generoso.histories:
@@ -1004,84 +1017,40 @@ def test_the_band_clamps_the_accumulated_balance_on_both_sides():
     """A conta pura da eq. (36) — fronteira a fronteira, nos dois extremos."""
     conta = dict(started_with=20, spent=5, period_return=12)
 
-    assert next_budget("carry", **conta, min_credits=12) == 27  # 20 - 5 + 12
-    assert next_budget("carry", **conta, min_credits=12, max_credits=None) == 27
-    assert next_budget("carry", **conta, min_credits=12, max_credits=30) == 27
-    assert next_budget("carry", **conta, min_credits=12, max_credits=27) == 27
-    assert next_budget("carry", **conta, min_credits=12, max_credits=20) == 20
+    assert next_budget(**conta, min_credits=12) == 27  # 20 - 5 + 12
+    assert next_budget(**conta, min_credits=12, max_credits=None) == 27
+    assert next_budget(**conta, min_credits=12, max_credits=30) == 27
+    assert next_budget(**conta, min_credits=12, max_credits=27) == 27
+    assert next_budget(**conta, min_credits=12, max_credits=20) == 20
 
     # O piso levanta o que a conta deixou abaixo dele, e vale até sem teto.
     gastou_tudo = dict(started_with=20, spent=20, period_return=3)
-    assert next_budget("carry", **gastou_tudo, min_credits=12) == 12
-    assert next_budget("carry", **gastou_tudo, min_credits=3, max_credits=30) == 3
-    assert next_budget("carry", **gastou_tudo, min_credits=1) == 3  # piso não alcançado
-
-    # Com memória "none" o orçamento é o piso, e o teto não tem o que fazer.
-    assert next_budget("none", **conta, min_credits=12, max_credits=5) == 12
-
-
-def test_without_the_return_the_carry_has_nothing_to_carry():
-    """Com k = 0, `"carry"` é o mesmo modelo que `"none"` — e isso é o que faz
-    do leilão igualitário **um** braço, e não dois.
-
-    O orçamento abre em `C_min` (eq. 37) e, sem retorno, `started - spent`
-    nunca passa dele: o piso o devolve a `C_min` todo período. A sobra só tem
-    o que carregar depois de o retorno erguer o saldo acima do piso.
-
-    O cenário precisa ser **apertado** para a prova dizer alguma coisa: sem
-    disputa ninguém gasta nada e as duas memórias coincidem por falta de
-    movimento, não por identidade.
-    """
-    conta = dict(started_with=12, spent=7, period_return=0)
-    assert next_budget("carry", **conta, min_credits=12) == 12
-    assert next_budget("none", **conta, min_credits=12) == 12
-
-    apertado = dict(students_per_period=5, return_multiplier=0, periods=8)
-    sem_memoria = run_simulation(make_config(credit_memory="none", **apertado))
-    com_sobra = run_simulation(make_config(credit_memory="carry", **apertado))
-
-    assert [s.graduated_at for s in sem_memoria.students] == [
-        s.graduated_at for s in com_sobra.students
-    ]
-    assert [p.aggregate.overall for p in sem_memoria.periods] == [
-        p.aggregate.overall for p in com_sobra.periods
-    ]
-    assert [h.periods for h in sem_memoria.histories] == [
-        h.periods for h in com_sobra.histories
-    ]
+    assert next_budget(**gastou_tudo, min_credits=12) == 12
+    assert next_budget(**gastou_tudo, min_credits=3, max_credits=30) == 3
+    assert next_budget(**gastou_tudo, min_credits=1) == 3  # piso não alcançado
 
 
 def test_the_return_matches_the_equation_inside_a_full_simulation():
     """O gamma registrado por disciplina tem de bater com a eq. (34) rodando a
-    simulação inteira — é o que a coluna da tela do aluno mostra."""
-    for multiplicador in (0, 1, 2, 3.5):
-        config = make_config(return_multiplier=multiplicador)
-        result = run_simulation(config)
-        taken = [
-            request
-            for history in result.histories
-            for record in history.periods
-            for request in record.requests
-            if request.attempt is not None
-        ]
-        assert taken, "o cenário deveria ter disciplinas cursadas"
-        for request in taken:
-            assert request.returned == credit_return(
-                paid=request.paid,
-                grade=request.grade,
-                multiplier=config.return_multiplier,
-            )
+    simulação inteira: é o que a coluna da tela do aluno mostra."""
+    result = run_simulation(make_config())
+    taken = [
+        request
+        for history in result.histories
+        for record in history.periods
+        for request in record.requests
+        if request.attempt is not None
+    ]
+    assert taken, "o cenário deveria ter disciplinas cursadas"
+    for request in taken:
+        assert request.returned == credit_return(
+            paid=request.paid, grade=request.grade
+        )
 
-    # O multiplicador precisa separar os cenários de fato, senão não há o que
-    # comparar: com 0 o retorno está desligado e todo aluno trava no piso, e
-    # com 1 ele nunca supera o gasto — o saldo também não sai de lá.
-    saldos = {
-        k: [s.credits for s in run_simulation(make_config(return_multiplier=k)).students]
-        for k in (0, 1, 2, 3.5)
-    }
-    assert all(c == 12 for c in saldos[0])
-    assert all(c == 12 for c in saldos[1])
-    assert sum(saldos[1]) < sum(saldos[2]) < sum(saldos[3.5])
+    # E o retorno precisa mexer no saldo de fato: sem ele o orçamento só cai e
+    # o piso o segura em C_min, então algum aluno tem de terminar acima dele.
+    alunos = run_simulation(make_config()).students
+    assert any(s.credits > 12 for s in alunos)
 
 
 def test_credit_return_is_reported_only_at_the_end_of_the_period():
@@ -1121,14 +1090,14 @@ def test_credit_return_is_reported_only_at_the_end_of_the_period():
 def test_scenario_without_students_or_disciplines_is_rejected():
     """Garantia de que todo período tem aluno começa na entrada: um cenário sem
     ninguém não produziria período algum, e toda métrica sairia indefinida."""
-    with pytest.raises(ValueError, match="pelo menos um aluno"):
+    with pytest.raises(ValueError, match="pelo menos um ingressante"):
         SimulationConfig(
             disciplines=[Discipline("D1", seats=5, hours=60)],
-            students_per_period=0,
-            **single_axis(360),
+            students_per_entry_class=0,
+            max_hours=360, **single_axis(360),
         )
     with pytest.raises(ValueError, match="pelo menos uma disciplina"):
-        SimulationConfig(students_per_period=5, **single_axis(360))
+        SimulationConfig(students_per_entry_class=5, max_hours=360, **single_axis(360))
 
 
 def test_every_period_receives_a_generation():
@@ -1228,7 +1197,7 @@ def test_minimum_periods_to_graduate_takes_the_tighter_of_the_two_limits():
             ("D", 5, 60, ("A",)),
             ("E", 5, 60, ("A",)),
         ),
-        students_per_period=5,
+        students_per_entry_class=5,
         max_hours=60,
         **single_axis(60),
     )

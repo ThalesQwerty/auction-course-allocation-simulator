@@ -43,7 +43,10 @@ def make_config(classes: int = 4, **overrides) -> SimulationConfig:
             ),
         ],
         periods=3,
-        students_per_period=6,
+        # Por **turma** de entrada: a coorte é isto vezes as turmas, então ela
+        # acompanha o `classes` que cada teste pede. Dois cabem na turma mais
+        # magra de todas as repartições que os testes montam.
+        students_per_entry_class=2,
         rounds=2,
         max_hours=WORKLOAD,
         seed=7,

@@ -45,8 +45,10 @@ class Student:
     # constrói um aluno à mão não está escolhendo uma ponta.
     #
     # Os dois primeiros são traço e entram só em sorteio; o terceiro vira a
-    # seletividade do período. Os três são o que os quantis dos relatórios
-    # recortam — ver `simulation.snapshots.Axis.quantiles`.
+    # seletividade do período. Os relatórios **não** os recortam mais: o corte
+    # passou a ser por valor corrente em 24/11/2026 (ver
+    # `simulation.snapshots.Axis.states`), e o que sai deles agora é a dispersão
+    # que faz o CR ordenar e o cabeçalho da tela individual.
     performance_level: float = 0.0
     availability_level: float = 0.0
     selectivity_level: float = 0.0
