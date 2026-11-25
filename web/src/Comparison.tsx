@@ -36,40 +36,26 @@ import { COMPARISON_ARMS } from "./types";
 import { MAX_CUTS, readBandColors, writeBandColor } from "./profileColors";
 import type { ClassCut, CompareRequest, Ruler, RunSummary } from "./types";
 
-/** Períodos com uma casa: o tempo de formatura anda em frações de período, e
- * duas casas sugeririam uma precisão que a amostra não tem. */
+/** Períodos com uma casa: o tempo de formatura anda em frações de período, e duas casas sugeririam uma precisão que a amostra não tem */
 const formatPeriods = (value: number) =>
   value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-/** Uma grandeza comparada entre os modelos. `of` é o ponto de uma simulação,
- * que as tabelas usam; `band` é a chave da série por período em
- * `GroupBands.values`, que os gráficos desenham. Sem `band` a métrica fica só
- * nas tabelas — é o caso do tempo de formatura, que é da simulação inteira. */
+/** Uma grandeza comparada entre os modelos */
 interface Metric {
   id: string;
   title: string;
-  /** Rótulo curto, para a coluna "Métrica" das tabelas. */
   short: string;
   of: (run: RunSummary) => number | null;
   band?: string;
-  /** Limites naturais da grandeza; o domínio é folgado em torno dos dados mas
-   * nunca passa daqui. Ausente quando a grandeza não tem teto. */
+   /** Limites naturais da grandeza; o domínio é folgado em torno dos dados mas nunca passa daqui */
   bounds?: [number, number];
-  /** De que lado está o melhor resultado — é o que decide o sinal de "seeds a
-   * favor". `null` quando a métrica **descreve** em vez de pontuar: λ e a
-   * saturação são o caso. */
+   /** De que lado está o melhor resultado — é o que decide o sinal de "seeds a favor" */
   betterWhen: "higher" | "lower" | null;
   format: (value: number) => string;
   zeroLine?: boolean;
 }
 
-/** A economia de créditos — **exclusiva do leilão**. Fora dele estas grandezas
- * saem `null`, e não zeradas: não há moeda, e zero se leria como "ninguém
- * gastou". A linha do CR, portanto, nem aparece nestes gráficos.
- *
- * Nenhuma delas pontua. Gastar mais não é melhor nem pior — é o que o
- * mecanismo faz com o orçamento —, e por isso elas ficam fora das tabelas de
- * comparação, que existem para dizer qual lado ganhou. */
+/** A economia de créditos — **exclusiva do leilão** */
 const CREDIT_METRICS: Metric[] = [
   {
     id: "credits_supply",
@@ -77,9 +63,6 @@ const CREDIT_METRICS: Metric[] = [
     short: "Orçamento",
     of: () => null,
     band: "credits_supply",
-    // C_a^(t,1), a oferta de abertura: o que o aluno tinha para apostar antes
-    // de qualquer lance. Com C_max ela tem teto, mas o teto é do cenário e não
-    // da grandeza, então a régua se ajusta aos dados.
     bounds: [0, Infinity],
     betterWhen: null,
     format: formatCount,
@@ -106,17 +89,14 @@ const CREDIT_METRICS: Metric[] = [
   },
 ];
 
-/** Os recortes do gráfico de preço. Eles repartem a **oferta**, e não os
- * alunos: é o único gráfico da tela cujas linhas não são grupos de gente. */
+/** Os recortes do gráfico de preço */
 const CLASS_CUTS: { axis: ClassCut; label: string }[] = [
   { axis: "classes", label: "Turmas" },
   { axis: "hours", label: "Carga horária" },
-  { axis: "difficulty", label: "Dificuldade" },
   { axis: "curriculum_period", label: "Período" },
 ];
 
-/** O rótulo em português de um grupo da oferta. A API manda o **valor** como
- * chave ("2", "60", "1.4"), sem idioma, e é aqui que ele vira texto. */
+/** O rótulo em português de um grupo da oferta */
 const classGroupLabel = (axis: ClassCut, key: string): string => {
   if (key === "elective") return "optativa";
   const value = Number(key);
@@ -126,24 +106,12 @@ const classGroupLabel = (axis: ClassCut, key: string): string => {
       return value === 1 ? "1 turma" : `${number} turmas`;
     case "hours":
       return `${number} h`;
-    case "difficulty":
-      return `dificuldade ${number}`;
     case "curriculum_period":
       return `${number}º período`;
   }
 };
 
-/** As métricas de alocação — as que avaliam a qualidade do que foi alocado.
- *
- * Nada de crédito: orçamento, preço e retorno não existem do lado da linha de
- * base, e comparar um mecanismo com o vazio não compara nada.
- *
- * Duas saíram em 08/10. A **ocupação** (θ), porque com o calouro fora do
- * recorte ela deixou de se ler como "o quanto a universidade encheu" — as vagas
- * garantidas continuam ocupadas e não entram mais no numerador; quem quer essa
- * leitura a tem nos gráficos por disciplina de uma simulação. E a
- * **semestralização**, que deu lugar ao tempo de formatura: mede a mesma coisa
- * — progressão na grade — num número que se lê direto. */
+/** As métricas de alocação — as que avaliam a qualidade do que foi alocado */
 const METRICS: Metric[] = [
   {
     id: "efficiency",
@@ -156,11 +124,11 @@ const METRICS: Metric[] = [
     format: formatRatio,
   },
   {
-    id: "utilization",
-    title: "Ocupação (θ)",
-    short: "Ocupação (θ)",
-    of: (run) => run.utilization,
-    band: "utilization",
+    id: "attendance",
+    title: "Aproveitamento (θ)",
+    short: "Aproveitamento (θ)",
+    of: (run) => run.attendance ?? 0,
+    band: "attendance",
     bounds: [0, 1],
     betterWhen: "higher",
     format: formatRatio,
@@ -172,10 +140,6 @@ const METRICS: Metric[] = [
     of: (run) => run.progress,
     band: "progress",
     bounds: [0, 1],
-    // Pontua, mas com a mesma ressalva do tempo de formatura: quem fecha a
-    // grade sai da medida, de modo que um mecanismo que forma mais gente pode
-    // exibir progresso *menor* entre os que ficaram. Lê-se com a fração de
-    // concluintes ao lado.
     betterWhen: "higher",
     format: formatRatio,
   },
@@ -186,8 +150,6 @@ const METRICS: Metric[] = [
     of: (run) => run.fidelity,
     band: "fidelity",
     bounds: [0, 1],
-    // Descreve, não pontua: dizer qual lado é melhor exigiria escolher entre
-    // expressar intensidade e ser simples de usar, e isso é juízo de quem lê.
     betterWhen: null,
     format: formatRatio,
   },
@@ -208,33 +170,18 @@ const METRICS: Metric[] = [
     of: (run) => run.exclusion_rate,
     band: "exclusion_rate",
     bounds: [0, 1],
-    // A vaga que ninguém cursou é perda pura: saiu da oferta e não virou aula.
     betterWhen: "lower",
     format: formatRatio,
   },
   {
-    id: "dissipation",
-    title: "Dissipação (Δψ)",
-    short: "Dissipação (Δψ)",
-    of: (run) => run.dissipation,
-    band: "dissipation",
-    bounds: [0, 1],
-    // Valor que foi alocado e não chegou a ser consumido: menos é melhor, e
-    // `ψ retida = ψ alocada − Δψ`. Custo **privado** da exclusão — o social
-    // é o desperdício de vaga, logo acima.
+    id: "mean_round",
+    title: "Rodada média (r̄)",
+    short: "Rodada média (r̄)",
+    of: (run) => run.mean_round ?? 1,
+    band: "mean_round",
+    bounds: undefined,
     betterWhen: "lower",
     format: formatRatio,
-  },
-  {
-    id: "correlation",
-    title: "Correlação CR × satisfação (λ)",
-    short: "Correlação (λ)",
-    of: (run) => run.correlation,
-    band: "correlation",
-    bounds: [-1, 1],
-    betterWhen: null,
-    format: formatRatio,
-    zeroLine: true,
   },
   {
     id: "grade_average",
@@ -242,12 +189,7 @@ const METRICS: Metric[] = [
     short: "CR médio",
     of: (run) => run.grade_average,
     band: "grade_average",
-    // A régua inteira, como manda `paddedScale`: o CR tem contradomínio, e
-    // fechá-la em torno da amostra faria um vão de 0,05 ocupar meio cartão.
     bounds: [0, 10],
-    // Descreve, não pontua. Ele sobe tanto quando o aluno vai melhor quanto
-    // quando o mecanismo o roteia para turma mais fácil, e separar as duas
-    // exige a dificuldade, que está nos gráficos por disciplina.
     betterWhen: null,
     format: formatRatio,
   },
@@ -256,16 +198,6 @@ const METRICS: Metric[] = [
     title: "Fração de concluintes",
     short: "Concluintes",
     of: (run) => (run.population ? run.graduates / run.population : null),
-    // Fração, e não contagem: o absoluto depende do tamanho do ingresso, e os
-    // braços só são comparáveis na mesma escala.
-    //
-    // **Não há gráfico de jubilados ao lado.** Como o horizonte é derivado do
-    // ciclo de vida, ao fim dele todo mundo saiu por uma das duas portas, e a
-    // fração de jubilados é exatamente `1 − esta`. Seria a mesma curva
-    // espelhada, ocupando espaço e convidando a ler duas vezes o mesmo fato.
-    //
-    // Por período ela é **acumulada**: quem concluiu até ali sobre quem já
-    // tinha entrado. No último período é o número da tabela.
     band: "graduation_rate",
     betterWhen: "higher",
     bounds: [0, 1],
@@ -276,24 +208,13 @@ const METRICS: Metric[] = [
     title: "Tempo de formatura (períodos)",
     short: "Tempo (períodos)",
     of: (run) => run.time_to_graduate,
-    // Sem série: o tempo é da simulação inteira, e a versão por período
-    // ("quanto levou quem concluiu em t") seria outra grandeza, com viés de
-    // sobrevivência. Fica nas tabelas.
     betterWhen: "lower",
     format: formatPeriods,
   },
 ];
 
 
-/** As quatro frações do funil de uma solicitação — `equations.request_funnel`.
- *
- * Cada uma divide pelo **nó anterior**, não pelo catálogo: é o que faz cada
- * painel se mexer só quando o nó dele se mexe, e é o que permite as quatro
- * dividirem a mesma régua de 0 a 1. Elas substituíram os seis painéis de
- * contagem, que subiam e desciam juntos porque dividiam o mesmo denominador.
- *
- * As contagens continuam na resposta da API (os seis estados), e é a elas que
- * se recorre quando uma fração sai vazia — um nó sem ninguém não tem fração. */
+/** As quatro frações do funil de uma solicitação — `equations.request_funnel` */
 const FUNNEL = [
   { key: "requested_share", title: "Fração de solicitadas" },
   { key: "granted_share", title: "Fração de deferidas" },
@@ -303,9 +224,7 @@ const FUNNEL = [
 
 const ORDINALS = ["1ª", "2ª", "3ª", "4ª", "5ª", "6ª", "7ª", "8ª", "9ª", "10ª"];
 
-/** Uma métrica por rodada do cenário: as vagas obtidas por aluno naquela
- * rodada. Quantas são depende do |R| da simulação, então elas são construídas a
- * partir do resultado, e não de uma lista fixa. */
+/** Uma métrica por rodada do cenário: as vagas obtidas por aluno naquela rodada */
 const roundMetrics = (rounds: number): Metric[] =>
   Array.from({ length: rounds }, (_, index) => {
     const ordinal = ORDINALS[index] ?? `${index + 1}ª`;
@@ -321,47 +240,14 @@ const roundMetrics = (rounds: number): Metric[] =>
     };
   });
 
-/** Os dois braços do leilão que isolam o acúmulo: eles diferem em **uma**
- * coisa só — `credits_ilp` abre todo período em C_min e não tem retorno,
- * `credits_return` carrega o saldo e o alimenta com o k do cenário. Comparar
- * qualquer outro par mediria o acúmulo somado a outra diferença. */
+/** Os dois braços do leilão que isolam o acúmulo: eles diferem em **uma** coisa só — `credits_ilp` abre todo período em C_min e não tem retorno, `credits_return` carrega o saldo e o alimenta com o k do cenário */
 const WITH_ACCUMULATION = "credits_return";
 const WITHOUT_ACCUMULATION = "credits_ilp";
 
-/** A linha de base, contra a qual as diferenças da tabela de resumo são
- * medidas: a matrícula por CR com varredura, que é o mecanismo real das
- * universidades brasileiras. */
+/** A linha de base, contra a qual as diferenças da tabela de resumo são medidas: a matrícula por CR com varredura, que é o mecanismo real das universidades brasileiras */
 const BASELINE = "ranking_greedy";
 
-/** A grade de correlações: duas grandezas **do aluno** contra três do
- * resultado dele. Seis células, e cada uma tem previsão — é isso que faz a
- * tabela valer leitura.
- *
- * A **carga efetiva** não entra como eixo: o aluno não conhece a própria
- * disponibilidade na hora de pedir, então nenhum canal do mecanismo responde
- * a ela e o coeficiente seria zero por construção, não por resultado.
- *
- * A dissipação entra pela **razão** `ψ retida / ψ alocada`, e não pela
- * diferença que a métrica publica: aqui se quer condicionar em quanto o aluno
- * ganhou, senão o coeficiente mede em parte "ganhou mais", que já está na
- * coluna da ocupação.
- *
- * A previsão de cada célula, na ordem abaixo:
- *
- * 1. **CR × satisfação** é a eq. (57) — positiva por construção na ordenação
- *    por CR, onde o histórico é o critério.
- * 2. **CR × ocupação**: mérito compra carga?
- * 3. **CR × retenção**: quem é servido primeiro ganha mais e esbarra mais na
- *    própria disponibilidade — espera-se negativa nos dois modelos.
- * 4. **Seletividade × satisfação** é a que mais informa: o retorno da
- *    estratégia. No CR o filtro só encolhe o pedido e não há intensidade a
- *    expressar, então deve ser nula ou negativa; no leilão, positiva.
- * 5. **Seletividade × ocupação**: negativa dos dois lados — é a patologia
- *    "ψ alto, aproveitamento baixo" virando número.
- * 6. **Seletividade × retenção**: a seletividade é autodefesa contra ganhar
- *    mais do que cabe, então deve ser positiva.
- *
- * Espelha `equations.Correlations`. */
+/** A grade de correlações: duas grandezas **do aluno** contra três do resultado dele */
 const CORRELATIONS: { key: string; title: string }[] = [
   {
     key: "cr_satisfaction",
@@ -389,8 +275,7 @@ const CORRELATIONS: { key: string; title: string }[] = [
   },
 ];
 
-/** Sinal explícito: numa coluna de diferenças, "+0,04" e "−0,04" se distinguem
- * de relance e "0,04" não. */
+/** Sinal explícito: numa coluna de diferenças, "+0,04" e "−0,04" se distinguem de relance e "0,04" não */
 const formatDelta = (value: number, format: (v: number) => string) =>
   `${value > 0 ? "+" : value < 0 ? "−" : ""}${format(Math.abs(value))}`;
 
@@ -402,45 +287,29 @@ export function Comparison({
 }: {
   run: ComparisonRun;
   onReuseConfig: () => void;
-  /** Roda de novo com outros cortes. Não é recorte de tela: quem monta as
-   * faixas é o motor, a partir de valores por aluno que a resposta não carrega
-   * — ver `App.handleRecut`. */
+   /** Roda de novo com outros cortes */
   onRecut: (cuts: Partial<CompareRequest>) => void;
   recutting: boolean;
 }) {
   const dark = usePrefersDark();
   const result = run.result;
   const ink = inkFor(dark);
-  /** As duas escolhas que governam todos os gráficos: a **régua** do eixo X
-   * (período, idade ou coorte) e o **recorte** das linhas (a universidade
-   * inteira ou um dos quatro eixos de perfil). O modelo é a terceira
-   * dimensão e não é escolha — ele é sempre o traçado.
-   *
-   * Uma só de cada para a tela inteira: o que elas trocam são os eixos de
-   * todos os gráficos, e lê-los com recortes diferentes lado a lado é o que
-   * não se quer. */
+   /** As duas escolhas que governam todos os gráficos: a **régua** do eixo X (período, idade ou coorte) e o **recorte** das linhas (a universidade inteira ou um dos quatro eixos de perfil) */
   const [rulerChoice, setRuler] = useState<RulerChoice>("period");
   const [cutChoice, setCut] = useState<CutChoice>("overall");
-  /** As cores escolhidas para as faixas, por eixo. Vivem no `localStorage` e
-   * não no cenário — ver `profileColors`. O estado em memória é a fonte da
-   * tela, de modo que a escolha valha mesmo onde gravar falhou. */
+   /** As cores escolhidas para as faixas, por eixo */
   const [bandColors, setBandColors] = useState(readBandColors);
-  /** Os cortes em edição, por eixo. Vazio significa "os da execução": o
-   * rascunho só existe entre a edição e o Aplicar, e some quando a execução
-   * nova chega, porque o componente é remontado por `key`. */
+   /** Os cortes em edição, por eixo */
   const [cutDraft, setCutDraft] = useState<Record<string, number[]>>({});
-  /** O recorte da oferta no gráfico de preço. Ele é independente do recorte
-   * das demais linhas: um reparte turmas, o outro reparte alunos. */
+   /** O recorte da oferta no gráfico de preço */
   const [priceCutChoice, setPriceCut] = useState<ClassCut>("curriculum_period");
 
-  /** Os dois leilões são escolha de quem configura a comparação. Sem os dois
-   * não há o que isolar, e a tabela do acúmulo sairia inteira em traços. */
+   /** Os dois leilões são escolha de quem configura a comparação */
   const hasBothAuctions = [WITH_ACCUMULATION, WITHOUT_ACCUMULATION].every((key) =>
     result.arms.some((arm) => arm.key === key)
   );
 
 
-  /** Os modelos que rodaram, com o traçado de cada um. */
   const arms: SeriesArmStyle[] = useMemo(
     () =>
       COMPARISON_ARMS.filter((arm) => result.arms.some((a) => a.key === arm.key)).map(
@@ -449,10 +318,7 @@ export function Comparison({
     [result.arms]
   );
 
-  /** O custo de **rodar** cada mecanismo, rodada a rodada. Fica de fora da
-   * maquinaria de recortes de propósito: é tempo de parede, e não há parcela
-   * dele que pertença a uma coorte ou a um perfil. Vazio em comparação gravada
-   * antes de 14/11/2026, e aí a seção inteira não aparece. */
+   /** O custo de **rodar** cada mecanismo, rodada a rodada */
   const allocationTimes: AllocationTimeLine[] = useMemo(
     () =>
       arms
@@ -465,8 +331,7 @@ export function Comparison({
     [arms, result.arms]
   );
 
-  /** Os recortes da oferta que esta comparação traz. Comparação sem leilão —
-   * ou gravada antes de 14/11/2026 — não traz nenhum, e a seção some. */
+   /** Os recortes da oferta que esta comparação traz */
   const priceCuts = CLASS_CUTS.filter((option) =>
     result.arms.some((arm) =>
       arm.class_prices?.some((cut) => cut.axis === option.axis && cut.groups.length)
@@ -477,8 +342,7 @@ export function Comparison({
       ? priceCutChoice
       : (priceCuts[0]?.axis ?? "curriculum_period");
 
-  /** As cores do recorte da oferta. Elas saem da paleta categórica, e não de
-   * `cutGroups`, porque os grupos aqui são da grade e não da população. */
+   /** As cores do recorte da oferta */
   const priceGroups: SeriesGroupStyle[] = useMemo(() => {
     const present = [
       ...new Set(
@@ -499,8 +363,7 @@ export function Comparison({
     }));
   }, [result.arms, priceCut, dark]);
 
-  /** As linhas do preço: um grupo da oferta sob um modelo. Mesma forma das
-   * demais séries, então o mesmo `SeriesChart` as desenha. */
+   /** As linhas do preço: um grupo da oferta sob um modelo */
   const priceLines: SeriesLine[] = arms.flatMap((arm) =>
     (
       result.arms
@@ -518,7 +381,6 @@ export function Comparison({
     }))
   );
 
-  /** As séries de cada braço, por recorte. */
   const series = useMemo(
     () =>
       Object.fromEntries(
@@ -530,15 +392,13 @@ export function Comparison({
     [arms, result.arms]
   );
 
-  /** As réguas que esta comparação traz. Uma gravada antes de a régua ser
-   * escolha só tem a do período, e os outros botões somem. */
+   /** As réguas que esta comparação traz */
   const rulers = RULERS.filter((option) =>
     Object.values(series).some((axes) =>
       axes.some((a) => rulerOf(a) === option.ruler && a.groups.length)
     )
   );
-  /** O que o eixo X está mostrando. `AGGREGATE` não é régua: é o colapso
-   * dela, e vale sempre — o número da tabela existe em qualquer comparação. */
+   /** O que o eixo X está mostrando */
   const view: RulerChoice =
     rulerChoice === AGGREGATE || rulers.some((r) => r.ruler === rulerChoice)
       ? rulerChoice
@@ -547,14 +407,12 @@ export function Comparison({
   const ruler: Ruler = aggregated ? (rulers[0]?.ruler ?? "period") : (view as Ruler);
   const scale = RULERS.find((option) => option.ruler === ruler) ?? RULERS[0];
 
-  /** Os eixos de todos os braços nesta régua. */
   const rulerAxes = useMemo(
     () => Object.values(series).flat().filter((a) => rulerOf(a) === ruler),
     [series, ruler]
   );
 
-  /** Os recortes que esta comparação traz **nesta régua**. Uma gravada antes
-   * dos recortes por quantil só tem o "Geral", e os outros botões somem. */
+   /** Os recortes que esta comparação traz **nesta régua** */
   const cuts = CUTS.filter((option) =>
     rulerAxes.some((a) => a.axis === option.axis && a.groups.length)
   );
@@ -563,13 +421,7 @@ export function Comparison({
     : (cuts[0]?.axis ?? "overall");
 
 
-  /** Os modelos que produziram **o recorte escolhido** — os que o gráfico de
-   * faixas desenha, e os únicos que entram na legenda dele.
-   *
-   * É o que tira o CR do recorte por créditos: a grandeza só existe de um
-   * lado, e deixar o modelo na legenda sem linha diria que ele ficou zerado,
-   * que é a leitura errada — ali não há moeda, não há zero. Vale para qualquer
-   * eixo que um só mecanismo produza. */
+   /** Os modelos que produziram **o recorte escolhido** — os que o gráfico de faixas desenha, e os únicos que entram na legenda dele */
   const axisArms: SeriesArmStyle[] = useMemo(
     () =>
       arms.filter(
@@ -582,14 +434,13 @@ export function Comparison({
     [arms, series, ruler, cut]
   );
 
-  /** O eixo escolhido no catálogo de recortes, com domínio, passo e os cortes
-   * em vigor — os do rascunho, se houver, senão os da execução. */
+   /** O eixo escolhido no catálogo de recortes, com domínio, passo e os cortes em vigor — os do rascunho, se houver, senão os da execução */
   const cutOption = CUTS.find((option) => option.axis === cut);
   const runCuts = cutOption?.field ? (run.config[cutOption.field] ?? []) : [];
   const cutValues = cutOption?.field
     ? (cutDraft[cutOption.field] ?? runCuts)
     : [];
-  const [cutLow, cutHigh] = cutDomain(cut, run.config) ?? [
+  const [cutLow, cutHigh] = cutDomain(cut) ?? [
     0,
     Number.POSITIVE_INFINITY,
   ];
@@ -601,8 +452,6 @@ export function Comparison({
     [...cutValues]
       .sort((a, b) => a - b)
       .some((value, index) => value !== [...runCuts].sort((a, b) => a - b)[index]);
-  // O corte novo cai no meio do que sobrou acima do maior, para ficar dentro
-  // do domínio sem o usuário ter de calcular.
   const nextCut = (() => {
     const step = cutOption?.step ?? 1;
     const maior = cutValues.length ? Math.max(...cutValues) : cutLow;
@@ -610,11 +459,9 @@ export function Comparison({
     return Math.round((maior + (teto - maior) / 2) / step) * step;
   })();
 
-  /** O eixo de um braço na régua e no recorte escolhidos. */
   const axisOf = (armKey: string) =>
     series[armKey]?.find((a) => rulerOf(a) === ruler && a.axis === cut);
 
-  /** Os grupos do recorte, com cor e rótulo. */
   const groups = useMemo(() => {
     const present = [
       ...new Set(
@@ -629,9 +476,7 @@ export function Comparison({
     });
   }, [rulerAxes, cut, dark, bandColors]);
 
-  /** A seção da economia só aparece com leilão na comparação **e** com dado
-   * dela: as gravadas antes de 14/11/2026 não a têm, e um gráfico vazio diria
-   * menos que seção nenhuma. */
+   /** A seção da economia só aparece com leilão na comparação **e** com dado dela: as gravadas antes de 14/11/2026 não a têm, e um gráfico vazio diria menos que seção nenhuma */
   const hasCredits = Object.values(series).some((axes) =>
     axes.some((axis) =>
       axis.groups.some((group) =>
@@ -640,7 +485,6 @@ export function Comparison({
     )
   );
 
-  /** As linhas de uma grandeza: um grupo do recorte sob um modelo. */
   const linesOf = (key: string): SeriesLine[] =>
     arms.flatMap((arm) =>
           (axisOf(arm.key)?.groups ?? []).map((group) => ({
@@ -655,22 +499,17 @@ export function Comparison({
           }))
         );
 
-  /** As execuções de um braço, na ordem das seeds. Execuções gravadas antes de
-   * um braço existir simplesmente não o trazem, e o braço sai vazio em vez de
-   * derrubar a tela. */
+   /** As execuções de um braço, na ordem das seeds */
   const runsOf = (key: string): RunSummary[] =>
     result.arms.find((arm) => arm.key === key)?.runs ?? [];
 
-  /** A cor de cada modelo no agregado. Nos gráficos de linha o modelo é o
-   * traçado e a cor é do recorte; sem eixo X não há recorte, e a cor volta
-   * para o modelo. */
+   /** A cor de cada modelo no agregado */
   const armColors = useMemo(
     () => categoricalColors(arms.map((arm) => arm.label), dark),
     [arms, dark]
   );
 
-  /** As duas distribuições de entrada do cenário. Não variam entre braços nem
-   * entre seeds: são do cenário, não da simulação. */
+   /** As duas distribuições de entrada do cenário */
   const scenarioHistograms = [
     result.grade_distribution?.length ? (
       <Histogram
@@ -689,9 +528,7 @@ export function Comparison({
     ) : null,
   ].filter(Boolean);
 
-  /** Quantas rodadas o cenário teve, lido do próprio resultado. Comparações
-   * gravadas antes da saturação existir não trazem a lista, e aí a seção some
-   * em vez de aparecer vazia. */
+   /** Quantas rodadas o cenário teve, lido do próprio resultado */
   const rounds = useMemo(
     () =>
       Math.max(
@@ -704,18 +541,13 @@ export function Comparison({
   );
   const saturation = useMemo(() => roundMetrics(rounds), [rounds]);
 
-  /** Os valores de uma métrica numa amostra. Posições nulas (ninguém concluiu,
-   * rodada sem o que medir) ficam de fora — zero ali seria um valor medido. */
+   /** Os valores de uma métrica numa amostra */
   const valuesOf = (key: string, metric: Metric): number[] =>
     runsOf(key)
       .map(metric.of)
       .filter((value): value is number => value !== null && value !== undefined);
 
-  /** Comparação pareada entre dois braços: em quantas das N seeds o primeiro
-   * saiu melhor que o segundo. Só faz sentido porque as listas compartilham a
-   * seed — é a mesma população dos dois lados, e a comparação par a par não
-   * precisa supor nada sobre a forma das distribuições. Pares incompletos não
-   * contam nem a favor nem contra. */
+   /** Comparação pareada entre dois braços: em quantas das N seeds o primeiro saiu melhor que o segundo */
   const paired = (metric: Metric, aKey: string, bKey: string) => {
     if (metric.betterWhen === null) return null;
     const a = runsOf(aKey);
@@ -734,8 +566,7 @@ export function Comparison({
     return { favour, comparable };
   };
 
-  /** Quantas seeds o acúmulo fez *subir* — contagem descritiva, sem juízo de
-   * melhor ou pior, porque para λ e para a saturação não há um lado bom. */
+   /** Quantas seeds o acúmulo fez *subir* — contagem descritiva, sem juízo de melhor ou pior, porque para λ e para a saturação não há um lado bom */
   const raisedByAccumulation = (metric: Metric) => {
     const a = runsOf(WITH_ACCUMULATION);
     const b = runsOf(WITHOUT_ACCUMULATION);
@@ -756,8 +587,7 @@ export function Comparison({
   const medianOf = (key: string, metric: Metric) =>
     boxStats(valuesOf(key, metric))?.median ?? null;
 
-  /** Uma linha por braço na tabela de resumo — só os que rodaram, porque uma
-   * linha inteira em traços não diz nada sobre o modelo que ficou de fora. */
+   /** Uma linha por braço na tabela de resumo — só os que rodaram, porque uma linha inteira em traços não diz nada sobre o modelo que ficou de fora */
   const summaryRows = (metric: Metric) =>
     COMPARISON_ARMS.filter((arm) =>
       result.arms.some((entry) => entry.key === arm.key)
@@ -796,7 +626,6 @@ export function Comparison({
       );
     });
 
-  /** Uma linha por métrica na tabela do efeito do acúmulo. */
   const accumulationRow = (metric: Metric) => {
     const flat = medianOf(WITHOUT_ACCUMULATION, metric);
     const accumulated = medianOf(WITH_ACCUMULATION, metric);
@@ -818,7 +647,6 @@ export function Comparison({
     );
   };
 
-  /** Um gráfico de séries por período, no recorte escolhido. */
   const chart = (
     id: string,
     title: string,
@@ -842,8 +670,7 @@ export function Comparison({
     />
   );
 
-  /** Uma caixa por modelo, sobre as seeds. É o mesmo número da tabela, visto
-   * como distribuição em vez de como ponto. */
+   /** Uma caixa por modelo, sobre as seeds */
   const metricBox = (metric: Metric) => (
     <BoxPlot
       key={metric.id}
@@ -853,8 +680,6 @@ export function Comparison({
       rows={arms.map((arm) => ({
         key: arm.key,
         label: arm.label,
-        // No agregado não há recorte, então a cor volta a distinguir o
-        // **modelo** — é a única dimensão que sobra quando o eixo X some.
         color: armColors[arm.label] ?? soloColor(dark),
         values: runsOf(arm.key)
           .map((entry) => metric.of(entry))

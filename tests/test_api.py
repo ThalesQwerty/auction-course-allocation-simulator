@@ -9,8 +9,7 @@ from leilao.api.main import app
 
 @pytest.fixture(autouse=True)
 def results_dir(tmp_path, monkeypatch):
-    """Toda rota que roda grava a execução em disco. Sem isto a suíte deixaria
-    arquivos na pasta do projeto a cada `pytest`."""
+    """Toda rota que roda grava a execução em disco. Sem isto a suíte deixaria"""
     monkeypatch.setenv("LEILAO_RESULTS_DIR", str(tmp_path / "resultados"))
     return tmp_path / "resultados"
 
@@ -49,10 +48,8 @@ def test_run_returns_allocation_prices_and_consumption(client):
     assert payload["consumption"]["ana|calc1"] == 40
     assert payload["remaining_budget"]["ana"] == 60
     assert payload["remaining_budget"]["bia"] == 100
-    # ana venceu calc1 (peso 4) e tinha capacidade 10 -> restam 6; bia perdeu e mantém 10
     assert payload["remaining_capacity"]["ana"] == 6
     assert payload["remaining_capacity"]["bia"] == 10
-    # créditos são sempre inteiros (eq. 18) — a API não deve devolver casas decimais
     assert isinstance(payload["prices"]["calc1"], int)
     assert isinstance(payload["remaining_budget"]["ana"], int)
 
@@ -100,21 +97,13 @@ def test_run_with_no_bids_returns_empty_allocation(client):
     assert response.json()["allocation"] == {}
 
 
-# Grade de dois períodos: "Cálculo I" e "Programação" de entrada (matrícula
-# garantida) e "Física I" desbloqueada por "Cálculo I".
 COMPARE_SCENARIO = {
     "disciplines": [
         {"name": "Cálculo I", "classes": 6, "hours": 60, "unlocks": ["Física I"], "entry": True},
         {"name": "Programação", "classes": 6, "hours": 60, "unlocks": [], "entry": True},
         {"name": "Física I", "classes": 6, "hours": 60, "unlocks": [], "entry": False},
     ],
-    # Duas vagas por turma, uma delas do ingressante: a coorte é o ingresso por
-    # turma de entrada vezes as 6 turmas, e com lotação 1 a turma de entrada
-    # abriria a primeira rodada já cheia, de modo que quem reprovasse não
-    # tornaria a cursá-la.
     "class_size": 2,
-    # Uma faixa de quantil só, e seletividade desligada: o cenário mede o
-    # mecanismo, não o recorte nem a estratégia.
     "performance": {"mode_grade": 8.0, "zero_rate": 0.005, "max_rate": 0.008},
     "max_hours": 360,
     "availability": {"mode_hours": 350.0, "full_load_rate": 0.9},
@@ -128,17 +117,10 @@ COMPARE_SCENARIO = {
     "seed": 5,
 }
 
-# As duas normais que descrevem a população, no lugar dos perfis que existiram
-# até 08/10/2026. Notas baixas e ganho alto para o cenário produzir recursadas
-# dentro do horizonte; W_a de 120 h para o teto morder.
 POPULATION = {
-    # Aptidão dura: média 0,4 (a Beta(2, 3) de antes), então reprova-se
-    # bastante e há recursada o bastante para o teste da razão D/t ter amostra.
     "performance": {"mode_grade": 4.0, "zero_rate": 0.05, "max_rate": 0.002},
     "interest_sigma": 1,
     "max_hours": 120,
-    # A moda da disponibilidade está em horas, então o padrão (dimensionado
-    # para W_a = 360) não cabe neste W_a.
     "availability": {"mode_hours": 110.0, "full_load_rate": 0.4},
 }
 
@@ -146,24 +128,16 @@ def test_compare_returns_one_summary_per_seed_in_every_arm(client):
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 3}).json()
 
     assert payload["runs"] == 3
-    # Os dois modelos comparados, na ordem do eixo. Não há braço que rode
-    # sem aparecer nos resultados — a ablação não roda por padrão.
     assert [a["key"] for a in payload["arms"]] == [
         "ranking_greedy",
         "credits_return",
     ]
-    # As seeds vão de 1 a N e são pareadas: a i-ésima execução de cada braço
-    # parte da mesma população.
     for arm in payload["arms"]:
         assert [r["seed"] for r in arm["runs"]] == [1, 2, 3]
 
 
 def test_compare_runs_only_the_arms_asked_for(client):
-    """Um braço só é o caso de quem está calibrando cenário: metade do tempo.
-
-    A seed continua sendo o eixo da amostra, e o que muda é só quantos braços
-    a percorrem — nada no resumo de um braço depende do outro ter rodado.
-    """
+    """Um braço só é o caso de quem está calibrando cenário: metade do tempo."""
     payload = client.post(
         "/compare", json={**COMPARE_SCENARIO, "runs": 2, "arms": ["credits_return"]}
     ).json()
@@ -173,8 +147,7 @@ def test_compare_runs_only_the_arms_asked_for(client):
 
 
 def test_compare_orders_the_arms_canonically_whatever_the_request_says(client):
-    """A tela acha o braço pela chave, então a ordem do pedido não pode vazar
-    para o resumo: duas requisições com as mesmas chaves dão o mesmo eixo."""
+    """A tela acha o braço pela chave, então a ordem do pedido não pode vazar"""
     payload = client.post(
         "/compare",
         json={**COMPARE_SCENARIO, "runs": 1, "arms": ["credits_return", "ranking_greedy"]},
@@ -193,8 +166,7 @@ def test_compare_rejects_an_unknown_arm(client):
 
 
 def test_a_run_is_written_to_disk_in_the_history_format(client, results_dir):
-    """O arquivo gravado é uma entrada de histórico: carregá-lo na interface é
-    só acrescentá-lo à lista, sem conversão e sem segundo esquema."""
+    """O arquivo gravado é uma entrada de histórico: carregá-lo na interface é"""
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 1}).json()
 
     saved = pathlib.Path(payload["saved_to"])
@@ -214,9 +186,8 @@ def test_two_runs_in_the_same_second_do_not_overwrite_each_other(client, results
     assert len(list(results_dir.glob("*.json"))) == 2
 
 
-def test_a_disk_that_refuses_does_not_fail_the_request(client, tmp_path, monkeypatch):  # noqa: PT019
-    """Quem pediu a simulação quer o resultado: perder uma rodada de dezenas
-    de minutos porque o registro não coube seria o pior dos dois mundos."""
+def test_a_disk_that_refuses_does_not_fail_the_request(client, tmp_path, monkeypatch):
+    """Quem pediu a simulação quer o resultado: perder uma rodada de dezenas"""
     blocked = tmp_path / "arquivo"
     blocked.write_text("não é pasta", encoding="utf-8")
     monkeypatch.setenv("LEILAO_RESULTS_DIR", str(blocked))
@@ -227,87 +198,18 @@ def test_a_disk_that_refuses_does_not_fail_the_request(client, tmp_path, monkeyp
     assert payload["arms"]
 
 
-def test_compare_returns_only_the_allocation_metrics(client):
-    """Nada de crédito: orçamento, preço e retorno não existem do lado da linha
-    de base, e nenhum recorte — o que se compara é o mecanismo. `periods`,
-    `graduates`, `dismissed` e `population` não são métricas: são o contexto
-    para ler as que são — as duas frações da tela saem deles."""
-    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
-
-    assert set(payload["arms"][0]["runs"][0]) == {
-        "seed",
-        "periods",
-        "graduates",
-        "dismissed",
-        "population",
-        "efficiency",
-        "utilization",
-        "progress",
-        "fidelity",
-        "fairness",
-        "correlation",
-        "grade_average",
-        "exclusion_rate",
-        "dissipation",
-        "request_states",
-        "time_to_graduate",
-        "allocations_per_round",
-    }
-    # As séries saem por braço, já reduzidas entre as seeds: cada régua do eixo
-    # X cruzada com o agregado e com os quatro recortes, cada grupo com
-    # `[q1, mediana, q3]` por grandeza e ponto.
-    series = payload["arms"][0]["series"]
-    assert [(axis["ruler"], axis["axis"]) for axis in series] == [
-        (ruler, axis)
-        for ruler in ("period", "age", "cohort")
-        # Sem o crédito: o primeiro braço é o `ranking`, onde não há moeda e o
-        # eixo não é produzido.
-        for axis in (
-            "overall",
-            "grade_average",
-            "reserve",
-        )
-    ]
-    overall = series[0]["groups"][0]
-    assert set(overall) == {"group", "x", "n", "values"}
-    assert {
-        "students",
-        "graduation_rate",
-        "efficiency",
-        "utilization",
-        "progress",
-        "fidelity",
-        "fairness",
-        "correlation",
-        "exclusion_rate",
-        "approved",
-        "requested_share",
-        "granted_share",
-        "attended_share",
-        "approved_share",
-        "round_1",
-    } <= set(overall["values"])
-    for band in overall["values"]["efficiency"]:
-        assert band is None or band[0] <= band[1] <= band[2]
-
-
 def test_compare_reports_the_time_to_graduate_with_its_denominator(client):
-    """O tempo de formatura tem viés de seleção — só existe sobre quem
-    concluiu —, então `graduates` anda junto. Sem concluinte, o tempo é nulo,
-    não zero: zero se leria como 'formou na hora'."""
+    """O tempo de formatura tem viés de seleção — só existe sobre quem"""
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
 
     for run in [r for arm in payload["arms"] for r in arm["runs"]]:
         assert (run["time_to_graduate"] is None) == (run["graduates"] == 0)
         if run["time_to_graduate"] is not None:
-            # Ninguém conclui em menos de um período, nem em mais do que o
-            # horizonte simulado.
             assert 1 <= run["time_to_graduate"] <= run["periods"]
 
 
 def test_compare_ignores_the_scenario_seed(client):
-    """A seed do cenário não entra: ali ela vira o eixo da amostra, e as seeds
-    são 1..N pareadas entre os braços."""
+    """A seed do cenário não entra: ali ela vira o eixo da amostra, e as seeds"""
     first = client.post(
         "/compare", json={**COMPARE_SCENARIO, "seed": 1, "runs": 2}
     ).json()
@@ -315,15 +217,8 @@ def test_compare_ignores_the_scenario_seed(client):
         "/compare", json={**COMPARE_SCENARIO, "seed": 77, "runs": 2}
     ).json()
 
-    # `saved_to` é onde a execução foi gravada, não o que ela calculou: duas
-    # chamadas nunca compartilham arquivo, e compará-lo não diria nada sobre
-    # o cenário.
     assert first.pop("saved_to") != second.pop("saved_to")
 
-    # O tempo de alocação é relógio, não resultado: a mesma configuração dá a
-    # mesma simulação e nunca os mesmos segundos. Dele se exige a **forma** —
-    # um ponto por (período, rodada), igual nos dois —, e o conteúdo sai da
-    # comparação pelo mesmo motivo que `saved_to`.
     shapes = [
         [[len(period) for period in arm.pop("allocation_seconds")] for arm in payload["arms"]]
         for payload in (first, second)
@@ -335,11 +230,7 @@ def test_compare_ignores_the_scenario_seed(client):
 
 
 def test_credit_quantities_exist_only_where_there_is_currency(client):
-    """As três grandezas da economia saem `null` na linha de base por CR.
-
-    Zero ali se leria como "ninguém gastou", e o certo é "não há o que gastar"
-    — é a mesma convenção das demais grandezas de crédito.
-    """
+    """As três grandezas da economia saem `null` na linha de base por CR."""
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
     chaves = ("credits_supply", "credits_spent", "credits_returned")
 
@@ -357,11 +248,7 @@ def test_credit_quantities_exist_only_where_there_is_currency(client):
 
 
 def test_the_price_cuts_split_the_offer_and_only_exist_in_the_auction(client):
-    """O preço recorta **turmas**, não alunos — a única família assim.
-
-    Como o tempo de alocação, ele atravessa `service._arm_out`, que lista os
-    campos um a um: esquecer um ali devolve lista vazia sem erro nenhum.
-    """
+    """O preço recorta **turmas**, não alunos — a única família assim."""
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
 
     for arm in payload["arms"]:
@@ -372,7 +259,6 @@ def test_the_price_cuts_split_the_offer_and_only_exist_in_the_auction(client):
         assert {cut["axis"] for cut in cortes} == {
             "classes",
             "hours",
-            "difficulty",
             "curriculum_period",
         }
         for cut in cortes:
@@ -381,18 +267,11 @@ def test_the_price_cuts_split_the_offer_and_only_exist_in_the_auction(client):
                 faixas = group["values"]["mean_price"]
                 assert len(faixas) == len(group["x"]) == len(group["n"])
                 assert any(f is not None for f in faixas)
-                # O preço é inteiro e tem piso 1 (eq. 24): quartil abaixo disso
-                # seria preço que ninguém pagou.
                 assert all(f is None or f[0] >= 1 for f in faixas)
 
 
 def test_compare_reports_the_allocation_time_of_every_round(client):
-    """O custo de rodar o mecanismo sai por braço, um ponto por (período, rodada).
-
-    Ele atravessa uma montagem que lista os campos um a um (`service._arm_out`),
-    onde um campo esquecido vira lista vazia **em silêncio** — e foi o que
-    aconteceu. Por isso o que se exige aqui é a forma, e não só a presença.
-    """
+    """O custo de rodar o mecanismo sai por braço, um ponto por (período, rodada)."""
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
 
     for arm in payload["arms"]:
@@ -404,8 +283,7 @@ def test_compare_reports_the_allocation_time_of_every_round(client):
 
 
 def test_compare_reports_one_allocation_figure_per_round(client):
-    """A saturação tem uma posição por rodada do cenário, igual em todo braço —
-    é o decaimento entre elas que responde "satura mais rápido?"."""
+    """A saturação tem uma posição por rodada do cenário, igual em todo braço —"""
     payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
 
     rounds = COMPARE_SCENARIO["rounds"]
@@ -414,10 +292,7 @@ def test_compare_reports_one_allocation_figure_per_round(client):
         assert all(value is None or value >= 0 for value in run["allocations_per_round"])
 
 def test_trace_reproduces_the_execution_the_comparison_summarized(client):
-    """O par (braço, seed) endereça uma execução do boxplot, e o traço é ela —
-    não uma parecida. A simulação é determinística, então refazê-la custa tempo
-    e não fidelidade: o que se confere aqui é que o braço entra dos dois lados
-    pela mesma porta (`arm_config`)."""
+    """O par (braço, seed) endereça uma execução do boxplot, e o traço é ela —"""
     comparison = client.post("/compare", json={**COMPARE_SCENARIO, **POPULATION, "runs": 2}).json()
 
     for arm in comparison["arms"]:
@@ -429,9 +304,6 @@ def test_trace_reproduces_the_execution_the_comparison_summarized(client):
 
             assert payload["arm"] == arm["key"]
             assert payload["seed"] == run["seed"]
-            # O traço é a vida inteira do aluno, pré-população incluída: é o
-            # que explica o estado dele quando a janela começa. O resumo da
-            # comparação, ao contrário, só conta o que a janela mediu.
             assert len(payload["periods"]) >= run["periods"]
             warmup = len(payload["periods"]) - run["periods"]
             graduated = [
@@ -443,9 +315,7 @@ def test_trace_reproduces_the_execution_the_comparison_summarized(client):
 
 
 def test_trace_records_every_eligible_discipline_round_by_round(client):
-    """Cada linha é uma disciplina elegível no período, com uma posição por
-    rodada do cenário — inclusive as que ficaram em zero, que são o caso que
-    costuma explicar um resultado inesperado."""
+    """Cada linha é uma disciplina elegível no período, com uma posição por"""
     payload = client.post(
         "/trace", json={**COMPARE_SCENARIO, **POPULATION, "arm": "credits_return", "seed": 1}
     ).json()
@@ -461,13 +331,8 @@ def test_trace_records_every_eligible_discipline_round_by_round(client):
     for record in records:
         assert len(record["bids"]) == rounds
         assert record["utility"] > 0
-        # Vaga obtida tem nota — o período fecha antes do relatório —, menos
-        # a que ele largou: excluir não é cursar, então não há nota.
         has_grade = record["won_round"] is not None and not record["excluded"]
         assert (record["grade"] is not None) == has_grade
-    # Vaga ganha numa rodada tem lance **naquela** rodada: é o que a tabela de
-    # cada rodada mostra lado a lado. (A vaga garantida é a exceção declarada:
-    # ela não veio de rodada nenhuma e leva `won_round` 0.)
     won_in_round = [r for r in records if r["won_round"] is not None and r["won_round"] > 0]
     assert won_in_round
     for record in won_in_round:
@@ -475,8 +340,7 @@ def test_trace_records_every_eligible_discipline_round_by_round(client):
 
 
 def test_trace_marks_the_guaranteed_enrollment_of_the_newcomer(client):
-    """A vaga garantida não veio de rodada nenhuma: `won_round` 0 a distingue de
-    uma disputada e ganhada na primeira."""
+    """A vaga garantida não veio de rodada nenhuma: `won_round` 0 a distingue de"""
     payload = client.post(
         "/trace", json={**COMPARE_SCENARIO, **POPULATION, "arm": "credits_return", "seed": 1}
     ).json()

@@ -1,12 +1,4 @@
 """Créditos efetivamente consumidos por uma demanda vencedora — anteprojeto, eq. (25).
-
-    δ_{a,x} = min(c_{a,x}, π_x)      se z_{a,x} = 1
-            = 0                      caso contrário
-
-Quem vence paga o preço de mercado (eq. 24), não o que apostou — e paga o
-lance quando este é menor que o preço, o que só acontece quando o bem teve
-vaga sobrando. **Lance perdedor não consome nada**, e é essa gratuidade que
-faz o aluno apostar tudo em toda rodada.
 """
 from __future__ import annotations
 

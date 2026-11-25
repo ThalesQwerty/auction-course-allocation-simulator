@@ -1,16 +1,9 @@
-/** Leitura da grade no navegador: migração do formato antigo e os recortes
- * que as telas usam.
- *
- * As duas induções — período e altura — estão em `equations/`, porque são
- * fórmulas que espelham o motor. Aqui fica o que é só do front: converter o
- * que o `localStorage` guardou e montar as arestas que elas consomem.
- */
+/** Leitura da grade no navegador: migração do formato antigo e os recortes que as telas usam */
 import { CYCLIC, curriculumPeriods as inducePeriods } from "./equations";
 import type { DisciplineInput } from "./types";
 
 export { CYCLIC };
 
-/** A grade já com os sucessores, antes de a flag de entrada ser resolvida. */
 type Unlocked = Omit<DisciplineInput, "entry">;
 
 type StoredDiscipline = Omit<DisciplineInput, "unlocks" | "entry"> & {
@@ -19,9 +12,7 @@ type StoredDiscipline = Omit<DisciplineInput, "unlocks" | "entry"> & {
   entry?: boolean;
 };
 
-/** Aceita grade nova (`unlocks`) ou legada (`prerequisites`). Campo `entry`
- * ausente vale verdadeiro nas raízes — o que o histórico antigo chamava de
- * 1º período. */
+/** Aceita grade nova (`unlocks`) ou legada (`prerequisites`) */
 export function withUnlocks(disciplines: StoredDiscipline[]): DisciplineInput[] {
   const normalized = disciplines.every((d) => Array.isArray(d.unlocks))
     ? disciplines.map(({ name, classes, hours, unlocks }) => ({
@@ -40,8 +31,7 @@ export function withUnlocks(disciplines: StoredDiscipline[]): DisciplineInput[] 
   }));
 }
 
-/** Inverte a grade legada: cada disciplina declarava o que exigia, e hoje
- * declara o que destrava. */
+/** Inverte a grade legada: cada disciplina declarava o que exigia, e hoje declara o que destrava */
 function fromPrerequisites(disciplines: StoredDiscipline[]): Unlocked[] {
   const unlocks = new Map(disciplines.map((d) => [d.name, [] as string[]]));
   for (const discipline of disciplines) {
@@ -57,9 +47,7 @@ function fromPrerequisites(disciplines: StoredDiscipline[]): Unlocked[] {
   }));
 }
 
-/** Predecessores de cada disciplina — a aresta inversa de `unlocks`. Sucessor
- * apontando para disciplina inexistente é ignorado: é o estado de uma
- * renomeação a meio. */
+/** Predecessores de cada disciplina — a aresta inversa de `unlocks` */
 function predecessorsByDiscipline(
   disciplines: readonly { name: string; unlocks: string[] }[]
 ): Map<string, string[]> {
@@ -74,28 +62,18 @@ function predecessorsByDiscipline(
   return predecessors;
 }
 
-/** O período de cada disciplina — ver `equations.curriculumPeriods`. */
 export function curriculumPeriods(
   disciplines: DisciplineInput[]
 ): Record<string, number> {
   return inducePeriods(predecessorsByDiscipline(disciplines));
 }
 
-/** As disciplinas de entrada: a matrícula garantida de quem ingressa. Vem da
- * flag, e **não** de não ter pré-requisito — a optativa também não tem e não
- * é entrada. É este conjunto que dimensiona a coorte e `max_hours`. Espelha
- * `SimulationConfig.entry_disciplines`. */
+/** As disciplinas de entrada: a matrícula garantida de quem ingressa */
 export function entryDisciplines(disciplines: DisciplineInput[]): DisciplineInput[] {
   return disciplines.filter((d) => d.entry);
 }
 
-/** Em quantas turmas cada disciplina de entrada está repartida — o fator que
- * leva o ingresso por turma à coorte (`equations.cohortSize`).
- *
- * É um número só: o motor recusa a grade cujas disciplinas de entrada discordem
- * no número de turmas, porque aí cada uma implicaria uma coorte. Zero quando
- * não há disciplina de entrada, que é grade que o motor também recusa.
- * Espelha `SimulationConfig.entry_classes`. */
+/** Em quantas turmas cada disciplina de entrada está repartida — o fator que leva o ingresso por turma à coorte (`equations.cohortSize`) */
 export function entryClasses(disciplines: DisciplineInput[]): number {
   return entryDisciplines(disciplines)[0]?.classes ?? 0;
 }

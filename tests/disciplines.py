@@ -1,8 +1,4 @@
-"""Monta disciplinas a partir da autoria por predecessores.
-
-A omissão de `entry` marca como entrada toda raiz — é o que os cenários de
-matrícula garantida descrevem. Uma raiz que não é de entrada passa `False`.
-"""
+"""Monta disciplinas a partir da autoria por predecessores."""
 
 from __future__ import annotations
 
@@ -12,11 +8,7 @@ from leilao.config import Discipline
 def disciplines_from_predecessors(
     *entries: tuple,
 ) -> list[Discipline]:
-    """Cada entrada é `(nome, vagas, horas)`, `(nome, vagas, horas, entry)`,
-    `(nome, vagas, horas, preds)` ou `(nome, vagas, horas, preds, entry)`.
-
-    `preds` são as disciplinas que desbloqueiam esta. A saída usa `unlocks`.
-    """
+    """Cada entrada é `(nome, vagas, horas)`, `(nome, vagas, horas, entry)`,"""
     parsed: list[tuple[str, int, int, tuple[str, ...], bool | None]] = []
     for entry in entries:
         explicit: bool | None = None

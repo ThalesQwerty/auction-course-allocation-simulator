@@ -2,10 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CYCLIC, curriculumPeriods } from "./curriculum";
 import type { DisciplineInput } from "./types";
 
-/** Um conector entre duas disciplinas, já em coordenadas do contêiner. O traço
- * é uma cúbica de tangentes horizontais, e não leva ponta: a cadeia corre da
- * esquerda para a direita, então o sentido está na própria posição das
- * colunas. */
+/** Um conector entre duas disciplinas, já em coordenadas do contêiner */
 interface Arrow {
   key: string;
   from: string;
@@ -15,19 +12,6 @@ interface Arrow {
 
 const formatHours = (hours: number) => hours.toLocaleString("pt-BR");
 
-/** A dificuldade do cartão. O **neutro é argumento** porque é ele que não
- * merece destaque — o que a vista precisa achar numa grade de dezenas de
- * cartões é quem foge dele. Daí o peso só acima e o recuo abaixo: a escala é
- * a mesma, a ênfase é que é assimétrica. */
-const trait = (value: number | undefined, neutral: number) => {
-  const amount = value ?? neutral;
-  const level =
-    amount > neutral ? "is-high" : amount < neutral ? "is-low" : undefined;
-  return (
-    <span className={level}>{amount.toLocaleString("pt-BR")}</span>
-  );
-};
-
 const totalHours = (list: DisciplineInput[]) =>
   list.reduce((sum, discipline) => sum + discipline.hours, 0);
 
@@ -36,17 +20,13 @@ export function GradeGraph({
   classSize,
 }: {
   disciplines: DisciplineInput[];
-  /** Alunos por turma: a grade declara turmas, e as vagas saem daqui. */
   classSize: number;
 }) {
   const periods = useMemo(() => curriculumPeriods(disciplines), [disciplines]);
   const required = useMemo(() => disciplines.filter((d) => !d.elective), [disciplines]);
   const electives = useMemo(() => disciplines.filter((d) => d.elective), [disciplines]);
 
-  /** As colunas das obrigatórias — uma por período da grade, na ordem. O
-   * período não se configura: sai da indução sobre os pré-requisitos
-   * (`curriculum.ts`). A última coluna recolhe o que está preso num ciclo, que
-   * é período nenhum mas é o estado normal do formulário no meio de uma edição. */
+   /** As colunas das obrigatórias — uma por período da grade, na ordem */
   const columns = useMemo(() => {
     const placed = required.filter((d) => periods[d.name] >= 1);
     const last = placed.reduce((max, d) => Math.max(max, periods[d.name]), 0);
@@ -60,17 +40,7 @@ export function GradeGraph({
     return result;
   }, [required, periods]);
 
-  /** A optativa não tem período a mostrar: não destrava nada e não é
-   * pré-requisito de ninguém, então não há cadeia que ordene o catálogo. Quem
-   * ordena no lugar dele é a **oferta**: uma coluna por patamar de vagas, da
-   * mais abundante para a mais apertada.
-   *
-   * É o mesmo gesto das obrigatórias, e de propósito. Ali as colunas correm da
-   * entrada larga à ponta estreita do funil; aqui correm do patamar farto ao
-   * escasso. Nos dois blocos, andar para a direita é andar para a disputa — e
-   * como vagas é justamente o eixo que o obrigatório não consegue medir (lá
-   * ele está confundido com o período), é no bloco das optativas que ele
-   * precisa estar legível. */
+   /** A optativa não tem período a mostrar: não destrava nada e não é pré-requisito de ninguém, então não há cadeia que ordene o catálogo */
   const electiveColumns = useMemo(() => {
     const byClasses = new Map<number, DisciplineInput[]>();
     for (const discipline of electives) {
@@ -117,9 +87,7 @@ export function GradeGraph({
 
   const [hover, setHover] = useState<string | null>(null);
 
-  /** Com o mouse sobre uma disciplina, a cadeia dela se acende e o resto recua:
-   * numa grade de dezenas de cartões é o apagar do que não é da cadeia que faz
-   * o caminho aparecer. */
+   /** Com o mouse sobre uma disciplina, a cadeia dela se acende e o resto recua: numa grade de dezenas de cartões é o apagar do que não é da cadeia que faz o caminho aparecer */
   const related = useCallback(
     (name: string) =>
       hover !== null &&
@@ -129,9 +97,7 @@ export function GradeGraph({
     [hover, links]
   );
 
-  /** Os dois lados da cadeia saem no **mesmo** tom: o que separa "exige" de
-   * "destrava" é a coluna em que o cartão está, e a grade corre num sentido
-   * só. */
+   /** Os dois lados da cadeia saem no **mesmo** tom: o que separa "exige" de "destrava" é a coluna em que o cartão está, e a grade corre num sentido só */
   const cardClass = (name: string) => {
     if (!hover) return "grade-card";
     if (hover === name) return "grade-card is-focus";
@@ -155,16 +121,10 @@ export function GradeGraph({
         const to = cards.current.get(successor);
         if (!to) continue;
         const end = to.getBoundingClientRect();
-        // Sai pela direita de quem destrava e chega pela esquerda de quem é
-        // destravada: a grade corre na horizontal, então é esse o par de bordas
-        // que não atravessa o próprio cartão.
         const x1 = start.right - origin.left;
         const y1 = start.top + start.height / 2 - origin.top;
         const x2 = end.left - origin.left;
         const y2 = end.top + end.height / 2 - origin.top;
-        // Metade do vão em cada ponta, e nada além dele: com a tangente mais
-        // longa que a distância, as duas pontas se ultrapassam e a curva estufa
-        // num S. O teto segura as que saltam colunas.
         const pull = Math.max(8, Math.min(Math.abs(x2 - x1) / 2, 48));
         next.push({
           key: `${discipline.name}->${successor}`,
@@ -209,7 +169,6 @@ export function GradeGraph({
       </p>
       <p className="grade-traits">
         {discipline.classes > 1 && <>{discipline.classes} turmas · </>}
-        dific. {trait(discipline.difficulty, 1)}
       </p>
     </article>
   );

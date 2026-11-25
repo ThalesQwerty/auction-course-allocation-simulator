@@ -1,10 +1,4 @@
-"""Vagas que sobram de um bem depois de uma alocação — anteprojeto, eq. (13).
-
-    q_x^(t,r+1) = q_x^(t,r) − Σ_{a ∈ A} z_{a,x}
-
-É o estoque andando de uma rodada para a seguinte. Bens sem demanda atendida
-atravessam a rodada intactos.
-"""
+"""Vagas que sobram de um bem depois de uma alocação — anteprojeto, eq. (13)."""
 from __future__ import annotations
 
 

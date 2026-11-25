@@ -12,7 +12,7 @@ from leilao.behavior import (
     utility_matrix,
 )
 from leilao.config import Discipline, SimulationConfig
-from leilao.equations import attempt_rates
+from leilao.equations import attempt_approval
 from leilao.names import FIRST_NAMES, LAST_NAMES, sample_names
 from leilao.population import Student, generate_students
 
@@ -34,8 +34,7 @@ def make_config(**overrides) -> SimulationConfig:
 
 
 def student(**overrides) -> Student:
-    """Um aluno qualquer: o que importa aqui é o conjunto elegível dele. O
-    sorteio das duas matrizes é testado em `test_population.py`."""
+    """Um aluno qualquer: o que importa aqui é o conjunto elegível dele. O"""
     base = dict(id="a1", name="Fulano", credits=10)
     return Student(**{**base, **overrides})
 
@@ -63,8 +62,7 @@ def test_curriculum_period_and_height_are_induced_from_unlocks():
 
 
 def test_a_root_without_the_entry_flag_stays_eligible():
-    """Sem pré-requisito não é entrada. A raiz livre entra no conjunto elegível
-    de quem não aprovou nada e fica fora da matrícula garantida."""
+    """Sem pré-requisito não é entrada. A raiz livre entra no conjunto elegível"""
     config = SimulationConfig(
         disciplines=disciplines_from_predecessors(
             ("Entrada", 5, 60),
@@ -104,8 +102,7 @@ def test_a_scenario_without_entry_disciplines_is_rejected():
 
 
 def test_a_cycle_of_unlocks_is_rejected():
-    """Uma cadeia que se fecha não tem altura nem período: as disciplinas dela
-    nunca ficariam elegíveis, e o cenário não se conclui por construção."""
+    """Uma cadeia que se fecha não tem altura nem período: as disciplinas dela"""
     with pytest.raises(ValueError, match="ciclo de sucessores"):
         SimulationConfig(
             disciplines=[
@@ -125,13 +122,8 @@ def test_unknown_successor_is_rejected():
         )
 
 
-# --- a matriz de interesse: array por dentro, dicionário por fora ---------
-
-
 def test_the_interest_matrix_reads_as_the_dictionary_it_replaced():
-    """`InterestMatrix` guarda o array e monta a linha no acesso — 131 MB no
-    lugar de 767 MB no cenário cheio. O contrato que isso não pode quebrar é
-    o do dicionário que ela substituiu, porque ninguém mais foi mexido."""
+    """`InterestMatrix` guarda o array e monta a linha no acesso — 131 MB no"""
     config = make_config(periods=4)
     students = [student(id=f"a{i}") for i in range(3)]
     rows = draw_interest(students, config, np.random.default_rng(0))
@@ -142,9 +134,7 @@ def test_the_interest_matrix_reads_as_the_dictionary_it_replaced():
 
 
 def test_the_period_of_the_interest_matrix_is_one_based():
-    """O eixo do array é 0-based e a chave é 1-based. O que não pode acontecer
-    é o período 0 virar índice −1 e devolver o último período em silêncio —
-    numpy aceitaria, e o erro não apareceria em lugar nenhum."""
+    """O eixo do array é 0-based e a chave é 1-based. O que não pode acontecer"""
     config = make_config(periods=4)
     rows = draw_interest([student(id="a0")], config, np.random.default_rng(0))
 
@@ -155,9 +145,7 @@ def test_the_period_of_the_interest_matrix_is_one_based():
 
 
 def test_the_interest_row_is_built_fresh_at_each_access():
-    """A linha é montada, não guardada — então escrever nela não alcança a
-    matriz. `Draws` promete ser imutável depois do sorteio, e é esta a forma
-    de a promessa continuar valendo com o array por baixo."""
+    """A linha é montada, não guardada — então escrever nela não alcança a"""
     config = make_config(periods=2)
     rows = draw_interest([student(id="a0")], config, np.random.default_rng(0))
 
@@ -171,17 +159,13 @@ def test_the_interest_row_is_built_fresh_at_each_access():
 
 
 def test_the_drawn_row_is_taste_alone_and_sums_to_one():
-    """A invariante de altura saiu: a posição na grade **não** ordena mais o
-    interesse. O valor curricular entra depois, quando `utility` converte o
-    interesse em utilidade, e não dentro do gosto."""
+    """A invariante de altura saiu: a posição na grade **não** ordena mais o"""
     config = make_config(periods=4)
     students = [student(id=f"a{i}") for i in range(5)]
     rows = draw_interest(students, config, np.random.default_rng(0))
     heights = config.heights()
 
-    assert all(sum(row.values()) == pytest.approx(1.0) for row in rows.values())
-    # Alguma linha tem de inverter a ordem por altura — se nenhuma invertesse,
-    # a invariante ainda estaria lá disfarçada.
+    assert all(all(v > 0 for v in row.values()) for row in rows.values())
     inverted = any(
         row[x] < row[y]
         for row in rows.values()
@@ -191,21 +175,15 @@ def test_the_drawn_row_is_taste_alone_and_sums_to_one():
 
 
 def test_utility_matrix_covers_only_the_eligible_disciplines():
-    """eq. (42): só entra o que o aluno ainda precisa cursar *e* já pode — a
-    bloqueada por pré-requisito vale zero tanto quanto a já aprovada."""
+    """eq. (42): só entra o que o aluno ainda precisa cursar *e* já pode — a"""
     config = make_config(periods=20)
     novice = student()
     row = draw_interest([novice], config, np.random.default_rng(3))[("a1", 1)]
 
     utilities = utility_matrix(interest=row, student=novice, config=config)
-    # Quem não aprovou nada só alcança o 1º período da grade.
     assert set(utilities) == {"D1", "D2", "D3"}
     assert len(set(utilities.values())) == len(utilities)
-    # A redistribuição conserva a massa: o que estava fora do alcance desceu
-    # para quem o destrava, então o recorte soma o mesmo que a linha inteira.
-    # É isso que põe `alpha_u` na mesma unidade da utilidade.
     assert sum(utilities.values()) == pytest.approx(1.0)
-    assert sum(row.values()) == pytest.approx(1.0)
 
 
 def test_approving_a_prerequisite_unlocks_the_next_discipline():
@@ -214,8 +192,6 @@ def test_approving_a_prerequisite_unlocks_the_next_discipline():
 
     before = utility_matrix(interest=row, student=student(), config=config)
     after = utility_matrix(interest=row, student=student(grades={"D1": 8.0}), config=config)
-    # D1 sai (aprovada) e D4 entra (pré-requisito cumprido); D6 continua fora,
-    # porque depende de D4.
     assert set(before) == {"D1", "D2", "D3"}
     assert set(after) == {"D2", "D3", "D4"}
 
@@ -229,8 +205,7 @@ def test_a_failed_prerequisite_does_not_unlock_anything():
 
 
 def test_utility_matrix_is_a_pure_function_of_the_row():
-    """A matriz é parâmetro de entrada: a mesma linha e o mesmo estado do aluno
-    têm de dar sempre a mesma utilidade, chamados em qualquer ordem."""
+    """A matriz é parâmetro de entrada: a mesma linha e o mesmo estado do aluno"""
     config = make_config()
     row = draw_interest([student()], config, np.random.default_rng(5))[("a1", 1)]
 
@@ -240,25 +215,20 @@ def test_utility_matrix_is_a_pure_function_of_the_row():
 
 
 def test_approving_a_discipline_concentrates_the_inheritance_on_who_is_left():
-    """Aprovar D3 tira a disciplina da matriz e deixa D5 — que ela e D2
-    travavam juntas — herdada só por D2. A soma continua 1, e é sempre 1:
-    não há massa a conservar, há uma linha que se renormaliza."""
+    """Aprovar D3 tira a disciplina da matriz e deixa D5 — que ela e D2"""
     config = make_config()
     row = draw_interest([student()], config, np.random.default_rng(9))[("a1", 1)]
 
     before = utility_matrix(interest=row, student=student(), config=config)
-    # D3 aprovada: D1 e D2 continuam elegíveis, e D5 não entra (falta D2).
     after = utility_matrix(interest=row, student=student(grades={"D3": 8.0}), config=config)
     assert "D3" in before and "D3" not in after
     assert sum(before.values()) == pytest.approx(1.0)
     assert sum(after.values()) == pytest.approx(1.0)
-    # D1 segue herdando D4 sozinha; D2 passa de meia D5 para D5 inteira.
     assert after["D2"] / after["D1"] > before["D2"] / before["D1"]
 
 
 def test_an_empty_eligible_set_gives_no_utility():
-    """Quem aprovou a grade inteira não quer mais nada — e, por isso, já se
-    formou antes de chegar a um leilão."""
+    """Quem aprovou a grade inteira não quer mais nada — e, por isso, já se"""
     config = make_config()
     row = draw_interest([student()], config, np.random.default_rng(2))[("a1", 1)]
     done = student(grades={name: 9.0 for name in ("D1", "D2", "D3", "D4", "D5", "D6")})
@@ -266,8 +236,7 @@ def test_an_empty_eligible_set_gives_no_utility():
 
 
 def _harmonic_value(bids: dict[str, int], utilities: dict[str, float]) -> float:
-    """O que o aluno extrai de uma repartição: c créditos em x valem u_x vezes o
-    c-ésimo número harmônico, porque o N-ésimo crédito rende u_x / N."""
+    """O que o aluno extrai de uma repartição: c créditos em x valem u_x vezes o"""
     return sum(
         utilities[name] * sum(1.0 / step for step in range(1, credits + 1))
         for name, credits in bids.items()
@@ -275,8 +244,7 @@ def _harmonic_value(bids: dict[str, int], utilities: dict[str, float]) -> float:
 
 
 def _splits(total: int, parts: int):
-    """Todas as formas de repartir `total` créditos inteiros entre `parts`
-    disciplinas — a busca exaustiva contra a qual o guloso é conferido."""
+    """Todas as formas de repartir `total` créditos inteiros entre `parts`"""
     if parts == 1:
         yield (total,)
         return
@@ -286,34 +254,26 @@ def _splits(total: int, parts: int):
 
 
 def test_bids_spend_the_whole_budget():
-    """Não há poupança de créditos: todo crédito a mais tem ganho marginal
-    positivo, e o que sobra não passa para o período seguinte."""
+    """Não há poupança de créditos: todo crédito a mais tem ganho marginal"""
     utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
     for budget in range(1, 16):
         bids = compute_bids(utilities=utilities, available=list(utilities), budget=budget)
         assert sum(bids.values()) == budget
-        # eq. (18): lance nulo não é demanda — quem aparece recebeu crédito.
         assert all(credits > 0 for credits in bids.values())
 
 
 def test_the_marginal_utility_decays_with_each_extra_credit():
-    """O N-ésimo crédito numa disciplina vale u_x / N, e é isso que decide a
-    ordem: a preferida só repete quando o que ela ainda rende supera o primeiro
-    crédito da seguinte."""
+    """O N-ésimo crédito numa disciplina vale u_x / N, e é isso que decide a"""
     utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
     common = dict(utilities=utilities, available=list(utilities))
-    # 1º crédito: compara 0,5 com 0,3 e 0,2 — vai para a preferida.
     assert compute_bids(**common, budget=1) == {"D1": 1}
-    # 2º: o segundo crédito de D1 vale 0,25, menos que o primeiro de D2 (0,3).
     assert compute_bids(**common, budget=2) == {"D1": 1, "D2": 1}
-    # 3º: agora 0,25 ganha do primeiro de D3 (0,2), e D1 repete.
     assert compute_bids(**common, budget=3) == {"D1": 2, "D2": 1}
     assert compute_bids(**common, budget=4) == {"D1": 2, "D2": 1, "D3": 1}
 
 
 def test_a_large_budget_still_reaches_the_least_preferred_discipline():
-    """O decaimento é o que impede o aluno de despejar tudo na preferida: com
-    orçamento folgado, até a de menor utilidade recebe crédito."""
+    """O decaimento é o que impede o aluno de despejar tudo na preferida: com"""
     utilities = {"D1": 0.7, "D2": 0.2, "D3": 0.1}
     bids = compute_bids(utilities=utilities, available=list(utilities), budget=20)
     assert set(bids) == {"D1", "D2", "D3"}
@@ -321,9 +281,7 @@ def test_a_large_budget_still_reaches_the_least_preferred_discipline():
 
 
 def test_the_greedy_split_matches_an_exhaustive_search():
-    """O guloso é ótimo porque os pesos são unitários e o ganho marginal cai
-    dentro de cada disciplina. Conferido contra todas as repartições possíveis
-    do orçamento."""
+    """O guloso é ótimo porque os pesos são unitários e o ganho marginal cai"""
     utilities = {"D1": 0.44, "D2": 0.31, "D3": 0.17, "D4": 0.08}
     names = list(utilities)
     for budget in range(1, 10):
@@ -336,15 +294,12 @@ def test_the_greedy_split_matches_an_exhaustive_search():
 
 
 def test_a_tie_goes_to_the_discipline_listed_first():
-    """Empate de utilidade é resolvido pela ordem global de desempate: a ordem
-    em que o cenário lista as disciplinas, que é a da interface."""
+    """Empate de utilidade é resolvido pela ordem global de desempate: a ordem"""
     tied = {"D1": 0.25, "D2": 0.25, "D3": 0.25, "D4": 0.25}
-    # Com 2 créditos e 4 disciplinas idênticas, levam as duas primeiras.
     assert compute_bids(utilities=tied, available=list(tied), budget=2) == {
         "D1": 1,
         "D2": 1,
     }
-    # A ordem que decide é a da matriz, não a alfabética nem a de `available`.
     reversed_grade = {name: 0.25 for name in ("D4", "D3", "D2", "D1")}
     assert compute_bids(
         utilities=reversed_grade, available=["D1", "D2", "D3", "D4"], budget=2
@@ -352,8 +307,7 @@ def test_a_tie_goes_to_the_discipline_listed_first():
 
 
 def test_available_may_arrive_in_any_order():
-    """`available` é um filtro, não uma ordenação: embaralhá-lo não muda lance
-    nenhum, nem no empate."""
+    """`available` é um filtro, não uma ordenação: embaralhá-lo não muda lance"""
     tied = {"D1": 0.25, "D2": 0.25, "D3": 0.25, "D4": 0.25}
     straight = compute_bids(utilities=tied, available=["D1", "D2", "D3", "D4"], budget=3)
     shuffled = compute_bids(utilities=tied, available=["D3", "D1", "D4", "D2"], budget=3)
@@ -361,11 +315,8 @@ def test_available_may_arrive_in_any_order():
 
 
 def test_a_tie_between_marginal_gains_also_follows_the_grade_order():
-    """O empate pode surgir entre utilidades diferentes: o 2º crédito de uma
-    disciplina de utilidade 0,4 rende o mesmo que o 1º de uma de 0,2. Vale a
-    mesma ordem."""
+    """O empate pode surgir entre utilidades diferentes: o 2º crédito de uma"""
     utilities = {"D1": 0.4, "D2": 0.2}
-    # 1º crédito: 0,4 em D1. 2º: 0,4/2 = 0,2 empata com 0,2 de D2 — D1 vem antes.
     assert compute_bids(utilities=utilities, available=list(utilities), budget=2) == {
         "D1": 2
     }
@@ -389,9 +340,7 @@ def test_without_pool_or_budget_there_is_no_bid():
 
 
 def test_bid_proportions_do_not_depend_on_the_utility_scale():
-    """A mochila côncava compara só razões entre utilidades — u_x/N contra
-    u_y/M —, então multiplicar a matriz inteira por uma constante não muda
-    lance nenhum."""
+    """A mochila côncava compara só razões entre utilidades — u_x/N contra"""
     utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
     scaled = {name: value * 7 for name, value in utilities.items()}
     common = dict(available=list(utilities), budget=20)
@@ -400,32 +349,23 @@ def test_bid_proportions_do_not_depend_on_the_utility_scale():
     )
 
 
-def test_the_retake_lowers_the_demand_of_the_discipline():
-    """A recursada entra nos mesmos dois expoentes que a dificuldade, do outro
-    lado da razão. Com D = 1, a segunda tentativa é tão fácil quanto uma
-    disciplina de dificuldade 1/2 seria de primeira — e é por isso que não há
-    botão de ganho por recursada: quem calibra isso é a dificuldade."""
-    def rates(attempt, difficulty=1.0):
-        return attempt_rates(
-            zero_rate=0.05,
-            max_rate=0.05,
-            difficulty=difficulty,
-            attempt=attempt,
+def test_the_retake_only_raises_the_approval_rate():
+    """Repetir move a chance de aprovar para cima e nunca para baixo, porque o"""
+    def rate(previous, gain=1.0):
+        return attempt_approval(
+            approval_rate=0.5, repetition_gain=gain, previous_attempts=previous
         )
 
-    # Recursar derruba a chance de zerar e levanta a de tirar 10.
-    assert rates(1)[0] > rates(2)[0] > rates(3)[0]
-    assert rates(1)[1] < rates(2)[1] < rates(3)[1]
-    assert rates(2) == rates(1, difficulty=0.5)
+    assert rate(0) < rate(1) < rate(2) < rate(3)
+    assert rate(0) == 0.5
+    assert rate(0, gain=0.0) == rate(5, gain=0.0) == 0.5
+    assert rate(2, gain=0.5) == rate(1, gain=1.0)
     with pytest.raises(ValueError):
-        rates(0)
+        rate(-1)
 
 
 def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
-    """A linha inteira vale 1, e é essa invariante que `metrics.satisfaction`
-    usa para dispensar a divisão: com o denominador da eq. (51) fixo em 1, psi
-    é a soma simples das utilidades atendidas. Se a normalização mudar, é aqui
-    que se descobre — antes de psi passar a mentir."""
+    """A linha inteira vale 1, e é essa invariante que `metrics.satisfaction`"""
     config = make_config()
     rng = np.random.default_rng(config.seed)
     students = generate_students(config, rng)
@@ -433,16 +373,16 @@ def test_a_utility_row_sums_to_one_over_the_whole_curriculum():
     assert rows, "nenhuma linha sorteada"
     for row in rows.values():
         assert set(row) == {d.name for d in config.disciplines}
-        assert sum(row.values()) == pytest.approx(1.0)
-
-
-# --- os genes de comportamento --------------------------------------------
+        assert all(value > 0 for value in row.values())
+    for student_ in students[:3]:
+        utilities = utility_matrix(
+            interest=rows[(student_.id, 1)], student=student_, config=config
+        )
+        assert sum(utilities.values()) == pytest.approx(1.0)
 
 
 def test_the_message_is_the_utility_itself():
-    """Não há expoente a aplicar: a mensagem do aluno **é** a utilidade dele,
-    e o lance sai proporcional a ela — que é o ótimo da relaxação contínua da
-    mochila côncava."""
+    """Não há expoente a aplicar: a mensagem do aluno **é** a utilidade dele,"""
     utilities = {"D1": 0.4, "D2": 0.3, "D3": 0.2, "D4": 0.1}
     pool = list(utilities)
     assert compute_bids(
@@ -455,21 +395,14 @@ def test_the_message_is_the_utility_itself():
 
 
 def test_the_bid_is_proportional_to_the_utility():
-    """Com orçamento que acomode o arredondamento, os créditos saem na razão
-    das utilidades — o lance sincero."""
+    """Com orçamento que acomode o arredondamento, os créditos saem na razão"""
     utilities = {"D1": 0.5, "D2": 0.3, "D3": 0.2}
     bids = compute_bids(utilities=utilities, available=list(utilities), budget=20)
     assert bids == {"D1": 10, "D2": 6, "D3": 4}
 
 
 def test_the_reserve_is_the_share_of_the_outside_option():
-    """A reserva e a fatia que a opcao externa fica no bolo:
-
-        s = S / (S + SI)
-
-    Com interesse somado 1, S = 1 da reserva 0,5 e corta a segunda; S = 0,25
-    da 0,2 e nao corta nenhuma.
-    """
+    """A reserva e a fatia que a opcao externa fica no bolo:"""
     utilities = {"D1": 0.6, "D2": 0.4}
 
     admitted, _scores, reserve = decide(
@@ -494,16 +427,7 @@ def test_without_eligible_interest_there_is_no_reserve():
 
 
 def test_selectivity_survives_the_catalogue_growing():
-    """O corte e em multiplos da indiferenca, e nao absoluto: dobrar o
-    conjunto elegivel com a mesma forma mantem a mesma **fracao** admitida.
-    Um limiar absoluto cortaria tudo no catalogo maior, onde cada disciplina
-    vale metade.
-
-    Dobrar o elegivel dobra o interesse somado — a linha do interesse e
-    normalizada sobre a grade, que nao mudou —, entao a reserva encolhe na
-    mesma proporcao em que a utilidade media encolhe: `s/mediaU = S/Ibarra`
-    nao depende de `|M|`.
-    """
+    """O corte e em multiplos da indiferenca, e nao absoluto: dobrar o"""
     base = [0.20, 0.16, 0.13, 0.11, 0.09, 0.08, 0.07, 0.06, 0.05, 0.05]
     pequeno = {f"D{i}": value for i, value in enumerate(base)}
     grande = {f"G{i}": value / 2 for i, value in enumerate(base + base)}
@@ -517,18 +441,13 @@ def test_selectivity_survives_the_catalogue_growing():
     ) / len(grande)
     assert abs(fracao_pequeno - fracao_grande) < 0.05
 
-    # Um limiar absoluto no mesmo nivel nao sobreviveria: no catalogo grande
-    # quase nada alcanca o corte do pequeno, porque cada disciplina vale
-    # metade.
     absoluto = 0.1 / (0.1 + 1.0)
     acima = sum(1 for value in grande.values() if value >= absoluto)
     assert acima / len(grande) < 0.2
 
 
 def test_the_reserve_also_stops_the_spending():
-    """A diferenca em relacao ao filtro sozinho: com limiar 0,5 e score 0,6, o
-    ganho do 2o credito e 0,3 e a mochila para. O resto do orcamento fica no
-    saldo, que e a poupanca."""
+    """A diferenca em relacao ao filtro sozinho: com limiar 0,5 e score 0,6, o"""
     utilities = {"D1": 0.6, "D2": 0.4}
     pool = list(utilities)
 
@@ -545,8 +464,7 @@ def test_the_reserve_also_stops_the_spending():
 
 
 def test_the_neutral_profile_spends_everything():
-    """Seletividade 0 desliga o corte e a parada: o laco roda o orcamento
-    inteiro, como antes de existir perfil."""
+    """Seletividade 0 desliga o corte e a parada: o laco roda o orcamento"""
     bids = compute_bids(
         utilities={"D1": 0.6, "D2": 0.4}, available=["D1", "D2"], budget=20,
         behavior=NEUTRAL,

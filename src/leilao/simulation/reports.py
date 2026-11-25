@@ -1,32 +1,16 @@
-"""O que uma simulação publica: os registros do relatório.
-
-Só estrutura — nenhuma conta. A regra que atravessa todos eles é a mesma:
-**ausência é `None`, nunca 0,0**. Recorte sem aluno, grandeza de crédito num
-mecanismo sem crédito, preço de uma disciplina que nunca esteve no mercado —
-em todos, zero se leria como um fato medido ("ninguém ficou satisfeito",
-"ninguém gastou", "de graça") em vez da ausência que é. Nos gráficos o ponto
-some; nas tabelas aparece um traço.
-"""
+"""O que uma simulação publica: os registros do relatório."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 from ..metrics import Metrics
 
-# `RequestRecord.won_round` quando a vaga não veio de rodada nenhuma: é a
-# matrícula garantida do ingressante, concedida antes de o leilão abrir.
 GUARANTEED_ROUND = 0
 
 
 @dataclass(frozen=True)
 class PriceStats:
-    """Dispersão de π_x (eq. 24) entre as disciplinas num instante.
-
-    O preço não é grandeza de aluno nem de coorte: é do mercado. O que se lê
-    dele ao longo do tempo é a faixa — a mais cara, a média e a mais barata —,
-    porque uma média sozinha esconde se o crédito está concentrado em poucas
-    disputas ou espalhado por todas.
-    """
+    """Dispersão de π_x (eq. 24) entre as disciplinas num instante."""
 
     min: float
     mean: float
@@ -41,68 +25,20 @@ class PriceStats:
 
 @dataclass(frozen=True)
 class GroupSnapshot:
-    """Um recorte de alunos num instante — a unidade dos gráficos.
+    """Um recorte de alunos num instante — a unidade dos gráficos."""
 
-    **O calouro conta como gente, não como dado.** Quem ingressa no período
-    não disputou nada: recebeu um pacote fixo — as disciplinas de entrada —,
-    igual para todo mundo e independente da preferência. Entra, portanto, com
-    CR = 0,000 sempre, e com um ψ que não diz nada sobre alocação: ele mede só
-    o quanto a preferência sorteada por acaso coincidiu com o pacote.
-
-    Sem optativa no cenário o pacote *é* o conjunto elegível inteiro e o ψ do
-    calouro vale 1,000 sem exceção. Com optativa, não: ela é elegível desde o
-    ingresso e fica fora da garantia, então o ψ dele cai para a faixa de 0,2,
-    variando com o sorteio. A regra não muda por isso; o motivo muda, de
-    "constante por construção" para "ruído por construção".
-
-    No preset Computação ele é ~11% das linhas aluno-período e sozinho
-    invertia o sinal da correlação da eq. (57). Por isso fica de fora de
-    **toda média por aluno** e permanece nas **contagens de pessoas**. Daí
-    `metrics.students ≤ active`, e o primeiro período de uma simulação não ter
-    métrica nenhuma: ali todo mundo é calouro.
-    """
-
-    # `None` na universidade inteira; o período de ingresso (t_a) por coorte.
-    # É texto porque o eixo é genérico — um recorte novo entra como outra
-    # lista de `GroupSnapshot`, sem mexer na estrutura.
     group: str | None
     metrics: Metrics | None
-    active: int  # |A^(t)| do recorte no início do período
-    # Alunos do recorte que já ingressaram, tenham concluído ou não. **Não** é
-    # `active + graduated`: quem se forma ao fim de t conta nos dois lados
-    # dessa soma, porque disputou o período inteiro antes de sair. É sobre
-    # este número que se tira a fração de formados.
-    #
-    # **`None` num eixo de estado** (`snapshots.Axis.partitions`): formado e
-    # jubilado não têm CR corrente, nem reserva, nem saldo, então a faixa de
-    # valor não os rotula e as três contagens não existem ali. Zeradas se
-    # leriam como "ninguém se formou".
+    active: int
     population: int | None
-    graduated: int | None  # concluintes acumulados até aqui
-    # Jubilados acumulados até aqui. Com `graduated`, reparte `population` em
-    # três: quem saiu por cima, quem saiu por baixo e quem ainda disputa. As
-    # duas frações que a tela mostra saem daqui, e somam 1 só no fim do
-    # horizonte — antes dele o resto ainda está em curso.
+    graduated: int | None
     dismissed: int | None
-    mean_credits: float | None  # saldo médio ao fim do recorte
+    mean_credits: float | None
     mean_approved_hours: float | None
-    # Oferta de crédito do início do período (C_a^(t,1), antes de qualquer
-    # lance) — distinta de `mean_credits`, que é o que sobrou.
     credits_per_student: float | None
     credits_per_seat: float | None
-    # Créditos apostados no período por aluno, somando as rodadas. **Pode
-    # passar do orçamento**: lance perdido não consome nada (eq. 25), então o
-    # crédito que não virou vaga volta a ser apostado na rodada seguinte. A
-    # matrícula garantida entra pelo valor que o sistema lançou na conta, para
-    # que lance e gasto fiquem na mesma régua.
     mean_bids: float | None
-    # Créditos **consumidos** no período por aluno, acumulados até o instante
-    # do recorte: a oferta de abertura menos o saldo. É a eq. (25) somada, e
-    # é distinta de `mean_bids` — lance perdido não consome nada, então o
-    # apostado passa do gasto sempre que houve disputa perdida.
     mean_credits_spent: float | None
-    # Σγ do período (eq. 34) por aluno. Só existe no recorte de fim de
-    # período: em plena rodada as notas ainda não saíram.
     mean_credit_return: float | None
 
 
@@ -113,84 +49,30 @@ class RoundReport:
     period: int
     round: int
     overall: GroupSnapshot
-    # O mesmo instante por coorte. Só as que já ingressaram, então a série de
-    # uma coorte começa no período do seu t_a — e o aluno fica na mesma
-    # coorte do início ao fim, que é o que torna essa leitura mais estável
-    # que a idade. O recorte **particiona** a população do agregado: somá-lo
-    # reproduz `overall`.
     by_cohort: list[GroupSnapshot]
     prices: PriceStats | None
-    # Segundos de parede que o alocador levou — ver `rounds.RoundOutcome`. Na
-    # linha agregada do período (`round` 0) é a **soma** das rodadas, que é o
-    # que o período custou; nas demais é o tempo daquela rodada.
-    #
-    # Não é recortada por coorte nem por perfil, e não poderia ser: o
-    # resolvedor decide a rodada inteira de uma vez, então não há parcela do
-    # tempo atribuível a um grupo.
-    #
-    # `compare=False` porque é tempo de parede: duas execuções da mesma seed
-    # produzem a mesma simulação e tempos diferentes, e há teste que exige
-    # relatórios iguais. Fora da igualdade, a instrumentação não mente sobre
-    # o que é determinístico.
     allocation_seconds: float = field(compare=False)
-    # O mesmo instante por perfil, um recorte por eixo — `performance`,
-    # `availability` e `selectivity` —, cada um na ordem em
-    # que o cenário declara os grupos. Também particiona `overall`. A API de
-    # traço não o publica: quem o lê é a comparação, que o reduz por período.
     by_profile: dict[str, list[GroupSnapshot]] = field(default_factory=dict)
-    # O mesmo instante por **célula**: cada eixo de perfil cruzado com a
-    # coorte, com a chave `"<perfil>|<t_a>"` (ver `snapshots.Axis.crossed`).
-    # É o material das réguas de idade e de coorte do eixo X, que reagrupam as
-    # células ao longo do horizonte; para a régua do período, que não
-    # reagrupa nada, os recortes acima bastam e são exatos.
-    #
-    # O "Geral" não está aqui porque já está: as células dele são `by_cohort`.
-    # E nenhuma delas sai na API — quem as lê é a comparação, que as reduz.
     by_cell: dict[str, list[GroupSnapshot]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class DisciplineSnapshot:
-    """O recorte da **turma**: é dela que são a vaga, o preço e a demanda.
-
-    O nome do tipo é histórico — com turma única, turma e disciplina são a
-    mesma coisa, e era esse o modelo até elas existirem. `discipline` diz a
-    qual clique a linha pertence, e é por onde a interface agrupa.
-
-    O que **não** está aqui é o histórico do aluno: nota, tentativa e
-    conclusão são da disciplina, e não sabem de turma. `approvals` é a
-    exceção aparente e não é uma: conta aprovações *ocorridas nesta turma*,
-    que é o que torna visível o efeito da escada de dificuldade.
-    """
+    """O recorte da **turma**: é dela que são a vaga, o preço e a demanda."""
 
     name: str
     discipline: str
     curriculum_period: int
-    hours: int  # w_x — repetido para o recorte por carga horária
-    # Os atributos abaixo são da **disciplina**, repetidos em cada turma dela
-    # pelo mesmo motivo que `hours` e `curriculum_period`: o recorte do preço
-    # é por turma, e uma turma tem de saber sozinha em que grupo cai, sem
-    # consultar o cenário de volta.
-    difficulty: float
-    classes: int  # em quantas turmas a disciplina foi repartida
-    # O **horário** é da turma, e é o único atributo que varia dentro de uma
-    # disciplina: carga, dificuldade e pré-requisito são todos herdados
-    # inteiros da disciplina.
+    hours: int
+    classes: int
     schedule: str
     elective: bool
-    seats: int  # q_x no início do período
-    filled: int  # vagas preenchidas, contando as garantidas
-    # Vagas entregues à matrícula garantida, antes do leilão. Só é diferente
-    # de zero nas disciplinas de entrada — e é o que explica uma disciplina
-    # chegar à primeira rodada já quase cheia.
+    seats: int
+    filled: int
     granted: int
-    # Quantos pediram no período: deram lance em alguma rodada ou a receberam
-    # na matrícula garantida. Dividido por `seats` dá a concorrência dela.
     requests: int
     mean_price: float | None
     approvals: int
-    # Vagas desta disciplina que foram obtidas e depois largadas. Com
-    # `filled`, separa a vaga que virou aula da que só saiu da oferta.
     exclusions: int
 
 
@@ -206,53 +88,33 @@ class PeriodReport:
 
 @dataclass(frozen=True)
 class RequestRecord:
-    """O que aconteceu com uma disciplina que o aluno quis num período.
-
-    Registra **toda** disciplina de utilidade positiva, inclusive as em que
-    ele nem chegou a dar lance — `bids` todo zero significa que ela saiu de
-    B_a^(t,r) antes (sem vaga, sem carga ou sem orçamento), e é justamente o
-    caso que costuma explicar um resultado inesperado.
-    """
+    """O que aconteceu com uma disciplina que o aluno quis num período."""
 
     discipline: str
-    utility: float  # ũ_{a,x}^(t) — a utilidade, não o interesse
-    bids: list[int]  # c_{a,x}^(t,r) por rodada; 0 = não pediu
-    won_round: int | None  # `None` = indeferida; `GUARANTEED_ROUND` = garantida
-    paid: int  # eq. (27)
-    # Obteve a vaga e não cursou: a disponibilidade do período não comportou.
-    # Com ela, `attempt` e `grade` saem `None` — não houve tentativa —, e
-    # `returned` traz metade do preço pago em vez do retorno por nota.
+    utility: float
+    bids: list[int]
+    won_round: int | None
+    paid: int
     excluded: bool
     attempt: int | None
-    # Nota **desta** tentativa (eq. 33). Pode ser menor que a de uma anterior.
-    # O que não regride é `Student.grades`, a maior já obtida, que alimenta o
-    # CR — e é essa diferença que a tela individual existe para mostrar.
     grade: float | None
     approved: bool
-    returned: int  # γ_{a,x}^(t) — eq. (34)
+    returned: int
 
 
 @dataclass(frozen=True)
 class StudentPeriodRecord:
-    """A linha do histórico de um aluno num período letivo.
-
-    As quatro grandezas de crédito fecham a conta da eq. (36):
-    `credits_end = clamp(credits_start − credits_spent + credits_returned,
-    C_min, C_max)`.
-    """
+    """A linha do histórico de um aluno num período letivo."""
 
     period: int
     credits_start: int
     credits_spent: int
-    credits_returned: int  # Σγ
+    credits_returned: int
     credits_end: int
-    satisfaction: float  # ψ_a^(t)
-    grade_average: float  # N_a no início do período
-    approved_hours: int  # acumulado ao fim do período
-    enrolled_hours: int  # carga obtida neste período, antes de excluir
-    # Carga que ele de fato cursou e o teto que a disponibilidade do período
-    # lhe deu. `retained_hours <= effective_load`, e o vão para
-    # `enrolled_hours` é o que ele largou.
+    satisfaction: float
+    grade_average: float
+    approved_hours: int
+    enrolled_hours: int
     retained_hours: int
     effective_load: int
     requests: list[RequestRecord]
@@ -261,8 +123,7 @@ class StudentPeriodRecord:
 
 @dataclass(frozen=True)
 class StudentHistory:
-    """Só os períodos em que o aluno participou da matrícula: quem já se
-    formou simplesmente não aparece dali em diante."""
+    """Só os períodos em que o aluno participou da matrícula: quem já se"""
 
     student_id: str
     periods: list[StudentPeriodRecord]
@@ -272,22 +133,12 @@ class StudentHistory:
 class StudentSummary:
     id: str
     name: str
-    entry_period: int  # t_a
-    # Os **níveis basilares** dele nos três eixos, na normal padrão. Dois são
-    # traço e não entram em decisão nenhuma; a seletividade é a estratégia
-    # dele. Estão aqui porque a tela individual é onde se pergunta "por que
-    # *este* aluno foi assim".
-    #
-    # Eram o **nome da faixa** de quantil de cada eixo até 24/11/2026. O
-    # recorte dos relatórios passou a ser por valor corrente
-    # (`snapshots.Axis.states`), e um rótulo de faixa que nenhum relatório mais
-    # usa não diria nada; o nível cru diz, e não depende de corte nenhum.
-    performance_level: float
-    availability_level: float
-    selectivity_level: float
-    grade_average: float  # N_a
+    entry_period: int
+    availability_anchor: float
+    selectivity_anchor: float
+    grade_average: float
     approved_hours: int
-    hours_to_graduate: int  # S — igual para todos
+    hours_to_graduate: int
     credits: int
     enrollments: int
     approvals: int
@@ -301,28 +152,14 @@ class SimulationResult:
     periods: list[PeriodReport] = field(default_factory=list)
     students: list[StudentSummary] = field(default_factory=list)
     histories: list[StudentHistory] = field(default_factory=list)
-    # As **turmas**, na ordem da grade: são elas que a tela individual
-    # endereça, porque é delas que são o lance e a vaga.
     disciplines: list[str] = field(default_factory=list)
-    # Turma -> disciplina. É por aqui que a tela volta ao clique para achar o
-    # período da grade e saber se é optativa, que são coisas da disciplina.
     classes: dict[str, str] = field(default_factory=dict)
     curriculum_periods: dict[str, int] = field(default_factory=dict)
-    # As duas distribuições de **entrada**, como histogramas. Saem das
-    # matrizes que esta simulação de fato usou, e não de uma amostra à parte.
-    # A primeira é do interesse, não da utilidade: é o que σ governa.
     interest_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)
-    # Quantos períodos iniciais são **pré-população**. Eles estão em `periods`
-    # como todos os outros — o motor não joga nada fora —, e o que este campo
-    # faz é dizer a quem lê onde a janela medida começa.
     warmup_periods: int = 0
 
     @property
     def observed(self) -> list[PeriodReport]:
-        """Os períodos **medidos** — os de depois da pré-população.
-
-        É o que a comparação reduz e desenha. Com `warmup_periods = 0` são
-        todos, que é o caso de uma simulação isolada.
-        """
+        """Os períodos **medidos** — os de depois da pré-população."""
         return [p for p in self.periods if p.period > self.warmup_periods]

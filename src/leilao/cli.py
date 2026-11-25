@@ -1,26 +1,4 @@
-"""A comparação pelo terminal, para os cenários que não cabem numa requisição.
-
-A rota `/compare` roda a comparação inteira dentro de um único POST, e isso
-tem um teto prático: no cenário cheio, 20 simulações por braço são horas de
-CPU: tempo demais para uma requisição HTTP sobreviver a um `--reload` do
-servidor, a um navegador que desiste ou a um Ctrl-C mal colocado, e tempo
-demais para ficar sem nenhum sinal de progresso.
-
-Esta é a mesma comparação pela porta de trás. Roda o motor direto, imprime
-cada simulação quando ela termina e grava o resultado em `resultados/` — **no
-mesmo formato do histórico do navegador**, de modo que o arquivo gravado aqui
-entra na interface por "Carregar resultado" e vira uma entrada igual às
-outras. Nada de conversão: quem monta a resposta é `api.service`, o mesmo
-módulo que a rota usa.
-
-O cenário de entrada é um JSON, e serve tanto um arquivo já gravado em
-`resultados/` (de que se lê o `config`) quanto um cenário solto. Reexecutar
-com mais seeds o que a interface rodou uma vez é, então:
-
-    python -m leilao.cli --scenario resultados/comparison-20261111-102551.json --runs 20
-
-A pasta de saída sai de `LEILAO_RESULTS_DIR`, como na API.
-"""
+"""A comparação pelo terminal, para os cenários que não cabem numa requisição."""
 from __future__ import annotations
 
 import argparse
@@ -94,12 +72,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _read_scenario(path: Path) -> CompareRequest:
-    """O cenário do arquivo, seja ele um resultado gravado ou um cenário solto.
-
-    Um resultado gravado é `{kind, at, config, result}` — o cenário é o
-    `config`, e o `result` que veio junto se ignora: esta execução produz o
-    seu.
-    """
+    """O cenário do arquivo, seja ele um resultado gravado ou um cenário solto."""
     if not path.is_file():
         raise SystemExit(
             f"não achei o cenário em {path} — informe um arquivo JSON, "
@@ -123,11 +96,7 @@ def _read_scenario(path: Path) -> CompareRequest:
 def _with_overrides(
     request: CompareRequest, *, runs: int | None, arms: list[str] | None
 ) -> CompareRequest:
-    """O cenário com o que veio da linha de comando, revalidado.
-
-    Revalidar importa: `runs` entra como número digitado e tem de passar pelo
-    mesmo limite que a API impõe, em vez de só ser atribuído.
-    """
+    """O cenário com o que veio da linha de comando, revalidado."""
     changes = {}
     if runs is not None:
         changes["runs"] = runs
@@ -150,14 +119,7 @@ def _minutes(since: float) -> str:
 
 
 def _progress(total: int, started: float):
-    """Imprime uma linha por simulação concluída.
-
-    Em paralelo elas terminam fora de ordem, então o que a linha afirma é
-    "esta terminou" e "tantas de tantas", nunca uma posição na fila. Sem
-    estimativa de término: os braços custam tempos muito diferentes — o
-    guloso é uma ordem de grandeza mais barato que a PLI —, e uma média dos
-    que já terminaram mentiria enquanto o barato não acabasse.
-    """
+    """Imprime uma linha por simulação concluída."""
     done = 0
 
     def report(arm: Arm, seed: int) -> None:

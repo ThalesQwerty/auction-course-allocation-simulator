@@ -15,9 +15,7 @@ import { SaveScenario } from "./SaveScenario";
 import { COMPARISON_ARMS, MAX_COMPARISON_RUNS, horizonFor } from "./types";
 import type { Scenario } from "./types";
 
-/** Quantas turmas caem em cada horário, lido como faixa. É o número que diz
- * se mexer nos horários apertou o conflito: menos horários é mais turma por
- * horário, e mais escolha do aluno travada por choque. */
+/** Quantas turmas caem em cada horário, lido como faixa */
 const scheduleLoad = (config: Scenario): string => {
   const load = schedulePressure(config.disciplines, config.slots);
   const low = Math.min(...load);
@@ -26,8 +24,7 @@ const scheduleLoad = (config: Scenario): string => {
   return `${faixa} turmas por horário`;
 };
 
-/** O piso dos horários: duas turmas da mesma disciplina não podem dividir um,
- * senão a oferta efetiva encolhe sem avisar. Espelha a validação do motor. */
+/** O piso dos horários: duas turmas da mesma disciplina não podem dividir um, senão a oferta efetiva encolhe sem avisar */
 const minSlots = (config: Scenario): number =>
   Math.max(1, ...config.disciplines.map((d) => d.classes));
 
@@ -61,8 +58,7 @@ export function Config({
   hasCustom: boolean;
   onSelectPreset: (presetId: string | null) => void;
   saved: SavedPreset[];
-  /** Grava o cenário atual sob este nome. Nome que já existe **substitui** o
-   * cenário daquele nome — é assim que se edita um salvo. */
+   /** Grava o cenário atual sob este nome */
   onSave: (name: string) => void;
   onDeleteSaved: (presetId: string) => void;
 }) {
@@ -70,50 +66,26 @@ export function Config({
     setConfig((current) => ({ ...current, ...values }));
   }
 
-  // **Entrada**, não "1º período": a optativa também não tem pré-requisito e
-  // também cai no 1º período na indução, mas fica fora da matrícula garantida.
-  // Validar contra o conjunto errado acusaria erro em cenário que o motor
-  // aceita, e o erro cresceria com o tamanho do catálogo de optativas.
   const entryCourses = entryDisciplines(config.disciplines);
   const entryHours = entryCourses.reduce((sum, d) => sum + d.hours, 0);
-  // A coorte é derivada: o ingresso por turma de entrada vezes as turmas de
-  // uma delas.
   const cohort = cohortSize(
     config.students_per_entry_class,
     entryClasses(config.disciplines)
   );
-  // O ingressante ocupa vaga da própria turma, então o que precisa caber é ele
-  // contra a lotação.
   const entryTooLarge = config.students_per_entry_class > config.class_size;
-  // O que resta em disputa em cada turma de entrada. Zero é cenário legítimo e
-  // armadilha: quem reprovar a disciplina não torna a cursá-la, porque a
-  // garantia vale só no ingresso.
   const contestedEntrySeats = config.class_size - config.students_per_entry_class;
   const entryTooHeavy = entryHours > config.max_hours;
 
-  // Porcentagem com casas suficientes para 0,05% não virar 0%: as chances de
-  // ponta vivem entre centésimos de ponto e dezenas.
   const percent = (share: number) =>
     `${(share * 100).toLocaleString("pt-BR", { maximumSignificantDigits: 2 })}%`;
 
-  // O recorte que cada prévia desenha. Nada disto é parâmetro de cenário: não
-  // vai para a API, e por isso mora aqui e não em `Scenario`.
-  const [difficulty, setDifficulty] = useState(1);
   const [attempt, setAttempt] = useState(1);
-  // Uma distribuição por eixo, então não há linha a escolher: a prévia é
-  // sempre a da população inteira.
-  const performance = config.performance;
   const availability = config.availability;
 
-  // As duas distribuições de entrada, recalculadas a cada tecla. São curvas, e
-  // não barras: aqui não há dado contado, e sim a forma que os parâmetros
-  // implicam.
   const grades = useMemo(
-    () => gradeCurve(config, { difficulty, attempt }, performance),
-    [config, difficulty, attempt, performance]
+    () => gradeCurve(config, attempt),
+    [config, attempt]
   );
-  // Em horas, não em fração: o parâmetro é uma fração de W_a, mas quem lê a
-  // curva quer saber quanta carga ela permite.
   const availabilities = useMemo(
     () => availabilityCurve(availability, config.max_hours),
     [availability, config.max_hours]
@@ -122,21 +94,14 @@ export function Config({
     () => interestCurve(config),
     [config]
   );
-  // O eixo do interesse é o suporte da própria amostra, que a curva já carrega
-  // no último ponto.
   const interestTop = interest.points.length
     ? interest.points[interest.points.length - 1].x
     : 1;
-  // Uma casa a mais do que a régua do eixo: o rodapé dá um número, e um número
-  // arredondado à casa do eixo perderia justamente o que ele acrescenta.
   const interestDigits =
     Math.max(0, Math.ceil(-Math.log10(Math.max(interestTop, 1e-9) / 10))) + 1;
   const interestValue = (value: number) =>
     value.toLocaleString("pt-BR", { maximumFractionDigits: interestDigits });
 
-  // A seletividade vive na mesma escala do interesse, mas ordens de grandeza
-  // abaixo — mediana em milésimos —, então ela precisa da própria régua e das
-  // próprias casas, e não das do interesse.
   const selectivity = useMemo(() => selectivityCurve(config), [config]);
   const selectivityTop = selectivity.points.length
     ? selectivity.points[selectivity.points.length - 1].x
@@ -146,25 +111,17 @@ export function Config({
   const selectivityValue = (value: number) =>
     value.toLocaleString("pt-BR", { maximumFractionDigits: selectivityDigits });
 
-  // O nome proposto ao salvar. Vindo de um preset carregado, é o nome dele —
-  // salvar por cima de um salvo é o caminho de edição, e repetir o nome é
-  // justamente o que o usuário quer ali. Do contrário, a data basta para
-  // distinguir.
   const suggestedName =
     saved.find((entry) => entry.id === presetId)?.name ??
     `Cenário de ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
 
 
-  // O catálogo de optativas é maior que a exigência de propósito — é a folga
-  // que dá ao aluno o que escolher —, e exigir mais do que se oferta deixaria
-  // o curso sem saída. É o mesmo limite que `SimulationConfig` impõe.
   const electiveOffer = config.disciplines.reduce(
     (total, discipline) => total + (discipline.elective ? discipline.hours : 0),
     0
   );
   const electiveTooLarge = config.elective_hours > electiveOffer;
 
-  // A nota sai do motor arredondada a um décimo; o rodapé a mostra assim.
   const grade = (value: number) =>
     value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
@@ -189,8 +146,7 @@ export function Config({
                       <input
                         type="checkbox"
                         checked={on}
-                        /* O último marcado não se desmarca: sem braço nenhum
-                           não há o que rodar, e o motor recusaria o pedido. */
+                           /** O último marcado não se desmarca: sem braço nenhum não há o que rodar, e o motor recusaria o pedido */
                         disabled={on && arms.length === 1}
                         onChange={() =>
                           setArms(
@@ -231,15 +187,15 @@ export function Config({
               />
             </div>
             <div className="field">
-              <label>Períodos observados</label>
+              <label>
+                Seed da primeira simulação
+              </label>
               <input
                 type="number"
-                min={1}
-                max={40}
-                value={config.observation_periods}
-                onChange={(e) =>
-                  patch({ observation_periods: Number(e.target.value) })
-                }
+                min={0}
+                step={1}
+                value={config.first_seed}
+                onChange={(e) => patch({ first_seed: Number(e.target.value) })}
               />
             </div>
             <div className="field">
@@ -326,7 +282,7 @@ export function Config({
           <p className="note">
             Coorte de {cohort} · {contestedEntrySeats} vagas em disputa por turma
             de entrada ·{" "}
-            {horizonFor(config.max_residence, config.observation_periods)}{" "}
+            {horizonFor(config.max_residence)}{" "}
             períodos, dos quais {config.max_residence} de pré-população ·{" "}
             {cohort * config.max_residence} alunos em regime
           </p>
@@ -376,8 +332,8 @@ export function Config({
                     min={0}
                     max={1}
                     step={0.1}
-                    value={config.class_stability}
-                    onChange={(e) => patch({ class_stability: Number(e.target.value) })}
+                    value={config.schedule_sigma}
+                    onChange={(e) => patch({ schedule_sigma: Number(e.target.value) })}
                   />
                 </div>
               </div>
@@ -431,9 +387,9 @@ export function Config({
                     min={0}
                     max={1}
                     step={0.05}
-                    value={config.selectivity_stability}
+                    value={config.interest_stability}
                     onChange={(e) =>
-                      patch({ selectivity_stability: Number(e.target.value) })
+                      patch({ interest_stability: Number(e.target.value) })
                     }
                   />
                 </div>
@@ -539,19 +495,10 @@ export function Config({
                 id="curva-disponibilidade"
                 title="Disponibilidade"
                 points={availabilities?.points ?? []}
-                /* O eixo **passa de W_a** de propósito: a massa à direita da
-                   carga máxima é justamente a chance de alcançá-la. Parar no
-                   teto faria a curva parecer truncada ali, que é exatamente o
-                   que o modelo deixou de fazer. */
+                   /** O eixo **passa de W_a** de propósito: a massa à direita da carga máxima é justamente a chance de alcançá-la */
                 domain={[0, availabilities?.top ?? config.max_hours]}
-                // O motor arredonda — a carga efetiva é `round(δ)` —, então o
-                // tooltip dá a hora inteira que a simulação vai usar.
                 format={(value) => `${Math.round(value)} h`}
                 split={{
-                  // A divisa é `W_a − 0,5`, e não W_a: a carga efetiva
-                  // arredonda, então 23,6 h já enche uma carga de 24 h. É o
-                  // limiar que a própria log-normal inverte, e é o que faz a
-                  // etiqueta concordar com a hora que o tooltip mostra.
                   at: fullLoadThreshold(config.max_hours),
                   below: STATUS.critical,
                   above: STATUS.good,
@@ -578,69 +525,39 @@ export function Config({
             <div>
               <div className="field-row">
                 <div className="field">
-                  <label>Nota mais provável</label>
+                  <label>
+                    Chance de aprovação (P<sub>apr</sub>)
+                  </label>
                   <input
                     type="number"
-                    min={0}
-                    max={10}
+                    min={0.01}
+                    max={0.99}
+                    step={0.01}
+                    value={config.approval_rate}
+                    onChange={(e) =>
+                      patch({ approval_rate: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Desvio das notas (σ)</label>
+                  <input
+                    type="number"
+                    min={0.1}
                     step={0.1}
-                    value={config.performance.mode_grade}
-                    onChange={(e) =>
-                      patch({
-                        performance: {
-                          ...config.performance,
-                          mode_grade: Number(e.target.value),
-                        },
-                      })
-                    }
+                    value={config.grade_sd}
+                    onChange={(e) => patch({ grade_sd: Number(e.target.value) })}
                   />
                 </div>
                 <div className="field">
-                  <label>Chance de tirar 0</label>
-                  <input
-                    type="number"
-                    min={0.0001}
-                    max={0.999}
-                    step={0.0005}
-                    value={config.performance.zero_rate}
-                    onChange={(e) =>
-                      patch({
-                        performance: {
-                          ...config.performance,
-                          zero_rate: Number(e.target.value),
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label>Chance de tirar 10</label>
-                  <input
-                    type="number"
-                    min={0.0001}
-                    max={0.999}
-                    step={0.0005}
-                    value={config.performance.max_rate}
-                    onChange={(e) =>
-                      patch({
-                        performance: {
-                          ...config.performance,
-                          max_rate: Number(e.target.value),
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label>Nível basilar</label>
+                  <label>Ganho por repetição (ω)</label>
                   <input
                     type="number"
                     min={0}
-                    max={1}
-                    step={0.05}
-                    value={config.performance_stability}
+                    step={0.1}
+                    value={config.repetition_gain}
                     onChange={(e) =>
-                      patch({ performance_stability: Number(e.target.value) })
+                      patch({ repetition_gain: Number(e.target.value) })
                     }
                   />
                 </div>
@@ -670,21 +587,15 @@ export function Config({
                 title="Notas"
                 points={grades?.points ?? []}
                 domain={[0, 10]}
-                /* As duas chances de ponta vão no rodapé, e não ao lado dos
-                   campos, porque **mudam com o recorte**: as do perfil valem
-                   para dificuldade 1 na primeira tentativa, e o que o rodapé
-                   mostra é o que aquela disciplina de fato produz. A aprovação
-                   também é derivada, não entrada. */
+                   /** As duas chances de ponta vão no rodapé, e não ao lado dos campos, porque **mudam com o recorte**: as do perfil valem para dificuldade 1 na primeira tentativa, e o que o rodapé mostra é o que aquela disciplina de fato produz */
                 footer={
                   grades ? (
                     <>
-                      mais provável: {grade(grades.mode)} · aprova:{" "}
-                      {percent(grades.approval)} · tira 0:{" "}
-                      {percent(grades.zeroRate)} · tira 10:{" "}
-                      {percent(grades.maxRate)}
+                      média: {grade(grades.mean)} · aprova:{" "}
+                      {percent(grades.approval)}
                     </>
                   ) : (
-                    <>nota média fora do alcance destas chances</>
+                    <>desvio ou chance de aprovação fora da faixa válida</>
                   )
                 }
                 split={{
@@ -695,19 +606,6 @@ export function Config({
                 }}
                 controls={
                   <div className="field-row">
-                    <div className="field">
-                      <label>Dificuldade</label>
-                      {/* O min é a base da escada do stepper: com min 0 e passo
-                          0,1 a grade é 0 · 0,1 · 0,2, e o padrão (1) cai nela.
-                          O 0 é aparado na prévia. */}
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.1}
-                        value={difficulty}
-                        onChange={(e) => setDifficulty(Number(e.target.value))}
-                      />
-                    </div>
                     <div className="field">
                       <label>Tentativa</label>
                       <input

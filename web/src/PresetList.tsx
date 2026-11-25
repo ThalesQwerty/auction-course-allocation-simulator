@@ -8,13 +8,10 @@ export function PresetList({
   onSelect,
   onDelete,
 }: {
-  /** Preset carregado no formulário; `null` = o cenário montado à mão. */
   selected: string | null;
-  /** Se há um cenário próprio guardado para voltar. Sem ele, "Personalizado"
-   * devolve os valores padrão. */
+   /** Se há um cenário próprio guardado para voltar */
   hasCustom: boolean;
-  /** Os cenários que o usuário salvou no navegador, do mais recente ao mais
-   * antigo. São os únicos que existem: não há lista fixa. */
+   /** Os cenários que o usuário salvou no navegador, do mais recente ao mais antigo */
   saved: SavedPreset[];
   onSelect: (presetId: string | null) => void;
   onDelete: (presetId: string) => void;

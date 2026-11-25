@@ -1,13 +1,4 @@
-"""Uma rodada de alocação, nos dois mecanismos.
-
-O que muda entre eles é **só o miolo**: o conjunto em que se pode obter vaga
-(eq. 15) é o mesmo, a concessão desconta igual, e o registro é o mesmo. O que
-difere é a mensagem que o aluno envia — créditos repartidos ou uma lista
-ordenada — e quem decide a alocação.
-
-É essa simetria que torna a diferença entre os dois lados atribuível ao
-mecanismo, e não à contabilidade.
-"""
+"""Uma rodada de alocação, nos dois mecanismos."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,30 +15,19 @@ from .reports import PriceStats
 from .setup import Draws
 from .state import PeriodState
 
-# π_x quando não houve lance mal-sucedido — é o valor da eq. (24) nesse caso,
-# inclusive quando o bem não recebeu lance nenhum e o leilão nem rodou.
 PRICE_FLOOR = 1
 
 
 @dataclass(frozen=True)
 class RoundOutcome:
-    """O que varia de uma rodada para a outra.
-
-    O relatório de cada rodada só é montado depois do laço, quando a
-    concorrência do período — que depende dos lances de *todas* as rodadas —
-    já existe; até lá, o que varia fica guardado aqui.
-    """
+    """O que varia de uma rodada para a outra."""
 
     number: int
     satisfaction: dict[str, float]
-    won: dict[str, set[str]]  # o que foi ganho **nesta** rodada
+    won: dict[str, set[str]]
     budget: dict[str, int]
-    bids: dict[str, int]  # acumulado até aqui, como o gasto
+    bids: dict[str, int]
     prices: PriceStats | None
-    # Segundos de parede gastos **decidindo a alocação** desta rodada, e só
-    # isso: não entram a montagem do lance nem o preço. É o ponto em que os
-    # dois mecanismos fazem a mesma coisa — dado o que foi pedido, decidir
-    # quem leva —, e por isso o único em que o tempo deles se compara.
     allocation_seconds: float
 
 
@@ -59,11 +39,7 @@ def _available(
     hours: dict[str, int],
     conflicts: dict[str, tuple[str, ...]],
 ) -> dict[str, list[str]]:
-    """B_a^(t,r) de cada aluno — ver `equations.available_goods`.
-
-    O ingressante já conquistou tudo que lhe é elegível, então sai daqui
-    vazio e não pede nada.
-    """
+    """B_a^(t,r) de cada aluno — ver `equations.available_goods`."""
     return {
         s.id: available_goods(
             eligible=utilities[s.id],
@@ -89,10 +65,7 @@ def _run_credit_round(
     round_number: int,
     won_now: dict[str, list[str]],
 ) -> tuple[dict[str, int], float]:
-    """O leilão: lances, PLI (ou varredura), preço e consumo.
-
-    Devolve os preços e os segundos que o resolvedor levou.
-    """
+    """O leilão: lances, PLI (ou varredura), preço e consumo."""
     bids: list[Bid] = []
     for student in active:
         posted = compute_bids(
@@ -108,9 +81,6 @@ def _run_credit_round(
         state.bid_total[student.id] += sum(posted.values())
         bids.extend(Bid(student.id, name, credits) for name, credits in posted.items())
 
-    # Quem está no mercado nesta rodada, antes de a alocação consumir vaga:
-    # só essas disciplinas têm preço com leitura. As vagas já entregues aos
-    # ingressantes saíram do mercado antes da rodada 1.
     prices = {
         name: PRICE_FLOOR for name in draws.seats if state.seats[name] > 0
     }
@@ -124,8 +94,6 @@ def _run_credit_round(
                 Good(name, state.seats[name], draws.hours[name])
                 for name in draws.seats
             ],
-            # E = M ∪ G — os cliques da eq. (5): ninguém leva duas turmas da
-            # mesma disciplina nem duas no mesmo horário.
             exclusions=[MutualExclusion(clique) for clique in draws.exclusions],
             conflicts=draws.conflicts,
             budgets=state.budget,
@@ -159,11 +127,7 @@ def _run_ranking_round(
     round_number: int,
     won_now: dict[str, list[str]],
 ) -> float:
-    """A linha de base: o aluno resolve a carga (eq. 4) em casa, numa mochila
-    0-1 sobre o que ainda cabe, e pede na própria ordem de preferência.
-
-    Não há lance, orçamento nem preço. Devolve os segundos do alocador.
-    """
+    """A linha de base: o aluno resolve a carga (eq. 4) em casa, numa mochila"""
     requests: list[tuple[str, str]] = []
     for student in active:
         for name in request_set(
@@ -179,17 +143,8 @@ def _run_ranking_round(
             state.record_bid(student.id, name, round_number, 1)
             requests.append((student.id, name))
 
-    # A prioridade é do **aluno**, não do par: o mesmo CR vale em todas as
-    # disciplinas que ele pediu. O ε desempata entre alunos; dentro de um
-    # aluno quem ordena é a preferência dele, que já veio na ordem de
-    # `requests`.
     priority = {s.id: grade_averages[s.id] for s in active}
     tiebreak = draws.student_epsilon
-    # O resolvedor é do **mecanismo**, e não escolha de cenário: o CR roda por
-    # ditadura serial (que desempata por ε) e o leilão por PLI (que ignora o ε
-    # e maximiza o bem-estar). Era configurável até 24/11/2026, quando o escopo
-    # fechou nos dois modelos — "CR com PLI" e "leilão guloso" deixaram de ser
-    # alcançáveis.
     allocate = allocate_by_ilp if config.uses_credits else allocate_by_ranking
     started = perf_counter()
     allocated = allocate(
@@ -226,9 +181,6 @@ def run_round(
         hours=draws.hours,
         conflicts=draws.conflicts,
     )
-    # A vaga garantida entra como conquista da rodada 1: é ali que ela passa a
-    # valer, e sem isso o ingressante apareceria com satisfação zero na
-    # primeira rodada e plena só no agregado do período.
     won_now: dict[str, list[str]] = {
         s.id: list(state.guaranteed[s.id]) if round_number == 1 else [] for s in active
     }
@@ -276,8 +228,6 @@ def run_round(
         won={s.id: set(won_now[s.id]) for s in active},
         budget=dict(state.budget),
         bids=dict(state.bid_total),
-        # `None` fora do leilão: sem lance não se forma preço, e a série some
-        # do gráfico em vez de virar uma linha de piso que ninguém pagou.
         prices=PriceStats.of(list(prices.values())) if prices is not None else None,
         allocation_seconds=allocation_seconds,
     )

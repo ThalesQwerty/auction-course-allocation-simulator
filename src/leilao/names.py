@@ -1,10 +1,4 @@
-"""Nomes brasileiros para batizar os alunos gerados na simulação.
-
-Cada aluno recebe um nome aleatório da forma "<nome> <sobrenome>", sorteado
-sem repetição das 256 x 256 = 65.536 combinações possíveis. Puramente
-cosmético: facilita a leitura das tabelas de resultado, já que ids como
-"a_0137" não dizem nada ao leitor.
-"""
+"""Nomes brasileiros para batizar os alunos gerados na simulação."""
 from __future__ import annotations
 
 import numpy as np

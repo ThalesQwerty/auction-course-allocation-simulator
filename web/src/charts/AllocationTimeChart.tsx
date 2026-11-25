@@ -1,19 +1,4 @@
-/** O custo de **rodar** o mecanismo: quanto o alocador levou em cada rodada.
- *
- * É o único gráfico da tela que não mede o modelo. Os outros perguntam o que o
- * mecanismo produziu; este pergunta quanto custou produzi-lo, e por isso não
- * tem recorte por coorte nem por perfil — o resolvedor decide a rodada inteira
- * de uma vez, e não há parcela do tempo que pertença a um grupo de alunos.
- *
- * **A régua é logarítmica** porque os dois mecanismos ficam a ordens de
- * grandeza um do outro: numa régua linear a ordenação por CR encostaria no
- * zero e o gráfico viraria a linha do leilão sozinha. Em log a distância
- * vertical entre as linhas **é** a razão entre os tempos, que é a leitura que
- * interessa.
- *
- * Uma rodada que não alocou nada sai como buraco na linha, não como zero: zero
- * segundo se leria como "foi instantâneo", e o que houve foi não acontecer.
- */
+/** O custo de **rodar** o mecanismo: quanto o alocador levou em cada rodada */
 import {
   CartesianGrid,
   Line,
@@ -31,19 +16,15 @@ const LAYOUT = { height: 240, left: 52, right: 12 };
 
 const ORDINALS = ["1ª", "2ª", "3ª", "4ª", "5ª", "6ª", "7ª", "8ª", "9ª", "10ª"];
 
-/** Um mecanismo e a série de tempos dele: `seconds[p][r]` é a rodada r+1 do
- * período p+1. */
+/** Um mecanismo e a série de tempos dele: `seconds[p][r]` é a rodada r+1 do período p+1 */
 export interface AllocationTimeLine {
   key: string;
   label: string;
-  /** `strokeDasharray`; vazio é contínuo. */
   dash: string;
   seconds: number[][];
 }
 
-/** Sempre em segundos, que é a unidade da régua. Duas casas **significativas**,
- * e não fixas: numa régua logarítmica os valores atravessam ordens de grandeza,
- * e casas fixas escreveriam "0,00" em tudo que está abaixo de um centésimo. */
+/** Sempre em segundos, que é a unidade da régua */
 export const formatSeconds = (value: number): string =>
   `${value.toLocaleString("pt-BR", { maximumSignificantDigits: 2 })} s`;
 

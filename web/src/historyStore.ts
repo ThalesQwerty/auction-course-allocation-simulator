@@ -1,18 +1,4 @@
-/** O histórico de execuções no **IndexedDB**.
- *
- * Saiu do `localStorage` em 09/11/2026, quando a comparação passou a trazer as
- * séries de todos os recortes (uns 450 kB cada): o `localStorage` tem uns
- * 5 MB por origem, e o histórico ia sendo podado pelas mais antigas muito
- * antes do teto de execuções. O IndexedDB tem cota proporcional ao disco e
- * guarda o objeto como está, sem `JSON.stringify`.
- *
- * A lista inteira é **um registro só**, gravado de uma vez. A ordem dela é a
- * da tela — um arquivo carregado entra no topo com a data dele, então a data
- * não serve de ordem —, e as gravações são raras (rodar, carregar, apagar).
- *
- * As gravações saem **em fila**: duas mudanças seguidas no histórico não
- * podem terminar fora de ordem e deixar gravada a mais antiga.
- */
+/** O histórico de execuções no **IndexedDB** */
 
 const DB_NAME = "leilao";
 const DB_VERSION = 1;
@@ -37,7 +23,6 @@ function open(): Promise<IDBDatabase> {
       request.onerror = () => reject(request.error);
       request.onblocked = () => reject(new Error("IndexedDB bloqueado"));
     });
-    // Falhou uma vez, tenta de novo na próxima chamada em vez de guardar o erro.
     opening.catch(() => (opening = null));
   }
   return opening;
@@ -59,15 +44,12 @@ function run<T>(
   );
 }
 
-/** A lista gravada sob `key`, ou `undefined` se nunca se gravou nada — o que
- * distingue "histórico vazio" de "ainda não migrou do `localStorage`". A
- * chave leva a versão do formato, como a do `localStorage` levava. */
+/** A lista gravada sob `key`, ou `undefined` se nunca se gravou nada — o que distingue "histórico vazio" de "ainda não migrou do `localStorage`" */
 export const readEntries = <T>(key: string): Promise<T[] | undefined> =>
   run<T[] | undefined>("readonly", (store) => store.get(key));
 
 let queue: Promise<unknown> = Promise.resolve();
 
-/** Grava a lista inteira, depois de qualquer gravação anterior terminar. */
 export function writeEntries<T>(key: string, entries: T[]): Promise<void> {
   const next = queue.then(() =>
     run<IDBValidKey>("readwrite", (store) => store.put(entries, key))
@@ -76,12 +58,10 @@ export function writeEntries<T>(key: string, entries: T[]): Promise<void> {
   return next.then(() => undefined);
 }
 
-/** Pede ao navegador que não despeje o banco sob pouco espaço em disco. É um
- * pedido: o navegador pode negar, e aí vale a regra comum de despejo. */
+/** Pede ao navegador que não despeje o banco sob pouco espaço em disco */
 export function requestPersistence(): void {
   try {
     void navigator.storage?.persist?.().catch(() => undefined);
   } catch {
-    // Sem a API, não há o que pedir.
   }
 }

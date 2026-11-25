@@ -1,17 +1,4 @@
-"""Ponte FastAPI entre o motor Python e a interface web.
-
-Quatro rotas, sem persistência nenhuma: `/run` resolve um leilão de uma rodada
-montado à mão, `/compare` roda o cenário nos braços da Seção 7.3, `/trace`
-refaz **uma** simulação da comparação e devolve o que cada aluno pediu, e
-`/playground` roda uma alocação isolada. O estado vive só no navegador — cada
-requisição carrega o cenário inteiro, e a seed torna o resultado reprodutível.
-
-Executar localmente:
-    uvicorn leilao.api.main:app --reload --port 8000
-
-ou, mais curto (após `pip install -e ".[dev]"`):
-    dev
-"""
+"""Ponte FastAPI entre o motor Python e a interface web."""
 from __future__ import annotations
 
 import uvicorn
@@ -48,12 +35,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# O traço de uma simulação é a resposta grande da API — uns 10 MB de JSON no
-# preset Computação, que comprimidos viram cerca de 1. O limite deixa de fora as
-# respostas pequenas, em que o gasto de comprimir não se paga.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
-# Front-end (Vite) roda por padrão em http://localhost:5173 durante o desenvolvimento.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -83,7 +66,7 @@ def run(req: RunRequest) -> RunResponse:
 
     try:
         result = run_auction(auction_input)
-    except Exception as exc:  # noqa: BLE001 — reporta falha do solver/instância inviável
+    except Exception as exc:
         raise HTTPException(status_code=422, detail=f"falha ao resolver o cenário: {exc}") from exc
 
     return RunResponse.from_result(result)
@@ -91,23 +74,12 @@ def run(req: RunRequest) -> RunResponse:
 
 @app.post("/compare", response_model=CompareResponse)
 def compare(req: CompareRequest) -> CompareResponse:
-    """Roda o mesmo cenário nos três modelos, N vezes em cada um.
-
-    As seeds vão de 1 a N e são pareadas: a simulação i de um braço e a do outro
-    partem da mesma população, das mesmas utilidades e das mesmas notas. A
-    resposta traz só as métricas de alocação, já reduzidas a um valor por
-    simulação, e as séries por período de cada braço — no agregado e em cada
-    recorte (coorte e os quatro eixos de perfil) —, reduzidas a quartis entre
-    as seeds. Nada de crédito: ele não existe do lado da linha de base.
-
-    É uma simulação completa por braço e por seed; com um cenário grande a
-    requisição leva dezenas de segundos.
-    """
+    """Roda o mesmo cenário nos três modelos, N vezes em cada um."""
     try:
         response = compare_scenario(req)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 — reporta falha do solver/instância inviável
+    except Exception as exc:
         raise HTTPException(
             status_code=422, detail=f"falha ao comparar os mecanismos: {exc}"
         ) from exc
@@ -118,16 +90,7 @@ def compare(req: CompareRequest) -> CompareResponse:
 
 @app.post("/trace", response_model=TraceResponse)
 def trace(req: TraceRequest) -> TraceResponse:
-    """Refaz uma simulação da comparação e devolve o que cada aluno pediu.
-
-    O par `(braço, seed)` endereça uma das simulações que `/compare` resumiu numa
-    linha das tabelas, e a configuração passa pelo mesmo `arm_config` que ela
-    usou — então o que volta aqui é literalmente a simulação de que aquele
-    ponto saiu, e não uma parecida.
-
-    É uma simulação completa por requisição (segundos, no preset Computação), e
-    a resposta é a maior da API: vem período a período, aluno a aluno.
-    """
+    """Refaz uma simulação da comparação e devolve o que cada aluno pediu."""
     arm = ARM_BY_KEY.get(req.arm)
     if arm is None:
         raise HTTPException(
@@ -142,7 +105,7 @@ def trace(req: TraceRequest) -> TraceResponse:
 
     try:
         result = run_simulation(config)
-    except Exception as exc:  # noqa: BLE001 — reporta falha do solver/instância inviável
+    except Exception as exc:
         raise HTTPException(
             status_code=422, detail=f"falha ao refazer a simulação: {exc}"
         ) from exc
@@ -192,7 +155,7 @@ def playground(req: PlaygroundRequest) -> PlaygroundResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(status_code=422, detail=f"falha no playground: {exc}") from exc
 
     return PlaygroundResponse(

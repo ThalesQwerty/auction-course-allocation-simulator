@@ -1,5 +1,4 @@
-"""A linha de base por CR (Seção 7.3.1, eqs. 49-50) e a comparação entre os
-dois mecanismos (Seção 7.3)."""
+"""A linha de base por CR (Seção 7.3.1, eqs. 49-50) e a comparação entre os"""
 import dataclasses
 from collections import Counter
 
@@ -54,9 +53,6 @@ def make_config(**overrides) -> SimulationConfig:
     return SimulationConfig(**{**base, **overrides})
 
 
-# --- o pedido do aluno: mochila 0-1 sobre a carga horária, eq. (50) ---------
-
-
 def ask(utilities, available=None, capacity=WORKLOAD, **kwargs):
     return request_set(
         utilities=utilities,
@@ -68,10 +64,7 @@ def ask(utilities, available=None, capacity=WORKLOAD, **kwargs):
 
 
 def test_the_request_fits_the_workload_ex_ante():
-    """A auto-restrição que o trabalho aponta como a primeira deficiência do
-    CR: o aluno resolve a eq. (4) **em casa**, antes de saber o que vai
-    conseguir, e pede só o que cabe. Com 180 h de teto e cinco elegíveis, ele
-    leva as três melhores de 60 h."""
+    """A auto-restrição que o trabalho aponta como a primeira deficiência do"""
     utilities = {"D1": 0.3, "D2": 0.25, "D3": 0.2, "D4": 0.15, "D5": 0.1}
     wanted = ask(utilities)
     assert wanted == ["D1", "D2", "D3"]
@@ -79,9 +72,7 @@ def test_the_request_fits_the_workload_ex_ante():
 
 
 def test_the_request_is_a_knapsack_and_not_an_ordering():
-    """A ordenação por utilidade erra assim que as cargas diferem: com 120 h de
-    teto ela toma D4 (90 h) e empaca, enquanto a mochila toma as duas de 60 h e
-    extrai mais utilidade."""
+    """A ordenação por utilidade erra assim que as cargas diferem: com 120 h de"""
     utilities = {"D1": 0.25, "D2": 0.25, "D4": 0.40}
     assert ask(utilities, capacity=120) == ["D1", "D2"]
 
@@ -89,21 +80,15 @@ def test_the_request_is_a_knapsack_and_not_an_ordering():
 def test_the_request_covers_only_what_is_available_and_wanted():
     utilities = {"D1": 0.6, "D2": 0.0, "D3": 0.4}
     assert ask(utilities, available=["D1", "D3"]) == ["D1", "D3"]
-    # Utilidade zero é o que marca o inelegível, e não entra no pedido.
     assert ask(utilities) == ["D1", "D3"]
     assert ask({"D1": 0.5}, available=[]) == []
 
 
 def test_a_tie_in_the_request_goes_to_the_discipline_listed_first():
-    """Empate sai na ordem da grade, a mesma que desempata o lance — e não na
-    ordem alfabética nem na de `available`. Com 180 h cabem três das quatro, e
-    quem fica de fora é a última da grade."""
+    """Empate sai na ordem da grade, a mesma que desempata o lance — e não na"""
     tied = {"D2": 0.25, "D1": 0.25, "D5": 0.25, "D3": 0.25}
     assert ask(tied) == ["D2", "D1", "D5"]
     assert ask(tied, available=["D5", "D3", "D1", "D2"]) == ["D2", "D1", "D5"]
-
-
-# --- a alocação: ditadura serial por CR, carga resolvida ex-post -----------
 
 
 def test_the_higher_grade_average_takes_the_last_seat():
@@ -118,9 +103,7 @@ def test_the_higher_grade_average_takes_the_last_seat():
 
 
 def test_the_student_loses_what_he_wanted_least_when_the_workload_binds():
-    """A guarda de carga da caminhada: o pedido da eq. (50) já cabe em W_a, mas
-    se vier maior o aluno fica com os primeiros da *lista dele* — não com os
-    que calharem. Com 120 h de teto e três pedidos de 60 h, leva dois."""
+    """A guarda de carga da caminhada: o pedido da eq. (50) já cabe em W_a, mas"""
     granted = allocate_by_ranking(
         requests=[("a", "D1"), ("a", "D2"), ("a", "D3")],
         priority={"a": 7.0},
@@ -143,17 +126,8 @@ def test_the_ilp_respects_the_workload_and_the_seats():
     assert all(student == "a" for student, _ in granted)
 
 
-# --- a simulação inteira sob a linha de base -------------------------------
-
-
 def test_the_tiebreak_decides_only_among_equals():
-    """O ε desempata quem tem o mesmo CR, e é o lado que **lê** o desempate: a
-    PLI o ignora (ver `test_wdp_solver`). Era a varredura gulosa do WDP que
-    guardava este lado até 24/11/2026; com ela fora, quem o lê é a ditadura
-    serial, e o par de testes continua cobrindo os dois lados.
-
-    Duas vagas, três alunos de CR igual: levam os dois de maior ε.
-    """
+    """O ε desempata quem tem o mesmo CR, e é o lado que **lê** o desempate: a"""
     granted = serial_dictatorship(
         requests=[("a1", "x1"), ("a2", "x1"), ("a3", "x1")],
         priority={"a1": 7.0, "a2": 7.0, "a3": 7.0},
@@ -173,9 +147,7 @@ def test_the_baseline_runs_and_respects_the_seats():
 
 
 def test_the_baseline_respects_the_workload_cap():
-    """eq. (4): a carga obtida no período nunca passa de W_a. Aqui ela é
-    resolvida pelo aluno, não pelo PLI — e é justamente por isso que convém
-    conferir."""
+    """eq. (4): a carga obtida no período nunca passa de W_a. Aqui ela é"""
     result = run_simulation(make_config())
     hours = {d.name: d.hours for d in GRADE}
     for history in result.histories:
@@ -185,8 +157,7 @@ def test_the_baseline_respects_the_workload_cap():
 
 
 def test_the_baseline_has_no_credits_anywhere():
-    """Sem leilão não há orçamento, preço nem retorno — e as grandezas saem
-    `None`, não zero: zero se leria como "ninguém gastou"."""
+    """Sem leilão não há orçamento, preço nem retorno — e as grandezas saem"""
     result = run_simulation(make_config())
     for period in result.periods:
         assert period.aggregate.prices is None
@@ -202,13 +173,11 @@ def test_the_baseline_has_no_credits_anywhere():
 
 
 def test_the_baseline_still_grants_the_entrants_their_entry_seats():
-    """A matrícula garantida é do modelo da universidade, não do mecanismo:
-    vale igual nos dois lados."""
+    """A matrícula garantida é do modelo da universidade, não do mecanismo:"""
     result = run_simulation(make_config())
     first = result.histories[0].periods[0]
     granted = [r for r in first.requests if r.won_round == GUARANTEED_ROUND]
     assert {r.discipline for r in granted} == {"D1", "D2"}
-    # E não custa nada: na linha de base o crédito não existe.
     assert all(r.paid == 0 for r in granted)
 
 
@@ -219,18 +188,13 @@ def test_the_baseline_is_deterministic():
 
 
 def test_the_two_mechanisms_start_from_the_same_population():
-    """A condição metodológica da Seção 7.3: mesma seed, mesma inicialização.
-    O que diverge depois é consequência do mecanismo, não do sorteio."""
+    """A condição metodológica da Seção 7.3: mesma seed, mesma inicialização."""
     credits = run_simulation(make_config(mechanism="credits"))
     ranking = run_simulation(make_config(mechanism="ranking"))
     assert [s.name for s in credits.students] == [s.name for s in ranking.students]
     assert [s.entry_period for s in credits.students] == [
         s.entry_period for s in ranking.students
     ]
-    # O perfil era a terceira coisa conferida aqui; sem perfis, o que resta da
-    # inicialização comum são o nome e o t_a. A matriz de notas também é a
-    # mesma, mas só se observa pelo CR, que diverge assim que a alocação
-    # diverge — então não dá para afirmá-la daqui.
 
 
 def test_the_two_mechanisms_allocate_differently():
@@ -250,13 +214,7 @@ def test_the_comparison_pairs_the_seeds_across_every_arm():
 
 
 def test_the_comparison_ignores_the_scenario_seed():
-    """Numa comparação a seed deixa de ser parâmetro e vira o eixo da amostra.
-
-    Vale para o resultado **inteiro**, histogramas inclusive: eles são sorteados
-    à parte das execuções, e sortear com a seed do cenário faria dois cenários
-    idênticos a menos dela devolverem respostas diferentes — exatamente o que
-    esta propriedade promete que não acontece.
-    """
+    """Numa comparação a seed deixa de ser parâmetro e vira o eixo da amostra."""
     first = run_comparison(make_config(seed=1), runs=2)
     second = run_comparison(make_config(seed=999), runs=2)
     assert first == second
@@ -264,16 +222,13 @@ def test_the_comparison_ignores_the_scenario_seed():
 
 
 def test_the_comparison_carries_both_scenario_distributions():
-    """Os dois histogramas de entrada vêm com a comparação, para a tela mostrar
-    de onde vieram os números. Somam 1, e as notas têm uma faixa a mais que as
-    utilidades porque a escala delas é [0, 10]."""
+    """Os dois histogramas de entrada vêm com a comparação, para a tela mostrar"""
     result = run_comparison(make_config(), runs=2)
     assert len(result.interest_distribution) == DISTRIBUTION_BINS
     assert len(result.grade_distribution) == GRADE_BINS
     assert sum(result.interest_distribution) == pytest.approx(1.0)
     assert sum(result.grade_distribution) == pytest.approx(1.0)
 
-    # A das notas não depende de sigma; a das utilidades sim.
     wider = run_comparison(make_config(interest_sigma=3.0), runs=2)
     assert wider.grade_distribution == result.grade_distribution
     assert wider.interest_distribution != result.interest_distribution
@@ -285,8 +240,7 @@ def test_the_comparison_rejects_a_run_count_out_of_range():
 
 
 def test_the_summary_weights_the_periods_by_the_active_students():
-    """A média ponderada tem de cair entre o menor e o maior valor por período
-    — e, com a drenagem, ficar mais perto dos períodos cheios."""
+    """A média ponderada tem de cair entre o menor e o maior valor por período"""
     result = run_simulation(make_config())
     summary = summarize(result, seed=7)
     efficiencies = [
@@ -299,26 +253,23 @@ def test_the_summary_weights_the_periods_by_the_active_students():
 
 
 def test_the_series_by_period_is_the_material_of_the_weighted_mean():
-    """As duas leituras saem do mesmo lugar: a média ponderada do que está em
-    `by_period`, com `students` de peso, é o número que foi para o boxplot."""
+    """As duas leituras saem do mesmo lugar: a média ponderada do que está em"""
     result = run_simulation(make_config())
     summary = summarize(result, seed=7)
     series = summary.by_period
 
-    # Uma posição por período medido, e todas as listas do mesmo tamanho.
     lengths = {
         len(series.x),
         len(series.students),
         len(series.efficiency),
-        len(series.utilization),
+        len(series.attendance),
         len(series.fidelity),
         len(series.fairness),
-        len(series.correlation),
+        len(series.mean_round),
     }
     assert lengths == {len(series.x)}
     assert series.x
 
-    # O primeiro período não se mede: todo mundo acabou de ingressar.
     assert 1 not in series.x
     assert series.x == sorted(series.x)
 
@@ -326,26 +277,15 @@ def test_the_series_by_period_is_the_material_of_the_weighted_mean():
     assert recomputed == pytest.approx(summary.efficiency)
 
 
-# Dois grupos em dois dos eixos de perfil, para o recorte ter o que repartir.
-# A coorte (4) cabe nas 6 vagas de entrada da grade de teste.
 MIXED = dict(
     students_per_entry_class=1,
-    # `1/(turmas da grade)`: 5 disciplinas de turma única.
     selectivity_median=0.2,
 )
 
 
-# Sem o crédito: este arquivo é o `ranking`, e lá o eixo não existe.
 @pytest.mark.parametrize("axis", ["grade_average", "reserve"])
 def test_each_cut_partitions_the_aggregate_period_by_period(axis):
-    """Em cada período, os grupos de um recorte somados com o peso deles
-    reproduzem o agregado — o recorte **particiona** a população.
-
-    A identidade é exata nas métricas que são média por aluno — ψ̄,
-    aproveitamento e fidelidade. φ e λ ficam de fora e não por descuido: o
-    índice de Jain e a correlação de Pearson não são médias, e o valor do todo
-    não se recompõe dos valores das partes.
-    """
+    """Em cada período, os grupos de um recorte somados com o peso deles"""
     result = run_simulation(make_config(**MIXED, grade_cuts=(5.0,), reserve_cuts=(0.01,)))
     summary = summarize(result, seed=3)
     groups = summary.by_group["period"][axis]
@@ -358,7 +298,7 @@ def test_each_cut_partitions_the_aggregate_period_by_period(axis):
             for g in groups
             if period in g.series.x
         ) == overall.students[index]
-        for name in ("efficiency", "utilization", "fidelity"):
+        for name in ("efficiency", "progress", "fidelity"):
             recomposed = weighted_mean(
                 [
                     (
@@ -374,13 +314,7 @@ def test_each_cut_partitions_the_aggregate_period_by_period(axis):
 
 @pytest.mark.parametrize("ruler", ["age", "cohort"])
 def test_the_cells_partition_the_aggregate_under_every_ruler(ruler):
-    """Mudar a régua não muda quem é medido: em cada ponto dela, os grupos de
-    um recorte espacial continuam repartindo o agregado.
-
-    A identidade aqui é a da **média ponderada** — é assim que as células são
-    reagrupadas —, e vale para as métricas por aluno, pelo mesmo motivo de
-    sempre.
-    """
+    """Mudar a régua não muda quem é medido: em cada ponto dela, os grupos de"""
     summary = summarize(run_simulation(make_config(**MIXED)), seed=3)
     overall = summary.by_group[ruler]["overall"]
     assert len(overall) == 1
@@ -391,7 +325,7 @@ def test_the_cells_partition_the_aggregate_under_every_ruler(ruler):
 
     for index, point in enumerate(aggregate.x):
         parts = [g.series for g in groups if point in g.series.x]
-        for name in ("efficiency", "utilization", "fidelity"):
+        for name in ("efficiency", "progress", "fidelity"):
             recomposed = weighted_mean(
                 [
                     (
@@ -407,9 +341,7 @@ def test_the_cells_partition_the_aggregate_under_every_ruler(ruler):
 
 
 def test_the_age_ruler_starts_where_the_cohort_was_first_measured():
-    """A régua da idade conta períodos completados pelo aluno: o calouro não é
-    medido, então a idade 0 não publica ponto nenhum, e a maior idade não passa
-    do horizonte."""
+    """A régua da idade conta períodos completados pelo aluno: o calouro não é"""
     config = make_config(**MIXED)
     summary = summarize(run_simulation(config), seed=3)
     ages = summary.by_group["age"]["overall"][0].series.x
@@ -421,8 +353,7 @@ def test_the_age_ruler_starts_where_the_cohort_was_first_measured():
 
 
 def test_the_cohort_ruler_gives_one_point_per_entry_period():
-    """A régua da coorte é um corte transversal: um ponto por turma de
-    ingresso, e nenhum depois do último ingresso."""
+    """A régua da coorte é um corte transversal: um ponto por turma de"""
     config = make_config(**MIXED)
     summary = summarize(run_simulation(config), seed=3)
     cohorts = summary.by_group["cohort"]["overall"][0].series.x
@@ -433,10 +364,7 @@ def test_the_cohort_ruler_gives_one_point_per_entry_period():
 
 
 def test_the_quantile_bands_come_out_from_the_lowest_to_the_highest():
-    """As faixas saem sempre na mesma ordem — a da legenda, em qualquer
-    régua —, da faixa de valor mais baixa para a mais alta.
-
-    O eixo de crédito não entra: este é o `ranking`, onde não há moeda."""
+    """As faixas saem sempre na mesma ordem — a da legenda, em qualquer"""
     config = make_config(**MIXED, grade_cuts=(5.0, 7.0), reserve_cuts=(0.01, 0.03))
     summary = summarize(run_simulation(config), seed=3)
 
@@ -453,17 +381,7 @@ def test_the_quantile_bands_come_out_from_the_lowest_to_the_highest():
 
 
 def test_the_graduation_rate_is_cumulative_over_who_entered():
-    """A fração de concluintes por período é acumulada: quem já concluiu até
-    ali sobre quem já tinha entrado. Mora em [0, 1], e **por coorte** nunca
-    desce — ninguém deixa de ter concluído.
-
-    A **monotonia** ao longo da idade valia enquanto havia uma onda de
-    ingresso só: cada ponto de idade era a mesma gente, um período mais
-    velha. Com ingresso contínuo cada ponto mistura coortes diferentes, de
-    populações diferentes, e a média ponderada delas pode recuar sem que
-    coorte nenhuma tenha recuado — então o que se guarda aqui é o domínio e a
-    identidade com o último período.
-    """
+    """A fração de concluintes por período é acumulada: quem já concluiu até"""
     result = run_simulation(make_config())
     summary = summarize(result, seed=3)
 
@@ -479,8 +397,7 @@ def test_the_graduation_rate_is_cumulative_over_who_entered():
 
 
 def test_the_cohort_ruler_takes_the_last_graduation_rate_not_the_mean():
-    """A fração de concluintes é acumulada, então a da coorte é a que ela
-    tinha no fim — a média da subida diria menos do que o valor final."""
+    """A fração de concluintes é acumulada, então a da coorte é a que ela"""
     result = run_simulation(make_config())
     summary = summarize(result, seed=3)
     by_cohort = {
@@ -500,13 +417,10 @@ def test_the_cohort_ruler_takes_the_last_graduation_rate_not_the_mean():
 
 
 def test_the_bands_reduce_the_seeds_to_quartiles():
-    """A faixa de um braço é `(q1, mediana, q3)` entre as seeds, ponto a
-    ponto, e `n` conta quantas seeds mediram o ponto."""
+    """A faixa de um braço é `(q1, mediana, q3)` entre as seeds, ponto a"""
     summaries = [summarize(run_simulation(make_config(seed=seed)), seed=seed) for seed in (1, 2, 3)]
     axes = bands(summaries)
 
-    # Uma entrada por régua × recorte, nessa ordem. Sem o crédito: este arquivo
-    # é o `ranking`, e lá o eixo não é produzido.
     assert [(a.ruler, a.axis) for a in axes] == [
         (ruler, axis)
         for ruler in ("period", "age", "cohort")
@@ -526,13 +440,7 @@ def test_the_bands_reduce_the_seeds_to_quartiles():
 
 
 def test_the_saturation_by_period_reduces_to_the_aggregate_one():
-    """A saturação por período e a agregada são a mesma grandeza em dois
-    recortes: a média ponderada da linha de cada rodada, com o mesmo peso das
-    outras métricas, devolve a posição correspondente da série agregada.
-
-    O peso servir às duas é o que o modelo garante: o recorte de um período é o
-    mesmo em todas as rodadas — a rodada muda o que foi alocado, não quem é
-    medido."""
+    """A saturação por período e a agregada são a mesma grandeza em dois"""
     config = make_config(rounds=3)
     result = run_simulation(config)
     summary = summarize(result, seed=11)
@@ -550,24 +458,16 @@ def test_the_saturation_by_period_reduces_to_the_aggregate_one():
 
 
 def test_the_series_by_period_carries_the_weight_of_each_point():
-    """O peso de cada ponto é quantos alunos ele mediu, e é o teste de
-    validade da janela: numa janela bem aquecida ele é plano.
-
-    Aqui o cenário não tem pré-população, então a série ainda mostra a rampa —
-    o que o teste guarda é que o peso existe e acompanha a população."""
+    """O peso de cada ponto é quantos alunos ele mediu, e é o teste de"""
     result = run_simulation(make_config())
     students = summarize(result, seed=1).by_period.students
 
-    # Um ponto por período medido. O 1º período não publica métrica nenhuma
-    # (todo mundo é calouro ali), então ele fica de fora.
     assert len(students) == len(result.observed) - 1
     assert all(count > 0 for count in students)
 
 
 def test_the_saturation_has_one_figure_per_round_and_decays():
-    """Uma posição por rodada, e o que foi ganho *naquela* rodada — não o
-    acumulado. Daí a série cair: a primeira pega o que estava livre, as
-    seguintes o que sobrou."""
+    """Uma posição por rodada, e o que foi ganho *naquela* rodada — não o"""
     config = make_config(rounds=3)
     series = allocations_per_round(run_simulation(config))
 
@@ -577,8 +477,7 @@ def test_the_saturation_has_one_figure_per_round_and_decays():
 
 
 def test_the_saturation_sums_to_the_allocation_of_the_period():
-    """Somadas, as rodadas dão as vagas por aluno do período — é a mesma
-    grandeza fatiada, não uma contagem à parte."""
+    """Somadas, as rodadas dão as vagas por aluno do período — é a mesma"""
     result = run_simulation(make_config(rounds=2))
 
     for period in result.periods:
@@ -594,8 +493,7 @@ def test_the_saturation_sums_to_the_allocation_of_the_period():
 
 
 def test_the_saturation_is_measured_in_both_mechanisms():
-    """A linha de base também tem rodadas: o aluno refaz a mochila com a carga
-    horária que lhe sobrou, então ali a saturação também se mede."""
+    """A linha de base também tem rodadas: o aluno refaz a mochila com a carga"""
     for mechanism in ("credits", "ranking"):
         series = allocations_per_round(
             run_simulation(make_config(mechanism=mechanism, rounds=2))
@@ -605,7 +503,6 @@ def test_the_saturation_is_measured_in_both_mechanisms():
 
 
 def test_the_summary_survives_a_simulation_with_no_active_students():
-    """Guarda: sem período publicado não há média a tirar, e o resumo sai zerado
-    em vez de dividir por zero."""
+    """Guarda: sem período publicado não há média a tirar, e o resumo sai zerado"""
     empty = dataclasses.replace(run_simulation(make_config()), periods=[])
     assert summarize(empty, seed=1).efficiency == 0.0

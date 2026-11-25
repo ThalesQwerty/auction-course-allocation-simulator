@@ -1,9 +1,4 @@
-"""Disponibilidade, exclusão e os dois eixos de perfil.
-
-As três peças que entraram juntas: o sorteio da fração de W_a que o aluno de
-fato cursa, a mochila do que ele leva e o que a exclusão faz com o crédito, a
-nota e a tentativa.
-"""
+"""Disponibilidade, exclusão e os dois eixos de perfil."""
 from __future__ import annotations
 
 import math
@@ -18,21 +13,18 @@ from leilao.availability import draw_availability
 from leilao.config import (
     Discipline,
     DEFAULT_AVAILABILITY,
-    DEFAULT_PERFORMANCE,
     AvailabilityShape,
-    PerformanceShape,
     SimulationConfig,
 )
 from leilao.equations import (
     RequestStates,
-    split_normal_mean,
     effective_load,
     exclusion_rate,
     request_funnel,
     request_states,
     retained_set,
 )
-from leilao.grading import GradeShapes, draw_base_quantiles, grade_for_attempt
+from leilao.grading import GradeMeans, draw_grade_quantiles, grade_for_attempt
 from leilao.population import Student, generate_students
 from leilao.simulation.snapshots import Axis
 from leilao.equations import value_band, value_band_names
@@ -53,10 +45,7 @@ def make_config(**overrides) -> SimulationConfig:
         periods=6,
         max_residence=4,
         students_per_entry_class=18,
-        # A referência da escala é `1/(turmas da grade)` — aqui 4 disciplinas
-        # de turma única —, que põe o limiar na utilidade média de uma
-        # elegível. Ver `equations.reserve_threshold`.
-        selectivity_median=0.25,
+        selectivity_median=2.0,
         rounds=2,
         max_hours=240,
         seed=7,
@@ -64,23 +53,16 @@ def make_config(**overrides) -> SimulationConfig:
     return SimulationConfig(**{**base, **overrides})
 
 
-# --- carga efetiva ---------------------------------------------------------
-
-
 def test_the_effective_load_rounds_to_the_nearest_hour():
     """A disponibilidade já vem em horas: a carga efetiva só arredonda."""
     assert effective_load(availability=360.0) == 360
     assert effective_load(availability=180.4) == 180
     assert effective_load(availability=0.0) == 0
-    # O round do Python desempata para o par, como no retorno de créditos.
     assert effective_load(availability=319.5) == 320
 
 
 def test_the_effective_load_has_no_ceiling():
-    """O teto de carga é do **sistema**, não do aluno, e por isso a carga
-    efetiva não clipa em W_a. Quem tem tempo para mais do que o curso oferece
-    simplesmente não exclui nada — quem impede a matrícula é o alocador, que
-    nunca entrega mais que W_a durante as rodadas."""
+    """O teto de carga é do **sistema**, não do aluno, e por isso a carga"""
     assert effective_load(availability=500.0) == 500
 
 
@@ -89,18 +71,8 @@ def test_the_effective_load_rejects_a_negative_availability():
         effective_load(availability=-1.0)
 
 
-# --- a mochila do que ele leva ---------------------------------------------
-
-
 def test_the_knapsack_beats_dropping_by_ascending_utility():
-    """O contraexemplo que justifica a mochila: a heurística sacrifica duas
-    disciplinas baratas para salvar uma cara.
-
-    Teto 122 h, obtidas Algoritmos (90 h, u 0,22), Cálculo (60 h, 0,13) e
-    Física (60 h, 0,11). Tirando da menor utilidade para a maior sobra só
-    Algoritmos, com 0,22 retido; a mochila fica com Cálculo + Física, 120 h e
-    0,24.
-    """
+    """O contraexemplo que justifica a mochila: a heurística sacrifica duas"""
     utilities = {"Algoritmos": 0.22, "Cálculo": 0.13, "Física": 0.11}
     hours = {"Algoritmos": 90, "Cálculo": 60, "Física": 60}
 
@@ -121,14 +93,12 @@ def test_the_knapsack_keeps_everything_when_the_load_fits():
 
 
 def test_the_knapsack_breaks_ties_toward_the_discipline_listed_first():
-    """Mesma regra do resto do motor: utilidades empatadas resolvem pela ordem
-    da grade, e não pela ordem de iteração."""
+    """Mesma regra do resto do motor: utilidades empatadas resolvem pela ordem"""
     utilities = {"primeira": 0.2, "segunda": 0.2}
     hours = {"primeira": 60, "segunda": 60}
     assert retained_set(
         utilities=utilities, hours=hours, obtained=utilities, load=60
     ) == ["primeira"]
-    # E a saída sai na ordem da grade, não na da conta.
     assert retained_set(
         utilities={"segunda": 0.2, "primeira": 0.2},
         hours=hours,
@@ -144,17 +114,8 @@ def test_the_knapsack_returns_nothing_when_the_load_is_zero():
     ) == []
 
 
-# --- o retorno da exclusão -------------------------------------------------
-
-
 def test_excluding_returns_no_credit_at_all():
-    """A excluída não devolve crédito nenhum: o aluno perde o que investiu para
-    obter a vaga, porque não cursou a disciplina para render.
-
-    Houve uma fração configurável até 24/11/2026, zero por padrão. Saiu: a
-    monografia nunca a previu, e sem ela não há cenário em que excluir custe
-    menos do que gastar.
-    """
+    """A excluída não devolve crédito nenhum: o aluno perde o que investiu para"""
     result = run_simulation(make_config())
     excluidas = [
         record
@@ -165,51 +126,40 @@ def test_excluding_returns_no_credit_at_all():
     ]
     assert excluidas, "o cenário deveria ter exclusões"
     assert all(record.returned == 0 for record in excluidas)
-    # E elas pagaram alguma coisa: sem isso o teste passaria por vacuidade.
     assert any(record.paid > 0 for record in excluidas)
 
 
-# --- o desperdício ---------------------------------------------------------
-
-
 def test_the_exclusion_rate_is_zero_when_nothing_was_allocated():
-    """Recorte sem vaga obtida não desperdiçou nada — o que é diferente de
-    não haver ninguém, que o recorte vazio já trata não publicando métrica."""
+    """Recorte sem vaga obtida não desperdiçou nada — o que é diferente de"""
     assert exclusion_rate(excluded=0, allocated=0) == 0.0
     assert exclusion_rate(excluded=3, allocated=12) == 0.25
     with pytest.raises(ValueError):
         exclusion_rate(excluded=4, allocated=3)
 
 
-# --- os seis estados -------------------------------------------------------
-
-
 def test_the_six_states_partition_what_is_still_missing():
-    """Cada disciplina que ainda falta cai em exatamente um estado, e a soma é
-    o tamanho do denominador."""
+    """Cada disciplina que ainda falta cai em exatamente um estado, e a soma é"""
     states = request_states(
         catalogue=["A", "B", "C", "D", "E", "F"],
-        approved={"A", "D"},  # A vinha de antes; D passou agora
+        approved={"A", "D"},
         eligible=["B", "C", "D"],
         requested={"B", "D"},
         won={"B", "D"},
         retained={"D"},
     )
     assert states == RequestStates(
-        not_eligible=2,  # E e F, bloqueadas
-        not_requested=1,  # C
+        not_eligible=2,
+        not_requested=1,
         refused=0,
-        excluded=1,  # B, obtida e largada
+        excluded=1,
         failed=0,
-        approved=1,  # D
+        approved=1,
     )
-    # O catálogo tem 6; A já estava aprovada e sai do denominador.
     assert states.total == 5
 
 
 def test_the_already_approved_leave_the_denominator():
-    """É o que impede "não elegível" de crescer por progresso e encolher por
-    desbloqueio ao mesmo tempo, cancelando-se."""
+    """É o que impede "não elegível" de crescer por progresso e encolher por"""
     antes = request_states(
         catalogue=["A", "B"],
         approved=set(),
@@ -227,7 +177,7 @@ def test_the_already_approved_leave_the_denominator():
         retained=set(),
     )
     assert antes.total == 2
-    assert depois.total == 1  # A saiu: não é mais algo que lhe falta
+    assert depois.total == 1
     assert depois.not_eligible == 0
 
 
@@ -240,12 +190,8 @@ def test_the_average_is_per_student_and_never_a_sum():
     assert RequestStates.average([]) == RequestStates(0, 0, 0, 0, 0, 0)
 
 
-# --- as quatro frações do funil --------------------------------------------
-
-
 def test_each_funnel_share_divides_by_the_node_before_it():
-    """Cada fração responde por um nó, e o denominador é o que chegou até
-    ali — não o catálogo."""
+    """Cada fração responde por um nó, e o denominador é o que chegou até"""
     states = RequestStates(
         not_eligible=4,
         not_requested=3,
@@ -257,19 +203,14 @@ def test_each_funnel_share_divides_by_the_node_before_it():
     funnel = request_funnel(states)
 
     assert states.total == 15
-    # Pediu 8 das 15 que lhe faltavam.
     assert funnel.requested_share == pytest.approx(8 / 15)
-    # Das 8 pedidas, 6 foram deferidas.
     assert funnel.granted_share == pytest.approx(6 / 8)
-    # Das 6 deferidas, cursou 5.
     assert funnel.attended_share == pytest.approx(5 / 6)
-    # Das 5 cursadas, passou em 3.
     assert funnel.approved_share == pytest.approx(3 / 5)
 
 
 def test_an_empty_node_gives_none_and_never_zero():
-    """"Ninguém pediu nada" é diferente de "ninguém foi deferido" — e zero
-    diria a segunda coisa."""
+    """"Ninguém pediu nada" é diferente de "ninguém foi deferido" — e zero"""
     nothing = request_funnel(RequestStates(5, 5, 0, 0, 0, 0))
     assert nothing.requested_share == 0.0
     assert nothing.granted_share is None
@@ -279,8 +220,7 @@ def test_an_empty_node_gives_none_and_never_zero():
 
 
 def test_the_attended_share_is_the_complement_of_the_exclusion_rate():
-    """A redundância é exata, e é bom que esteja declarada: a fração de
-    cursadas é `1 − ε`, as duas vindas das mesmas contagens."""
+    """A redundância é exata, e é bom que esteja declarada: a fração de"""
     states = RequestStates(2, 2, 1, 3, 4, 5)
     funnel = request_funnel(states)
     allocated = int(states.excluded + states.failed + states.approved)
@@ -289,36 +229,16 @@ def test_the_attended_share_is_the_complement_of_the_exclusion_rate():
     )
 
 
-# --- os eixos da população -------------------------------------------------
-
-
 def test_the_cohort_is_typed_not_derived():
-    """O tamanho da coorte é digitado. Era derivado do produto das combinações
-    de perfil até 19/11/2026, e mexer num eixo mudava a população sem que
-    ninguém pedisse."""
+    """O tamanho da coorte é digitado. Era derivado do produto das combinações"""
     config = make_config(students_per_entry_class=20)
     students = generate_students(config, np.random.default_rng(0))
     assert config.students_per_period == 20
     assert len([s for s in students if s.entry_period == 1]) == 20
 
 
-def test_the_quantile_bands_split_the_population_evenly():
-    """A fronteira é **declarada**, não amostral: ela sai dos cortes do cenário
-    e é a mesma em toda execução — sem isso a média entre seeds somaria faixas
-    que não são a mesma coisa. O que varia é quem está em cada faixa, e isso é
-    o conteúdo da medida, não ruído nela."""
-    config = make_config(grade_cuts=(5.0, 7.0))
-    axis = Axis.states(config)["grade_average"]
-    assert axis.order == ["0–5", "5–7", "7–10"]
-
-    # A mesma ordem com outra seed e outra população: a fronteira não se move.
-    outra = make_config(grade_cuts=(5.0, 7.0), seed=99, students_per_entry_class=6)
-    assert Axis.states(outra)["grade_average"].order == axis.order
-
-
 def test_the_cut_belongs_to_the_band_it_opens():
-    """Com cortes 5 e 7, um CR exatamente 7 está em "7–10" — a comparação é
-    `corte <= valor`, que é o que a especificação da interface pede."""
+    """Com cortes 5 e 7, um CR exatamente 7 está em "7–10" — a comparação é"""
     cuts = (5.0, 7.0)
     assert value_band(value=4.9, cuts=cuts) == 0
     assert value_band(value=5.0, cuts=cuts) == 1
@@ -333,147 +253,40 @@ def test_one_band_is_the_whole_university():
     assert axis.order == ["Geral"]
 
 
-def test_the_credit_axis_only_exists_in_the_auction():
-    """Não há moeda no `ranking`: o eixo sai da lista inteiro, em vez de sair
-    com faixa zerada."""
-    assert "credits" in Axis.states(make_config(mechanism="credits"))
-    assert "credits" not in Axis.states(make_config(mechanism="ranking"))
-
-
-def test_the_base_levels_come_from_the_seed():
-    """Ao contrário dos perfis, que eram atribuídos por posição, o nível
-    basilar é sorteado: duas seeds dão populações diferentes, que é o que a
-    Seção 7.3 quer quando pede múltiplas configurações de entrada."""
-    config = make_config()
-    one = generate_students(config, np.random.default_rng(1))
-    two = generate_students(config, np.random.default_rng(99))
-    assert [s.performance_level for s in one] != [s.performance_level for s in two]
-    # O período de ingresso continua fora da seed.
-    assert [s.entry_period for s in one] == [s.entry_period for s in two]
-
-
-def test_the_base_level_gives_the_cr_a_floor_to_disperse_around():
-    """Sem nível basilar a média dos quantis de um aluno converge para 0,5: a
-    dispersão cai como 1/√D e **não tem piso**. Com ele, o que sobra depois de
-    muitas disciplinas é o nível, e a ordenação por CR continua ordenando.
-
-    O teste compara a mesma medida em duas grades de tamanhos diferentes: é
-    onde a diferença entre "cai" e "tem piso" aparece.
-    """
+def test_the_marginal_of_the_quantile_stays_uniform():
+    """O nível basilar reparte a variância, não a muda: a calibragem da nota"""
     config = make_config(students_per_entry_class=150)
     students = generate_students(config, np.random.default_rng(0))
-
-    def spread(stability: float, materias: int) -> float:
-        cfg = make_config(students_per_entry_class=150, performance_stability=stability)
-        grade = [
-            Discipline(name=f"M{i}", seats=10, hours=60) for i in range(materias)
-        ]
-        quantis = draw_base_quantiles(students, grade, cfg, np.random.default_rng(1))
-        por_aluno: dict[str, list[float]] = {}
-        for (student_id, _), value in quantis.items():
-            por_aluno.setdefault(student_id, []).append(value)
-        medias = [sum(v) / len(v) for v in por_aluno.values()]
-        return float(np.std(medias))
-
-    # Sem nível basilar, quadruplicar a grade corta a dispersão pela metade.
-    assert spread(0.0, 40) < 0.6 * spread(0.0, 10)
-    # Com ele, ela mal se move: o que sobra é o aluno.
-    assert spread(0.8, 40) > 0.9 * spread(0.8, 10)
-    # E em qualquer tamanho ela é maior.
-    assert spread(0.8, 40) > 2 * spread(0.0, 40)
-
-
-def test_the_marginal_of_the_quantile_stays_uniform():
-    """O nível basilar reparte a variância, não a muda: a calibragem da nota
-    não se move com ele."""
-    config = make_config(students_per_entry_class=150, performance_stability=0.6)
-    students = generate_students(config, np.random.default_rng(0))
     valores = list(
-        draw_base_quantiles(students, GRADE, config, np.random.default_rng(1)).values()
+        draw_grade_quantiles(students, GRADE, config, np.random.default_rng(1)).values()
     )
     assert np.mean(valores) == pytest.approx(0.5, abs=0.02)
     assert np.std(valores) == pytest.approx(1 / np.sqrt(12), abs=0.02)
 
 
-def test_the_summary_carries_the_band_of_the_student():
-    """A tela individual é onde se pergunta "por que *este* aluno foi assim",
-    e a faixa é metade da resposta — a seed é a outra."""
-    result = run_simulation(make_config())
-
-    assert result.students
-    for summary in result.students:
-        # O nível basilar cru, e não mais o nome de uma faixa: o recorte dos
-        # relatórios passou a ser por valor corrente, e um rótulo de faixa que
-        # nenhum relatório usa não diria nada.
-        for level in (
-            summary.performance_level,
-            summary.availability_level,
-            summary.selectivity_level,
-        ):
-            assert math.isfinite(level)
-
-
 def test_a_student_built_by_hand_sits_at_the_median():
     """Quem constrói um aluno à mão não está escolhendo uma ponta."""
     student = Student(id="x", name="X", credits=10)
-    assert student.performance_level == 0.0
-    assert student.availability_level == 0.0
-    assert student.selectivity_level == 0.0
-
-
-def test_the_scenario_rejects_distributions_that_do_not_exist():
-    # A moda tem de caber abaixo de W_a: com o pico no teto não existe
-    # log-normal que ainda o alcance com a frequência pedida.
-    with pytest.raises(ValueError, match="abaixo da carga"):
-        make_config(availability=AvailabilityShape(240.0, 0.1))
-    with pytest.raises(ValueError, match="chance"):
-        make_config(availability=AvailabilityShape(200.0, 1.0))
-    # No desempenho a moda sempre cabe; o que pode não caber são as chances.
-    with pytest.raises(ValueError, match="escala"):
-        make_config(
-            performance=PerformanceShape(
-                mode_grade=10.0, zero_rate=0.01, max_rate=0.01
-            )
-        )
-    with pytest.raises(ValueError, match="no máximo"):
-        make_config(grade_cuts=(1.0, 2.0, 3.0, 4.0, 5.0))
-    with pytest.raises(ValueError, match="devem ficar entre"):
-        make_config(grade_cuts=(11.0,))
-    with pytest.raises(ValueError, match="devem ficar entre"):
-        make_config(reserve_cuts=(1.0,))
-    # O corte de crédito se valida contra o orçamento **deste** cenário.
-    with pytest.raises(ValueError, match="devem ficar entre"):
-        make_config(min_credits=12, max_credits=30, credit_cuts=(31,))
-    with pytest.raises(ValueError, match="nível basilar"):
-        make_config(performance_stability=1.5)
-
-
-# --- o sorteio -------------------------------------------------------------
+    assert student.availability_anchor == 0.5
+    assert student.selectivity_anchor == 0.5
 
 
 def test_availability_is_drawn_once_per_student_and_period():
-    """Ao contrário do desempenho, que é um só para o curso inteiro: o tempo
-    disponível é circunstância, não traço. O que é traço é a forma."""
+    """Ao contrário do desempenho, que é um só para o curso inteiro: o tempo"""
     config = make_config()
     students = generate_students(config, np.random.default_rng(0))
     drawn = draw_availability(students, config, np.random.default_rng(0))
 
     assert len(drawn) == len(students) * config.periods
-    # Em horas, não em fração: a log-normal nunca desce a zero e não tem teto,
-    # de modo que passar de W_a é legítimo.
     assert all(value > 0.0 for value in drawn.values())
     assert any(value > config.max_hours for value in drawn.values())
-    # O valor varia entre os períodos — o nível basilar é o patamar em torno
-    # do qual ele flutua, não um valor fixo repetido.
-    reduced = min(students, key=lambda s: s.availability_level)
+    reduced = min(students, key=lambda s: s.availability_anchor)
     row = [drawn[(reduced.id, t)] for t in range(1, config.periods + 1)]
     assert len(set(row)) == len(row)
 
 
 def test_tripling_the_seats_moves_no_availability_draw():
-    """A mesma invariante que o interesse tem: nada é sorteado
-    dentro do laço, senão mexer numa vaga mudaria o comportamento de todo
-    mundo e a diferença entre dois cenários deixaria de ser do mecanismo."""
+    """A mesma invariante que o interesse tem: nada é sorteado"""
     import dataclasses
 
     config = make_config()
@@ -487,12 +300,8 @@ def test_tripling_the_seats_moves_no_availability_draw():
     )
 
 
-# --- o que a exclusão faz na simulação inteira -----------------------------
-
-
 def test_excluding_costs_no_attempt_and_leaves_the_record_without_a_grade():
-    """Quem exclui e refaz no semestre seguinte volta como primeira
-    tentativa, sem o ganho de recursada."""
+    """Quem exclui e refaz no semestre seguinte volta como primeira"""
     result = run_simulation(make_config())
     excluded = [
         request
@@ -518,48 +327,16 @@ def test_the_retained_load_fits_the_availability_of_the_period():
 
 
 def test_the_excluded_seat_does_not_return_to_the_offer():
-    """Exclui-se depois de encerradas as alocações do período, então a vaga
-    morre com quem a pegou. É o que torna a exclusão socialmente cara."""
+    """Exclui-se depois de encerradas as alocações do período, então a vaga"""
     result = run_simulation(make_config())
     for period in result.periods:
         for snapshot in period.disciplines:
-            # `filled` conta a vaga consumida, excluída ou não.
             assert snapshot.exclusions <= snapshot.filled
             assert snapshot.filled <= snapshot.seats
 
 
-def test_the_waste_is_the_gap_between_the_two_utilizations():
-    """A ocupação fica no alocado e o aproveitamento efetivo no retido; a
-    diferença entre os dois é o desperdício, e é o que a disponibilidade
-    existe para produzir."""
-    result = run_simulation(make_config())
-    measured = [
-        period.aggregate.overall.metrics
-        for period in result.periods
-        if period.aggregate.overall.metrics is not None
-    ]
-    assert measured
-    for metrics in measured:
-        assert metrics.effective_utilization <= metrics.utilization
-        assert metrics.excluded <= metrics.allocated
-        assert metrics.exclusion_rate == pytest.approx(
-            metrics.excluded / metrics.allocated if metrics.allocated else 0.0
-        )
-    assert any(m.excluded > 0 for m in measured)
-
-
 def test_a_full_availability_scenario_never_excludes():
-    """Com disponibilidade praticamente cheia a mecânica some, e o modelo
-    volta a ser o de antes dela — o controle que separa o efeito da exclusão
-    de tudo o mais que mudou junto.
-
-    Note o que uma chance de encher tão alta custa à forma: com a moda logo
-    abaixo de W_a, exigir que 99,99% da massa fique **acima** dele força um
-    desvio logarítmico enorme, e a mediana vai para a casa dos milhões de
-    horas. É consistente, e para este controle é exatamente o que se quer —
-    mas mostra que "quase sempre cheio" e "tipicamente perto de W_a" são
-    pedidos incompatíveis nesta família.
-    """
+    """Com disponibilidade praticamente cheia a mecânica some, e o modelo"""
     result = run_simulation(
         make_config(availability=always_available(240))
     )

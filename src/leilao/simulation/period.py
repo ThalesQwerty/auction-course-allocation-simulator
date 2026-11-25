@@ -1,11 +1,4 @@
-"""Um período letivo inteiro: da matrícula garantida ao relatório.
-
-    u^(t) recortado ao elegível                  eqs. (41)-(43)
-    matrícula garantida dos ingressantes         (fora do leilão)
-    para cada rodada r:  mensagem → alocação → descontos
-    notas, retorno de créditos, conclusão        eqs. (33)-(36), (40)
-    relatórios do período e os sinais do próximo
-"""
+"""Um período letivo inteiro: da matrícula garantida ao relatório."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,9 +28,6 @@ from .setup import Draws
 from .snapshots import Axis, measure, snapshot_groups
 from .state import PeriodState
 
-# Prefixo com que os eixos de célula viajam dentro de `snapshot_groups`, que
-# recebe um dicionário plano de eixos: é o que permite separá-los dos de
-# perfil na volta sem uma segunda chamada.
 CELL_AXIS = "cell:"
 
 
@@ -47,7 +37,6 @@ class PeriodOutcome:
     records: dict[str, StudentPeriodRecord]
     satisfaction: dict[str, float]
     first_grades: list[float]
-    # O que este período publica para o próximo ler.
 
 
 def _scarcities(
@@ -56,14 +45,7 @@ def _scarcities(
     utilities: dict[str, dict[str, float]],
     config_seats: dict[str, int],
 ) -> dict[str, float]:
-    """Escassez: elegíveis por vaga, na média das disciplinas que o aluno
-    ainda pode cursar.
-
-    Conta toda a universidade em "quantos querem", e não só o recorte: quem
-    disputa uma vaga com o aluno não é só quem está na coorte dele.
-    Disciplina sem vaga fica de fora — não é oferta, e a razão seria divisão
-    por zero.
-    """
+    """Escassez: elegíveis por vaga, na média das disciplinas que o aluno"""
     eligible = {
         s.id: [n for n in utilities[s.id] if config_seats[n] > 0] for s in active
     }
@@ -82,20 +64,13 @@ def _scarcities(
 def _contentions(
     *, active: list[Student], state: PeriodState
 ) -> tuple[dict[str, float], dict[str, int]]:
-    """Concorrência: solicitantes por vaga nas disciplinas que o aluno pediu.
-
-    Como a escassez, é do período inteiro e usa a oferta do início dele, então
-    também não anda entre as rodadas. Devolve também a contagem por
-    disciplina, que o relatório por disciplina publica como `requests`.
-    """
+    """Concorrência: solicitantes por vaga nas disciplinas que o aluno pediu."""
     requested = {s.id: state.requested(s.id) for s in active}
     demand: dict[str, int] = {}
     for student in active:
         for name in requested[student.id]:
             demand[name] = demand.get(name, 0) + 1
     contentions = {
-        # Uma disciplina sem vaga nunca entra em B_a^(t,r), então quem está
-        # aqui tem q_x >= 1.
         s.id: demand_per_seat(
             demands=[demand[n] / state.config_seats[n] for n in requested[s.id]]
         )
@@ -107,11 +82,7 @@ def _contentions(
 def _eligible_count(
     utilities: dict[str, dict[str, float]],
 ) -> dict[str, int]:
-    """Quantos alunos tinham cada disciplina no conjunto elegível.
-
-    Sai das próprias linhas de utilidade: elas só trazem o que cada aluno
-    podia pedir, então não há segunda fonte de verdade.
-    """
+    """Quantos alunos tinham cada disciplina no conjunto elegível."""
     count: dict[str, int] = {}
     for row in utilities.values():
         for name in row:
@@ -128,21 +99,9 @@ def _request_records(
     config: SimulationConfig,
     groups: dict[str, str],
 ) -> list[RequestRecord]:
-    """Uma linha por **turma** que o aluno quis — a tela de depuração.
-
-    Ordenação **estável** sobre um dicionário que já vem na ordem da grade:
-    utilidades empatadas saem na ordem de listagem do cenário, a mesma que
-    desempata as duas mochilas.
-
-    A linha é da turma, mas a tentativa e a nota são do **histórico**, que é
-    por disciplina: é por `groups` que a turma cursada encontra a nota que
-    ela produziu.
-    """
+    """Uma linha por **turma** que o aluno quis — a tela de depuração."""
     records: list[RequestRecord] = []
     excluded = set(closing.excluded.get(student.id, ()))
-    # Só a turma que ele de fato cursou carrega a nota. A tentativa é da
-    # disciplina, então sem este filtro as turmas **irmãs** — que ele quis e
-    # não levou — exibiriam a nota que a outra produziu.
     taken = closing.retained.get(student.id, set())
     for name, utility in sorted(utilities.items(), key=lambda item: -item[1]):
         attempt = (
@@ -169,24 +128,17 @@ def _request_records(
 
 @dataclass(frozen=True)
 class _Reporter:
-    """Monta um `RoundReport` a partir do que muda no instante.
-
-    O contexto que **não** muda dentro do período — quem está ativo, o eixo
-    das coortes, as utilidades, a escassez e a concorrência — fica guardado
-    aqui, de modo que cada chamada passe só o instante.
-    """
+    """Monta um `RoundReport` a partir do que muda no instante."""
 
     config: SimulationConfig
     draws: Draws
     period: int
     active: list[Student]
     axis: Axis
-    # Os eixos de estado (`Axis.states`), no mesmo instante.
     profiles: dict[str, Axis]
     state: PeriodState
     utilities: dict[str, dict[str, float]]
     grade_averages: dict[str, float]
-    # s_a^(t) por aluno — ver `Measurements.reserves`.
     reserves: dict[str, float]
     scarcities: dict[str, float]
     contentions: dict[str, float]
@@ -214,8 +166,6 @@ class _Reporter:
         retained: dict[str, set[str]] | None = None,
         excluded: dict[str, list[str]] | None = None,
     ) -> RoundReport:
-        # O pedido é do período inteiro, não da rodada: lance em qualquer
-        # rodada conta, e a matrícula garantida conta como pedido.
         requested = {s.id: self.state.requested(s.id) for s in self.active}
         values = measure(
             config=self.config,
@@ -235,7 +185,7 @@ class _Reporter:
             discipline_hours=self.draws.discipline_hours,
             credit_returns=credit_returns,
             selectivities={
-                s.id: self.draws.selectivity[(s.id, self.period)] for s in self.active
+                s.id: self.draws.selectivity[s.id] for s in self.active
             },
             reserves=self.reserves,
             allocated_satisfactions=allocated_satisfactions,
@@ -273,12 +223,7 @@ class _Reporter:
         )
 
     def ages(self, *, closed: bool) -> dict[str, int]:
-        """A idade do aluno no instante do recorte.
-
-        Em plena rodada de t ele completou t - t_a periodos: o que cursa
-        agora ainda nao foi avaliado. Ao fim de t, com as notas ja saidas, o
-        periodo conta como completo.
-        """
+        """A idade do aluno no instante do recorte."""
         return {
             s.id: self.period - s.entry_period + (1 if closed else 0)
             for s in self.active
@@ -286,11 +231,7 @@ class _Reporter:
 
 
 def _period_prices(*, config: SimulationConfig, state: PeriodState) -> dict[str, float]:
-    """O preço do período de cada **turma** que esteve no mercado.
-
-    Por turma porque é ela que tem vaga: duas turmas da mesma disciplina
-    fecham a preços diferentes, e é essa diferença que diz qual delas o
-    mecanismo achou mais disputada."""
+    """O preço do período de cada **turma** que esteve no mercado."""
     prices: dict[str, float] = {}
     for name in config.seats_by_class():
         price = mean_price(
@@ -318,7 +259,6 @@ def _discipline_snapshots(
             discipline=draws.discipline_of[name],
             curriculum_period=draws.curriculum[draws.discipline_of[name]],
             hours=draws.hours[name],
-            difficulty=draws.difficulty[name],
             classes=by_name[draws.discipline_of[name]].classes,
             schedule=draws.schedule_of[name],
             elective=by_name[draws.discipline_of[name]].elective,
@@ -386,53 +326,37 @@ def run_period(
     enrollments: dict[str, int],
     keep_records: bool = True,
 ) -> PeriodOutcome | None:
-    """Roda o período. `None` quando não há ninguém a medir — e aí a
-    simulação para, porque um período sem aluno só produziria zeros
-    enganosos.
-
-    Com `keep_records=False` o período devolve `records` vazio: é um
-    registro por (aluno, disciplina de utilidade positiva), que só a tela
-    individual lê — ver `run_simulation`.
-    """
-    # A seletividade é **do período**: ela sai de uma log-normal com nível
-    # basilar, como o interesse, então a exigência do aluno flutua em torno do
-    # patamar permanente dele. Atribuí-la aqui, antes das rodadas, é o que faz
-    # `rounds` continuar lendo um `Behavior` só.
+    """Roda o período. `None` quando não há ninguém a medir — e aí a"""
     for student in active:
         student.behavior = Behavior(
-            selectivity=draws.selectivity[(student.id, period)]
+            selectivity=draws.selectivity[student.id]
         )
 
     utilities = {
         s.id: utility_matrix(
-            interest=draws.interest_rows[(s.id, period)], student=s, config=config
+            interest=draws.interest_rows[(s.id, period)],
+            student=s,
+            config=config,
+            schedule_interest=draws.schedule_rows[(s.id, period)],
         )
         for s in active
     }
-    # Σ_{X ∈ M_a^(t)} I_{a,X} — o denominador da reserva
-    # (`equations.reserve_threshold`). É do período, como a utilidade, e é a
-    # única grandeza da decisão que lê o interesse cru.
     interests = {
         s.id: interest_total(
-            interest=draws.interest_rows[(s.id, period)], student=s, config=config
+            interest=draws.interest_rows[(s.id, period)],
+            student=s,
+            config=config,
         )
         for s in active
     }
-    # Guarda, não caso de uso: nada é elegível só para quem aprovou a grade
-    # inteira, que já saiu por `graduated_at` e nem chega aqui. Sem ela, uma
-    # grade degenerada publicaria um período de satisfação zero em vez de
-    # simplesmente não publicar período nenhum.
     active = [s for s in active if utilities[s.id]]
     if not active:
         return None
 
     grade_averages = {s.id: s.grade_average(draws.discipline_hours) for s in active}
-    # A mesma conta que `behavior` faz para decidir, guardada para o recorte e
-    # para a grade de correlações. Repeti-la aqui em vez de colhê-la de lá
-    # mantém `rounds` sem canal de saída: a decisão não precisa reportar nada.
     reserves = {
         s.id: reserve_threshold(
-            selectivity=draws.selectivity[(s.id, period)], interest=interests[s.id]
+            selectivity=draws.selectivity[s.id], interest=interests[s.id]
         )
         for s in active
     }
@@ -441,11 +365,6 @@ def run_period(
         active=active, utilities=utilities, config_seats=state.config_seats
     )
 
-    # A coorte é repartida entre as turmas de cada disciplina de entrada em
-    # blocos contíguos (`equations.entry_class`): o calouro não escolhe turma
-    # porque a matrícula garantida não passa pelo mecanismo. O bloco **gira**
-    # uma posição por disciplina de entrada, e é esse giro que impede o pacote
-    # garantido de chocar consigo mesmo no horário.
     newcomers = [s for s in active if s.entry_period == period]
     for ordinal, student in enumerate(newcomers):
         state.enroll_newcomer(
@@ -477,8 +396,6 @@ def run_period(
         for number in range(1, config.rounds + 1)
     ]
 
-    # A concorrência depende dos lances de **todas** as rodadas, então os
-    # relatórios de rodada só podem ser montados depois do laço.
     contentions, demand = _contentions(active=active, state=state)
     reporter = _Reporter(
         config=config,
@@ -521,19 +438,12 @@ def run_period(
         enrollments=enrollments,
     )
 
-    # ψ do período sai do que o aluno **reteve**, não do que lhe foi alocado:
-    # ele não consumiu a utilidade do que largou. As rodadas, ao contrário,
-    # medem o alocado — ali a exclusão ainda não aconteceu.
     period_satisfaction = {
         s.id: satisfaction(
             utilities=utilities[s.id], allocated=sorted(closing.retained[s.id])
         )
         for s in active
     }
-    # A outra leitura do mesmo ψ: o que foi **alocado**, antes de o aluno
-    # descartar o que não cabia. O vão entre as duas é a dissipação
-    # (`equations.dissipation`), e é o custo privado da exclusão — o custo
-    # social dela é o ε, que conta vagas.
     allocated_satisfaction = {
         s.id: satisfaction(
             utilities=utilities[s.id], allocated=sorted(state.won[s.id])
@@ -542,9 +452,6 @@ def run_period(
     }
     prices = _period_prices(config=config, state=state)
 
-    # `grade_averages` continua sendo o CR vigente no **início** do período —
-    # o que estava valendo durante os leilões. As notas de t só entram no CR
-    # do período seguinte, como numa matrícula de verdade.
     aggregate = reporter.at(
         round_number=0,
         satisfactions=period_satisfaction,

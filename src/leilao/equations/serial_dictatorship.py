@@ -1,48 +1,4 @@
-"""Ditadura serial: a distribuição da linha de base — Seção 7.3.1.
-
-Os alunos entram em ordem decrescente de prioridade e cada um leva o que
-quer, na **própria ordem de preferência**, enquanto houver vaga e carga:
-
-    para a em ordem decrescente de N_a:
-        para x na ordem de preferência de a:
-            se q_x > 0 e w_x <= W_a:  concede, q_x −= 1, W_a −= w_x
-
-`requests` vem já na ordem de preferência de cada aluno, e `priority` é por
-**aluno** (N_a da eq. 49 mais a perturbação de desempate), não por par. Essa
-separação é o que torna a regra lexicográfica de verdade: o CR decide *quem*
-escolhe antes, e a utilidade decide *o que* cada um escolhe. Com uma
-ordenação achatada sobre os pares, o ε por par embaralharia a ordem interna
-do aluno e ele levaria o que calhasse, não o que preferia.
-
-**A carga horária já foi resolvida em casa.** O pedido da eq. (50) cabe em
-W_a^(t,r) por construção, de modo que a checagem daqui é **guarda**, não
-critério: ela só morde se o pedido voltar a vir maior que o teto. O que corta
-nesta caminhada é a vaga, e o aluno perde o que menos queria.
-
-Quem decide a carga é, portanto, o aluno — e é essa a assimetria que a
-comparação mede. Do lado do leilão o aluno pede acima do que cabe e quem
-escolhe o que cortar é a PLI, com a demanda inteira à vista.
-
-O ROTEAMENTO
-------------
-
-`conflicts` mapeia cada turma nos grupos de `E = M ∪ G` a que ela pertence —
-a disciplina e o horário —, e o conjunto `served` é o que impede o aluno de
-levar duas turmas do mesmo grupo: a caminhada **pula** o que conflita com o
-que ele já levou, em vez de conceder de novo.
-
-`requests` vem com **uma turma por disciplina e sem choque de horário** — os
-mesmos cliques já são o grafo de conflito da mochila da eq. (50) —, de modo
-que dentro de uma rodada a caminhada não tem o que pular e o roteamento fica
-como guarda, pela mesma razão que a carga:
-`serial_dictatorship` não checa clique nenhum por si, e o braço precisa dela
-se o pedido voltar a listar irmãs ou turmas que colidem.
-
-O conjunto cobre a **rodada**; entre rodadas quem cobre é o filtro por grupo
-de `equations.available_goods`.
-
-`seats` e `capacity` não são modificados: a concessão é descontada em cópias.
-"""
+"""Ditadura serial: a distribuição da linha de base — Seção 7.3.1."""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

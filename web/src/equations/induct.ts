@@ -1,15 +1,4 @@
-/** Indução sobre a DAG de pré-requisitos, iterativa.
- *
- * Duas grandezas da grade são a mesma recorrência sobre arestas opostas — a
- * altura anda pelos sucessores, o período pelos predecessores —, então a
- * travessia mora aqui e cada uma declara só o que a sua recorrência faz.
- *
- * Espelha `equations._induction` do motor, com uma diferença que é o ponto:
- * **ciclo aqui não é erro**. O motor recusa o cenário; a tela de configuração
- * precisa sobreviver a ele, porque um ciclo é o estado normal do formulário
- * no meio de uma edição. O nó preso recebe `cycleValue`, e quem depende dele
- * também.
- */
+/** Indução sobre a DAG de pré-requisitos, iterativa */
 export function induct(
   edges: Map<string, string[]>,
   {
@@ -27,8 +16,6 @@ export function induct(
       const [name, expanded] = stack.pop()!;
       if (expanded) {
         onPath.delete(name);
-        // Vizinho apontando para disciplina inexistente é ignorado: é o
-        // estado de uma renomeação a meio.
         const neighbours = (edges.get(name) ?? []).filter((n) => edges.has(n));
         value[name] = neighbours.some((n) => value[n] === cycleValue)
           ? cycleValue

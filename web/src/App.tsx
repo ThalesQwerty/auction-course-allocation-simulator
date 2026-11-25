@@ -26,22 +26,13 @@ import type { CompareRequest } from "./types";
 
 export default function App() {
   const [choice, setChoice] = useState<PresetChoice>(initialChoice);
-  // Os cenários salvos no navegador. Leitura preguiçosa: `localStorage` só é
-  // tocado na primeira renderização.
   const [saved, setSaved] = useState(loadSavedPresets);
   const config = choice.config;
-  // O histórico vem do IndexedDB, que é assíncrono: a lista começa vazia e se
-  // preenche quando a leitura termina. `loaded` segura a gravação até lá —
-  // sem ele, a lista vazia do primeiro render sobrescreveria o que está salvo.
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState<View>({ kind: "config" });
   const [playground, setPlayground] = useState<PlaygroundDraft | null>(null);
-  // O modo e o número de execuções não são do cenário: o mesmo cenário se roda
-  // uma vez ou se compara N vezes, e trocar de modo não pode mexer nele.
   const [runs, setRuns] = useState(20);
-  // Quais braços a comparação roda. Rodar um só é o caso de quem está
-  // calibrando cenário e não quer esperar o outro lado a cada tentativa.
   const [arms, setArms] = useState<string[]>(() => COMPARISON_ARMS.map((arm) => arm.key));
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,8 +42,6 @@ export default function App() {
     let alive = true;
     loadHistory().then((stored) => {
       if (!alive) return;
-      // O que entrou antes de a leitura terminar (uma execução rápida, um
-      // arquivo carregado) fica no topo, como se tivesse entrado depois.
       setHistory((current) => [...current, ...stored].slice(0, MAX_RUNS));
       setLoaded(true);
     });
@@ -61,7 +50,6 @@ export default function App() {
     };
   }, []);
 
-  // O histórico mora no navegador: execuções antigas sobrevivem a um recarregamento.
   useEffect(() => {
     if (!loaded) return;
     let alive = true;
@@ -73,8 +61,7 @@ export default function App() {
     };
   }, [history, loaded]);
 
-  /** Carrega um resultado gravado em disco e o abre. Ele entra no histórico
-   * como qualquer execução — o arquivo tem o mesmo formato. */
+   /** Carrega um resultado gravado em disco e o abre */
   async function handleLoadFile(file: File) {
     setError(null);
     try {
@@ -92,10 +79,7 @@ export default function App() {
     setMenuOpen(false);
   }
 
-  /** Roda a comparação e abre o resultado. A seed do formulário não a
-   * acompanha: ali as seeds são as de 1 a N, e o retorno de créditos é o que
-   * separa dois dos braços — carregá-los junto guardaria parâmetros que não
-   * tiveram efeito nenhum. */
+   /** Roda a comparação e abre o resultado */
   async function handleRun() {
     setRunning(true);
     setError(null);
@@ -112,13 +96,7 @@ export default function App() {
     }
   }
 
-  /** Roda de novo a mesma execução com outros pontos de corte.
-   *
-   * As faixas são montadas pelo **motor**, a partir dos valores por aluno que a
-   * resposta não carrega — só os quartis entre as seeds. Então mudar um corte
-   * não é recorte de tela: é outra execução, e entra no histórico como tal.
-   * Daí o botão: disparar a cada tecla custaria N simulações por braço.
-   */
+   /** Roda de novo a mesma execução com outros pontos de corte */
   async function handleRecut(entry: ComparisonRun, cuts: Partial<CompareRequest>) {
     setRunning(true);
     setError(null);
@@ -140,7 +118,6 @@ export default function App() {
     if (!confirm(`Apagar a execução de ${formatRunDate(entry.at)}? A ação não pode ser desfeita.`))
       return;
     setHistory((current) => current.filter((e) => e.id !== id));
-    // Se a execução apagada era a que estava na tela, volta para a configuração.
     if (view.kind === "run" && view.id === id) navigate({ kind: "config" });
   }
 
@@ -150,13 +127,9 @@ export default function App() {
     navigate({ kind: "config" });
   }
 
-  /** Volta ao formulário com o cenário de uma execução carregado. Ela devolve
-   * também o N e os braços, senão "reabrir" daria um formulário que não
-   * reproduz o que está na tela. */
+   /** Volta ao formulário com o cenário de uma execução carregado */
   function reuseConfig(entry: HistoryEntry) {
     const { runs: count, arms: chosen, ...scenario } = entry.config;
-    // Sem seed: ela não fez parte da comparação, então a do formulário fica
-    // como está em vez de ser sobrescrita por um valor inventado.
     setChoice((c) => editConfig(c, { ...c.config, ...scenario }));
     setRuns(count);
     setArms(chosen ?? COMPARISON_ARMS.map((arm) => arm.key));
@@ -165,8 +138,6 @@ export default function App() {
   }
 
 
-  // Uma execução apagada pelo limite de espaço cai de volta na configuração
-  // em vez de deixar a tela em branco.
   const current = view.kind === "run" ? history.find((entry) => entry.id === view.id) : undefined;
   const showConfig = view.kind === "config" || (view.kind === "run" && !current);
 
@@ -205,8 +176,6 @@ export default function App() {
             }}
             saved={saved}
             onSave={(name) => {
-              // Grava e já seleciona o salvo: quem acabou de salvar está
-              // editando aquele cenário, não um personalizado solto.
               const next = saveSavedPresets(upsertSavedPreset(saved, name, config));
               setSaved(next);
               const stored = next.find((entry) => entry.name === name.trim());
@@ -214,8 +183,6 @@ export default function App() {
             }}
             onDeleteSaved={(id) => {
               setSaved(saveSavedPresets(saved.filter((entry) => entry.id !== id)));
-              // O apagado some da lista; o formulário continua como está, e
-              // passa a valer como personalizado.
               setChoice((c) => (c.presetId === id ? { ...c, presetId: null, custom: c.config } : c));
             }}
           />

@@ -1,12 +1,4 @@
-/** O controle de salvar o cenário atual, ao lado do botão de comparar.
- *
- * Abre em dois tempos: o botão revela o campo do nome, e só o segundo clique
- * (ou Enter) grava. Sem isso, salvar seria um clique irreversível que cria uma
- * entrada com nome genérico — e a lista encheria de "Cenário 1", "Cenário 2".
- *
- * Esc cancela e devolve o foco ao botão, que é o que se espera de um campo que
- * apareceu por cima de uma barra de ações.
- */
+/** O controle de salvar o cenário atual, ao lado do botão de comparar */
 import { useEffect, useRef, useState } from "react";
 
 export function SaveScenario({
@@ -15,12 +7,9 @@ export function SaveScenario({
   exists,
 }: {
   onSave: (name: string) => void;
-  /** Nome proposto no campo, já selecionado — digitar por cima é mais rápido
-   * que apagar. */
+   /** Nome proposto no campo, já selecionado — digitar por cima é mais rápido que apagar */
   suggestion: string;
-  /** Se já há um cenário salvo com este nome. O nome é a identidade, então
-   * salvar por cima **substitui** — e o botão diz isso antes do clique, em vez
-   * de o usuário descobrir depois. */
+   /** Se já há um cenário salvo com este nome */
   exists: (name: string) => boolean;
 }) {
   const [editing, setEditing] = useState(false);

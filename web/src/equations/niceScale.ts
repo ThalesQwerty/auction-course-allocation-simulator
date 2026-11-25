@@ -1,16 +1,4 @@
-/** Domínio e marcas arredondados a passos legíveis.
- *
- *     passo = {1, 2, 2,5, 5 ou 10} × 10^⌊log₁₀((alto − baixo)/n)⌋
- *     de = ⌊baixo/passo⌋ · passo,   até = ⌈alto/passo⌉ · passo
- *
- * O conjunto de multiplicadores é o que produz marcas que uma pessoa lê sem
- * contar casas: 0,25 · 0,5 · 0,75 em vez de 0,23 · 0,47 · 0,70. O domínio é
- * então **estendido** até cobrir os dados, e não o contrário — uma caixa não
- * pode sair pela borda do gráfico.
- *
- * Amostra sem dispersão (todas as simulações iguais) não tem escala: abre-se
- * uma folga de 5% em torno do valor para a linha não ficar colada no eixo.
- */
+/** Domínio e marcas arredondados a passos legíveis */
 const STEPS = [1, 2, 2.5, 5, 10];
 const FLAT_PADDING = 0.05;
 

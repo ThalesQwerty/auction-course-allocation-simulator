@@ -19,7 +19,6 @@ export function Sidebar({
   onNavigate: (view: View) => void;
   onDelete: (id: string) => void;
   onClear: () => void;
-  /** Um resultado gravado em disco pela API, de volta para a lista. */
   onLoadFile: (file: File) => void;
 }) {
   const key = (v: View) => (v.kind === "run" ? `run:${v.id}` : v.kind);
@@ -89,8 +88,6 @@ export function Sidebar({
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) onLoadFile(file);
-              // Zera para que carregar o mesmo arquivo duas vezes seguidas
-              // dispare o evento nas duas.
               e.target.value = "";
             }}
           />

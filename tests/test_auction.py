@@ -27,12 +27,9 @@ def test_price_is_second_highest_unsuccessful_bid():
     )
     result = run_auction(auction_input)
     assert result.allocation[("a1", "x1")] == 1
-    # eq. (24): preço = maior lance mal-sucedido (o de a2, 50 créditos)
     assert result.prices["x1"] == 50
-    # eq. (25): consumo do vencedor é o preço de mercado, não o próprio lance
     assert result.consumption[("a1", "x1")] == 50
     assert result.remaining_budget["a1"] == 50
-    # eq. (14): capacidade restante = W_a - peso do bem recebido (10 - 1)
     assert result.remaining_capacity["a1"] == 9
     assert result.remaining_capacity["a2"] == 10
     assert result.remaining_capacity["a3"] == 10
@@ -61,7 +58,6 @@ def test_capacity_constraint_prevents_overload():
         seed=1,
     )
     result = run_auction(auction_input)
-    # capacidade só comporta um dos dois bens -> vence o de maior lance (x2)
     assert result.allocation[("a1", "x2")] == 1
     assert result.allocation[("a1", "x1")] == 0
 

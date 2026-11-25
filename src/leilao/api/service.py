@@ -1,15 +1,4 @@
-"""O que as rotas fazem, sem HTTP.
-
-Existe porque a comparação tem **duas portas**: a rota `/compare`, que o
-navegador chama, e o terminal (`leilao.cli`), para quando o cenário é grande
-demais para caber numa requisição. As duas têm de produzir exatamente o mesmo
-arquivo — mesmo cenário de entrada, mesmo resultado de saída —, e a única
-forma de garantir isso é não haver duas implementações.
-
-Aqui não entra `fastapi`: o que mora neste módulo é a tradução entre o
-esquema que o navegador fala (`schemas`) e o motor (`comparison`). Quem
-transforma erro em código de status é a rota.
-"""
+"""O que as rotas fazem, sem HTTP."""
 from __future__ import annotations
 
 from ..comparison import (
@@ -34,21 +23,14 @@ __all__ = ["build_config", "compare_scenario"]
 
 
 def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
-    """Converte o cenário recebido no `SimulationConfig` do motor.
-
-    A comparação passa cada seed da amostra, de modo que todos os braços veem
-    o mesmo cenário — que é o que a Seção 7.3 exige dela.
-    """
+    """Converte o cenário recebido no `SimulationConfig` do motor."""
     return SimulationConfig(
         disciplines=[
             Discipline(
                 name=d.name,
-                # `seats` é a oferta da **disciplina**; `classes` a reparte
-                # entre as turmas, que são os bens de fato alocados.
                 seats=d.classes * req.class_size,
                 classes=d.classes,
                 hours=d.hours,
-                difficulty=d.difficulty,
                 unlocks=tuple(d.unlocks),
                 entry=d.entry,
                 elective=d.elective,
@@ -56,18 +38,18 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
             )
             for d in req.disciplines
         ],
-        performance=req.performance.to_shape(),
-        performance_stability=req.performance_stability,
+        approval_rate=req.approval_rate,
+        grade_sd=req.grade_sd,
+        repetition_gain=req.repetition_gain,
+        schedule_sigma=req.schedule_sigma,
+        first_seed=req.first_seed,
         availability=req.availability.to_shape(),
         availability_stability=req.availability_stability,
         selectivity_median=req.selectivity_median,
         selectivity_sigma=req.selectivity_sigma,
-        selectivity_stability=req.selectivity_stability,
         grade_cuts=tuple(req.grade_cuts),
         reserve_cuts=tuple(req.reserve_cuts),
-        credit_cuts=tuple(req.credit_cuts),
         interest_stability=req.interest_stability,
-        class_stability=req.class_stability,
         slots=req.slots,
         interest_mean=req.interest_mean,
         interest_sigma=req.interest_sigma,
@@ -91,11 +73,7 @@ def compare_scenario(
     workers: int = DEFAULT_WORKERS,
     on_run_done: RunDone | None = None,
 ) -> CompareResponse:
-    """Roda a comparação descrita por `req` e devolve a resposta da API.
-
-    Não grava nada: quem decide registrar em disco é quem chamou. `saved_to`
-    sai `None` daqui.
-    """
+    """Roda a comparação descrita por `req` e devolve a resposta da API."""
     result = run_comparison(
         build_config(req),
         runs=req.runs,

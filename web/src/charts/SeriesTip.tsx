@@ -1,8 +1,6 @@
 import { inkFor } from "./theme";
 
-/** O tooltip das séries, em ordem decrescente de valor — com várias séries no
- * mesmo ponto, a ordem da legenda obrigaria a procurar; a do valor põe quem
- * está por cima do cursor no topo. */
+/** O tooltip das séries, em ordem decrescente de valor — com várias séries no mesmo ponto, a ordem da legenda obrigaria a procurar; a do valor põe quem está por cima do cursor no topo */
 export function SeriesTip({
   active,
   payload,
@@ -18,9 +16,7 @@ export function SeriesTip({
   colors: Record<string, string>;
   format: (value: number) => string;
   dark: boolean;
-  /** Cor do marcador quando ela é da **faixa**, e não da série — o histograma
-   * pintado por estado tem uma cor por barra, e o `dataKey` é o mesmo em
-   * todas. */
+   /** Cor do marcador quando ela é da **faixa**, e não da série — o histograma pintado por estado tem uma cor por barra, e o `dataKey` é o mesmo em todas */
   fillFor?: (label: string | undefined) => string | undefined;
 }) {
   if (!active || !payload?.length) return null;

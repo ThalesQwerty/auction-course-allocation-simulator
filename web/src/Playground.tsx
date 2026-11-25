@@ -8,22 +8,19 @@ interface PlaygroundStudent {
   credits: number;
   cr: number;
   maxHours: number;
-  /** δ em horas, já realizada: aqui não há perfil de onde sorteá-la. */
   availability: number;
   selectivity: number;
-  /** Utilidade por **turma**: é a turma que se aloca, como na simulação. */
   rows: Record<string, number>;
 }
 
 export interface PlaygroundDraft {
   mechanism: Mechanism;
   rounds: number;
-  /** Vagas de cada turma. */
   seats: number;
   seed: number;
-  modeGrade: number;
-  zeroRate: number;
-  maxRate: number;
+  minGrade: number;
+  gradeSd: number;
+  approvalRate: number;
   selected: number;
   students: PlaygroundStudent[];
 }
@@ -34,11 +31,9 @@ export function createPlaygroundDraft(config: Scenario): PlaygroundDraft {
     rounds: 1,
     seats: 1,
     seed: 1,
-    // O playground é um leilão isolado: parte da distribuição de desempenho
-    // do cenário, e dali o usuário mexe à vontade.
-    modeGrade: config.performance?.mode_grade ?? 8,
-    zeroRate: config.performance?.zero_rate ?? 0.005,
-    maxRate: config.performance?.max_rate ?? 0.008,
+    minGrade: config.min_grade ?? 5,
+    gradeSd: config.grade_sd ?? 2,
+    approvalRate: config.approval_rate ?? 0.7,
     selected: 0,
     students: [newStudent("voce", "Você", config)],
   };
@@ -50,9 +45,7 @@ interface OfferedClass {
   hours: number;
 }
 
-/** As turmas do cenário, na ordem da grade. Espelha
- * `SimulationConfig.classes_of`: turma única tem o nome da disciplina, e as
- * demais ganham o sufixo " T1", " T2"… */
+/** As turmas do cenário, na ordem da grade */
 function offeredClasses(disciplines: DisciplineInput[]): OfferedClass[] {
   return disciplines.flatMap(({ name, hours, classes }) =>
     (classes ?? 1) <= 1
@@ -72,9 +65,6 @@ function newStudent(id: string, label: string, config: Scenario): PlaygroundStud
     credits: config.min_credits,
     cr: 7,
     maxHours: config.max_hours,
-    // Disponibilidade que cobre a carga e a seletividade neutra: o aluno
-    // novo não exclui nada e pede tudo que é elegível, como o `Student`
-    // construído à mão no motor.
     availability: config.max_hours,
     selectivity: 0,
     rows: {},
@@ -142,9 +132,9 @@ export function Playground({
           mechanism: draft.mechanism,
           rounds: draft.rounds,
           seed: draft.seed,
-          mode_grade: draft.modeGrade,
-          zero_rate: draft.zeroRate,
-          max_rate: draft.maxRate,
+          min_grade: draft.minGrade,
+          grade_sd: draft.gradeSd,
+          approval_rate: draft.approvalRate,
           classes: offer.map(({ name, discipline, hours }) => ({
             name,
             discipline,
@@ -212,40 +202,39 @@ export function Playground({
             />
           </div>
           <div className="field">
-            <label>Nota mais provável</label>
+            <label>
+              Nota mínima (n<sub>min</sub>)
+            </label>
             <input
               type="number"
               min={0.1}
-              max={9.9}
+              max={10}
               step={0.1}
-              value={draft.modeGrade}
-              onChange={(e) => setDraft({ ...draft, modeGrade: Number(e.target.value) })}
+              value={draft.minGrade}
+              onChange={(e) => setDraft({ ...draft, minGrade: Number(e.target.value) })}
             />
           </div>
           <div className="field">
-            <label>Chance de 0 (%)</label>
+            <label>Chance de aprovação (%)</label>
             <input
               type="number"
-              min={0.01}
+              min={1}
               max={99}
-              step={0.01}
-              value={Math.round(draft.zeroRate * 1e6) / 1e4}
+              step={1}
+              value={Math.round(draft.approvalRate * 100)}
               onChange={(e) =>
-                setDraft({ ...draft, zeroRate: Number(e.target.value) / 100 })
+                setDraft({ ...draft, approvalRate: Number(e.target.value) / 100 })
               }
             />
           </div>
           <div className="field">
-            <label>Chance de 10 (%)</label>
+            <label>Desvio das notas (σ)</label>
             <input
               type="number"
-              min={0.01}
-              max={99}
-              step={0.01}
-              value={Math.round(draft.maxRate * 1e6) / 1e4}
-              onChange={(e) =>
-                setDraft({ ...draft, maxRate: Number(e.target.value) / 100 })
-              }
+              min={0.1}
+              step={0.1}
+              value={draft.gradeSd}
+              onChange={(e) => setDraft({ ...draft, gradeSd: Number(e.target.value) })}
             />
           </div>
           <div className="field">
@@ -475,8 +464,6 @@ function PlaygroundResult({
   const grades = new Map(
     result.grades.map((grade) => [`${grade.student_id}\u0000${grade.name}`, grade.grade])
   );
-  // A ordem da grade, que é a mesma das duas listas: cursadas e excluídas
-  // intercaladas como a disciplina aparece no cenário.
   const closing = result.closing
     .map((row) => ({
       ...row,

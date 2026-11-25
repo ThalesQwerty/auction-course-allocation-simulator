@@ -1,11 +1,4 @@
-"""Schemas Pydantic para a API — o corpo da requisição já É o cenário completo
-(sem persistência): a interface monta tudo no navegador e manda de uma vez.
-
-São três entradas: `/run` recebe um leilão isolado (agentes, bens e lances
-explícitos), `/compare` recebe o cenário de uma comparação — a universidade e a
-população, de que alunos, utilidades e notas saem pela seed — e `/trace` recebe
-o mesmo cenário mais o par `(braço, seed)` de uma das simulações que ela rodou.
-"""
+"""Schemas Pydantic para a API — o corpo da requisição já É o cenário completo"""
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -16,10 +9,8 @@ from ..config import (
     AvailabilityShape,
     Mechanism,
     MAX_CUTS,
-    PerformanceShape,
     horizon_for_window,
 )
-from ..equations import grade_shape
 
 
 class AgentIn(BaseModel):
@@ -98,15 +89,6 @@ class DisciplineIn(BaseModel):
             "concorrentes, que é o que trava a fila"
         ),
     )
-    difficulty: float = Field(
-        default=1.0,
-        gt=0,
-        description=(
-            "a dificuldade, em quantas tentativas a disciplina custa para render "
-            "o que uma de "
-            "dificuldade 1 rende de primeira"
-        ),
-    )
     elective: bool = Field(
         default=False,
         description=(
@@ -117,46 +99,8 @@ class DisciplineIn(BaseModel):
     )
 
 
-class PerformanceIn(BaseModel):
-    """A distribuição de desempenho da população — **uma só**.
-
-    A nota sai de uma normal dividida censurada em [0, 10], descrita pelas três
-    grandezas que se leem: **nota mais provável, chance de tirar 0 e chance de
-    tirar 10**. A moda é a locação, e o número digitado é literalmente o pico
-    da curva. `equations.grade_shape` converte na trinca de forma.
-
-    As três valem para a **disciplina de dificuldade 1 na primeira tentativa**;
-    a dificuldade e a recursada transformam as duas chances.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    mode_grade: float = Field(default=8.0, ge=0, le=10)
-    zero_rate: float = Field(default=0.005, gt=0, lt=1)
-    max_rate: float = Field(default=0.008, gt=0, lt=1)
-
-    @model_validator(mode="after")
-    def _shape_exists(self) -> "PerformanceIn":
-        try:
-            self.to_shape().shape
-        except ValueError as erro:
-            raise ValueError(str(erro)) from erro
-        return self
-
-    def to_shape(self) -> PerformanceShape:
-        return PerformanceShape(
-            mode_grade=self.mode_grade,
-            zero_rate=self.zero_rate,
-            max_rate=self.max_rate,
-        )
-
-
 class AvailabilityIn(BaseModel):
-    """A distribuição de disponibilidade da população — **uma só**.
-
-    Duas grandezas: a **moda** em horas e a **chance de alcançar a carga
-    máxima**. A segunda referencia W_a, que é do cenário.
-    """
+    """A distribuição de disponibilidade da população — **uma só**."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -170,42 +114,51 @@ class AvailabilityIn(BaseModel):
 
 
 class ScenarioIn(BaseModel):
-    """O cenário em si (Seção 7.2) — tudo que descreve a universidade e a
-    população, sem dizer *como* ele será executado.
-
-    Os dois modos partem daqui e acrescentam só o que lhes é próprio: uma
-    simulação única acrescenta a seed, e a comparação acrescenta quantas
-    simulações fazer. É o que garante que os dois lados de uma comparação rodem
-    exatamente o mesmo cenário — a condição metodológica da Seção 7.3.
-    """
+    """O cenário em si (Seção 7.2) — tudo que descreve a universidade e a"""
 
     disciplines: list[DisciplineIn] = Field(default_factory=list)
-    # A grade declara **turmas**; quantos cabem em cada uma é do cenário, e é
-    # o botão de estresse: a mesma grade sob 20 ou 40 por turma é o mesmo
-    # currículo com o dobro de aperto. Multiplicar aqui, e não na grade, é o
-    # que mantém a oferta como estrutura e a lotação como tratamento.
     class_size: int = Field(
         default=25, gt=0, description="alunos por turma — q_x = classes × este"
     )
-    # Os **três eixos da população**, cada um uma distribuição só mais um
-    # nível basilar: a fração da variância que é permanente do aluno. Sem ele
-    # o eixo descreve o sorteio do período, não um tipo de aluno, e o corte
-    # por quantil fatiaria ruído.
-    performance: PerformanceIn = Field(
-        default_factory=PerformanceIn,
+    approval_rate: float = Field(
+        default=0.7,
+        gt=0,
+        lt=1,
         description=(
-            "distribuição de desempenho: governa a normal dividida da nota, por "
-            "nota mais provável, chance de tirar 0 e chance de tirar 10"
+            "P_apr — a probabilidade de a nota alcançar n_min. Parâmetro global: "
+            "não há heterogeneidade de desempenho, e o quantil da nota é sorteado "
+            "de novo a cada tentativa"
         ),
     )
-    performance_stability: float = Field(
-        default=0.5,
+    grade_sd: float = Field(
+        default=2.0,
+        gt=0,
+        description="σ — o desvio padrão das notas; a média sai dele e de P_apr",
+    )
+    repetition_gain: float = Field(
+        default=1.0,
         ge=0,
-        le=1,
         description=(
-            "quanto do desempenho é do aluno e não da matéria — a correlação "
-            "entre os quantis dele em duas disciplinas. Em 0 a dispersão do CR "
-            "entre alunos não tem piso e a ordenação por CR vira sorte"
+            "ω — o ganho por repetição: quanto de experiência cada recursada "
+            "acrescenta. Em 0 repetir não ajuda; em 1 cada tentativa soma uma "
+            "unidade ao denominador do expoente"
+        ),
+    )
+    schedule_sigma: float = Field(
+        default=0.6,
+        ge=0,
+        description=(
+            "σ do interesse por horário, a segunda metade do produto que forma o "
+            "interesse por turma. Em 0 todas as turmas de uma disciplina valem "
+            "igual"
+        ),
+    )
+    first_seed: int = Field(
+        default=1,
+        ge=0,
+        description=(
+            "a seed da primeira simulação da comparação; as seguintes contam de "
+            "1 em 1 a partir dela"
         ),
     )
     availability: AvailabilityIn = Field(
@@ -236,16 +189,6 @@ class ScenarioIn(BaseModel):
     selectivity_sigma: float = Field(
         default=0.6, gt=0, description="desvio em log da seletividade"
     )
-    selectivity_stability: float = Field(
-        default=0.7,
-        ge=0,
-        le=1,
-        description="quanto da seletividade é permanente, entre períodos",
-    )
-    # Os cortes de cada eixo de recorte. A ordem não importa aqui — o motor os
-    # ordena (`equations.ordered_cuts`) —, e a lista vazia dá uma faixa só.
-    # O domínio de cada um é validado no `SimulationConfig`, porque o do
-    # crédito depende de `min_credits`/`max_credits` deste mesmo pedido.
     grade_cuts: list[float] = Field(
         default=[5.0, 7.0],
         max_length=MAX_CUTS,
@@ -256,14 +199,6 @@ class ScenarioIn(BaseModel):
         max_length=MAX_CUTS,
         description="pontos de corte do recorte por utilidade de reserva, em [0, 1)",
     )
-    credit_cuts: list[int] = Field(
-        default=[15, 20],
-        max_length=MAX_CUTS,
-        description=(
-            "pontos de corte do recorte por orçamento de crédito, entre C_min "
-            "e C_max; só se aplica ao leilão"
-        ),
-    )
     students_per_entry_class: int = Field(
         default=10,
         ge=1,
@@ -272,15 +207,6 @@ class ScenarioIn(BaseModel):
             "entrada, no máximo `class_size`. A coorte é isto vezes as turmas "
             "de uma disciplina de entrada, e em regime a população é a coorte "
             "vezes o prazo de jubilamento"
-        ),
-    )
-    class_stability: float = Field(
-        default=1.0,
-        ge=0,
-        le=1,
-        description=(
-            "quanto do interesse é comum às turmas da mesma disciplina. Em 1 "
-            "todas valem o mesmo para o aluno; em 0 cada uma tem valor próprio"
         ),
     )
     slots: int = Field(
@@ -338,34 +264,16 @@ class ScenarioIn(BaseModel):
             "a partir dele"
         ),
     )
-    observation_periods: int = Field(
-        default=10,
-        ge=1,
-        le=40,
-        description=(
-            "quantos períodos são medidos, depois da pré-população. São os que as "
-            "tabelas e os gráficos mostram"
-        ),
-    )
 
     @property
     def warmup_periods(self) -> int:
-        """A pré-população — **é** o prazo de jubilamento.
-
-        Não é campo porque não é escolha: com ingresso em todo período e
-        residência R, antes de `t = R` nenhuma coorte é velha o bastante para
-        sair, e a população cresce uma coorte por período. Qualquer valor menor
-        mediria a rampa.
-        """
+        """A pré-população — **é** o prazo de jubilamento."""
         return self.max_residence
 
     @property
     def periods(self) -> int:
         """|T|, derivado — ver `config.horizon_for_window`."""
-        return horizon_for_window(
-            max_residence=self.max_residence,
-            observation_periods=self.observation_periods,
-        )
+        return horizon_for_window(max_residence=self.max_residence)
     rounds: int = Field(default=1, ge=1, le=10, description="|R| — rodadas por período")
     min_grade: float = Field(default=5.0, gt=0, le=10, description="n_min")
     elective_hours: int = Field(
@@ -384,15 +292,7 @@ class ScenarioIn(BaseModel):
 
 
 class CompareRequest(ScenarioIn):
-    """Uma comparação entre os dois modelos sobre o mesmo cenário.
-
-    A **seed** do cenário não tem efeito aqui, porque as seeds são 1..`runs` e
-    cada uma roda nos dois braços: fixar uma só mediria aquela população, e não
-    parear mediria a variação entre populações junto da variação entre modelos.
-
-    Nem o resolvedor nem a memória do orçamento entram: o escopo fechou nos
-    dois modelos, e cada um traz o seu resolvedor por construção.
-    """
+    """Uma comparação entre os dois modelos sobre o mesmo cenário."""
 
     runs: int = Field(
         default=20,
@@ -417,35 +317,18 @@ class CompareRequest(ScenarioIn):
 
 
 class GroupBandsOut(BaseModel):
-    """Um grupo de um recorte reduzido entre as seeds, ponto a ponto.
-
-    `values[k][i]` é `[q1, mediana, q3]` da grandeza `k` no ponto `x[i]` da
-    régua, ou `null` se nenhuma seed a mediu ali. `n[i]` é quantas seeds
-    mediram o grupo naquele ponto.
-
-    As grandezas de `values` são as métricas de período, os seis estados de
-    uma solicitação, as quatro frações do funil (`requested_share`,
-    `granted_share`, `attended_share`, `approved_share`) e um `round_<r>` por
-    rodada do cenário.
-    """
+    """Um grupo de um recorte reduzido entre as seeds, ponto a ponto."""
 
     model_config = ConfigDict(from_attributes=True)
 
     group: str
-    # O ponto da régua: o número do período, a idade do aluno ou a coorte
-    # dele, conforme o `ruler` do eixo.
     x: list[int]
     n: list[int]
     values: dict[str, list[tuple[float, float, float] | None]]
 
 
 class AxisBandsOut(BaseModel):
-    """Os grupos de um recorte espacial sob uma régua do eixo X.
-
-    As duas dimensões são independentes na tela, e vêm todas as combinações:
-    `ruler` é `period`, `age` ou `cohort`; `axis` é `overall` (um grupo só) ou
-    um dos eixos de perfil — `performance`, `availability` ou `selectivity`.
-    """
+    """Os grupos de um recorte espacial sob uma régua do eixo X."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -455,74 +338,30 @@ class AxisBandsOut(BaseModel):
 
 
 class RunSummaryOut(BaseModel):
-    """Uma simulação reduzida a um ponto por métrica — o que vira uma linha
-    das tabelas. As três de período são a média ponderada pelos alunos medidos, de
-    modo que a fase de drenagem não pese como um período cheio; o tempo de
-    formatura é da simulação inteira."""
+    """Uma simulação reduzida a um ponto por métrica — o que vira uma linha"""
 
     model_config = ConfigDict(from_attributes=True)
 
     seed: int
-    # Períodos efetivamente publicados; menor que |T| se a população se esvaziou
-    # antes do horizonte.
     periods: int
-    # Concluintes da simulação — o contexto sem o qual `time_to_graduate` não se
-    # lê: quem forma menos pode exibir um tempo menor só por sobrarem os rápidos.
     graduates: int
-    # Jubilados da simulação, e o total que entrou — o denominador das duas
-    # frações que a tela mostra.
     dismissed: int
     population: int
-    efficiency: float  # eq. (53)
-    # Ocupação: a contraparte em carga do psi, que é em utilidade.
-    utilization: float
-    # Progresso: carga aprovada sobre a carga que conclui o curso. Acumula ao
-    # longo do horizonte, e lê-se com `graduates` ao lado.
+    efficiency: float
+    attendance: float | None
+    mean_round: float | None
     progress: float
-    # Fidelidade da mensagem: quanto da preferência sobrevive à tradução.
-    # Descreve, não pontua — como a correlação.
     fidelity: float
-    fairness: float  # eq. (55)
-    correlation: float  # eq. (57)
-    # Desperdício: a fração das vagas obtidas que foi largada antes de virar
-    # aula. É a quinta métrica da comparação, e a que a disponibilidade existe
-    # para produzir.
+    fairness: float
     exclusion_rate: float
-    # Δψ — a dissipação: a satisfação alocada que não chegou a ser consumida.
-    # Custo **privado** da exclusão, contra o ε acima, que é o social.
-    dissipation: float = 0.0
-    # N̄ — o CR médio. Descreve, não pontua: sobe tanto por o aluno ir melhor
-    # quanto por o mecanismo roteá-lo para turma mais fácil.
     grade_average: float = 0.0
-    # Os seis estados em média por aluno, reduzidos a um ponto cada.
     request_states: RequestStatesOut
-    # Períodos do ingresso ao diploma, na média dos concluintes. Null quando
-    # ninguém concluiu.
     time_to_graduate: float | None
-    # Vagas obtidas por aluno em cada rodada (o índice r-1 é a rodada r), com
-    # |R| posições. Mede a **saturação**: o que se lê é o decaimento entre as
-    # rodadas, não o nível de cada uma.
     allocations_per_round: list[float | None]
 
 
 class ClassPriceBandsOut(BaseModel):
-    """O preço médio da turma sob um recorte da **oferta**.
-
-    É a única família de recortes que não reparte alunos — ela reparte turmas
-    —, e por isso vem à parte de `series` em vez de ser mais um `axis` dela:
-    cruzar "disciplina de 2 turmas" com uma métrica por aluno não produziria
-    leitura nenhuma.
-
-    `axis` é `classes`, `hours`, `difficulty` ou
-    `curriculum_period`. Os grupos têm a forma das demais faixas, com uma
-    grandeza só (`mean_price`), e a chave de cada um é **o valor**, sem
-    idioma: `"2"`, `"60"`, `"1.4"` — e `"elective"` no recorte por período,
-    onde a optativa é grupo à parte por não ter período na grade. O rótulo em
-    português é da interface.
-
-    A régua é sempre o período: as outras duas (`age`, `cohort`) são do tempo
-    do **aluno**, e uma turma não tem idade nem coorte.
-    """
+    """O preço médio da turma sob um recorte da **oferta**."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -531,31 +370,15 @@ class ClassPriceBandsOut(BaseModel):
 
 
 class ArmResultOut(BaseModel):
-    """Um dos modelos comparados e as suas N simulações.
-
-    `key` é o identificador estável da série; o rótulo em português é da
-    interface, não da API.
-    """
+    """Um dos modelos comparados e as suas N simulações."""
 
     model_config = ConfigDict(from_attributes=True)
 
     key: str
     mechanism: Mechanism
     runs: list[RunSummaryOut]
-    # As séries reduzidas entre as seeds: cada régua do eixo X cruzada com o
-    # agregado e com cada recorte. A série de cada simulação não sai — só os
-    # quartis dela.
     series: list[AxisBandsOut]
-    # Segundos médios do alocador em cada (período, rodada), entre as seeds:
-    # `allocation_seconds[p][r]` é a rodada r+1 do período p+1. Sai só a média
-    # do braço, e não a série de cada seed — quem a lê é um gráfico global, e
-    # mandar as N séries multiplicaria a resposta sem acrescentar leitura.
-    #
-    # É a única série daqui que **não** é do modelo: mede quanto custa rodar o
-    # mecanismo, não o que ele produz. Ver `comparison.allocation_seconds`.
     allocation_seconds: list[list[float]] = []
-    # O preço médio da turma por recorte da oferta. Vazio fora do leilão —
-    # sem moeda não há preço —, e aí a seção some da tela.
     class_prices: list[ClassPriceBandsOut] = []
 
 
@@ -571,23 +394,14 @@ class CompareResponse(BaseModel):
 
 
 class RequestStatesOut(BaseModel):
-    """Os seis estados de solicitação, em **média por aluno**.
-
-    Particionam o que ainda falta ao aluno — o catálogo menos o que ele já
-    aprovou —, de modo que a soma é o tamanho desse denominador. A ordem dos
-    campos é a do funil, do mais distante ao mais bem-sucedido.
-
-    É média, nunca soma: a soma seria governada pela população, que sobe no
-    escalonamento de ingresso e despenca na drenagem, e o gráfico mostraria o
-    tamanho da universidade em vez do mecanismo.
-    """
+    """Os seis estados de solicitação, em **média por aluno**."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    not_eligible: float  # pré-requisito pendente, ou optativa que a cota dispensou
+    not_eligible: float
     not_requested: float
-    refused: float  # pediu e não foi atendido — "indeferida" na tela
-    excluded: float  # obteve a vaga e largou
+    refused: float
+    excluded: float
     failed: float
     approved: float
 
@@ -598,50 +412,27 @@ class MetricsOut(BaseModel):
     students: int
     allocated: int
     allocations_per_student: float
-    efficiency: float  # eq. (53)
-    # Ocupação: carga horária obtida no período ÷ W_a, média dos medidos. A
-    # contraparte em carga do psi, que é em utilidade.
-    utilization: float
-    # Progresso: carga aprovada do histórico ÷ carga mínima para concluir,
-    # média dos medidos. A única métrica daqui que acumula entre períodos.
+    efficiency: float
+    attendance: float | None
+    attendance_students: int | None
     progress: float
-    # Fidelidade da mensagem: cosseno entre o lance normalizado e a utilidade.
-    # Mede quanto da preferência sobrevive à tradução. Descreve, não pontua.
     fidelity: float
-    fairness: float  # eq. (55)
-    occupancy: float  # eq. (54)
-    # As grandezas da exclusão. `null` em plena rodada: a exclusão acontece
-    # depois da última, então só o recorte de fim de período tem o que contar.
-    #
-    # As de **contagem** acima (allocated, occupancy, utilization) ficam no
-    # alocado, porque a vaga saiu do sistema tenha sido cursada ou não; as de
-    # **valor** (efficiency, fairness, correlation) ficam no retido, porque o
-    # aluno não consumiu a utilidade do que largou. O vão entre as duas
-    # leituras é o desperdício.
+    fairness: float
     excluded: int | None
     exclusion_rate: float | None
-    effective_utilization: float | None  # carga **retida** / W_a, média
     request_states: RequestStatesOut | None
-    scarcity: float  # escassez — elegíveis por vaga, média dos alunos
-    contention: float  # concorrência — candidatos por vaga, média dos alunos
-    mean_grade_average: float  # eq. (56)
-    correlation: float  # eq. (57)
-    semestralization: float  # carga aprovada / máximo possível desde o ingresso
+    scarcity: float
+    contention: float
+    mean_grade_average: float
+    semestralization: float
 
 
 class GroupSnapshotOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    # Quem é este recorte: null na universidade inteira (`overall`) e o período
-    # de ingresso (t_a, eq. 31) em `by_cohort`. Texto, e não inteiro, porque o
-    # eixo é genérico; a lista de origem diz como ler a chave.
     group: str | None
-    # Nulos quando o recorte não tem aluno no período — não havia ninguém, o
-    # que é diferente de ninguém ter ficado satisfeito.
     metrics: MetricsOut | None
     active: int
-    # Alunos do recorte que já ingressaram, tenham saído ou não — o
-    # denominador da fração de formados.
     population: int
     graduated: int
     dismissed: int
@@ -649,10 +440,7 @@ class GroupSnapshotOut(BaseModel):
     mean_approved_hours: float | None
     credits_per_student: float | None
     credits_per_seat: float | None
-    # Créditos apostados no período por aluno ativo, somando as rodadas.
-    # Pode passar do orçamento: lance perdido não consome nada.
     mean_bids: float | None
-    # Null nas rodadas: o retorno só existe ao fim do período, quando saem as notas.
     mean_credit_return: float | None
 
 
@@ -672,37 +460,23 @@ class RoundReportOut(BaseModel):
     period: int
     round: int
     overall: GroupSnapshotOut
-    # Agregado por coorte; só as coortes que já ingressaram.
     by_cohort: list[GroupSnapshotOut]
-    # E pelos dois eixos de perfil, na ordem em que o cenário os declara. Os
-    # três recortes particionam a mesma população: somar qualquer um deles
-    # reproduz `overall`.
-    # Null quando nenhuma disciplina estava no mercado no instante.
     prices: PriceStatsOut | None
 
 
 class DisciplineSnapshotOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    # O nome da **turma** — é dela que são a vaga, o preço e a demanda.
     name: str
-    # O clique a que a turma pertence, por onde a tela agrupa.
     discipline: str
-    # Período da disciplina na grade, induzido dos pré-requisitos.
     curriculum_period: int
     hours: int
     seats: int
     filled: int
-    # Vagas entregues à matrícula garantida, antes da primeira rodada.
     granted: int
-    # Quantos pediram a disciplina no período; dividido por `seats` dá a
-    # concorrência dela.
     requests: int
-    # Média de pi_x nas rodadas em que ainda havia vaga; null se nunca houve.
     mean_price: float | None
     approvals: int
-    # Vagas desta disciplina obtidas e depois largadas. Com `filled`, separa a
-    # vaga que virou aula da que só saiu da oferta.
     exclusions: int
 
 
@@ -723,13 +497,8 @@ class StudentSummaryOut(BaseModel):
     id: str
     name: str
     entry_period: int
-    # Os níveis basilares do aluno, na normal padrão — o que a tela individual
-    # mostra no cabeçalho dele. Eram o nome da faixa de quantil de cada eixo
-    # até 24/11/2026; o recorte passou a ser por valor corrente e o rótulo
-    # antigo não dizia mais nada.
-    performance_level: float
-    availability_level: float
-    selectivity_level: float
+    availability_anchor: float
+    selectivity_anchor: float
     grade_average: float
     approved_hours: int
     hours_to_graduate: int
@@ -747,11 +516,8 @@ class RequestRecordOut(BaseModel):
     discipline: str
     utility: float
     bids: list[int]
-    # 0 = vaga garantida de ingressante, concedida fora do leilão.
     won_round: int | None
     paid: int
-    # Obteve a vaga e não cursou. Com ela, `attempt` e `grade` vêm null — não
-    # houve tentativa — e `returned` traz metade do preço pago.
     excluded: bool
     attempt: int | None
     grade: float | None
@@ -770,10 +536,7 @@ class StudentPeriodRecordOut(BaseModel):
     satisfaction: float
     grade_average: float
     approved_hours: int
-    enrolled_hours: int  # carga obtida no período, antes de excluir
-    # Carga que ele de fato cursou e o teto que a disponibilidade lhe deu.
-    # `retained_hours <= effective_load`, e o vao para `enrolled_hours` e o que
-    # ele largou.
+    enrolled_hours: int
     retained_hours: int
     effective_load: int
     requests: list[RequestRecordOut]
@@ -788,15 +551,7 @@ class StudentHistoryOut(BaseModel):
 
 
 class TraceRequest(ScenarioIn):
-    """O traço de **uma** simulação da comparação: o cenário mais o par
-    `(braço, seed)` que a identifica.
-
-    Aqui a seed não é ignorada como em `/compare` — ela é o que se pede. A
-    comparação roda as seeds de 1 a N em cada braço e devolve um ponto por
-    simulação; este par é o endereço de uma delas, e a simulação é refeita em
-    vez de guardada: ela é determinística, então refazê-la custa tempo e não
-    fidelidade. O retorno de créditos e o resolvedor continuam vindo do braço.
-    """
+    """O traço de **uma** simulação da comparação: o cenário mais o par"""
 
     arm: str = Field(
         description="chave do modelo, como em `/compare` — ex.: `credits_return`"
@@ -809,12 +564,7 @@ class TraceRequest(ScenarioIn):
 
 
 class TracePeriodOut(BaseModel):
-    """O contexto de mercado de um período: a oferta disciplina a disciplina.
-
-    É o que a vista por disciplina lê no cabeçalho de cada período — vagas,
-    preenchidas, solicitantes, preço e aprovações. As métricas de aluno não
-    entram: elas são da comparação, e aqui o que se olha é um caso.
-    """
+    """O contexto de mercado de um período: a oferta disciplina a disciplina."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -823,25 +573,15 @@ class TracePeriodOut(BaseModel):
 
 
 class TraceResponse(BaseModel):
-    """Uma simulação inteira, aluno a aluno — a tela de depuração do projeto.
-
-    É a parte pesada do resultado (uns 10 MB no preset Computação, contra 100 kB
-    do resumo da comparação), e é por isso que ela não vem junto de `/compare`
-    nem é guardada no navegador: quem quiser o caso individual o pede, e só
-    daquela simulação.
-    """
+    """Uma simulação inteira, aluno a aluno — a tela de depuração do projeto."""
 
     model_config = ConfigDict(from_attributes=True)
 
     arm: str
     seed: int
-    # A oferta de cada período, para a vista por disciplina.
     periods: list[TracePeriodOut]
     students: list[StudentSummaryOut]
-    # Período a período, o que cada aluno pediu e o que recebeu.
     histories: list[StudentHistoryOut]
-    # As disciplinas na ordem da grade, e o período de cada uma — induzido dos
-    # pré-requisitos, não configurado.
     disciplines: list[str]
     classes: dict[str, str]
     curriculum_periods: dict[str, int]
@@ -851,8 +591,6 @@ class PlaygroundClassIn(BaseModel):
     name: str
     seats: int = Field(ge=0)
     hours: int = Field(gt=0)
-    # A disciplina da turma — o clique da eq. (5). Ausente, a turma é a
-    # própria disciplina.
     discipline: str | None = None
 
 
@@ -863,9 +601,7 @@ class PlaygroundStudentIn(BaseModel):
     max_hours: int = Field(gt=0)
     utilities: dict[str, float]
     eligible: list[str]
-    # Horas já realizadas; ausente, o aluno leva tudo o que obteve.
     availability: int | None = Field(default=None, ge=0)
-    # O mesmo limite do perfil do cenário.
     selectivity: float = Field(default=0.0, ge=0)
 
 
@@ -873,9 +609,8 @@ class PlaygroundRequest(BaseModel):
     mechanism: Mechanism
     rounds: int = Field(ge=1, le=10)
     seed: int = 0
-    mode_grade: float = Field(default=8.0, gt=0, lt=10)
-    zero_rate: float = Field(default=0.005, gt=0, lt=1)
-    max_rate: float = Field(default=0.008, gt=0, lt=1)
+    approval_rate: float = Field(default=0.7, gt=0, lt=1)
+    grade_sd: float = Field(default=2.0, gt=0)
     classes: list[PlaygroundClassIn]
     students: list[PlaygroundStudentIn]
 
@@ -897,7 +632,7 @@ class PlaygroundRoundOut(BaseModel):
 
 class PlaygroundGradeOut(BaseModel):
     student_id: str
-    name: str  # a turma cursada
+    name: str
     grade: float
 
 

@@ -106,8 +106,7 @@ def test_an_ineligible_discipline_is_not_bid_even_with_high_utility():
 
 
 def test_the_second_round_skips_what_was_won_and_what_no_longer_fits():
-    """Quatro créditos cabem todos na utilidade alta. A segunda rodada só vê a
-    outra disciplina, e com a carga que sobrou."""
+    """Quatro créditos cabem todos na utilidade alta. A segunda rodada só vê a"""
     result = run_playground(
         mechanism="credits",
         rounds=2,
@@ -166,9 +165,7 @@ def test_a_non_positive_utility_is_rejected():
 
 
 def test_the_bid_reads_the_student_behavior():
-    """A seletividade entra no lance como na simulação. As utilidades vêm na
-    escala do motor — somam 1 sobre as disciplinas —, e sem grade é essa soma
-    que serve de interesse das elegíveis: `s = S/(S + 1)`, aqui 1/6."""
+    """A seletividade entra no lance como na simulação. As utilidades vêm na"""
     utilities = {"A": 0.6, "B": 0.3, "C": 0.1}
     behavior = Behavior(selectivity=0.2)
     result = run_playground(
@@ -223,8 +220,7 @@ def test_selectivity_also_cuts_the_ranking_request():
 
 
 def test_what_does_not_fit_the_availability_is_excluded_and_ungraded():
-    """O especulador pede as duas e obtém as duas; com 60 h disponíveis leva a
-    mais útil e larga a outra, que não recebe nota."""
+    """O especulador pede as duas e obtém as duas; com 60 h disponíveis leva a"""
     result = run_playground(
         mechanism="ranking",
         rounds=1,
@@ -289,9 +285,7 @@ def test_a_negative_selectivity_is_rejected():
 
 
 def test_the_auction_splits_between_the_classes_and_never_takes_two():
-    """Mochila em dois níveis: a fatia da disciplina se reparte entre as
-    turmas dela, com mais na preferida — e o clique (eq. 5) concede uma só,
-    de modo que na rodada seguinte o grupo inteiro já saiu do disponível."""
+    """Mochila em dois níveis: a fatia da disciplina se reparte entre as"""
     classes = turmas("Cálculo", 2) + [discipline("Física")]
     utilities = {"Cálculo T1": 3, "Cálculo T2": 2, "Física": 1}
     result = run_playground(
@@ -317,9 +311,7 @@ def test_the_auction_splits_between_the_classes_and_never_takes_two():
 
 
 def test_the_ranking_sends_the_loser_to_the_sister_class_next_round():
-    """Os dois pedem só a T1, que é a melhor turma dos dois: o CR mais alto a
-    leva, e quem perdeu só chega à T2 na rodada seguinte, quando
-    `available_goods` devolve a irmã. O seguro é a rodada, não o pedido."""
+    """Os dois pedem só a T1, que é a melhor turma dos dois: o CR mais alto a"""
     result = run_playground(
         mechanism="ranking",
         rounds=2,

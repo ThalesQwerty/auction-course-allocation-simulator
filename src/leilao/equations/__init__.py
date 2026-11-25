@@ -1,186 +1,16 @@
-"""Uma fórmula por arquivo, uma função pura por fórmula.
-
-Cada módulo deste pacote implementa **uma** conta do modelo. A docstring traz
-a fórmula e o porquê da forma escolhida; a função é determinística e não toca
-em estado. O resto do motor monta o laço, guarda o resultado e decide quando
-chamar — a conta mora aqui, para que revisá-la seja abrir um arquivo.
-
-O recorte é o **código**, não o anteprojeto: há conta aqui que ele não prevê,
-e previsão dele que o código substituiu. Onde a correspondência existe, o
-número está na primeira linha da docstring.
-
-ÍNDICE
-------
-
-Uma rodada de leilão (Seção 7.1)
-
-    stochastic_perturbation   ε ∈ (0, 1/(|A|²·|B|)), distintos    7.1.2
-    market_price              π = maior lance perdedor            eq. (24)
-    credit_consumption        δ = min(c, π)                       eq. (25)
-    remaining_seats           q − Σz                              eq. (13)
-    remaining_capacity        W − Σ w·z                           eq. (14)
-    remaining_budget          C − Δ                               eq. (27)
-
-    A alocação exata por PLI não tem forma fechada e vive em `wdp_solver`;
-    o objetivo Σ p·z (eq. 8) é montado lá, simbolicamente.
-
-Decisão do aluno (Seção 7.2.4)
-
-    eligible_interest         Σ_{X ∈ M_a} I_{a,X}                 —
-    reserve_threshold         s_a = S_a / (S_a + Σ I_{a,X})       —
-    available_goods           B_a^(t,r)                           eq. (15)
-    concave_bids              mochila côncava do lance        substitui 44-46
-                              (em dois níveis: disciplina, depois turma)
-    request_set               D_a^(t,r), mochila 0-1 da carga      eq. (50)
-                              (com grafo de conflito: E = M ∪ G)
-    serial_dictatorship       ditadura serial por CR              7.3.1
-
-Turmas, turnos e horários
-
-    class_schedule            a varredura circular por horário    —
-    entry_class               o bloco girado da coorte em cada turma —
-
-    A exclusão mútua (eq. 5) não tem arquivo próprio: ela é a restrição de
-    clique montada em `wdp_solver`, o grafo de conflito da mochila de
-    `request_set`, o filtro por grupo de `available_goods` e a caminhada de
-    `serial_dictatorship` — quatro lugares, uma regra. O que ela proíbe é
-    `E = M ∪ G`: duas turmas da mesma disciplina ou duas turmas no mesmo
-    horário.
-
-    Houve um `best_class` aqui até 23/11/2026: ele escolhia a melhor turma de
-    cada disciplina antes de a mochila abrir, e os cliques ficavam resolvidos
-    fora dela. A mochila passou a ler o grafo de conflito direto, como manda a
-    eq. (50), e a escolha da seção virou parte da mesma tabela.
-
-Interesse, utilidade e grade
-
-    **Interesse** é o sorteio normalizado: soma 1 sobre a grade inteira e não
-    depende do histórico — parâmetro de entrada, tirado da seed. **Utilidade**
-    é o interesse com o inelegível zerado e redistribuído: soma 1 sobre o
-    elegível e depende do histórico — derivada a cada período. A decisão do
-    aluno e ψ leem só utilidade; o interesse cru só aparece em relatório.
-
-    O u_{a,x} do anteprojeto, como sai do sorteio da eq. (41), é o
-    **interesse** daqui; com os zeros da eq. (42) e a redistribuição, ele vira
-    a utilidade ũ.
-
-    preference_split          √s·permanente + √(1−s)·sazonal      —
-    interest_row              normalização do interesse     substitui 41
-    eligible_set              não aprovada, liberada, X em aberto eq. (42)
-    utility                   interesse → utilidade      substitui 41 e 43
-                              (média das turmas, herança transitiva)
-    admitted_set              corte da utilidade de reserva       —
-    curriculum_height         s_x, a cadeia à frente          substitui 38
-    curriculum_period         o período induzido dos pré-req.     —
-    curriculum_reach          quantas destrava, transitivamente   —
-    curriculum_closure        seq e req, o fecho e a inversa dele  —
-
-Notas, créditos e saída (Seção 7.2.2)
-
-    split_normal_cdf          F da normal dividida                —
-    split_normal_quantile     F⁻¹ da normal dividida              —
-    split_normal_mean         μ = m + √(2/π)·(d − e)              —
-    grade_shape               (moda, P₀, P₁₀) → forma       substitui 32
-    attempt_rates             P₀^(t/d) e P₁₀^(d/t)                —
-    grade_for_attempt         quantil → nota, censurada     substitui 33
-    credit_return             γ = round(nota/10 · 2 · preço)      eq. (34)
-    guaranteed_share          ⌊C / |entrada|⌋                     —
-    period_return             Γ = Σγ                        substitui 35
-    next_budget               clamp(C − gasto + Γ, C_min, C_max) eqs. (36)-(37)
-    graduation                obrigatórias ⊆ aprovadas ∧ X        eq. (40)
-    grade_average             N_a ponderado por carga             eq. (49)
-
-Disponibilidade e exclusão
-
-    availability_shape        (moda, chance de W_a) → log-normal   —
-    lognormal_cdf             F da log-normal                     —
-    effective_load            Ŵ_a = round(δ), sem teto            —
-    retained_set              mochila 0-1 do que ele leva         —
-                              (a mesma tabela da eq. 50 — `_knapsack`)
-    exclusion_rate            ε = excluídas / obtidas             —
-    request_states            os seis estados de uma solicitação  —
-    request_funnel            as quatro frações condicionais      —
-
-Métricas de um recorte (Seção 7.3.3)
-
-    satisfaction              ψ_a = Σ u·z                          eq. (51)
-    mean_satisfaction         ψ̄                                   eq. (53)
-    occupancy                 θ = alocadas/ofertadas              eq. (54)
-    jain_index                φ de Jain                           eq. (55)
-    mean_grade_average        N̄                                   eq. (56)
-    pearson_correlation       λ de Pearson                        eq. (57)
-    utilization               carga obtida / W_a                  —
-    message_fidelity          cosseno(mensagem, preferência)      —
-    semestralization          σ_a = H̃/(W·idade)                   —
-    progress                  quanto do curso já fechou, teto 1      —
-    demand_per_seat           escassez e concorrência             —
-    credits_per_seat          oferta de crédito / vagas           —
-    mean_price                π̄ sobre as rodadas com vaga         —
-
-Agregação de uma simulação (Seção 7.3)
-
-    weighted_mean             média ponderada pelos medidos       —
-    time_to_graduate          períodos do ingresso ao diploma     —
-    grade_histogram           faixas de [0, 10]                   —
-    interest_histogram        faixas da linha, escala por linha   —
-    value_band                faixa de valor do recorte           —
-
-Substituídas
-
-    `greedy_allocation` era a varredura por preferência decrescente do WDP — o
-    *bidding points* clássico —, e saiu em 24/11/2026 com o fechamento do
-    escopo: o leilão deste trabalho resolve por PLI, e a varredura era degrau
-    de ablação. A linha de base por CR varre por `serial_dictatorship`, que é
-    outra regra (ela lê o ε; a PLI não).
-
-    `quantile_band` recortava a população em faixas de **quantil sobre o
-    nível basilar** — o componente permanente do aluno —, e saiu em
-    24/11/2026 com os três eixos que a usavam (desempenho, disponibilidade,
-    seletividade). `value_band` a substitui cortando o **valor corrente**: o
-    CR, a utilidade de reserva e o orçamento de crédito. A troca é de
-    pergunta, não de escala — ver o cabeçalho de `value_band`.
-
-Não implementadas, e por quê
-
-    eq. (31)   t_a: o ingresso é escalonado por construção, em `population`
-    eq. (34)   as quatro políticas discretas (`none`, `unit`, `full`,
-               `ratio`) saíram: `unit` e `full` não liam a nota, e com elas o
-               retorno não separava dois aprovados. Ficou uma forma só, com o
-               multiplicador `k` como parâmetro contínuo — e `none` é `k = 0`
-    eq. (35)   o crédito base Γ_min, somado ao retorno todo período, saiu: o
-               parâmetro virou `C_min`, o **piso** do orçamento da eq. (36).
-               Com isso a eq. (34) é a única entrada de crédito novo, e a
-               (35) fica sendo só o somatório — ver `next_budget`
-    eq. (41)   a invariante de altura saiu: punha valor curricular dentro do
-               gosto. `utility` a substitui fazendo a elegível herdar o
-               interesse de tudo que ela destrava, pelo fecho transitivo da
-               cadeia — a porteira vale mais porque acumulou o interesse do
-               aluno pelo que vem adiante, e não porque uma desigualdade
-               ordenou por altura
-    eq. (43)   U_a, a utilidade alcançável, saiu de denominador: com
-               `Σ_X U_{a,X} = 1` por construção, ψ é a soma simples das
-               utilidades atendidas — ver `satisfaction`
-    eqs. (47)-(48)  grupos da grade: toda obrigatória pesa igual, não há o
-                    que hierarquizar
-    eq. (20)   α̂, o fator de desempate: em [0, 1) por par, mas somado sobre
-               milhares de pares ele vira milhares de créditos no objetivo
-               do WDP e passa a inverter diferenças de lance — o oposto do
-               que a eq. (22) promete
-    eq. (22)   a soma `p = c + β̂ + α̂ + ε`: some com as duas acima, e o que
-               sobraria (`p = c + ε`) não se escreve como soma. A preferência
-               é o lance; o ε é camada à parte, que decide no guloso e na
-               ditadura serial e **não entra na PLI** — ver `wdp_solver`
-    eq. (21)   β̂, o viés de alocação: saiu com α̂. A política universitária
-               que ele expressaria entrou no cenário pela oferta de vagas e
-               pelos pré-requisitos, que são anteriores ao leilão
-"""
+"""Uma fórmula por arquivo, uma função pura por fórmula."""
 from __future__ import annotations
 
+from ._normal import (
+    standard_normal_cdf,
+    standard_normal_quantile,
+    standard_normal_quantiles,
+)
 from .admitted_set import admitted_set
-from .attempt_rates import attempt_rates
+from .attempt_approval import attempt_approval
+from .attendance import attendance
 from .availability_shape import availability_shape
 from .available_goods import available_goods
-from .base_quantile import base_quantile
 from .class_schedule import (
     class_schedules,
     schedule_cliques,
@@ -201,8 +31,6 @@ from .curriculum_height import curriculum_heights
 from .curriculum_period import curriculum_periods
 from .curriculum_reach import curriculum_reach
 from .demand_per_seat import demand_per_seat
-from .correlations import Correlations, correlations
-from .dissipation import dissipation
 from .effective_load import effective_load
 from .eligible_interest import eligible_interest
 from .eligible_set import eligible_set
@@ -210,20 +38,19 @@ from .exclusion_rate import exclusion_rate
 from .grade_average import grade_average
 from .grade_for_attempt import MAX_GRADE, MIN_GRADE, grade_for_attempt
 from .grade_histogram import grade_histogram
-from .grade_shape import grade_shape, grade_sds
-from .lognormal_cdf import lognormal_cdf
+from .grade_mean import grade_mean
+from .lognormal_cdf import lognormal_cdf, lognormal_quantile
 from .graduation import has_graduated
 from .guaranteed_share import guaranteed_share
 from .interest_histogram import interest_histogram
-from .interest_row import normalize_rows
 from .jain_index import jain_index
 from .market_price import market_prices
 from .mean_grade_average import mean_grade_average
 from .mean_price import mean_price
+from .mean_round import mean_round
 from .mean_satisfaction import mean_satisfaction
 from .message_fidelity import message_fidelity
 from .next_budget import next_budget
-from .occupancy import occupancy
 from .progress import progress
 from .value_band import (
     ordered_cuts,
@@ -231,9 +58,8 @@ from .value_band import (
     value_band_name,
     value_band_names,
 )
-from .pearson_correlation import pearson
 from .period_return import period_return
-from .preference_split import preference_split
+from .reflected_anchor import reflect, reflect_array, reflected_anchor, shock_scale
 from .remaining_budget import remaining_budget
 from .remaining_capacity import remaining_capacity
 from .remaining_seats import remaining_seats
@@ -247,11 +73,7 @@ from .semestralization import semestralization
 from .serial_dictatorship import serial_dictatorship
 from .stochastic_perturbation import per_agent, stochastic_perturbations
 from .time_to_graduate import time_to_graduate
-from .split_normal_cdf import split_normal_cdf
-from .split_normal_mean import split_normal_mean
-from .split_normal_quantile import split_normal_quantile
 from .utility import utility
-from .utilization import utilization
 from .weighted_mean import weighted_mean
 
 __all__ = [
@@ -261,11 +83,11 @@ __all__ = [
     "NEUTRAL",
     "RequestFunnel",
     "RequestStates",
-    "attempt_rates",
     "available_goods",
     "admitted_set",
+    "attempt_approval",
+    "attendance",
     "availability_shape",
-    "base_quantile",
     "class_schedules",
     "schedule_cliques",
     "schedule_names",
@@ -275,8 +97,6 @@ __all__ = [
     "rotated_index",
     "concave_bids",
     "consumption",
-    "Correlations",
-    "correlations",
     "credit_return",
     "credits_per_seat",
     "curriculum_heights",
@@ -285,7 +105,6 @@ __all__ = [
     "curriculum_periods",
     "curriculum_reach",
     "demand_per_seat",
-    "dissipation",
     "effective_load",
     "eligible_interest",
     "eligible_set",
@@ -293,29 +112,28 @@ __all__ = [
     "grade_average",
     "grade_for_attempt",
     "grade_histogram",
-    "grade_sds",
+    "grade_mean",
     "lognormal_cdf",
-    "grade_shape",
+    "lognormal_quantile",
     "guaranteed_share",
     "has_graduated",
     "interest_histogram",
     "jain_index",
     "market_prices",
-    "split_normal_cdf",
-    "split_normal_mean",
-    "split_normal_quantile",
     "mean_grade_average",
     "mean_price",
+    "mean_round",
     "mean_satisfaction",
     "message_fidelity",
     "next_budget",
-    "normalize_rows",
-    "occupancy",
     "progress",
     "ordered_cuts",
-    "pearson",
     "period_return",
-    "preference_split",
+    "reflect",
+    "reflect_array",
+    "reflect_array",
+    "shock_scale",
+    "reflected_anchor",
     "remaining_budget",
     "remaining_capacity",
     "remaining_seats",
@@ -330,8 +148,10 @@ __all__ = [
     "per_agent",
     "stochastic_perturbations",
     "time_to_graduate",
+    "standard_normal_cdf",
+    "standard_normal_quantile",
+    "standard_normal_quantiles",
     "utility",
-    "utilization",
     "value_band",
     "value_band_name",
     "value_band_names",

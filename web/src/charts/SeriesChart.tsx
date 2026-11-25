@@ -1,15 +1,4 @@
-/** O gráfico de séries — uma métrica ao longo do horizonte, período a período.
- *
- * **A linha é a mediana entre as simulações, e a faixa é o intervalo
- * interquartil.** A redução já vem feita da API (`GroupBands`): aqui só se
- * desenha. A faixa não é enfeite: sem ela, linhas lisas convidam a ler um vão
- * de 0,01 como real quando as simulações se espalham por 0,08.
- *
- * **Duas codificações, uma por dimensão.** A cor é o grupo do recorte (um
- * perfil, uma coorte); o traçado é o modelo (contínuo, tracejado). A legenda
- * alterna cada uma por conta própria: esconder um traçado deixa todas as cores
- * de um modelo só, e esconder cores isola grupos nos dois modelos.
- */
+/** O gráfico de séries — uma métrica ao longo do horizonte, período a período */
 import { useMemo, useState } from "react";
 import {
   Area,
@@ -28,14 +17,9 @@ import { inkFor, usePrefersDark } from "./theme";
 
 const HEIGHT = 220;
 
-/** Folga da régua quando a métrica não tem contradomínio — ver `paddedScale`. */
 const PADDING = 0.1;
 
-/** Um período de uma linha: a faixa entre as seeds e quantas a mediram.
- *
- * Os quartis são opcionais porque nem toda linha é uma redução de amostra: a
- * amplitude entre os grupos de um eixo é um número só, e ali a faixa some em
- * vez de virar uma faixa de altura zero. */
+/** Um período de uma linha: a faixa entre as seeds e quantas a mediram */
 export interface BandPoint {
   x: number;
   q1?: number;
@@ -44,33 +28,28 @@ export interface BandPoint {
   n: number;
 }
 
-/** A faixa de um ponto, ou `null` quando a linha não tem faixa. */
 const spanOf = (point: BandPoint): [number, number] | null =>
   point.q1 === undefined || point.q3 === undefined ? null : [point.q1, point.q3];
 
-/** Uma linha do gráfico: um grupo do recorte sob um modelo. */
 export interface SeriesLine {
   group: string;
   arm: string;
   points: BandPoint[];
 }
 
-/** Um grupo do recorte, com a cor que o cenário lhe deu. */
 export interface SeriesGroupStyle {
   key: string;
   label: string;
   color: string;
 }
 
-/** Um modelo, com o traçado da linha dele (`strokeDasharray`; vazio é
- * contínuo). */
+/** Um modelo, com o traçado da linha dele (`strokeDasharray`; vazio é contínuo) */
 export interface SeriesArmStyle {
   key: string;
   label: string;
   dash: string;
 }
 
-/** O traço de amostra de um modelo, para a legenda e o tooltip. */
 export function LineSample({ dash, color }: { dash: string; color: string }) {
   return (
     <svg className="line-sample" width="22" height="10" aria-hidden="true">
@@ -105,23 +84,18 @@ export function SeriesChart({
   foot = "mediana · intervalo interquartil",
 }: {
   title: string;
-  /** Cor do quadrado ao lado do título, quando o que o gráfico mostra é um
-   * **estado** e não uma grandeza — os seis de uma solicitação. */
+   /** Cor do quadrado ao lado do título, quando o que o gráfico mostra é um **estado** e não uma grandeza — os seis de uma solicitação */
   accent?: string;
   lines: SeriesLine[];
   groups: SeriesGroupStyle[];
   arms: SeriesArmStyle[];
   format?: (value: number) => string;
-  /** O contradomínio da métrica. Com os dois limites finitos, **a régua é
-   * ele** — a série se desenha na escala da grandeza, e não na da amostra. */
+   /** O contradomínio da métrica */
   bounds?: [number, number];
-  /** Marca o zero quando o sinal da métrica é o que se lê (λ). */
   zeroLine?: boolean;
-  /** Quantas simulações cada modelo tem. O tooltip avisa quando o ponto foi
-   * medido sobre menos que todas. */
+   /** Quantas simulações cada modelo tem */
   runs: number;
   xLabel?: (x: number) => string;
-  /** O que a linha é, no rodapé do tooltip. */
   foot?: string;
 }) {
   const dark = usePrefersDark();
@@ -151,7 +125,6 @@ export function SeriesChart({
     [lines, hiddenGroups, hiddenArms]
   );
 
-  /** Por linha, o ponto de cada período — o que o tooltip consulta. */
   const byX = useMemo(() => {
     const table = new Map<string, Map<number, BandPoint>>();
     lines.forEach((line) =>
@@ -160,7 +133,6 @@ export function SeriesChart({
     return table;
   }, [lines]);
 
-  /** O eixo: a união dos períodos publicados, em ordem. */
   const xs = useMemo(() => {
     const seen = new Set<number>();
     lines.forEach((line) => line.points.forEach((p) => seen.add(p.x)));
@@ -186,8 +158,6 @@ export function SeriesChart({
     line.points.flatMap((point) => spanOf(point) ?? [point.median])
   );
   const scale = paddedScale(spread, { bounds, zeroLine, padding: PADDING });
-  // Com muitas linhas as faixas se somam e viram névoa; mais leves, elas
-  // continuam dizendo onde a amostra se espalha sem cobrir as medianas.
   const bandOpacity = visible.length > 4 ? 0.05 : 0.12;
 
   const toggle =
@@ -309,9 +279,7 @@ export function SeriesChart({
   );
 }
 
-/** No mouse: um período, e o que cada linha mediu nele, em ordem decrescente
- * de mediana. O `n` só aparece quando o ponto foi medido sobre menos
- * simulações que o total. */
+/** No mouse: um período, e o que cada linha mediu nele, em ordem decrescente de mediana */
 function PeriodTip({
   active,
   label,

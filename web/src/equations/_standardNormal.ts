@@ -1,18 +1,4 @@
-/** Φ e Φ⁻¹ da normal padrão — os dois primitivos de que a normal dividida vive.
- *
- * O JavaScript não traz nenhum dos dois, e o Python traz (`math.erfc` e
- * `statistics.NormalDist.inv_cdf`). Para a prévia não mentir sobre o que o
- * motor vai produzir, as duas implementações têm de concordar bem além do que
- * a tela mostra: a inversão da forma resolve a partir de probabilidades da
- * ordem de 10⁻⁴, e um Φ⁻¹ de precisão baixa erraria a cauda em dezenas por
- * cento mesmo parecendo certo no meio.
- *
- * Φ sai do `erfc` de Chebyshev (Numerical Recipes), com erro relativo da ordem
- * de 10⁻¹⁵ inclusive na cauda. Φ⁻¹ sai da aproximação racional de Acklam
- * (~10⁻⁹) e um passo de Halley usando Φ, que a leva ao limite do `double`.
- *
- * Privado de propósito: são ferramenta numérica, não conta do modelo.
- */
+/** Φ e Φ⁻¹ da normal padrão — os dois primitivos de que a normal dividida vive */
 
 const CHEBYSHEV = [
   -1.3026537197817094, 6.419697923564902e-1, 1.9476473204185836e-2,
@@ -83,7 +69,6 @@ export function standardNormalQuantile(probability: number): number {
         q) /
       (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1);
   }
-  // Um passo de Halley: o erro de Acklam cai de ~10⁻⁹ para o do `double`.
   const error = standardNormalCdf(guess) - probability;
   const density = Math.exp(-0.5 * guess * guess) / Math.sqrt(2 * Math.PI);
   if (!(density > 0)) return guess;

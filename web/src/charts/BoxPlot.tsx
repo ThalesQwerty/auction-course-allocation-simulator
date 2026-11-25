@@ -1,19 +1,4 @@
-/** O eixo X colapsado: uma caixa por modelo, sobre as **seeds**.
- *
- * As linhas da tela mostram a mediana entre as simulações em cada ponto do
- * tempo; aqui o tempo some e o que sobra é a distribuição do número da tabela.
- * A pergunta é outra, e é a que o texto precisa: **o vão entre os mecanismos é
- * maior que o ruído entre populações?** Caixas que não se sobrepõem respondem
- * que sim.
- *
- * A caixa é sobre as seeds, nunca sobre os alunos. A dispersão entre alunos é
- * o que as linhas de quantil mostram, e as duas respondem a perguntas
- * diferentes — misturá-las numa caixa só seria erro de leitura.
- *
- * Desenho convencional: caixa do 1º ao 3º quartil, traço na mediana, bigodes
- * até os extremos. Sem outliers destacados — com 20 seeds a amostra é pequena
- * demais para a regra de 1,5·IQR dizer alguma coisa.
- */
+/** O eixo X colapsado: uma caixa por modelo, sobre as **seeds** */
 import { boxStats } from "../equations";
 import { inkFor, usePrefersDark } from "./theme";
 
@@ -43,9 +28,6 @@ export function BoxPlot({
   const stats = rows.map((row) => ({ row, box: boxStats(row.values) }));
   const present = stats.filter((entry) => entry.box !== null);
 
-  // A régua cobre o contradomínio pedido, mas nunca menos que a amostra: uma
-  // grandeza em [0, 1] com todas as caixas entre 0,2 e 0,3 se leria como três
-  // riscos colados no eixo.
   const values = present.flatMap((entry) => entry.row.values);
   const low = Math.min(bounds[0], ...values);
   const high = Math.max(bounds[1], ...values);

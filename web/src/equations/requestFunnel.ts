@@ -1,18 +1,4 @@
-/** O funil de uma solicitação em quatro frações condicionais.
- *
- *     solicitadas = (todas − não solicitadas − não elegíveis) / todas
- *     deferidas   = (aprovadas + reprovadas + excluídas) / solicitadas
- *     cursadas    = (aprovadas + reprovadas) / deferidas
- *     aprovadas   = aprovadas / cursadas
- *
- * Espelha `equations.request_funnel`, e está aqui pelo mesmo motivo que as
- * outras contas duplicadas: a comparação gravada antes de 11/11/2026 não traz
- * as frações, só as seis contagens, e é desta função que o recorte "Geral"
- * dessas execuções antigas sai (`legacyBands`).
- *
- * `null` quando o nó está vazio, nunca 0: "ninguém pediu nada" é diferente de
- * "ninguém foi deferido".
- */
+/** O funil de uma solicitação em quatro frações condicionais */
 import type { RequestStates } from "../types";
 
 export interface RequestFunnel {

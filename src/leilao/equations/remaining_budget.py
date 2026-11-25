@@ -1,10 +1,4 @@
-"""Saldo de créditos do agente ao fim da rodada — anteprojeto, eq. (27).
-
-    C_a^(t,r+1) = C_a^(t,r) − Δ_a^(t,r),    Δ_a^(t,r) = Σ_{x ∈ B} δ_{a,x}
-
-Só o consumo da eq. (25) desconta. O crédito comprometido num lance que
-perdeu volta inteiro ao saldo e pode ser reapostado na rodada seguinte.
-"""
+"""Saldo de créditos do agente ao fim da rodada — anteprojeto, eq. (27)."""
 from __future__ import annotations
 
 

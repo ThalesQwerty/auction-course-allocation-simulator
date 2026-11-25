@@ -1,13 +1,4 @@
-/** Os gráficos: tema, formatos e as marcas que a interface usa.
- *
- * A comparação lê tudo por **período**: a série põe o período num eixo
- * ordenado e mostra, por grupo e por modelo, a mediana entre as simulações e
- * o intervalo interquartil.
- *
- * A **estatística** por trás deles não mora aqui — a régua de marcas legíveis
- * e os quantis estão em `equations/`, onde se revisam como fórmula. Aqui fica
- * o desenho.
- */
+/** Os gráficos: tema, formatos e as marcas que a interface usa */
 export { AllocationTimeChart, formatSeconds } from "./AllocationTimeChart";
 export type { AllocationTimeLine } from "./AllocationTimeChart";
 export { BoxPlot } from "./BoxPlot";

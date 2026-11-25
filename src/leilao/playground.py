@@ -1,38 +1,4 @@
-"""Uma alocação isolada, sem períodos: várias rodadas dos dois mecanismos.
-
-A elegibilidade chega pronta — pré-requisito e disciplina de entrada não
-entram. É a tela de depuração do mecanismo: o cenário é escrito à mão, e o que
-se quer ver é como lance e ordenação tratam a *mesma* mensagem.
-
-O bem é a **turma**, como na simulação: a vaga é dela, a utilidade é dela, e a
-disciplina é o clique (eq. 5) — ninguém leva duas turmas da mesma. O lance é a
-mochila em dois níveis de `behavior.compute_bids` e o pedido por CR lista as
-turmas dentro da disciplina, exatamente como lá.
-
-As contas são as mesmas da simulação (`equations/`); o que muda é que aqui não
-há grade, histórico nem conclusão. **Nem horário**: o horário sai da varredura
-circular sobre a grade inteira (`equations.class_schedule`), e sem grade a
-única exclusão mútua que resta é a disciplina.
-
-As utilidades chegam **na escala do motor**: lá `equations.utility` faz a
-melhor turma de cada disciplina somar 1 sobre o elegível. Sem grade não há
-interesse separado da utilidade — a herança de pré-requisito é o que os
-distingue, e aqui ela não existe —, então o denominador da reserva é a soma
-das próprias utilidades digitadas, por disciplina (`eligible_interest`):
-`s_a = S_a / (S_a + ΣU)`. Digitar utilidades numa escala própria muda o que a
-seletividade corta — o lance e o pedido, que só leem a ordem e as razões, não
-se mexem.
-
-Cada aluno traz o eixo de **estratégia** — a seletividade, que é o
-`Behavior` com que ele decide — e a **disponibilidade**, que na
-simulação é sorteada do perfil e aqui chega já realizada, em horas. Com ela o
-fim do período é o mesmo: a mochila do que ele leva (`retained_set`) e a
-exclusão do resto. É o que deixa ver a especulação em escala micro: quem pede
-tudo e depois larga o que não cabe.
-
-O que **não** entra do fechamento é o crédito: sem histórico, retorno e saldo
-do período seguinte não têm onde aparecer.
-"""
+"""Uma alocação isolada, sem períodos: várias rodadas dos dois mecanismos."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -49,7 +15,7 @@ from .equations import (
     eligible_interest,
     effective_load,
     grade_for_attempt,
-    grade_shape,
+    grade_mean,
     retained_set,
     per_agent,
     stochastic_perturbations,
@@ -59,12 +25,7 @@ from .ranking import allocate_by_ranking, request_set
 
 @dataclass(frozen=True)
 class PlaygroundClass:
-    """Uma turma — o bem alocado.
-
-    `discipline` é o grupo dela; `None` é turma única, e aí a turma **é** a
-    disciplina, com o mesmo nome — o mesmo caso particular de
-    `SimulationConfig.classes_of`.
-    """
+    """Uma turma — o bem alocado."""
 
     name: str
     seats: int
@@ -84,8 +45,6 @@ class PlaygroundStudent:
     max_hours: int
     utilities: dict[str, float]
     eligible: tuple[str, ...]
-    # δ, em horas e já realizada: no sandbox não há perfil de onde sorteá-la.
-    # `None` é disponibilidade sem teto — ele leva tudo o que obteve.
     availability: float | None = None
     selectivity: float = 0.0
 
@@ -114,17 +73,13 @@ class PlaygroundRound:
 @dataclass(frozen=True)
 class PlaygroundGrade:
     student_id: str
-    name: str  # a turma cursada
+    name: str
     grade: float
 
 
 @dataclass(frozen=True)
 class PlaygroundClosing:
-    """O fim do período de um aluno: o que ele levou e o que largou.
-
-    `load` é Ŵ_a — `None` quando a disponibilidade não foi dada. As duas
-    listas somam o que ele obteve nas rodadas, na ordem da grade.
-    """
+    """O fim do período de um aluno: o que ele levou e o que largou."""
 
     student_id: str
     load: int | None
@@ -136,17 +91,11 @@ class PlaygroundClosing:
 class PlaygroundResult:
     rounds: tuple[PlaygroundRound, ...]
     closing: tuple[PlaygroundClosing, ...]
-    # Só do que foi retido: a excluída não recebe nota.
     grades: tuple[PlaygroundGrade, ...]
 
 
 def normalized_utilities(utilities: dict[str, float]) -> dict[str, float]:
-    """A linha do aluno reescalada para somar 1 — só para exibição.
-
-    No cenário escrito à mão as utilidades chegam em qualquer escala, e a tela
-    mostra frações. Nenhuma decisão depende disso: as duas mochilas comparam
-    só razões.
-    """
+    """A linha do aluno reescalada para somar 1 — só para exibição."""
     total = sum(utilities.values())
     if total <= 0:
         return {}
@@ -204,16 +153,12 @@ class _Table:
     budget: dict[str, int]
     won: dict[str, set[str]]
     utilities: dict[str, dict[str, float]]
-    # Turma -> os grupos de exclusão dela. Sem grade não há horário, então o
-    # único grupo é a disciplina.
     conflicts: dict[str, tuple[str, ...]]
     classes: dict[str, tuple[str, ...]]
-    # Σ_{X ∈ M_a} I_{a,X}, por aluno — o denominador da reserva.
     interests: dict[str, float]
 
     def available(self, student_id: str) -> list[str]:
-        """B_a^(r) — ver `equations.available_goods`: há vaga, cabe na carga e
-        o aluno ainda não levou turma nenhuma da disciplina."""
+        """B_a^(r) — ver `equations.available_goods`: há vaga, cabe na carga e"""
         return available_goods(
             eligible=self.utilities[student_id],
             seats=self.seats,
@@ -316,9 +261,6 @@ def _ranking_round(
         requests.extend((student.id, name) for name in asked)
 
     won_now: dict[str, list[str]] = {student.id: [] for student in students}
-    # A prioridade é do aluno; dentro dele quem ordena é a própria preferência,
-    # que já veio na ordem de `requests`. A carga é verificada na concessão,
-    # não no pedido.
     granted = allocate_by_ranking(
         requests=requests,
         priority={s.id: s.cr for s in students},
@@ -340,11 +282,7 @@ def _close(
     names: list[str],
     table: _Table,
 ) -> tuple[PlaygroundClosing, ...]:
-    """A exclusão do fim do período — a mesma de `simulation.closing`.
-
-    Valor = utilidade, peso = carga, teto = Ŵ_a. A utilidade é a crua da
-    tela, sem normalizar: o argmax de uma soma não muda com a escala.
-    """
+    """A exclusão do fim do período — a mesma de `simulation.closing`."""
     closing: list[PlaygroundClosing] = []
     for student in students:
         obtained = table.won[student.id]
@@ -381,31 +319,17 @@ def _grades(
     groups: dict[str, str],
     retained: dict[str, tuple[str, ...]],
     seed: int,
-    mode_grade: float,
-    zero_rate: float,
-    max_rate: float,
+    min_grade: float,
+    grade_sd: float,
+    approval_rate: float,
 ) -> tuple[PlaygroundGrade, ...]:
-    """As notas do que cada um cursou.
-
-    O sandbox não guarda posição entre rodadas: sorteia um quantil por
-    (aluno, disciplina) na hora, que é o bastante para a tela mostrar nota
-    plausível. A simulação de verdade persiste o quantil, que é traço.
-
-    O quantil é da **disciplina**, não da turma, como na simulação: o aluno
-    não fica melhor por mudar de seção. E sai para **todo** par, cursado ou
-    não: assim mexer na disponibilidade de um aluno não desloca o gerador e
-    não muda a nota de ninguém mais.
-
-    Todo mundo sai do mesmo perfil, em disciplina de dificuldade 1 e primeira
-    tentativa — o sandbox é uma rodada isolada, e não tem histórico de onde
-    tirar tentativa nem perfil por aluno.
-    """
+    """As notas do que cada um cursou."""
     disciplines = list(dict.fromkeys(groups[name] for name in names))
     column = {discipline: x for x, discipline in enumerate(disciplines)}
     rng = np.random.default_rng(seed)
     quantiles = rng.random((len(students), len(disciplines)))
-    mode, left_sd, right_sd = grade_shape(
-        mode_grade=mode_grade, zero_rate=zero_rate, max_rate=max_rate
+    mean = grade_mean(
+        min_grade=min_grade, grade_sd=grade_sd, approval_rate=approval_rate
     )
     grades: list[PlaygroundGrade] = []
     for a, student in enumerate(students):
@@ -418,9 +342,8 @@ def _grades(
                     name=name,
                     grade=grade_for_attempt(
                         quantile=float(quantiles[a, column[groups[name]]]),
-                        mode=mode,
-                        left_sd=left_sd,
-                        right_sd=right_sd,
+                        grade_mean=mean,
+                        grade_sd=grade_sd,
                     ),
                 )
             )
@@ -433,18 +356,17 @@ def _interest_total(
     names: list[str],
     groups: dict[str, str],
 ) -> float:
-    """Σ_{X ∈ M_a} I_{a,X} do aluno — só sobre as turmas elegíveis a ele, e na
-    ordem da mesa."""
+    """Σ_{X ∈ M_a} I_{a,X} do aluno — só sobre as turmas elegíveis a ele, e na"""
     own: dict[str, list[str]] = {}
     eligible = set(student.eligible)
     for name in names:
         if name in eligible:
             own.setdefault(groups[name], []).append(name)
-    return eligible_interest(
-        interest=student.utilities,
-        eligible=list(own),
-        classes={group: tuple(members) for group, members in own.items()},
-    )
+    por_disciplina = {
+        group: max(student.utilities.get(name, 0.0) for name in members)
+        for group, members in own.items()
+    }
+    return eligible_interest(interest=por_disciplina, eligible=list(own))
 
 
 def run_playground(
@@ -452,9 +374,9 @@ def run_playground(
     mechanism: Mechanism,
     rounds: int,
     seed: int,
-    mode_grade: float = 8.0,
-    zero_rate: float = 0.005,
-    max_rate: float = 0.008,
+    min_grade: float = 5.0,
+    grade_sd: float = 2.0,
+    approval_rate: float = 0.7,
     classes: list[PlaygroundClass],
     students: list[PlaygroundStudent],
 ) -> PlaygroundResult:
@@ -544,8 +466,8 @@ def run_playground(
             groups=groups,
             retained={row.student_id: row.retained for row in closing},
             seed=seed,
-            mode_grade=mode_grade,
-            zero_rate=zero_rate,
-            max_rate=max_rate,
+            min_grade=min_grade,
+            grade_sd=grade_sd,
+            approval_rate=approval_rate,
         ),
     )

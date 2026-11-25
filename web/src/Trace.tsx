@@ -12,98 +12,64 @@ import type {
   TraceResponse,
 } from "./types";
 
-/** A utilidade é uma fração que soma 1 na linha do aluno, então ela vive na
- * terceira casa: com duas, as disciplinas de uma grade grande empatam todas. */
+/** A utilidade é uma fração que soma 1 na linha do aluno, então ela vive na terceira casa: com duas, as disciplinas de uma grade grande empatam todas */
 const formatUtility = (value: number) =>
   value.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
-/** O que aconteceu com uma linha **naquela rodada**.
- *
- * São as quatro saídas que a tela colore, e a cor nunca anda sozinha: a
- * palavra está na célula, porque o amarelo não alcança 3:1 sobre o fundo claro
- * (ver a paleta de estado em `charts/theme.ts`).
- *
- * `idle` é o cinza, e leva duas palavras diferentes. **Não solicitada** é a
- * disciplina elegível que não recebeu lance na rodada — ou o aluno não quis,
- * ou ela saiu de B_a^(t,r) antes (sem vaga, sem carga ou sem orçamento), e é o
- * caso que costuma explicar um resultado inesperado. **Já obtida** é a que ele
- * ganhou numa rodada anterior: ela não está mais em disputa, e chamá-la de não
- * solicitada esconderia justamente o que deu certo. */
+/** O que aconteceu com uma linha **naquela rodada** */
 type Tone = "approved" | "failed" | "refused" | "dropped" | "idle";
 
 interface Outcome {
   label: string;
   tone: Tone;
-  /** A vaga que não veio de rodada nenhuma: a matrícula garantida do
-   * ingressante, concedida antes de o leilão abrir. */
+   /** A vaga que não veio de rodada nenhuma: a matrícula garantida do ingressante, concedida antes de o leilão abrir */
   guaranteed: boolean;
 }
 
-/** O resultado de uma disciplina **nesta** rodada, ou `null` quando ela não
- * é linha de tabela aqui.
- *
- * O `null` é a disciplina que o aluno **já obteve numa rodada anterior**: ela
- * saiu de B_a^(t,r) e não está em disputa, de modo que listá-la repetiria a
- * mesma vaga em todas as rodadas seguintes e afogaria o que ainda se decide.
- * O que ela produziu aparece na rodada em que foi ganha, e no fim do período.
- */
+/** O resultado de uma disciplina **nesta** rodada, ou `null` quando ela não é linha de tabela aqui */
 function outcomeOf(record: RequestRecord, round: number): Outcome | null {
   const won = record.won_round;
   const guaranteed = won === GUARANTEED_ROUND;
-  // A garantida é creditada na 1ª rodada: é ali que ela passa a valer, e é
-  // assim que a simulação a conta (ver `simulation.rounds`).
   const settled = won !== null && (won === round || (guaranteed && round === 1));
   if (settled) {
-    // Excluída vem antes das duas: ela obteve a vaga e não cursou, então não
-    // há nota — `approved` é falso ali por ausência, não por reprovação.
     if (record.excluded) return { label: "excluída", tone: "dropped", guaranteed };
     return record.approved
       ? { label: "aprovada", tone: "approved", guaranteed }
       : { label: "reprovada", tone: "failed", guaranteed };
   }
   if (record.bids[round - 1] > 0) return { label: "indeferida", tone: "refused", guaranteed: false };
-  // Já obtida antes desta rodada: fora da tabela — ver acima.
   if (won !== null && (guaranteed || won < round)) return null;
   return { label: "não solicitada", tone: "idle", guaranteed: false };
 }
 
-/** Quem vale a pena ver nesta rodada quando as cinzas estão escondidas. */
 const isLive = (outcome: Outcome) => outcome.tone !== "idle";
 
-/** O nível basilar como a tela o escreve: z-score com sinal, uma casa. O sinal
- * é o que se lê de relance — de que lado da mediana da população o aluno
- * está —, e é por isso que o `+` é explícito. */
-const nivel = (value: number) =>
-  `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1).replace(".", ",")}`;
+/** O nível basilar como a tela o escreve: z-score com sinal, uma casa */
+/** A âncora é um quantil em (0, 1): 0,5 é a mediana da população, e o número se lê como "este aluno está no percentil tal" */
+const quantil = (value: number) =>
+  `${Math.round(value * 100)}%`;
 
 const Chip = ({ outcome }: { outcome: Outcome }) => (
   <span className={`outcome ${outcome.tone}`}>{outcome.label}</span>
 );
 
-/** O rótulo da coluna de crédito muda com o mecanismo: na linha de base não há
- * lance, e o registro guarda só a marca de que houve pedido. */
+/** O rótulo da coluna de crédito muda com o mecanismo: na linha de base não há lance, e o registro guarda só a marca de que houve pedido */
 const bidCell = (credits: number, usesCredits: boolean) =>
   usesCredits ? (credits || "—") : credits > 0 ? "pedida" : "—";
 
 export function Trace({ run }: { run: ComparisonRun }) {
   const result = run.result;
-  /** Só os braços que esta comparação de fato rodou: uma gravada antes de um
-   * braço existir não o traz, e pedir o traço dele não encontraria simulação. */
+   /** Só os braços que esta comparação de fato rodou: uma gravada antes de um braço existir não o traz, e pedir o traço dele não encontraria simulação */
   const arms = useMemo(
     () => COMPARISON_ARMS.filter((arm) => result.arms.some((a) => a.key === arm.key)),
     [result.arms]
   );
 
-  // O padrão é o último braço do caminho — o modelo proposto, e o único em que
-  // todas as colunas de crédito têm o que mostrar.
   const [armKey, setArmKey] = useState(arms[arms.length - 1]?.key ?? COMPARISON_ARMS[0].key);
   const [seed, setSeed] = useState(1);
-  /** O traço custa uma simulação completa no servidor, então ele não vem
-   * sozinho: a seção abre com o botão, e dali em diante trocar de modelo ou de
-   * simulação já refaz. */
+   /** O traço custa uma simulação completa no servidor, então ele não vem sozinho: a seção abre com o botão, e dali em diante trocar de modelo ou de simulação já refaz */
   const [started, setStarted] = useState(false);
-  /** Contador de tentativas: é o que dá ao botão "tentar de novo" o que mudar
-   * quando o par (braço, seed) continua o mesmo. */
+   /** Contador de tentativas: é o que dá ao botão "tentar de novo" o que mudar quando o par (braço, seed) continua o mesmo */
   const [attempt, setAttempt] = useState(0);
   const [data, setData] = useState<TraceResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -119,8 +85,6 @@ export function Trace({ run }: { run: ComparisonRun }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    // `runs` é da comparação, não do cenário: o que o traço pede é uma
-    // simulação só, endereçada pelo par (braço, seed).
     const { runs: _runs, ...scenario } = run.config;
     trace({ ...scenario, arm: armKey, seed })
       .then((payload) => {
@@ -140,19 +104,13 @@ export function Trace({ run }: { run: ComparisonRun }) {
     };
   }, [started, attempt, armKey, seed, run.config]);
 
-  /** O mecanismo do braço **carregado**, e não o do seletor: as colunas de
-   * crédito descrevem o que está na tela, e trocar de modelo só as troca
-   * quando o traço novo chega. */
+   /** O mecanismo do braço **carregado**, e não o do seletor: as colunas de crédito descrevem o que está na tela, e trocar de modelo só as troca quando o traço novo chega */
   const loadedArm = data ? result.arms.find((arm) => arm.key === data.arm) : undefined;
   const usesCredits = loadedArm ? loadedArm.mechanism === "credits" : true;
-  // O acúmulo e o retorno deixaram de ser eixo em 24/11/2026: todo braço de
-  // crédito os tem, então quem os tem é exatamente quem usa moeda.
   const hasReturn = usesCredits;
   const rounds = run.config.rounds;
 
-  /** O sujeito sai do que está carregado: se o escolhido não existe mais —
-   * primeira abertura, ou troca de cenário —, cai no primeiro da lista em vez
-   * de deixar a tela vazia. */
+   /** O sujeito sai do que está carregado: se o escolhido não existe mais — primeira abertura, ou troca de cenário —, cai no primeiro da lista em vez de deixar a tela vazia */
   const student =
     data?.students.find((s) => s.id === studentId) ?? data?.students[0] ?? null;
   const chosen =
@@ -341,7 +299,6 @@ export function Trace({ run }: { run: ComparisonRun }) {
   );
 }
 
-/** Os alunos por coorte, na ordem do ingresso — como o seletor os agrupa. */
 function cohortsOf(students: StudentSummary[]): [number, StudentSummary[]][] {
   const groups = new Map<number, StudentSummary[]>();
   for (const student of students) {
@@ -352,11 +309,7 @@ function cohortsOf(students: StudentSummary[]): [number, StudentSummary[]][] {
   return [...groups.entries()].sort((a, b) => a[0] - b[0]);
 }
 
-/** As disciplinas por período da grade, com as optativas num grupo à parte.
- *
- * A optativa não tem período a mostrar: ela não tem pré-requisito, então a
- * indução a colocaria no 1º, onde ela não está. Quem sabe que ela é optativa é
- * o cenário, e é de lá que vem a separação. */
+/** As disciplinas por período da grade, com as optativas num grupo à parte */
 function groupDisciplines(
   data: TraceResponse,
   configured: { name: string; elective?: boolean }[]
@@ -364,8 +317,6 @@ function groupDisciplines(
   const elective = new Set(configured.filter((d) => d.elective).map((d) => d.name));
   const groups = new Map<number, string[]>();
   const electives: string[] = [];
-  // A lista é de turmas; período e cota de optativa são da **disciplina**,
-  // então o agrupamento passa pelo clique antes de perguntar.
   for (const name of data.disciplines) {
     const discipline = data.classes?.[name] ?? name;
     if (elective.has(discipline)) {
@@ -412,18 +363,17 @@ function StudentTrace({
           <p className="note">
             {cohortLabel(student.entry_period)} · {student.id}
           </p>
-          {/* Os níveis basilares ficam junto do nome, e não na régua de
-              números: eles não são resultado, são o que o aluno trouxe de
-              fábrica. É metade da resposta a "por que este aluno foi assim" —
-              a seed é a outra. São z-scores: 0 é a mediana da população, e o
-              sinal diz de que lado dela o aluno está. */}
+          {/* As âncoras ficam junto do nome, e não na régua de números: elas
+              não são resultado, são o que o aluno trouxe de fábrica. É metade
+              da resposta a "por que este aluno foi assim"; a seed é a outra.
+              São quantis: 0,5 é a mediana da população. Não há âncora de
+              desempenho, porque a aprovação é parâmetro de cenário. */}
           <p className="trace-profiles">
-            <span className="chip">desempenho {nivel(student.performance_level)}</span>
             <span className="chip">
-              disponibilidade {nivel(student.availability_level)}
+              disponibilidade {quantil(student.availability_anchor)}
             </span>
             <span className="chip">
-              seletividade {nivel(student.selectivity_level)}
+              seletividade {quantil(student.selectivity_anchor)}
             </span>
           </p>
         </div>
@@ -509,8 +459,6 @@ function StudentPeriod({
 }) {
   const won = record.requests.filter((request) => request.won_round !== null).length;
   const asked = record.requests.filter((request) => request.bids.some((c) => c > 0)).length;
-  // No período de ingresso não houve disputa: as vagas vieram garantidas, e
-  // "6 de 6 pedidos atendidos" leria como um leilão bem-sucedido.
   const guaranteed = record.requests.some(
     (request) => request.won_round === GUARANTEED_ROUND
   );
@@ -564,9 +512,6 @@ function StudentPeriod({
                 </thead>
                 <tbody>
                   {rows.map(({ request, outcome }) => {
-                    // Nota, pagamento e retorno são do par (aluno, disciplina)
-                    // no período, e pertencem à rodada em que a vaga saiu: nas
-                    // outras eles ainda não existiam.
                     const settled = outcome.tone === "approved" || outcome.tone === "failed";
                     return (
                       <tr key={request.discipline} className={outcome.tone === "idle" ? "idle-row" : undefined}>
@@ -603,11 +548,9 @@ function StudentPeriod({
   );
 }
 
-/** Uma linha da vista por disciplina: o aluno que a pediu naquele período. */
 interface Bidder {
   student: StudentSummary;
   request: RequestRecord;
-  /** O CR com que ele entrou no período — a prioridade da linha de base. */
   cr: number;
 }
 
@@ -622,9 +565,7 @@ function DisciplineTrace({
   rounds: number;
   usesCredits: boolean;
 }) {
-  /** Quem pediu esta disciplina, período a período. O índice é montado uma vez
-   * por disciplina escolhida: varrer os históricos a cada rodada seria varrer
-   * a população inteira |T| × |R| vezes. */
+   /** Quem pediu esta disciplina, período a período */
   const byPeriod = useMemo(() => {
     const students = new Map(data.students.map((student) => [student.id, student]));
     const index = new Map<number, Bidder[]>();
@@ -687,8 +628,6 @@ function DisciplineTrace({
             </header>
 
             {Array.from({ length: rounds }, (_, index) => index + 1).map((round) => {
-              // Só quem pediu **nesta** rodada: a vista por disciplina não tem
-              // não solicitadas, senão toda linha seria a população inteira.
               const rows = bidders
                 .flatMap((bidder) => {
                   const outcome = outcomeOf(bidder.request, round);
@@ -700,8 +639,6 @@ function DisciplineTrace({
                     outcome.tone === "approved" ||
                     outcome.tone === "failed"
                 )
-                // Na ordem em que o mecanismo as olhou: pelo lance, e pelo CR
-                // onde não há lance que os separe.
                 .sort(
                   (a, b) =>
                     (b.request.bids[round - 1] ?? 0) - (a.request.bids[round - 1] ?? 0) ||

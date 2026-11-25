@@ -1,28 +1,4 @@
-"""Simulação multi-período da matrícula universitária (Seção 7.2).
-
-Amarra as peças: a inicialização sorteia tudo da seed (`setup`), cada período
-roda as suas rodadas e fecha com notas e conclusões (`period`, `rounds`,
-`closing`), e os relatórios saem recortados por coorte (`snapshots`,
-`reports`). As contas moram em `equations/`.
-
-Não há cursos: a universidade inteira cursa a mesma grade. Toda disciplina
-obrigatória tem de ser aprovada; as optativas valem pela carga somada.
-
-**Quem ingressa não disputa as disciplinas de entrada** — recebe vaga
-garantida nelas e fica fora do leilão naquele período para esse conjunto.
-Entrada é uma flag do cenário, e não "não ter pré-requisito": a optativa
-também não tem e fica fora da garantia.
-
-O aluno sai do conjunto ativo por uma única porta: concluindo o curso
-(eq. 40). Quem não concluiu continua disputando até o fim do horizonte, e é a
-fase de drenagem que dá às coortes tardias tempo de chegar lá.
-
-**Dois mecanismos, um cenário.** `config.mechanism` troca só o miolo da
-rodada. Tudo o mais — população, utilidades, notas, pré-requisitos, matrícula
-garantida, conclusão e métricas — é idêntico, que é a condição metodológica
-da Seção 7.3: os dois lados partem da mesma inicialização, e por isso a
-diferença entre eles é atribuível ao mecanismo.
-"""
+"""Simulação multi-período da matrícula universitária (Seção 7.2)."""
 from __future__ import annotations
 
 from ..config import SimulationConfig
@@ -68,21 +44,7 @@ __all__ = [
 def run_simulation(
     config: SimulationConfig, *, keep_histories: bool = True
 ) -> SimulationResult:
-    """Roda a simulação inteira. Determinística: mesma config, mesmo resultado.
-
-    **Invariante dos relatórios**: todo período publicado tem pelo menos um
-    aluno ativo, e a numeração vai de 1 a `len(periods)` sem buraco. Vale por
-    construção — os ingressos ocorrem em períodos consecutivos a partir do
-    primeiro e, passado o último deles, a população só diminui, então o primeiro
-    período vazio só é seguido de períodos vazios. A simulação para ali.
-
-    **`keep_histories` só muda o que se guarda, nunca o que acontece.** O
-    histórico é um `RequestRecord` por (aluno, disciplina que ele quis,
-    período) — no cenário cheio são 3 milhões deles, 1,1 GB, e nenhuma métrica
-    os lê: quem lê é a tela individual, pela rota `/trace`. A comparação roda
-    dezenas de simulações em paralelo e pede `False`, porque somar esse
-    histórico por execução é o que a põe na memória virtual.
-    """
+    """Roda a simulação inteira. Determinística: mesma config, mesmo resultado."""
     draws = prepare(config)
     students = draws.students
 
@@ -91,12 +53,8 @@ def run_simulation(
     satisfactions: dict[str, list[float]] = {s.id: [] for s in students}
     enrollments: dict[str, int] = {s.id: 0 for s in students}
     first_grades: list[float] = []
-    # No 1º período não há histórico, e os dois índices caem no neutro de 1/2
-    # sozinhos — os genes de oferta e de aprovação não agem.
 
     for period in range(1, config.periods + 1):
-        # Matriculados: já ingressaram (t_a) e ainda não saíram — por
-        # conclusão (eq. 40) ou por jubilamento.
         active = [
             s for s in students if s.entry_period <= period and s.left_at is None
         ]
@@ -128,9 +86,8 @@ def run_simulation(
                 id=s.id,
                 name=s.name,
                 entry_period=s.entry_period,
-                performance_level=s.performance_level,
-                availability_level=s.availability_level,
-                selectivity_level=s.selectivity_level,
+                availability_anchor=s.availability_anchor,
+                selectivity_anchor=s.selectivity_anchor,
                 grade_average=s.grade_average(draws.discipline_hours),
                 approved_hours=s.approved_hours(
                     draws.discipline_hours, config.min_grade

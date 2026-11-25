@@ -1,23 +1,9 @@
-"""A acumulada da log-normal.
-
-    F(x) = Φ((ln x − μ) / σ),   x > 0
-    F(x) = 0,                   x ≤ 0
-
-O suporte é (0, ∞): a disponibilidade nunca é negativa, e isso vem da família,
-não de uma truncagem imposta.
-
-Serve para ler de volta o que o perfil declarou — `1 − F(W_a)` tem de devolver
-a chance de alcançar a carga máxima — e para as grandezas derivadas que a tela
-mostra ao pé da curva: a mediana, e quanto da massa fica abaixo de uma carga
-qualquer.
-
-Não está no anteprojeto.
-"""
+"""A acumulada da log-normal."""
 from __future__ import annotations
 
 import math
 
-from .split_normal_cdf import standard_normal_cdf
+from ._normal import standard_normal_cdf, standard_normal_quantile
 
 
 def lognormal_cdf(*, value: float, log_mean: float, log_sd: float) -> float:
@@ -26,3 +12,12 @@ def lognormal_cdf(*, value: float, log_mean: float, log_sd: float) -> float:
     if value <= 0.0:
         return 0.0
     return standard_normal_cdf((math.log(value) - log_mean) / log_sd)
+
+
+def lognormal_quantile(*, quantile: float, log_mean: float, log_sd: float) -> float:
+    """F⁻¹(q) = exp(μ + σ · Φ⁻¹(q)) — a carga que aquele quantil vale."""
+    if log_sd <= 0.0:
+        raise ValueError("o desvio logarítmico deve ser > 0")
+    if not 0.0 <= quantile <= 1.0:
+        raise ValueError("o quantil deve estar em [0, 1]")
+    return math.exp(log_mean + log_sd * standard_normal_quantile(quantile))

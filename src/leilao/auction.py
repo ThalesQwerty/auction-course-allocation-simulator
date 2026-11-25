@@ -1,12 +1,4 @@
-"""Uma rodada do leilão por créditos (Seção 7.1).
-
-Cada agente reparte o orçamento em lances (eq. 19), o resolvedor decide a
-alocação sobre as preferências da eq. (22), e a liquidação aplica o preço de
-segundo preço (eq. 24), o consumo (eq. 25) e os dois descontos (eqs. 14, 27).
-
-Escopo: um período, uma rodada. O laço multi-rodada e a camada multi-período
-são de `simulation`.
-"""
+"""Uma rodada do leilão por créditos (Seção 7.1)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -38,24 +30,13 @@ class Bid:
 
 @dataclass
 class AuctionInput:
-    """Insumos de uma rodada.
-
-    `epsilon` permite injetar a matriz de perturbações já sorteada. Numa
-    simulação multi-rodada ela **precisa** ser a mesma em todas as rodadas
-    (Seção 7.1.2); omitida, é sorteada a partir de `seed` para esta rodada.
-
-    Não há mais ordem de desempate (matriz α) nem viés (matriz β): as duas
-    saíram do modelo junto com as eqs. (20) e (21) — ver `wdp_solver`.
-    """
+    """Insumos de uma rodada."""
 
     agents: list[Agent]
     goods: list[Good]
-    budgets: dict[str, int]  # C_a — eq. (19)
+    budgets: dict[str, int]
     bids: list[Bid]
     exclusions: list[MutualExclusion] = field(default_factory=list)
-    # Turma -> os grupos de `E = M ∪ G` a que ela pertence: a disciplina e o
-    # horário. Entra no preço — quem foi roteado para outra turma de um grupo
-    # em comum não é perdedor nesta.
     conflicts: dict[str, tuple[str, ...]] = field(default_factory=dict)
     epsilon: dict[tuple[str, str], float] | None = None
     seed: int = 0
@@ -80,23 +61,16 @@ class AuctionInput:
 @dataclass
 class AuctionResult:
     bids: dict[tuple[str, str], int]
-    allocation: Allocation  # z — eq. (1)
-    prices: dict[str, int]  # π_x — eq. (24)
-    consumption: dict[tuple[str, str], int]  # δ_{a,x} — eq. (25)
-    remaining_budget: dict[str, int]  # C_a − Δ_a — eq. (27)
-    remaining_capacity: dict[str, float]  # W_a − Σ w_x — eq. (14)
-    # Tempo de parede do resolvedor, em segundos. É instrumentação, não
-    # grandeza do modelo: nada no simulador a lê para decidir coisa alguma.
-    # Cobre montar o problema e resolvê-lo, que é o que `solve_wdp` faz.
+    allocation: Allocation
+    prices: dict[str, int]
+    consumption: dict[tuple[str, str], int]
+    remaining_budget: dict[str, int]
+    remaining_capacity: dict[str, float]
     solver_seconds: float = 0.0
 
 
 def _demands(auction_input: AuctionInput, bids: dict[tuple[str, str], int]) -> list[Demand]:
-    """Os pares de demanda: a preferência é o **lance**, e o ε vai à parte.
-
-    Somá-los seria a eq. (22) do anteprojeto, e é justamente o que não se faz
-    mais — ver `wdp_solver`.
-    """
+    """Os pares de demanda: a preferência é o **lance**, e o ε vai à parte."""
     epsilon = auction_input.epsilon
     if epsilon is None:
         epsilon = stochastic_perturbations(
@@ -112,13 +86,7 @@ def _demands(auction_input: AuctionInput, bids: dict[tuple[str, str], int]) -> l
 
 
 def run_auction(auction_input: AuctionInput) -> AuctionResult:
-    """Resolve o WDP da rodada por PLI e liquida preços, consumo e saldos.
-
-    Houve um parâmetro `resolver` aqui até 24/11/2026, que trocava a PLI pela
-    varredura gulosa — o mecanismo de *bidding points*. Saiu com o fechamento
-    do escopo: o leilão deste trabalho é o da PLI, e a varredura só existia
-    como degrau de ablação.
-    """
+    """Resolve o WDP da rodada por PLI e liquida preços, consumo e saldos."""
     bids = {(b.agent_id, b.good_id): b.credits for b in auction_input.bids}
     capacity = {a.id: a.capacity for a in auction_input.agents}
     if not bids:

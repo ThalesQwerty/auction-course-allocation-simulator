@@ -114,7 +114,7 @@ A introdução de um leilão de vagas baseado em orçamentos limitados de crédi
 
 Além disso, tal abordagem equilibra a vantagem de alunos com maior prioridade dentro do sistema. Mesmo se os orçamentos forem proporcionais ao desempenho acadêmico de cada estudante, um aluno com maior orçamento é forçado a diluir a própria vantagem caso solicite múltiplas disciplinas, possibilitando que alguém com menor orçamento eventualmente ganhe uma disputa de vaga com este aluno ao concentrar seus créditos nos lances de maior utilidade para si. Este equilíbrio mitiga o problema de \textit{snowballing} discutido anteriormente.
 
-O mesmo contraste se reproduz um nível abaixo, entre as turmas de uma mesma disciplina. Como o estudante pode ser contemplado em apenas uma delas, mas pode solicitar várias, a repartição do orçamento entre turmas irmãs é uma forma de proteção contra a incerteza que apenas o leilão consegue expressar: declarar o quanto se aposta em cada turma é diferente de declarar uma única turma como favorita. Essa escolha interna à disciplina tem consequência direta sobre o efeito bola de neve quando as turmas diferem entre si, por exemplo, em dificuldade. Sob a ordenação por CR, a vantagem é posicional e se acumula, pois quem tem CR elevado obtém sistematicamente a turma mais favorável, dela extrai melhor desempenho e assim preserva a própria posição; sob o leilão, a turma mais disputada tem preço, e a vantagem se dilui no ato de exercê-la.
+O mesmo contraste se reproduz um nível abaixo, entre as turmas de uma mesma disciplina. Como o estudante pode ser contemplado em apenas uma delas, mas pode solicitar várias, a repartição do orçamento entre turmas irmãs é uma forma de proteção contra a incerteza que apenas o leilão consegue expressar: declarar o quanto se aposta em cada turma é diferente de declarar uma única turma como favorita. Essa escolha interna à disciplina tem consequência direta sobre o efeito bola de neve, visto que as turmas diferem entre si no horário em que são ofertadas. Sob a ordenação por CR, a vantagem é posicional e se acumula, pois quem tem CR elevado obtém sistematicamente a turma no horário que mais lhe convém, e assim preserva a própria posição; sob o leilão, a turma mais disputada tem preço, e a vantagem se dilui no ato de exercê-la.
 
 Paralelamente, a centralização do processo alocativo por meio de modelos de Programação Linear Inteira (PLI) altera a abordagem algorítmica do problema, uma vez que estes modelos são capazes de gerenciar as restrições de carga horária e de exclusão mútua entre turmas no resolvedor global \cite{wolsey1998}. O tratamento unificado de tais restrições evita que o sistema exija do estudante uma auto-restrição prévia das suas próprias demandas, o que reduz a necessidade de rodadas de alocação de vagas remanescentes. O orçamento de créditos, portanto, passa a ser o único fator limitador \textit{ex-ante} das solicitações de matrícula de cada estudante.
 
@@ -140,8 +140,9 @@ A hipótese central desta pesquisa é que a substituição do mecanismo ordinal 
 \begin{itemize}
     \item \textbf{Maior eficiência:} a satisfação média dos estudantes com as alocações é aumentada;
     \item \textbf{Maior equidade:} a dispersão da satisfação entre os estudantes é reduzida;
-    \item \textbf{Menor influência do CR:} a correlação entre desempenho acadêmico e satisfação é reduzida;
-    \item \textbf{Ocupação mais rápida:} a demanda é atendida em menos rodadas, reduzindo a proporção de vagas obtidas após a primeira;
+    \item \textbf{Menor influência do CR:} a inclinação da satisfação sobre o CR final é reduzida, isto é, o desempenho acadêmico deixa de ser vantagem posicional direta e passa a influir apenas de forma indireta, pelo retorno de créditos;
+    \item \textbf{Ocupação mais rápida:} a demanda é atendida em menos rodadas, reduzindo a rodada média das vagas alocadas;
+    \item \textbf{Menos vaga desperdiçada:} a fração da carga horária obtida que o estudante de fato cursa é aumentada;
 \end{itemize}
 
 \section{Objetivo}
@@ -501,26 +502,26 @@ Enquanto $t$ representa o período global da simulação, a variável $t_a \in \
     t_a = 1 + t - T_a \quad \forall a \in A^{(t)}
 \end{equation}
 
-% O ingresso é contínuo: uma quantidade fixa de alunos entra em todo período letivo. A simulação é, portanto, dividida em duas fases: os primeiros $j$ períodos constituem a pré-população: são simulados integralmente, com o mesmo mecanismo, mas ficam fora da medição. Os $|O|$ períodos seguintes são os \textbf{observados}, e são deles que saem todas as métricas:
-% \begin{equation}
-%     |\mathcal{L}| = j + |O|
-% \end{equation}
+O ingresso é contínuo: uma quantidade fixa de alunos entra em todo período letivo, inclusive nos períodos finais, nos quais ninguém mais chega a concluir. A simulação é dividida em duas fases, e mede \textbf{uma única coorte}.
 
-% A pré-população é igual ao tempo máximo de permanência, e não é um valor livre. Com ingresso de $N$ alunos por período e permanência máxima $j$, no período $t$ estão matriculadas as coortes que ingressaram em $t, t-1, \dots, t-j+1$; antes de $t = j$ nenhuma coorte é antiga o bastante para sair, de modo que a população cresce $N$ a cada período. A partir de $t = j$ entra uma coorte e sai outra, e a população estabiliza-se em exatamente $N \cdot j$:
-% \begin{equation}
-%     \left| A^{(t)} \right| \leq N \cdot \min(t, j)
-%     \quad \forall t \in \{1, \dots, |\mathcal{L}|\}
-% \end{equation}
+Os primeiros $j$ períodos constituem o \textbf{aquecimento}: são simulados integralmente, com o mesmo mecanismo, porém ficam fora da medição. A \textbf{observação} começa em $t = j$, quando a coorte medida ingressa, e termina quando o último membro dela conclui ou é jubilado, do que decorre o horizonte:
+\begin{equation}
+    |\mathcal{L}| = 2j - 1
+\end{equation}
 
-% Medir antes disso seria medir o regime transitório em que a universidade ainda se enche, e não o estado estacionário. A distinção não é cosmética: as métricas de alocação são sensíveis ao tamanho da população que disputa as mesmas vagas, e uma curva ao longo de um horizonte que ainda cresce mostra o enchimento da universidade em vez do comportamento do mecanismo.
+O aquecimento é igual ao tempo máximo de permanência, e não é um valor livre. Com ingresso de $N$ alunos por período e permanência máxima $j$, no período $t$ estão matriculadas as coortes que ingressaram em $t, t-1, \dots, t-j+1$; antes de $t = j$ nenhuma coorte é antiga o bastante para sair, de modo que a população cresce $N$ a cada período. A partir de $t = j$ entra uma coorte e sai outra, e a população estabiliza-se em exatamente $N \cdot j$:
+\begin{equation}
+    \left| A^{(t)} \right| \leq N \cdot \min(t, j)
+    \quad \forall t \in \{1, \dots, |\mathcal{L}|\}
+\end{equation}
 
-% O jubilamento, além de regra institucional, é o que faz o estado estacionário existir. Com ingresso contínuo e sem prazo de permanência, a população só deixaria de crescer se todos os alunos concluíssem o curso dentro de um tempo esperado finito, o que não se pode supor de antemão num cenário escassez.
+Medir antes disso seria medir o regime transitório em que a universidade ainda se enche, e não o estado estacionário. A distinção não é cosmética: as métricas de alocação são sensíveis ao tamanho da população que disputa as mesmas vagas, e uma curva ao longo de um horizonte que ainda cresce mostra o enchimento da universidade em vez do comportamento do mecanismo. O jubilamento, além de regra institucional, é o que faz o estado estacionário existir, pois com ingresso contínuo e sem prazo de permanência a população só deixaria de crescer se todos os alunos concluíssem em tempo esperado finito, o que não se pode supor num cenário de escassez.
 
+Medir uma coorte única, e não uma janela de períodos, é o que torna as séries \textbf{longitudinais}. Com várias coortes medidas, um mesmo período contém calouros e veteranos, e a série resultante é um corte transversal da universidade; um corte transversal não exibe efeito cumulativo, que é divergência progressiva das mesmas pessoas. Com uma coorte, o $k$-ésimo período da medição é o $k$-ésimo período de todo estudante medido, e a série passa a ser trajetória. Pelo mesmo motivo, o índice de equidade sobre a coorte mensura a desigualdade entre quem ingressou junto, em vez de confundir progressão com desigualdade.
 
-% Por sua vez, o valor $t^{(t)}_a$ indica por quantos perídos o aluno esteve matrículado até o período $t$:
-% \begin{equation}
-%     t^{(t)}_a = t - T_a \implies a \notin A^{(t)} \quad \forall a \in A
-% \end{equation}
+O ingresso permanece ativo até o fim do horizonte porque, do contrário, a coorte medida viveria numa universidade em esvaziamento, e a satisfação das idades mais velhas sairia inflada por uma folga que o mecanismo não produziu. As coortes que ingressam depois da medida não chegam a concluir e não são medidas: elas existem para manter a concorrência estacionária.
+
+Vale ressaltar o preço dessa escolha: conforme a coorte envelhece, quem concluiu ou foi jubilado sai da amostra, de modo que uma métrica que sobe pode estar subindo porque os estudantes com pior desempenho saíram. Por esse motivo, cada série é publicada ao lado da contagem de sobreviventes.
 
 \subsection{Notas e retorno de créditos}
 
@@ -578,8 +579,9 @@ C_a^{(t, 1)} = C_{\min}
 
 
 \subsection{Grade curricular}
+\label{sec:grade-oferta}
 
-A grade de disciplinas é única e comum a todos os estudantes da simulação, não havendo distinção entre cursos ou campi, por razões de simplificação. Cada disciplina declara carga horária, número de turmas, dificuldade, seus pré-requisitos e a classificação de \textbf{obrigatória} ou \textbf{optativa}, representada pelos conjuntos $M_\text{obg} \subseteq M$ e $M_\text{opt} \subseteq M$, respectivamente. 
+A grade de disciplinas é única e comum a todos os estudantes da simulação, não havendo distinção entre cursos ou campi, por razões de simplificação. Cada disciplina declara carga horária, número de turmas, seus pré-requisitos e a classificação de \textbf{obrigatória} ou \textbf{optativa}, representada pelos conjuntos $M_\text{obg} \subseteq M$ e $M_\text{opt} \subseteq M$, respectivamente. 
 \begin{equation}
 M_\text{obg} \cup M_\text{opt} = M
 \end{equation}
@@ -745,13 +747,17 @@ A carga horária máxima também não impede, por si somente, que um estudante c
 \subsection{Comportamento ex-ante}
 
 \subsubsection{Interesse}
+\label{sec:interesse}
 
-O comportamento dos alunos \textit{ex-ante}, isto é, anterior ao término das alocações, é governado primariamente por uma matriz $i^{(t)}$, na qual cada elemento, $i_{a, x}^{(t)} \in \mathbb{R}_{> 0}$, representa a intensidade do \textbf{interesse} do aluno $a$ na turma $x$ no período $t$. Se o aluno tem mais interesse em uma vaga na turma $x$ em relação à turma $y$, isto implica $i_{a, x}^{(t)} > i_{a, y}^{(t)}$. 
+O comportamento dos alunos \textit{ex-ante}, isto é, anterior ao término das alocações, é governado primariamente por duas matrizes sorteadas. A primeira, $I^{(t)}$, representa o interesse dos alunos nas \textbf{disciplinas}: cada elemento $I^{(t)}_{a, X} \in \mathbb{R}_{>0}$ é a intensidade do interesse do aluno $a$ pela matéria $X$ no período $t$. A segunda, $h^{(t)}$, representa o interesse pelos \textbf{horários}: cada elemento $h^{(t)}_{a, Q_j} \in \mathbb{R}_{>0}$ é o quanto o aluno aprecia o horário $Q_j \in Q$.
 
-A matriz $I^{(t)}$, por sua vez, representa o interesse dos alunos nas disciplinas; cada elemento $I^{(t)}_{a, X}  \in \mathbb{R}_{> 0}$ é construído a partir da média aritmética do interesse pelas turmas de $X$:
-\begin{equation} 
-    I^{(t)}_{a, X} = \frac{1}{|X|} \cdot \sum_{x \in X} i^{(t)}_{a, x}
+O \textbf{interesse pela turma} é o produto dos dois. Denotando por $\mathrm{hor}(x) \in Q$ o horário em que a turma $x$ é ofertada, tem-se que:
+\begin{equation} \label{eq:interesse-turma}
+    i^{(t)}_{a, x} = I^{(t)}_{a, X} \cdot h^{(t)}_{a, \mathrm{hor}(x)}
+    \quad \forall X \in M, \forall x \in X
 \end{equation}
+
+Dado que o fator da matéria é comum a todas as turmas de $X$, o que distingue uma turma da outra para o aluno é exclusivamente o horário dela. Essa construção faz emergir a preferência de rotina sem que seja preciso declarar turnos: quem desgosta de um horário desgosta dele em toda disciplina, pois o fator de horário é compartilhado por toda a grade.
 
 \subsubsection{Utilidade}
 
@@ -778,38 +784,38 @@ A partir dos valores da matriz de interesses em disciplinas, $I^{(t)}$, e das di
     \forall a \in A^{(t)}, \forall X \in M_a^{(t)}
 \end{equation}
 
-Com base em $U^{(t)}$, a matriz de utilidades de turmas, $u^{(t)}$, é construída seguindo as seguintes propriedades: os valores de utilidade das turmas de cada disciplina elegível para cada aluno têm as mesmas proporções dos seus valores de interesse; e a turma de maior utilidade tem o mesmo valor numérico que a utilidade da disciplina.
+Com base em $U^{(t)}$, a matriz de utilidades de turmas, $u^{(t)}$, é construída repartindo a utilidade da disciplina pelo interesse do aluno nos horários das turmas dela, tomado relativamente ao melhor horário dele:
 \begin{equation}
-    u_{a, x}^{(t)} = U_{a, X}^{(t)} \cdot \frac{i_{a, x}^{(t)}}{\max_{y \in X} i_{a, y}^{(t)}}
+    u_{a, x}^{(t)} = U_{a, X}^{(t)} \cdot \frac{h_{a, \mathrm{hor}(x)}^{(t)}}{\max_{Q_j \in Q} h_{a, Q_j}^{(t)}}
     \quad \forall a \in A^{(t)}, \forall X \in M, \forall x \in X
 \end{equation}
+
+O denominador é o melhor horário \textbf{do aluno}, e não o melhor horário em que $X$ é ofertada. A escolha é deliberada: assim o fator fica comparável entre períodos, visto que o melhor horário é propriedade do gosto dele e não da oferta daquele semestre. Com o máximo tomado por disciplina, a mesma turma valeria coisas diferentes em semestres distintos sem que o gosto houvesse mudado.
 
 Por consequência, dá-se que:
 \begin{equation}
     u_{a, x}^{(t)} \leq U_{a, X}^{(t)}
     \quad \forall a \in A^{(t)}, \forall X \in M, \forall x \in X
 \end{equation}
-\begin{equation}
-    \sum_{X \in M} \sum_{x \in X} u_{a, x}^{(t)} \geq 1
-    \quad \forall a \in A^{(t)}, \forall X \in M, \forall x \in X
-\end{equation}
 
-A motivação por trás desse método de construção se dá pelo fato de que, como não é possível ao aluno obter múltiplas turmas de uma mesma disciplina, a utilidade máxima obtível de cada disciplina é equivalente à utilidade da sua turma de maior interesse.
+A igualdade vale apenas para a turma que cai no horário favorito do aluno. Por isso a soma das melhores turmas de cada disciplina elegível é, no máximo, 1, e alcança esse teto somente para quem encontra toda disciplina elegível ofertada no horário que mais aprecia.
+
+A motivação por trás desse método de construção se dá pelo fato de que, como não é possível ao aluno obter múltiplas turmas de uma mesma disciplina, a utilidade máxima obtível de cada disciplina é equivalente à utilidade da turma dela no melhor horário dele.
 
 \begin{table}[htbp]
 \centering
-\caption{Exemplo de construção das utilidades para um aluno, com $A$ e $B$ elegíveis, e $C$ e $D$ bloqueadas por pré-requisito}
+\caption{Exemplo de construção das utilidades para um aluno, com $A$ e $B$ elegíveis, e $C$ e $D$ bloqueadas por pré-requisito. As duas turmas de cada disciplina caem nos horários $Q_1$ e $Q_2$, com $h_{a, Q_1} = 1$ e $h_{a, Q_2} = 0{,}5$}
 \label{tab:exemplo-utilidade}
-\begin{tabular}{lcccccc}
+\begin{tabular}{lcccc}
 \toprule
-\textbf{Disciplina} & $\mathrm{pre}(X)$ & $i_{a, x}^{(t)}$ & $I_{a, X}^{(t)}$ &  $U_{a, X}^{(t)}$ & $u_{a, x}^{(t)}$ \\
+\textbf{Disciplina} & $\mathrm{pre}(X)$ & $I_{a, X}^{(t)}$ &  $U_{a, X}^{(t)}$ & $u_{a, x}^{(t)}$ \\
 \midrule
-$A$ & $\emptyset$ & 4,5; 1,5 & 3  & $\left(3 + \frac{I_{a, C}}{2} \right)\div 10 = 0,4$       & 0,4; 0,1333... \\
-$B$ & $\emptyset$ & 2; 4     & 3  & $\left(3 + \frac{I_{a, C}}{2} + \frac{I_{a, D}}{1}\right) \div 10 =0,6$ & 0,3; 0,6  \\
-$C$ & $\{A, B\}$  & 2; 2     & 2                  & 0   & 0; 0       \\
-$D$ & $\{B\}$     & 1; 3     & 2                  & 0   & 0; 0      \\
+$A$ & $\emptyset$ & 3 & $\left(3 + \frac{I_{a, C}}{2} \right)\div 10 = 0,4$ & 0,4; 0,2 \\
+$B$ & $\emptyset$ & 3 & $\left(3 + \frac{I_{a, C}}{2} + \frac{I_{a, D}}{1}\right) \div 10 = 0,6$ & 0,6; 0,3 \\
+$C$ & $\{A, B\}$  & 2 & 0 & 0; 0 \\
+$D$ & $\{B\}$     & 2 & 0 & 0; 0 \\
 \midrule
-Soma    &             &          & 10 & 10                  & 1   &           \\
+Soma & & 10 & 1 & \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -856,46 +862,53 @@ A matriz binária $z^{[pos](t)} \in \{0, 1\}^{|A| \times |B|}$ representa quais 
 
 \subsection{Heterogeneidade da população}
 
-A população não é homogênea, ou seja, os alunos terão diversos valores de interesse ($i^{(t)}$), seletividade ($S^{(t)}$), disponibilidade ($W^{[\text{pos}](t)}$) e desempenho acadêmico ($n^{(t)}$). A distribuição desses valores se dará a partir de funções de densidade de probabilidade da família normal; mais especificamente, define-se valores base fixos (sem índice temporal $^{(t)}$) para essas matrizes, a partir dos quais serão gerados novos valores a cada período $t$ a partir de perturbações aleatórias. Dessa forma, cada aluno possui um perfil relativamente estável, com flutuações moderadas no decorrer da simulação (por exemplo: um aluno com tendências a tirar notas boas, mas ocasionalmente é reprovado em uma ou outra disciplina).
+A população não é homogênea: os alunos terão diversos valores de interesse ($i^{(t)}$), seletividade ($S$) e disponibilidade ($W^{[\text{pos}](t)}$). O desempenho acadêmico, por sua vez, é homogêneo: a probabilidade de aprovação é parâmetro de cenário, igual para todos, e o quantil da nota é sorteado novamente a cada vez que o aluno cursa a disciplina.
+
+Essa assimetria é deliberada. Como a nota é sorteada independentemente da seletividade, do interesse e da disponibilidade, o CR final do aluno fica independente, por construção, de todo o restante do perfil dele; por consequência, qualquer inclinação observada entre o CR e a satisfação é atribuível ao mecanismo, sem confundidor a descartar. O preço é que o CR passa a medir realização de nota, e não capacidade, e que a dispersão dele entre alunos decresce com a raiz do número de disciplinas aprovadas.
 
 \subsubsection{Perturbações e estabilidade}
 
-Para cada distribuição, define-se também a \textbf{estabilidade}, isto é, o quão resistentes a flutuação serão os valores no decorrer dos períodos. Assumindo $v \in \mathbb{R}$ como um valor base obtido de uma distribuição, $\beta \in \mathbb{R}$ como um segundo valor aleatório obtido da mesma distribuição (que atuará como perturbação), $v^{(t)} \in \mathbb{R}$ como o valor resultante no período $t$, e $\alpha \in [0, 1]$ como a estabilidade ($0$ implica o valor base não influenciar nos valores de cada período, e $1$ implica os valores de cada período serem todos iguais ao base), tem-se que:
-\begin{equation}\label{perturbacoes}
-    v^{(t)} = \sqrt{\alpha} \cdot v + \sqrt{1 - \alpha} \cdot \beta
+Os valores que flutuam entre períodos são o interesse e a disponibilidade. Cada aluno carrega uma \textbf{âncora} $q_a \in (0, 1)$, que é a posição permanente dele naquele eixo, e a cada período ela sofre um abalo gaussiano $\varepsilon_a^{(t)}$, cujo resultado é refletido de volta para dentro do intervalo. Denotando por $\mathrm{ref}: \mathbb{R} \rightarrow [0, 1]$ a reflexão, de período 2 e par, tem-se que:
+\begin{equation}\label{eq:perturbacoes}
+    q_a^{(t)} = \mathrm{ref}\left( q_a + \varepsilon_a^{(t)} \right)
 \end{equation}
 
-As raízes quadradas na equação são usadas para preservar a variância das distribuições, visto que são da família normal \cite{???}.
+A reflexão preserva a marginal uniforme \textbf{exatamente}: se a âncora é uniforme em $(0, 1)$ e o abalo é simétrico e independente dela, o resultado também é uniforme em $(0, 1)$, qualquer que seja a dispersão do abalo. A demonstração decorre de desdobrar o uniforme de $(0, 1)$ para o círculo de perímetro 2, no qual somar qualquer variável independente devolve um uniforme, e projetar de volta pela onda triangular. É essa propriedade que faz a distribuição realizada de cada eixo ser a declarada, já que o valor do período é obtido aplicando-se a inversa da acumulada ao quantil refletido.
 
-\subsubsection{Desempenho acadêmico e dificuldade}
+O abalo incide sempre sobre a âncora, e nunca sobre o resultado do período anterior: encadear perturbações produziria um passeio aleatório, cuja posição difunde para o uniforme e esquece a origem, de modo que o nível permanente desapareceria e deixaria de haver aluno sistematicamente mais interessado que outro. A \textbf{estabilidade} $\alpha \in [0, 1]$ governa a escala do abalo: em 1 não há abalo e a âncora vale em todo período; em 0 o abalo é grande o bastante para a posição recomeçar. Vale ressaltar que ela não é a correlação de Pearson entre dois períodos, visto que a reflexão não admite forma fechada para essa grandeza.
 
-No caso das notas, a distribuição usada para a densidade de probabilidade é a normal bipartida, com área fixada em 1, parametrizada pela moda ($0 \leq m \leq 10$) e por duas probabilidades: a chance do aluno obter nota mínima em cada disciplina, $P(v \leq 0) \in [0, 1]$, e a chance do aluno obter nota máxima, $P(v \geq 10) \in [0, 1]$. Por exemplo, pode-se usar uma distribuição com moda $6$, chance de nota máxima $5\%$ e, de nota mínima, $1\%$.
+A seletividade, por sua vez, não flutua: ela é sorteada uma vez e vale para o curso inteiro. A utilidade de reserva que dela deriva já flutua pelo denominador, dado que o interesse é resorteado a cada período e o conjunto elegível muda conforme o aluno progride.
 
-Cada disciplina possui uma dificuldade, denotada por $d_X \in \mathbb{R}_{>0}$, que distorce a distribuição das notas dos alunos ao alterar a probabilidade dos extremos: quanto maior a dificuldade, menor é a chance de obter nota máxima, e maior é a chance de obter nota mínima. Paralelamente, quando um aluno reprova e precisa recursar uma disciplina, ele terá mais chances de obter nota máxima na próxima tentativa, e menos chances de obter nota mínima, pois ele está cursando um conteúdo que já estudou anteriormente. Assumindo $k \in \mathbb{N}^*$ como quantas vezes o aluno cursou a disciplina (na primeira vez, $k = 1$), tem-se que:
+\subsubsection{Desempenho acadêmico}
+
+A distribuição das notas é uma \textbf{normal}, parametrizada por duas grandezas de cenário: o desvio padrão $\sigma \in \mathbb{R}_{>0}$ e a \textbf{probabilidade de aprovação} $P_\text{apr} \in (0, 1)$, isto é, a chance de a nota alcançar o limiar $n_\text{apr}$. A média não é parâmetro, e sim consequência das duas, por inversão direta de $P(v \geq n_\text{apr}) = P_\text{apr}$:
+\begin{equation} \label{eq:media-nota}
+    \mu = n_\text{apr} + \sigma \cdot \Phi^{-1}(P_\text{apr})
+\end{equation}
+
+Parametrizar pela aprovação, e não pela média, é o que torna o número declarado igual ao realizado. A nota é truncada em décimos e presa ao intervalo $[0, 10]$, e nenhuma das duas operações desloca a taxa: quem obteria 11 recebe 10 e continua aprovado, quem obteria $-1$ recebe 0 e continua reprovado, e o truncamento alcança $n_\text{apr}$ exatamente quando o latente o alcança, visto que $10 \cdot n_\text{apr}$ é inteiro. Assumindo $v$ como o valor sorteado da distribuição, a nota correspondente é:
 \begin{equation}
-    P(v^\prime \geq 10) = P(v \geq 10)^{\frac{d}{k}}
-\end{equation}
-\begin{equation}
-    P(v^\prime \leq 0) = P(v \leq 0)^{\frac{k}{d}}
+    n_{a, X}^{(t)} = \mathrm{clamp}_{[0, 10]}\frac{\lfloor v \cdot 10 \rfloor}{10}
 \end{equation}
 
-Vale ressaltar que a dificuldade da disciplina serve um propósito específico para a simulação: emular gargalos na progressão dos alunos. Em um cenário universitário real, as disciplinas mais disputadas normalmente são as mais difíceis, pois reprovam com maior frequência, fazendo que os alunos tenham que cursar ela mais vezes em média, o que evidentemente aumenta a sua demanda.
+O clipe é o que torna as notas 0 e 10 alcançáveis. Numa distribuição contínua, o último décimo da escala tem probabilidade desprezível, de modo que a nota máxima jamais sairia; censurar na borda concentra ali toda a massa que o instrumento não consegue distinguir, o que é coerente com o fato de o limite da escala ser do instrumento, e não do aluno.
 
-Assumindo $v^\prime$ como um valor obtido da distribuição distorcida pela dificuldade, a nota correspondente é calculada a partir deste valor como:
-\begin{equation}
-    n_{a, X}^{(t)} = \mathrm{clamp}_{[0, 10]}\frac{\lfloor v^\prime \cdot 10\rceil}{10}
+Quando um aluno reprova e precisa recursar uma disciplina, ele terá mais chances de aprovar na próxima tentativa, pois estará cursando um conteúdo que já estudou. Assumindo $k \in \mathbb{N}$ como quantas vezes o aluno já cursou a disciplina anteriormente (na primeira vez, $k = 0$) e $\omega \in \mathbb{R}_{\geq 0}$ como o \textbf{ganho por repetição}, a chance daquela tentativa é:
+\begin{equation} \label{eq:aprovacao-tentativa}
+    P_k = P_\text{apr}^{\frac{1}{1 + \omega \cdot k}}
 \end{equation}
+
+O denominador é a experiência acumulada, que começa em 1 e soma $\omega$ a cada repetição. Como $P_\text{apr}$ está em $(0, 1)$, elevá-lo a um expoente menor que 1 o aumenta, de modo que repetir sempre ajuda e nunca atrapalha. Os dois extremos de $\omega$ significam algo: em 0 não se aprende nada com repetir, e a aprovação é geométrica; em 1 cada tentativa soma uma unidade inteira. Vale ressaltar que a alavanca é fraca quando a aprovação é alta: com $P_\text{apr} = 0{,}7$, a faixa inteira de $\omega$ move cerca de 5\% nas tentativas esperadas até aprovar, ao passo que com $P_\text{apr} = 0{,}35$ ela move 43\%. Quem governa a cauda de retidos, portanto, é a probabilidade de aprovação.
+
+As disciplinas não têm dificuldade própria: o gargalo na progressão dos alunos decorre do afunilamento da oferta ao longo dos níveis da grade obrigatória, descrito na Subseção \ref{sec:grade-oferta}, e a reprovação homogênea de $1 - P_\text{apr}$ basta para alimentá-lo.
 
 \subsubsection{Interesse, seletividade e disponibilidade}
 
 No caso das demais matrizes, a distribuição usada para a densidade de probabilidade é a log-normal, pois isso garante que os valores serão sempre positivos.
 
-Para o interesse e seletividade, a distribuição é parametrizada pela média e desvio padrão. Já para a disponibilidade, a paramterização ocorre pela moda ($0 < m \leq W_a$) e pela chance do aluno ter disponibilidade igual ou superior à carga horária máxima institucional, $P(W^{[pos]}_a \geq W_a)$.
+Para o interesse e a seletividade, a distribuição é parametrizada pela média e pelo desvio padrão do logaritmo. Já para a disponibilidade, a parametrização ocorre pela moda ($0 < m \leq W_a$) e pela chance de o aluno ter disponibilidade igual ou superior à carga horária máxima institucional, $P(W^{[pos]}_a \geq W_a)$.
 
-Para evitar que disciplinas com mais turmas tenham valores de interesse mais similares entre si devido ao cálculo da média com mais valores, define-se um valor preliminar de interesse para as disciplinas (por exemplo, $v_{a, X}$) e, a partir de perturbações destes, define-se o interesse de suas turmas, de forma similar às perturbações por período descritas anteriormente na Equação \ref{perturbacoes}.
-\begin{equation}\label{perturbacoes}
-    i_{a, x} = \sqrt{\alpha} \cdot v_{a, X} + \sqrt{1 - \alpha} \cdot \beta
-\end{equation}
+O interesse por uma turma, conforme a Subseção \ref{sec:interesse}, é o produto de dois fatores sorteados: o interesse pela disciplina e o interesse pelo horário. Cada um deles tem âncora e abalo próprios, pela Equação \eqref{eq:perturbacoes}, e a turma em si não tem sorteio. Por consequência, o que distingue duas turmas de uma mesma disciplina para o aluno é exclusivamente o horário delas, e um aluno que desgosta de um horário desgosta dele em toda disciplina, do que emerge a preferência de rotina sem que exista turno.
 
 % Para o recorte dos resultados, a população é dividida em \textbf{faixas de quantil} sobre o nível basilar de cada eixo. O corte é teórico, e não amostral: como o nível basilar é normal padrão por construção, a sua acumulada é uniforme e as fronteiras das faixas são as mesmas em toda execução. Cortar nos quantis amostrais produziria faixas exatamente equilibradas dentro de cada simulação, mas fronteiras distintas a cada semente, e a média sobre múltiplas execuções estaria somando faixas que não designam o mesmo conjunto de estudantes.
 
@@ -948,23 +961,32 @@ Primeiro, determina-se a \textbf{satisfação}, $\psi_a^{(t)} \in [0, 1]$, de ca
 
 A satisfação média dos estudantes, $\bar{\psi}^{(t)} \in [0, 1]$, segue a equação \eqref{eq:media}.
 
-\subsubsection{Desperdício}
-
-Determina-se o \textbf{desperdício}, $\omega_a^{(t)} \in [0, 1]$, como a soma total das utilidades das turmas que o aluno recebeu, mas decidiu excluir ao invés de cursar:
-\begin{equation}
-    \omega_a^{(t)} = \sum_{x \in B} u_{a, x}^{(t)} \cdot \left(z_{a, x}^{(t, *)} - z_{a, x}^{[pos](t)}\right)
-    \quad \forall a \in A^{(t)}
-\end{equation}
-
 \subsubsection{Aproveitamento}
 
-Determina-se o \textbf{aproveitamento}, $\eta_a^{(t)} \in [0, 1]$, como a fração da carga horária máxima do estudante que a alocação efetivamente preencheu:
+Determina-se o \textbf{aproveitamento}, $\theta_a^{(t)} \in [0, 1]$, como a fração da carga horária obtida que o estudante de fato cursou:
 \begin{equation}
-    \eta_a^{(t)} = \frac{1}{W_a^{(t, 1)}} \cdot \sum_{x \in B} w_{x} \cdot z_{a, x}^{(t, *)}
-    \quad \forall a \in A^{(t)}
+    \theta_a^{(t)} = \frac{\sum_{x \in B} w_x \cdot z_{a, x}^{[pos](t)}}{\sum_{x \in B} w_x \cdot z_{a, x}^{(t, *)}}
+    \quad \forall a \in A^{(t)} : \sum_{x \in B} z_{a, x}^{(t, *)} > 0
 \end{equation}
 
-Trata-se da contraparte em carga horária da satisfação, que é em utilidade, e as duas separam-se exatamente onde está o efeito que interessa medir: o estudante que concentra os lances, obtém a turma que mais queria e deixa ocioso o restante de $W_a^{(t, 1)}$ pontua satisfação alta e aproveitamento baixo. O limite superior decorre da equação \eqref{eq:capacidade}, que restringe ambos os mecanismos.
+O complemento é a vaga que o aluno recebeu e excluiu, que para a universidade é tão perdida quanto a vaga que ninguém pediu, visto que só retorna à oferta no período seguinte.
+
+A grandeza é medida em \textbf{carga horária}, e não em contagem de vagas, e a escolha da unidade não é detalhe: ela pode inverter qual mecanismo parece melhor. Tomando dez vagas que somam 25 h, o estudante que exclui uma turma de 6 h retém nove das dez vagas (0,90) mas apenas 19 das 25 horas (0,76), ao passo que o que exclui três turmas de 1 h retém sete vagas (0,70) e 22 horas (0,88). Como as cargas da grade variam de 1 a 6 h, contar vagas apagaria na leitura justamente o contraste que esse espalhamento existe para expor. Ademais, a carga é a unidade do que de fato se aloca, pois a restrição do estudante é a equação \eqref{eq:capacidade}, em horas, e a mochila que decide o descarte pesa horas.
+
+Vale ressaltar que a razão não existe para quem nada obteve, e esses estudantes saem da amostra, não aleatoriamente mas por terem perdido a disputa, de modo que $\theta$ condiciona em ter obtido alguma coisa. Por esse motivo, publica-se junto a contagem de quem entrou nela.
+
+\subsubsection{Rodada média}
+
+Determina-se a \textbf{rodada média}, $\bar{r}^{(t)} \in [1, |R|]$, como a rodada de alocação média das vagas alocadas no período:
+\begin{equation}
+    \bar{r}^{(t)} = \frac{\sum_{r = 1}^{|R|} r \cdot \sum_{(a, x) \in D} z_{a, x}^{(t, r)}}{\sum_{r = 1}^{|R|} \sum_{(a, x) \in D} z_{a, x}^{(t, r)}}
+\end{equation}
+
+Metade das vagas saindo na primeira rodada e metade na segunda dá $\bar{r} = 1{,}5$; quanto mais próxima de 1, mais a alocação resolveu a demanda de uma vez só.
+
+Esta é a métrica que mensura o custo da auto-restrição \textit{ex-ante} discutida na introdução. Do lado do leilão, o resolvedor global vê a demanda inteira e decide com ela à vista, de modo que a primeira rodada tende a atender quase tudo. Na linha de base, o estudante fecha em casa um pacote que caiba na carga horária, perde parte dele para a concorrência e só recupera a carga liberada na rodada seguinte: cada volta é uma fragmentação que o compromisso prévio causou.
+
+Vale ressaltar que a grandeza é censurada pelo teto de rodadas, pois a vaga que seria alocada depois da última simplesmente não é alocada, e a razão condiciona no que foi alocado. O corte recai sobre a cauda do braço mais lento, que é justamente o que se desejava medir, de modo que o viés empurra $\bar{r}$ para baixo onde ele deveria estar alto. Por esse motivo, encerra-se o período quando uma rodada não concede vaga alguma, e publica-se quantos períodos alcançaram o teto.
 
 \subsubsection{Progresso}
 
@@ -1000,50 +1022,15 @@ A equidade (\textit{fairness}), denotada por $\phi^{(t)} \in \{0\} \cup [\frac{1
 
 Caso a fração resulte na indeterminação $\frac{0}{0}$, assume-se que $\phi^{(t)} = 0$.
 
-\subsubsection{Correlações}
+\subsubsection{Dispersões}
 
-Por fim, para mensurar o grau de dependência linear entre duas grandezas definidas por estudante, aplica-se o coeficiente de correlação de Pearson \cite{montgomery2010applied}. Sejam $f_a^{(t)}$ e $g_a^{(t)}$ duas dessas grandezas, e $\bar{f}^{(t)}$ e $\bar{g}^{(t)}$ as suas médias pela equação \eqref{eq:media}; o coeficiente, denotado por $\lambda^{(t)}(f, g) \in [-1, 1]$, estabelece-se pela covariância entre elas, normalizada pelo produto de seus respectivos desvios padrão:
-\begin{equation}
-    \lambda^{(t)}(f, g) =
-    \frac{
-        \sum_{a \in A_\text{med}^{(t)}}
-            \left( f_a^{(t)} - \bar{f}^{(t)} \right) \cdot
-            \left( g_a^{(t)} - \bar{g}^{(t)} \right)
-    }{
-        \sqrt{
-            \sum_{a \in A_\text{med}^{(t)}} \left( f_a^{(t)} - \bar{f}^{(t)} \right)^2 \cdot
-            \sum_{a \in A_\text{med}^{(t)}} \left( g_a^{(t)} - \bar{g}^{(t)} \right)^2
-        }
-    }
-\end{equation}
+Além das séries por período, os resultados são lidos por \textbf{dispersões}: um ponto por estudante, com duas grandezas de vida inteira nos eixos. A grandeza do eixo das abscissas é o \textbf{CR final}, $N_a^{(T^\prime_a - 1)}$, isto é, o coeficiente de rendimento no período em que o estudante deixou a universidade, ou a \textbf{utilidade de reserva} média dos períodos dele; a das ordenadas é qualquer das métricas acima.
 
-Quando $\lambda^{(t)}$ é positivo, indica uma correlação linear positiva entre as duas grandezas; quando é negativo, indica o oposto; por fim, $\lambda^{(t)} = 0$ indica ausência de correlação. Além disso, o valor absoluto de $\lambda^{(t)}$ mensura a intensidade dessa correlação: quanto mais próximo de $1$, mais forte ela é. Caso alguma das grandezas não apresente variância no período, o coeficiente não existe, e assume-se $\lambda^{(t)} = 0$.
+Ler o CR na saída, e não no período corrente, é o que torna a dispersão legível: todo ponto é medido no mesmo estágio, de modo que não há mistura de idades, e entre concluintes o número de disciplinas aprovadas é praticamente o mesmo, fixado pela exigência do curso. Entre jubilados ele varia, e varia junto com o azar, razão pela qual os dois grupos são distinguidos no gráfico.
 
-Medem-se seis correlações, cruzando duas grandezas \textbf{declaradas} pelo estudante (o CR, $N_a^{(t)}$, e a seletividade, $S_a^{(t)}$) contra três \textbf{resultados}da alocação dele: a satisfação, $\psi_a^{(t)}$; o aproveitamento, $\eta_a^{(t)}$; e a \textbf{retenção}, $\tau_a^{(t)} \in [0, 1]$, definida como a fração da satisfação alocada que o estudante não descartou:
-\begin{equation}
-    \tau_a^{(t)} = 1 - \frac{\omega_a^{(t)}}{\psi_a^{(t)}}
-    \quad \forall a \in A^{(t)} : \psi_a^{(t)} > 0
-\end{equation}
+A dispersão substitui o coeficiente de correlação porque a forma importa mais que o número. Um coeficiente comprime a nuvem inteira em um escalar e esconde não monotonicidade, ao passo que a hipótese a respeito da seletividade prevê exatamente isso: sob o CR, exigir mais só custa, e a curva decresce; sob o leilão existe um ponto ótimo interior, pois quem não é seletivo espalha crédito e não obtém o que mais queria, enquanto quem é seletivo demais fica de fora.
 
-A retenção entra como razão, e não como a diferença que o desperdício já publica, porque aqui se quer condicionar em quanto o estudante obteve: sem isso o coeficiente mediria em parte "obteve mais", que é justamente o que a coluna do aproveitamento mede. O preço é que ela não existe para quem nada obteve, e esses estudantes saem da amostra das duas células correspondentes.
-
-A Tabela \ref{tab:correlacoes} reúne as seis células e a pergunta que cada uma responde.
-
-\begin{table}[htbp]
-\centering
-\caption{As seis correlações medidas e a pergunta de cada uma}
-\label{tab:correlacoes}
-\begin{tabularx}{\textwidth}{lXXX}
-\toprule
- & \textbf{Satisfação} & \textbf{Aproveitamento} & \textbf{Retenção} \\
-\midrule
-\textbf{CR}           & A alocação acompanha o histórico? & O mérito compra carga horária? & Quem mais obtém mais descarta? \\
-\textbf{Seletividade} & Concentrar os lances compensa?    & Concentrar custa carga horária? & Exigir mais protege de descartar? \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-A célula $\lambda^{(t)}(N, \psi)$ é a que a hipótese nomeia: é por ela que se verifica se a influência do desempenho acadêmico sobre a alocação diminui sob o leilão. As outras cinco não têm predição declarada na hipótese e cumprem papel descritivo, pois qual dos dois sentidos é preferível depende de alocar por mérito passado ou por necessidade presente, e essa é uma escolha normativa externa ao modelo.
+Para o recorte das séries por período, a população é dividida em \textbf{faixas} sobre o valor corrente dessas mesmas duas grandezas, com os pontos de corte declarados no cenário. O corte é teórico, e não amostral: as fronteiras são as mesmas em toda execução, de modo que a média sobre múltiplas sementes soma faixas que designam o mesmo recorte. Cortar nos quantis amostrais produziria faixas equilibradas dentro de cada simulação, porém fronteiras distintas a cada semente.
 
 \chapter{Resultados e discussão}
 

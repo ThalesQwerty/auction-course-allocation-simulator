@@ -1,17 +1,4 @@
-/** O resumo de cinco números de uma amostra, mais os pontos fora dos bigodes.
- *
- *     cerca = 1,5 · (q3 − q1)
- *     bigodes = o valor mais extremo ainda dentro de [q1 − cerca, q3 + cerca]
- *     ponto solto = o que fica fora
- *
- * É a convenção de **Tukey**. Os bigodes não são o mínimo e o máximo: eles
- * param no último dado que ainda está perto do corpo da distribuição, e o que
- * sobra aparece como ponto, que é o que distingue "a amostra é dispersa" de
- * "houve uma simulação estranha".
- *
- * Cada valor dentro de uma caixa é uma simulação; a comparação entre caixas é
- * a **sobreposição** delas, e não a distância entre as medianas.
- */
+/** O resumo de cinco números de uma amostra, mais os pontos fora dos bigodes */
 import { quantile } from "./quantile";
 
 export interface BoxStats {

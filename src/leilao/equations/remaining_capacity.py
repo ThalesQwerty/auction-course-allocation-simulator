@@ -1,11 +1,4 @@
-"""Carga horária que sobra ao agente depois de uma alocação — anteprojeto, eq. (14).
-
-    W_a^(t,r+1) = W_a^(t,r) − Σ_{x ∈ B} w_x · z_{a,x}
-
-A contraparte da eq. (13) do lado do aluno: cada vaga obtida desconta a carga
-da disciplina do teto do período. É a restrição da eq. (4) sendo consumida ao
-longo das rodadas.
-"""
+"""Carga horária que sobra ao agente depois de uma alocação — anteprojeto, eq. (14)."""
 from __future__ import annotations
 
 
