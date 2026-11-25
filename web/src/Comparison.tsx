@@ -1,7 +1,5 @@
 import { useMemo, useState } from "react";
 import {
-  AllocationTimeChart,
-  Histogram,
   LineSample,
   SeriesChart,
   categoricalColors,
@@ -11,30 +9,27 @@ import {
   soloColor,
   usePrefersDark,
 } from "./charts";
-import type {
-  AllocationTimeLine,
-  SeriesArmStyle,
-  SeriesGroupStyle,
-  SeriesLine,
-} from "./charts";
+import type { SeriesArmStyle, SeriesLine } from "./charts";
 import { BoxPlot } from "./charts";
 import {
-  AGGREGATE,
   CUTS,
-  RULERS,
+  PERIOD_POINT,
+  SCATTER_AXES,
   cutDomain,
   cutGroups,
   pointsOf,
-  rulerOf,
   seriesOf,
+  validCuts,
 } from "./bands";
-import type { CutChoice, RulerChoice } from "./bands";
+import type { AxisChoice, CutChoice } from "./bands";
+import { cutBands } from "./cutBands";
+import { studentCurves } from "./studentCurves";
 import { boxStats } from "./equations";
 import { describeComparison, formatRunDate, ComparisonRun } from "./history";
 import { Trace } from "./Trace";
 import { COMPARISON_ARMS } from "./types";
 import { MAX_CUTS, readBandColors, writeBandColor } from "./profileColors";
-import type { ClassCut, CompareRequest, Ruler, RunSummary } from "./types";
+import type { RunSummary, StudentPoint } from "./types";
 
 /** Períodos com uma casa: o tempo de formatura anda em frações de período, e duas casas sugeririam uma precisão que a amostra não tem */
 const formatPeriods = (value: number) =>
@@ -53,72 +48,29 @@ interface Metric {
   betterWhen: "higher" | "lower" | null;
   format: (value: number) => string;
   zeroLine?: boolean;
+   /** A grandeza de vida inteira do aluno, quando ela existe: sem ela a métrica não vai à dispersão */
+  point?: (student: StudentPoint) => number | null;
+   /** As que não se partem em faixas — a equidade é do conjunto, não do aluno */
+  soloOnly?: boolean;
 }
 
-/** A economia de créditos — **exclusiva do leilão** */
-const CREDIT_METRICS: Metric[] = [
-  {
-    id: "credits_supply",
-    title: "Orçamento de créditos por aluno",
-    short: "Orçamento",
-    of: () => null,
-    band: "credits_supply",
-    bounds: [0, Infinity],
-    betterWhen: null,
-    format: formatCount,
-  },
-  {
-    id: "credits_spent",
-    title: "Créditos gastos por aluno",
-    short: "Gastos",
-    of: () => null,
-    band: "credits_spent",
-    bounds: [0, Infinity],
-    betterWhen: null,
-    format: formatCount,
-  },
-  {
-    id: "credits_returned",
-    title: "Créditos retornados por aluno",
-    short: "Retornados",
-    of: () => null,
-    band: "credits_returned",
-    bounds: [0, Infinity],
-    betterWhen: null,
-    format: formatCount,
-  },
-];
-
 /** Os recortes do gráfico de preço */
-const CLASS_CUTS: { axis: ClassCut; label: string }[] = [
-  { axis: "classes", label: "Turmas" },
-  { axis: "hours", label: "Carga horária" },
-  { axis: "curriculum_period", label: "Período" },
-];
-
-/** O rótulo em português de um grupo da oferta */
-const classGroupLabel = (axis: ClassCut, key: string): string => {
-  if (key === "elective") return "optativa";
-  const value = Number(key);
-  const number = Number.isFinite(value) ? value.toLocaleString("pt-BR") : key;
-  switch (axis) {
-    case "classes":
-      return value === 1 ? "1 turma" : `${number} turmas`;
-    case "hours":
-      return `${number} h`;
-    case "curriculum_period":
-      return `${number}º período`;
-  }
-};
-
 /** As métricas de alocação — as que avaliam a qualidade do que foi alocado */
+/** Quantos pontos a curva por aluno tem por padrão, e o teto que a tela aceita */
+const DEFAULT_CURVE_POINTS = 40;
+
+const MAX_CURVE_POINTS = 300;
+
+const CURVE_POINT_STEP = 10;
+
 const METRICS: Metric[] = [
   {
-    id: "efficiency",
+    id: "satisfaction",
     title: "Satisfação (ψ̄)",
     short: "Satisfação (ψ̄)",
-    of: (run) => run.efficiency,
-    band: "efficiency",
+    of: (run) => run.satisfaction,
+    point: (student) => student.satisfaction,
+    band: "satisfaction",
     bounds: [0, 1],
     betterWhen: "higher",
     format: formatRatio,
@@ -128,6 +80,7 @@ const METRICS: Metric[] = [
     title: "Aproveitamento (θ)",
     short: "Aproveitamento (θ)",
     of: (run) => run.attendance ?? 0,
+    point: (student) => student.attendance,
     band: "attendance",
     bounds: [0, 1],
     betterWhen: "higher",
@@ -138,19 +91,10 @@ const METRICS: Metric[] = [
     title: "Progresso",
     short: "Progresso",
     of: (run) => run.progress,
+    point: (student) => student.progress,
     band: "progress",
     bounds: [0, 1],
     betterWhen: "higher",
-    format: formatRatio,
-  },
-  {
-    id: "fidelity",
-    title: "Fidelidade da mensagem",
-    short: "Fidelidade",
-    of: (run) => run.fidelity,
-    band: "fidelity",
-    bounds: [0, 1],
-    betterWhen: null,
     format: formatRatio,
   },
   {
@@ -158,19 +102,10 @@ const METRICS: Metric[] = [
     title: "Equidade (índice de Jain, φ)",
     short: "Equidade (φ)",
     of: (run) => run.fairness,
+    soloOnly: true,
     band: "fairness",
     bounds: [0, 1],
     betterWhen: "higher",
-    format: formatRatio,
-  },
-  {
-    id: "exclusion_rate",
-    title: "Desperdício de vaga",
-    short: "Desperdício",
-    of: (run) => run.exclusion_rate,
-    band: "exclusion_rate",
-    bounds: [0, 1],
-    betterWhen: "lower",
     format: formatRatio,
   },
   {
@@ -178,27 +113,23 @@ const METRICS: Metric[] = [
     title: "Rodada média (r̄)",
     short: "Rodada média (r̄)",
     of: (run) => run.mean_round ?? 1,
+    point: (student) => student.mean_round,
     band: "mean_round",
     bounds: undefined,
     betterWhen: "lower",
     format: formatRatio,
   },
-  {
-    id: "grade_average",
-    title: "CR médio (N̄)",
-    short: "CR médio",
-    of: (run) => run.grade_average,
-    band: "grade_average",
-    bounds: [0, 10],
-    betterWhen: null,
-    format: formatRatio,
-  },
+];
+
+/** O que se publica **ao lado** das métricas: quem sobreviveu à coorte e até onde chegou. Não são métricas de alocação, e por isso ficam fora da dispersão e do recorte em faixas */
+const CONTEXT: Metric[] = [
   {
     id: "graduation_rate",
     title: "Fração de concluintes",
     short: "Concluintes",
     of: (run) => (run.population ? run.graduates / run.population : null),
     band: "graduation_rate",
+    soloOnly: true,
     betterWhen: "higher",
     bounds: [0, 1],
     format: formatRatio,
@@ -214,66 +145,12 @@ const METRICS: Metric[] = [
 ];
 
 
-/** As quatro frações do funil de uma solicitação — `equations.request_funnel` */
-const FUNNEL = [
-  { key: "requested_share", title: "Fração de solicitadas" },
-  { key: "granted_share", title: "Fração de deferidas" },
-  { key: "attended_share", title: "Fração de cursadas" },
-  { key: "approved_share", title: "Fração de aprovadas" },
-] as const;
-
-const ORDINALS = ["1ª", "2ª", "3ª", "4ª", "5ª", "6ª", "7ª", "8ª", "9ª", "10ª"];
-
-/** Uma métrica por rodada do cenário: as vagas obtidas por aluno naquela rodada */
-const roundMetrics = (rounds: number): Metric[] =>
-  Array.from({ length: rounds }, (_, index) => {
-    const ordinal = ORDINALS[index] ?? `${index + 1}ª`;
-    return {
-      id: `round-${index}`,
-      title: `Alocações por aluno (${ordinal} rodada)`,
-      short: `Alocações (${ordinal} rodada)`,
-      of: (run) => run.allocations_per_round?.[index] ?? null,
-      band: `round_${index + 1}`,
-      bounds: [0, Infinity],
-      betterWhen: null,
-      format: formatCount,
-    };
-  });
-
 /** Os dois braços do leilão que isolam o acúmulo: eles diferem em **uma** coisa só — `credits_ilp` abre todo período em C_min e não tem retorno, `credits_return` carrega o saldo e o alimenta com o k do cenário */
 const WITH_ACCUMULATION = "credits_return";
 const WITHOUT_ACCUMULATION = "credits_ilp";
 
 /** A linha de base, contra a qual as diferenças da tabela de resumo são medidas: a matrícula por CR com varredura, que é o mecanismo real das universidades brasileiras */
 const BASELINE = "ranking_greedy";
-
-/** A grade de correlações: duas grandezas **do aluno** contra três do resultado dele */
-const CORRELATIONS: { key: string; title: string }[] = [
-  {
-    key: "cr_satisfaction",
-    title: "CR × satisfação (λ)",
-  },
-  {
-    key: "cr_occupancy",
-    title: "CR × ocupação",
-  },
-  {
-    key: "cr_dissipation",
-    title: "CR × retenção",
-  },
-  {
-    key: "selectivity_satisfaction",
-    title: "Seletividade × satisfação",
-  },
-  {
-    key: "selectivity_occupancy",
-    title: "Seletividade × ocupação",
-  },
-  {
-    key: "selectivity_dissipation",
-    title: "Seletividade × retenção",
-  },
-];
 
 /** Sinal explícito: numa coluna de diferenças, "+0,04" e "−0,04" se distinguem de relance e "0,04" não */
 const formatDelta = (value: number, format: (v: number) => string) =>
@@ -282,28 +159,37 @@ const formatDelta = (value: number, format: (v: number) => string) =>
 export function Comparison({
   run,
   onReuseConfig,
-  onRecut,
-  recutting,
 }: {
   run: ComparisonRun;
   onReuseConfig: () => void;
-   /** Roda de novo com outros cortes */
-  onRecut: (cuts: Partial<CompareRequest>) => void;
-  recutting: boolean;
 }) {
   const dark = usePrefersDark();
   const result = run.result;
   const ink = inkFor(dark);
    /** As duas escolhas que governam todos os gráficos: a **régua** do eixo X (período, idade ou coorte) e o **recorte** das linhas (a universidade inteira ou um dos quatro eixos de perfil) */
-  const [rulerChoice, setRuler] = useState<RulerChoice>("period");
+  const [axisChoice, setAxis] = useState<AxisChoice>("period");
   const [cutChoice, setCut] = useState<CutChoice>("overall");
    /** As cores escolhidas para as faixas, por eixo */
   const [bandColors, setBandColors] = useState(readBandColors);
-   /** Os cortes em edição, por eixo */
-  const [cutDraft, setCutDraft] = useState<Record<string, number[]>>({});
-   /** O recorte da oferta no gráfico de preço */
-  const [priceCutChoice, setPriceCut] = useState<ClassCut>("curriculum_period");
+   /** Quantos pontos a curva por aluno tem: cada um é uma faixa de quantil da coorte */
+  const [curvePoints, setCurvePoints] = useState(DEFAULT_CURVE_POINTS);
+   /** Os cortes de cada eixo: escolha de **visualização**, porque o recorte sai das linhas cruas. `applied` guarda o último conjunto válido, para o gráfico não piscar enquanto se digita */
+  const [cutState, setCutState] = useState(() => {
+    const start: Record<string, number[]> = {
+      grade_average: [...(run.config.grade_cuts ?? [])],
+      reserve: [...(run.config.reserve_cuts ?? [])],
+    };
+    return { typed: start, applied: start };
+  });
 
+  const changeCuts = (axis: CutChoice, values: number[]) =>
+    setCutState((current) => {
+      const typed = { ...current.typed, [axis]: values };
+      return {
+        typed,
+        applied: validCuts(axis, values) ? typed : current.applied,
+      };
+    });
    /** Os dois leilões são escolha de quem configura a comparação */
   const hasBothAuctions = [WITH_ACCUMULATION, WITHOUT_ACCUMULATION].every((key) =>
     result.arms.some((arm) => arm.key === key)
@@ -318,101 +204,70 @@ export function Comparison({
     [result.arms]
   );
 
-   /** O custo de **rodar** cada mecanismo, rodada a rodada */
-  const allocationTimes: AllocationTimeLine[] = useMemo(
-    () =>
-      arms
-        .map((arm) => ({
-          ...arm,
-          seconds:
-            result.arms.find((entry) => entry.key === arm.key)?.allocation_seconds ?? [],
-        }))
-        .filter((line) => line.seconds.length > 0),
-    [arms, result.arms]
-  );
-
-   /** Os recortes da oferta que esta comparação traz */
-  const priceCuts = CLASS_CUTS.filter((option) =>
-    result.arms.some((arm) =>
-      arm.class_prices?.some((cut) => cut.axis === option.axis && cut.groups.length)
-    )
-  );
-  const priceCut: ClassCut =
-    priceCuts.some((option) => option.axis === priceCutChoice)
-      ? priceCutChoice
-      : (priceCuts[0]?.axis ?? "curriculum_period");
-
-   /** As cores do recorte da oferta */
-  const priceGroups: SeriesGroupStyle[] = useMemo(() => {
-    const present = [
-      ...new Set(
-        result.arms.flatMap(
-          (arm) =>
-            arm.class_prices
-              ?.find((cut) => cut.axis === priceCut)
-              ?.groups.map((group) => group.group) ?? []
-        )
-      ),
-    ];
-    const labels = present.map((key) => classGroupLabel(priceCut, key));
-    const colors = categoricalColors(labels, dark);
-    return present.map((key, index) => ({
-      key,
-      label: labels[index],
-      color: colors[labels[index]],
-    }));
-  }, [result.arms, priceCut, dark]);
-
-   /** As linhas do preço: um grupo da oferta sob um modelo */
-  const priceLines: SeriesLine[] = arms.flatMap((arm) =>
-    (
-      result.arms
-        .find((entry) => entry.key === arm.key)
-        ?.class_prices?.find((cut) => cut.axis === priceCut)?.groups ?? []
-    ).map((group) => ({
-      arm: arm.key,
-      group: group.group,
-      points: pointsOf(group).flatMap((x, i) => {
-        const band = group.values.mean_price?.[i];
-        return band
-          ? [{ x, q1: band[0], median: band[1], q3: band[2], n: group.n[i] }]
-          : [];
-      }),
-    }))
-  );
-
   const series = useMemo(
     () =>
       Object.fromEntries(
-        arms.map((arm) => [
-          arm.key,
-          seriesOf(result.arms.find((a) => a.key === arm.key)),
-        ])
+        arms.map((arm) => {
+          const found = result.arms.find((a) => a.key === arm.key);
+          const stored = seriesOf(found);
+          const live = (["grade_average", "reserve"] as const).flatMap((axis) => {
+            const option = CUTS.find((entry) => entry.axis === axis);
+            const bands =
+              found && option?.domain
+                ? cutBands(
+                    found.runs,
+                    axis,
+                    cutState.applied[axis] ?? [],
+                    option.domain,
+                    option.decimals ?? 0
+                  )
+                : null;
+            return bands ? [bands] : [];
+          });
+          // Sem linhas cruas (execução antiga) só resta o recorte que o motor gravou
+          return [
+            arm.key,
+            live.length
+              ? [...stored.filter((axis) => axis.axis === "overall"), ...live]
+              : stored,
+          ];
+        })
       ),
-    [arms, result.arms]
+    [arms, result.arms, cutState.applied]
   );
 
-   /** As réguas que esta comparação traz */
-  const rulers = RULERS.filter((option) =>
-    Object.values(series).some((axes) =>
-      axes.some((a) => rulerOf(a) === option.ruler && a.groups.length)
-    )
+   /** O recorte é editável quando sai das linhas cruas; execução antiga trouxe faixas fixas */
+  const editableCuts = result.arms.some((arm) =>
+    arm.runs.some((entry) => entry.observations?.period.length)
   );
+
+   /** Quanto dos períodos medidos bateu no teto de rodadas: é onde r̄ perde a cauda */
+  const cappedShare = useMemo(() => {
+    const todos = result.arms.flatMap((arm) => arm.runs);
+    const total = todos.reduce((soma, run) => soma + run.periods, 0);
+    const teto = todos.reduce((soma, run) => soma + (run.capped_periods ?? 0), 0);
+    return total > 0 ? teto / total : null;
+  }, [result.arms]);
+
+   /** Um ponto por aluno medido, braço a braço */
+  const pointsOfArm = (key: string): StudentPoint[] =>
+    result.arms.find((arm) => arm.key === key)?.points ?? [];
+
+   /** A dispersão só existe com ponto gravado: as comparações antigas não têm */
+  const hasPoints = result.arms.some((arm) => (arm.points?.length ?? 0) > 0);
+
    /** O que o eixo X está mostrando */
-  const view: RulerChoice =
-    rulerChoice === AGGREGATE || rulers.some((r) => r.ruler === rulerChoice)
-      ? rulerChoice
-      : (rulers[0]?.ruler ?? "period");
-  const aggregated = view === AGGREGATE;
-  const ruler: Ruler = aggregated ? (rulers[0]?.ruler ?? "period") : (view as Ruler);
-  const scale = RULERS.find((option) => option.ruler === ruler) ?? RULERS[0];
+  const view: AxisChoice =
+    !hasPoints && (axisChoice === "grade_average" || axisChoice === "reserve")
+      ? "period"
+      : axisChoice;
+  const aggregated = view === "aggregate";
+  const scattered = view === "grade_average" || view === "reserve";
+  const scatterAxis = SCATTER_AXES.find((option) => option.key === view);
 
-  const rulerAxes = useMemo(
-    () => Object.values(series).flat().filter((a) => rulerOf(a) === ruler),
-    [series, ruler]
-  );
+  const rulerAxes = useMemo(() => Object.values(series).flat(), [series]);
 
-   /** Os recortes que esta comparação traz **nesta régua** */
+   /** Os recortes que esta comparação traz */
   const cuts = CUTS.filter((option) =>
     rulerAxes.some((a) => a.axis === option.axis && a.groups.length)
   );
@@ -428,30 +283,20 @@ export function Comparison({
         (arm) =>
           cut === "overall" ||
           (series[arm.key] ?? []).some(
-            (a) => rulerOf(a) === ruler && a.axis === cut && a.groups.length
+            (a) => a.axis === cut && a.groups.length
           )
       ),
-    [arms, series, ruler, cut]
+    [arms, series, cut]
   );
 
    /** O eixo escolhido no catálogo de recortes, com domínio, passo e os cortes em vigor — os do rascunho, se houver, senão os da execução */
   const cutOption = CUTS.find((option) => option.axis === cut);
-  const runCuts = cutOption?.field ? (run.config[cutOption.field] ?? []) : [];
-  const cutValues = cutOption?.field
-    ? (cutDraft[cutOption.field] ?? runCuts)
-    : [];
+  const cutValues = cutOption?.field ? (cutState.typed[cut] ?? []) : [];
   const [cutLow, cutHigh] = cutDomain(cut) ?? [
     0,
     Number.POSITIVE_INFINITY,
   ];
-  const cutsValid =
-    cutValues.every((value) => value > cutLow && value < cutHigh) &&
-    new Set(cutValues).size === cutValues.length;
-  const cutsChanged =
-    cutValues.length !== runCuts.length ||
-    [...cutValues]
-      .sort((a, b) => a - b)
-      .some((value, index) => value !== [...runCuts].sort((a, b) => a - b)[index]);
+  const cutsValid = validCuts(cut, cutValues);
   const nextCut = (() => {
     const step = cutOption?.step ?? 1;
     const maior = cutValues.length ? Math.max(...cutValues) : cutLow;
@@ -459,8 +304,8 @@ export function Comparison({
     return Math.round((maior + (teto - maior) / 2) / step) * step;
   })();
 
-  const axisOf = (armKey: string) =>
-    series[armKey]?.find((a) => rulerOf(a) === ruler && a.axis === cut);
+  const axisOf = (armKey: string, axis: CutChoice = cut) =>
+    series[armKey]?.find((a) => a.axis === axis);
 
   const groups = useMemo(() => {
     const present = [
@@ -476,18 +321,15 @@ export function Comparison({
     });
   }, [rulerAxes, cut, dark, bandColors]);
 
-   /** A seção da economia só aparece com leilão na comparação **e** com dado dela: as gravadas antes de 14/11/2026 não a têm, e um gráfico vazio diria menos que seção nenhuma */
-  const hasCredits = Object.values(series).some((axes) =>
-    axes.some((axis) =>
-      axis.groups.some((group) =>
-        group.values.credits_supply?.some((band) => band !== null)
-      )
-    )
+   /** O recorte "Geral" — o que as métricas que não se partem em faixas usam */
+  const soloGroups = useMemo(
+    () => cutGroups("overall", [], { solo: soloColor(dark) }),
+    [dark]
   );
 
-  const linesOf = (key: string): SeriesLine[] =>
+  const linesOf = (key: string, axis: CutChoice = cut): SeriesLine[] =>
     arms.flatMap((arm) =>
-          (axisOf(arm.key)?.groups ?? []).map((group) => ({
+          (axisOf(arm.key, axis)?.groups ?? []).map((group) => ({
             arm: arm.key,
             group: group.group,
             points: pointsOf(group).flatMap((x, i) => {
@@ -508,38 +350,6 @@ export function Comparison({
     () => categoricalColors(arms.map((arm) => arm.label), dark),
     [arms, dark]
   );
-
-   /** As duas distribuições de entrada do cenário */
-  const scenarioHistograms = [
-    result.grade_distribution?.length ? (
-      <Histogram
-        key="notas"
-        title="Notas de primeira tentativa"
-        fractions={result.grade_distribution}
-        domain={[0, 10]}
-      />
-    ) : null,
-    result.interest_distribution?.length ? (
-      <Histogram
-        key="interesse"
-        title="Interesse"
-        fractions={result.interest_distribution}
-      />
-    ) : null,
-  ].filter(Boolean);
-
-   /** Quantas rodadas o cenário teve, lido do próprio resultado */
-  const rounds = useMemo(
-    () =>
-      Math.max(
-        0,
-        ...result.arms.flatMap((arm) =>
-          arm.runs.map((entry) => entry.allocations_per_round?.length ?? 0)
-        )
-      ),
-    [result.arms]
-  );
-  const saturation = useMemo(() => roundMetrics(rounds), [rounds]);
 
    /** Os valores de uma métrica numa amostra */
   const valuesOf = (key: string, metric: Metric): number[] =>
@@ -656,19 +466,57 @@ export function Comparison({
       format?: (value: number) => string;
       zeroLine?: boolean;
       accent?: string;
+      solo?: boolean;
     } = {}
-  ) => (
-    <SeriesChart
-      key={id}
-      title={title}
-      lines={linesOf(key)}
-      groups={groups}
-      arms={axisArms}
-      runs={result.runs}
-      xLabel={scale.point}
-      {...extra}
-    />
-  );
+  ) => {
+    const { solo, ...rest } = extra;
+    const axis: CutChoice = solo ? "overall" : cut;
+    return (
+      <SeriesChart
+        key={id}
+        title={title}
+        lines={linesOf(key, axis)}
+        groups={solo ? soloGroups : groups}
+        arms={solo ? arms : axisArms}
+        runs={result.runs}
+        xLabel={PERIOD_POINT}
+        {...rest}
+      />
+    );
+  };
+
+   /** A métrica sobre a grandeza de vida inteira escolhida: um ponto por faixa de quantil da coorte */
+  const metricCurve = (metric: Metric) => {
+    if (!scatterAxis || !metric.point) return null;
+    const curves = studentCurves(
+      arms.map((arm) => ({ key: arm.key, points: pointsOfArm(arm.key) })),
+      scatterAxis.of,
+      metric.point,
+      curvePoints
+    );
+    const lines: SeriesLine[] = arms.flatMap((arm) =>
+      curves[arm.key]?.length
+        ? [{ group: "overall", arm: arm.key, points: curves[arm.key] }]
+        : []
+    );
+    if (!lines.length) return null;
+    return (
+      <SeriesChart
+        key={metric.id}
+        title={metric.title}
+        lines={lines}
+        groups={soloGroups}
+        arms={arms}
+        runs={result.runs}
+        bounds={metric.bounds}
+        format={metric.format}
+        xLabel={(x) => `${scatterAxis.label} ${scatterAxis.format(x)}`}
+        axisLabel={scatterAxis.label}
+        showCount
+        foot="mediana · intervalo interquartil entre os alunos da faixa"
+      />
+    );
+  };
 
    /** Uma caixa por modelo, sobre as seeds */
   const metricBox = (metric: Metric) => (
@@ -688,16 +536,17 @@ export function Comparison({
     />
   );
 
-  const metricChart = (metric: Metric) =>
-    aggregated
-      ? metricBox(metric)
-      : metric.band
-        ? chart(metric.id, metric.title, metric.band, {
-            bounds: metric.bounds,
-            format: metric.format,
-            zeroLine: metric.zeroLine,
-          })
-        : null;
+  const metricChart = (metric: Metric) => {
+    if (scattered) return metricCurve(metric);
+    if (aggregated) return metricBox(metric);
+    if (!metric.band) return null;
+    return chart(metric.id, metric.title, metric.band, {
+      bounds: metric.bounds,
+      format: metric.format,
+      zeroLine: metric.zeroLine,
+      solo: metric.soloOnly,
+    });
+  };
 
   return (
     <div>
@@ -717,31 +566,48 @@ export function Comparison({
           simulações
         </h2>
         <div className="switch-set">
-          {(rulers.length > 1 || true) && (
-            <div className="switch-group" role="group" aria-label="Eixo">
-              <span>Eixo</span>
-              <div className="view-switch">
-                {[
-                  ...rulers.map((option) => ({
-                    key: option.ruler as RulerChoice,
-                    label: option.label,
-                  })),
-                  { key: AGGREGATE as RulerChoice, label: "Agregado" },
-                ].map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    className={view === option.key ? "on" : ""}
-                    aria-pressed={view === option.key}
-                    onClick={() => setRuler(option.key)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+          <div className="switch-group" role="group" aria-label="Eixo">
+            <span>Eixo</span>
+            <div className="view-switch">
+              {[
+                { key: "period" as AxisChoice, label: "Período" },
+                ...(hasPoints
+                  ? SCATTER_AXES.map((option) => ({
+                      key: option.key as AxisChoice,
+                      label: option.label,
+                    }))
+                  : []),
+                { key: "aggregate" as AxisChoice, label: "Agregado" },
+              ].map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  className={view === option.key ? "on" : ""}
+                  aria-pressed={view === option.key}
+                  onClick={() => setAxis(option.key)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {scattered && (
+            <div className="switch-group">
+              <span>Pontos</span>
+              <input
+                type="number"
+                min={CURVE_POINT_STEP}
+                max={MAX_CURVE_POINTS}
+                step={CURVE_POINT_STEP}
+                value={curvePoints}
+                onChange={(e) => {
+                  const asked = Number(e.target.value);
+                  if (Number.isFinite(asked)) setCurvePoints(asked);
+                }}
+              />
             </div>
           )}
-          {cuts.length > 1 && (
+          {!scattered && cuts.length > 1 && (
             <div className="switch-group" role="group" aria-label="Linhas">
               <span>Linhas</span>
               <select
@@ -754,27 +620,25 @@ export function Comparison({
                   </option>
                 ))}
               </select>
-              {/* Os cortes do eixo escolhido. Um corte a mais é uma faixa a
-                  mais. Eles são do **motor**, não da tela — ver `onRecut` —,
-                  então a edição fica em rascunho e o Aplicar roda de novo; a
-                  cada tecla custaria N simulações por braço. */}
-              {cutOption?.field && (
+              {/* Os cortes do eixo escolhido: um corte a mais é uma faixa a
+                  mais. Saem das linhas cruas, então valem na hora. */}
+              {cutOption?.field && editableCuts && (
                 <div className="cut-list">
                   {cutValues
-                    .map((cut, index) => [cut, index] as const)
+                    .map((value, index) => [value, index] as const)
                     .sort((a, b) => b[0] - a[0])
-                    .map(([cut, index]) => (
+                    .map(([value, index]) => (
                       <input
                         key={index}
                         type="number"
                         min={cutLow}
                         max={Number.isFinite(cutHigh) ? cutHigh : undefined}
                         step={cutOption.step ?? 1}
-                        value={cut.toFixed(cutOption.decimals ?? 0)}
+                        value={value.toFixed(cutOption.decimals ?? 0)}
                         onChange={(e) => {
                           const next = [...cutValues];
                           next[index] = Number(e.target.value);
-                          setCutDraft({ ...cutDraft, [cutOption.field!]: next });
+                          changeCuts(cut, next);
                         }}
                       />
                     ))}
@@ -782,12 +646,7 @@ export function Comparison({
                     type="button"
                     className="ghost"
                     disabled={cutValues.length >= MAX_CUTS}
-                    onClick={() =>
-                      setCutDraft({
-                        ...cutDraft,
-                        [cutOption.field!]: [...cutValues, nextCut],
-                      })
-                    }
+                    onClick={() => changeCuts(cut, [...cutValues, nextCut])}
                   >
                     +
                   </button>
@@ -796,31 +655,14 @@ export function Comparison({
                     className="ghost"
                     disabled={!cutValues.length}
                     onClick={() =>
-                      setCutDraft({
-                        ...cutDraft,
-                        [cutOption.field!]: cutValues
-                          .slice()
-                          .sort((a, b) => a - b)
-                          .slice(0, -1),
-                      })
+                      changeCuts(
+                        cut,
+                        cutValues.slice().sort((a, b) => a - b).slice(0, -1)
+                      )
                     }
                   >
                     −
                   </button>
-                  {cutsChanged && (
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={recutting || !cutsValid}
-                      onClick={() =>
-                        onRecut({
-                          [cutOption.field!]: [...cutValues].sort((a, b) => a - b),
-                        } as Partial<CompareRequest>)
-                      }
-                    >
-                      {recutting ? "Rodando…" : "Aplicar"}
-                    </button>
-                  )}
                   {!cutsValid && (
                     <span className="field-error">
                       entre {cutLow.toLocaleString("pt-BR")} e{" "}
@@ -875,13 +717,42 @@ export function Comparison({
         <header className="chart-section-head">
           <h2>Métricas de alocação</h2>
           <p>
-            A mediana entre as simulações em cada ponto do eixo, com o
-            intervalo interquartil em faixa. O tempo de formatura não entra: é
-            da simulação inteira, não de um ponto dela.
+            {scattered
+              ? "Um ponto por aluno medido, com a média dos períodos dele. A equidade não entra: é do conjunto, não do aluno."
+              : "A mediana entre as simulações em cada ponto do eixo, com o intervalo interquartil em faixa."}
           </p>
+          {cappedShare !== null && (
+            <p className="note">
+              {formatRatio(cappedShare)} dos períodos usaram todas as rodadas do
+              cenário, e neles r̄ sai censurada para baixo.
+            </p>
+          )}
         </header>
         <div className="chart-grid">
           {METRICS.map(metricChart)}
+        </div>
+      </section>
+
+      <section className="chart-section">
+        <header className="chart-section-head">
+          <h2>A coorte medida</h2>
+          <p>
+            A série acima encolhe conforme a coorte sai, por conclusão ou
+            jubilamento, e por isso se lê ao lado destes dois.
+          </p>
+        </header>
+        <div className="chart-grid">
+          {CONTEXT.map((metric) =>
+            aggregated
+              ? metricBox(metric)
+              : metric.band
+                ? chart(metric.id, metric.title, metric.band, {
+                    bounds: metric.bounds,
+                    format: metric.format,
+                    solo: true,
+                  })
+                : null
+          )}
           {/* O peso de cada ponto, no fim da grade — e o **teste de validade
               da janela**: em regime ele é plano, porque entra uma coorte e sai
               outra. Se subir ao longo da janela, a pré-população foi curta e
@@ -893,141 +764,14 @@ export function Comparison({
               e ativo são o mesmo conjunto. No "Geral" não são — o calouro
               conta como ativo e sai das médias —, e o rótulo da régua continua
               sendo o certo. */}
-          {chart(
-            "students",
-            cut === "overall" ? scale.weight : "Alunos ativos na faixa",
-            "students",
-            {
+          {!aggregated &&
+            chart("students", "Alunos medidos", "students", {
               bounds: [0, Infinity],
               format: formatCount,
-            }
-          )}
+              solo: true,
+            })}
         </div>
       </section>
-
-      {rounds > 0 && (
-        <section className="chart-section">
-          <header className="chart-section-head">
-            <h2>Saturação da demanda</h2>
-            <p>
-              A mesma rodada ao longo do horizonte — a 1ª rodada de cada
-              período, a 2ª de cada período —, para o decaimento se ler junto
-              com o momento em que acontece.
-            </p>
-          </header>
-          <div className="chart-grid">{saturation.map(metricChart)}</div>
-        </section>
-      )}
-
-      <section className="chart-section">
-        <header className="chart-section-head">
-          <h2>Correlações</h2>
-          <p>
-            O que anda junto com o quê: duas grandezas do aluno — o CR e a
-            seletividade — contra três do resultado dele. Descrevem, não
-            pontuam: qual lado é melhor depende de alocar por mérito passado
-            ou por necessidade, e essa é escolha de quem lê.
-          </p>
-        </header>
-        <div className="chart-grid">
-          {CORRELATIONS.map((cell) =>
-            chart(cell.key, cell.title, cell.key, {
-              bounds: [-1, 1],
-              format: formatRatio,
-              zeroLine: true,
-            })
-          )}
-        </div>
-      </section>
-
-      <section className="chart-section">
-        <header className="chart-section-head">
-          <h2>Solicitações de disciplinas</h2>
-          <p>
-            O funil de cada disciplina que ainda falta ao aluno, fração a
-            fração: quanto ele pediu do que lhe faltava, quanto do que pediu
-            lhe foi deferido, quanto do que levou chegou a cursar e quanto do
-            que cursou aprovou. Cada uma divide pelo nó anterior, de modo que
-            as quatro vão de 0 a 1 e cada painel se mexe só quando o nó dele
-            se mexe.
-          </p>
-        </header>
-        <div className="chart-grid">
-          {FUNNEL.map((share) =>
-            chart(share.key, share.title, share.key, {
-              bounds: [0, 1],
-              format: formatRatio,
-            })
-          )}
-        </div>
-      </section>
-
-      {scenarioHistograms.length > 0 && (
-        <section className="chart-section">
-          <header className="chart-section-head">
-            <h2>As distribuições do cenário</h2>
-          </header>
-          <div className="chart-grid">{scenarioHistograms}</div>
-        </section>
-      )}
-
-      {allocationTimes.length > 0 && (
-        <section className="chart-section">
-          <header className="chart-section-head">
-            <h2>O custo de rodar o mecanismo</h2>
-          </header>
-          <div className="chart-grid">
-            <AllocationTimeChart
-              title="Tempo de alocação por rodada (escala log)"
-              lines={allocationTimes}
-            />
-          </div>
-        </section>
-      )}
-
-      {hasCredits && (
-        <section className="chart-section">
-          <header className="chart-section-head">
-            <h2>Economia de créditos</h2>
-          </header>
-          <div className="chart-grid">{CREDIT_METRICS.map(metricChart)}</div>
-
-          {priceCuts.length > 0 && (
-            <>
-              {priceCuts.length > 1 && (
-                <div className="switch-group" role="group" aria-label="Linhas do preço">
-                  <span>Linhas</span>
-                  <div className="view-switch">
-                    {priceCuts.map((option) => (
-                      <button
-                        key={option.axis}
-                        type="button"
-                        className={priceCut === option.axis ? "on" : ""}
-                        aria-pressed={priceCut === option.axis}
-                        onClick={() => setPriceCut(option.axis)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="chart-grid">
-                <SeriesChart
-                  title="Preço das disciplinas"
-                  lines={priceLines}
-                  groups={priceGroups}
-                  arms={arms}
-                  runs={result.runs}
-                  xLabel={RULERS[0].point}
-                  bounds={[0, Infinity]}
-                  format={formatCount}
-                />
-              </div>
-            </>
-          )}
-        </section>
-      )}
 
       {hasBothAuctions && (
       <div className="panel">
@@ -1043,7 +787,7 @@ export function Comparison({
               <th>CR (referência)</th>
             </tr>
           </thead>
-          <tbody>{[...METRICS, ...saturation].map(accumulationRow)}</tbody>
+          <tbody>{[...METRICS, ...CONTEXT].map(accumulationRow)}</tbody>
         </table>
       </div>
       )}
@@ -1064,7 +808,7 @@ export function Comparison({
               <th>Seeds a favor</th>
             </tr>
           </thead>
-          <tbody>{[...METRICS, ...saturation].flatMap(summaryRows)}</tbody>
+          <tbody>{[...METRICS, ...CONTEXT].flatMap(summaryRows)}</tbody>
         </table>
       </div>
 

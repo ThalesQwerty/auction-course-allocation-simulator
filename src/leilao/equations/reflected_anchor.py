@@ -19,14 +19,6 @@ def reflected_anchor(*, anchor: float, shock: float) -> float:
     return reflect(anchor + shock)
 
 
-FULL_SHOCK = 2.0
-
-
-def shock_scale(stability: float) -> float:
-    """O desvio do abalo, a partir da estabilidade declarada."""
-    return FULL_SHOCK * (1.0 - min(1.0, max(0.0, stability)))
-
-
 def reflect_array(values):
     """A mesma dobra, sobre um array inteiro."""
     import numpy as np

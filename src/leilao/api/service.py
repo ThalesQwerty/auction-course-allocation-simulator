@@ -11,11 +11,11 @@ from ..comparison import (
 from ..config import Discipline, SimulationConfig
 from .schemas import (
     ArmResultOut,
-    ClassPriceBandsOut,
     AxisBandsOut,
     CompareRequest,
     CompareResponse,
     RunSummaryOut,
+    StudentPointOut,
     ScenarioIn,
 )
 
@@ -34,25 +34,28 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
                 unlocks=tuple(d.unlocks),
                 entry=d.entry,
                 elective=d.elective,
-                stability=d.stability,
+                fluctuation=d.fluctuation,
             )
             for d in req.disciplines
         ],
         approval_rate=req.approval_rate,
         grade_sd=req.grade_sd,
         repetition_gain=req.repetition_gain,
+        schedule_mean=req.schedule_mean,
         schedule_sigma=req.schedule_sigma,
+        schedule_fluctuation=req.schedule_fluctuation,
         first_seed=req.first_seed,
         availability=req.availability.to_shape(),
-        availability_stability=req.availability_stability,
-        selectivity_median=req.selectivity_median,
+        availability_fluctuation=req.availability_fluctuation,
+        selectivity_mean=req.selectivity_mean,
         selectivity_sigma=req.selectivity_sigma,
+        selectivity_fluctuation=req.selectivity_fluctuation,
         grade_cuts=tuple(req.grade_cuts),
         reserve_cuts=tuple(req.reserve_cuts),
-        interest_stability=req.interest_stability,
         slots=req.slots,
         interest_mean=req.interest_mean,
         interest_sigma=req.interest_sigma,
+        interest_fluctuation=req.interest_fluctuation,
         max_hours=req.max_hours,
         periods=req.periods,
         warmup_periods=req.warmup_periods,
@@ -94,9 +97,6 @@ def _arm_out(arm: ArmResult) -> ArmResultOut:
         key=arm.key,
         mechanism=arm.mechanism,
         runs=[RunSummaryOut.model_validate(run) for run in arm.runs],
+        points=[StudentPointOut.model_validate(point) for point in arm.points],
         series=[AxisBandsOut.model_validate(axis) for axis in arm.series],
-        allocation_seconds=arm.allocation_seconds,
-        class_prices=[
-            ClassPriceBandsOut.model_validate(cut) for cut in arm.class_prices
-        ],
     )

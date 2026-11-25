@@ -44,7 +44,6 @@ function outcomeOf(record: RequestRecord, round: number): Outcome | null {
 
 const isLive = (outcome: Outcome) => outcome.tone !== "idle";
 
-/** O nível basilar como a tela o escreve: z-score com sinal, uma casa */
 /** A âncora é um quantil em (0, 1): 0,5 é a mediana da população, e o número se lê como "este aluno está no percentil tal" */
 const quantil = (value: number) =>
   `${Math.round(value * 100)}%`;

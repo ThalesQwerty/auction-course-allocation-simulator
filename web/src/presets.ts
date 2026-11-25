@@ -8,27 +8,35 @@ const POPULATION: Pick<
   | "grade_sd"
   | "repetition_gain"
   | "availability"
-  | "availability_stability"
-  | "selectivity_median"
+  | "availability_fluctuation"
+  | "selectivity_mean"
   | "selectivity_sigma"
+  | "selectivity_fluctuation"
+  | "schedule_mean"
   | "schedule_sigma"
+  | "schedule_fluctuation"
   | "grade_cuts"
   | "reserve_cuts"
   | "interest_mean"
   | "interest_sigma"
+  | "interest_fluctuation"
 > = {
   approval_rate: 0.7,
   grade_sd: 2,
   repetition_gain: 1,
-  availability: { mode_hours: 22, full_load_rate: 0.05 },
-  availability_stability: 0.5,
-  selectivity_median: 2,
+  availability: { hours_sd: 1.2, full_load_rate: 0.05 },
+  availability_fluctuation: 0.5,
+  selectivity_mean: 0.7,
   selectivity_sigma: 0.6,
+  selectivity_fluctuation: 0,
+  schedule_mean: 0,
   schedule_sigma: 0.6,
+  schedule_fluctuation: 0.25,
   grade_cuts: [5, 7],
   reserve_cuts: [0.01, 0.03],
   interest_mean: 1,
   interest_sigma: 1,
+  interest_fluctuation: 0.25,
 };
 
 /** Os eixos da população que um cenário salvo antes deles pode não trazer */
@@ -111,8 +119,6 @@ export const defaultScenario = (): Scenario => ({
   first_seed: 1,
   rounds: 3,
   min_grade: 5,
-  interest_stability: 0.5,
-
   slots: 11,
   seed: 42,
   ...POPULATION,

@@ -11,7 +11,6 @@ from leilao.equations import (
     reflect,
     reflect_array,
     reflected_anchor,
-    shock_scale,
     standard_normal_quantiles,
 )
 
@@ -44,10 +43,9 @@ def test_the_anchor_rejects_a_position_outside_the_interval():
         reflected_anchor(anchor=1.5, shock=0.0)
 
 
-def test_a_full_stability_never_moves_the_anchor():
-    assert shock_scale(1.0) == 0.0
-    assert shock_scale(0.0) > 1.0
-    assert shock_scale(0.25) > shock_scale(0.75)
+def test_without_a_shock_the_anchor_is_the_position():
+    for anchor in (0.0, 0.2, 0.5, 0.9, 1.0):
+        assert reflected_anchor(anchor=anchor, shock=0.0) == pytest.approx(anchor)
 
 
 def test_the_mean_puts_the_declared_share_above_the_threshold():

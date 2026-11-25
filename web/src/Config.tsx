@@ -5,9 +5,11 @@ import {
   availabilityCurve,
   gradeCurve,
   interestCurve,
+  scheduleCurve,
   selectivityCurve,
 } from "./distributions";
-import { cohortSize, fullLoadThreshold, schedulePressure } from "./equations";
+import type { Curve } from "./distributions";
+import { cohortSize, schedulePressure } from "./equations";
 import { PresetList } from "./PresetList";
 import { nameExists } from "./savedPresets";
 import type { SavedPreset } from "./savedPresets";
@@ -24,6 +26,17 @@ const scheduleLoad = (config: Scenario): string => {
   return `${faixa} turmas por horário`;
 };
 
+/** O teto do eixo de uma prévia e o formato em que os valores dela se leem */
+const curveAxis = (curve: Curve) => {
+  const top = curve.points.length ? curve.points[curve.points.length - 1].x : 1;
+  const digits = Math.max(0, Math.ceil(-Math.log10(Math.max(top, 1e-9) / 10))) + 1;
+  return {
+    top,
+    value: (value: number) =>
+      value.toLocaleString("pt-BR", { maximumFractionDigits: digits }),
+  };
+};
+
 /** O piso dos horários: duas turmas da mesma disciplina não podem dividir um, senão a oferta efetiva encolhe sem avisar */
 const minSlots = (config: Scenario): number =>
   Math.max(1, ...config.disciplines.map((d) => d.classes));
@@ -36,7 +49,6 @@ export function Config({
   arms,
   setArms,
   running,
-  error,
   onRun,
   presetId,
   hasCustom,
@@ -52,7 +64,6 @@ export function Config({
   arms: string[];
   setArms: (arms: string[]) => void;
   running: boolean;
-  error: string | null;
   onRun: () => void;
   presetId: string | null;
   hasCustom: boolean;
@@ -90,26 +101,12 @@ export function Config({
     () => availabilityCurve(availability, config.max_hours),
     [availability, config.max_hours]
   );
-  const interest = useMemo(
-    () => interestCurve(config),
-    [config]
-  );
-  const interestTop = interest.points.length
-    ? interest.points[interest.points.length - 1].x
-    : 1;
-  const interestDigits =
-    Math.max(0, Math.ceil(-Math.log10(Math.max(interestTop, 1e-9) / 10))) + 1;
-  const interestValue = (value: number) =>
-    value.toLocaleString("pt-BR", { maximumFractionDigits: interestDigits });
-
+  const interest = useMemo(() => interestCurve(config), [config]);
+  const interestAxis = curveAxis(interest);
+  const schedule = useMemo(() => scheduleCurve(config), [config]);
+  const scheduleAxis = curveAxis(schedule);
   const selectivity = useMemo(() => selectivityCurve(config), [config]);
-  const selectivityTop = selectivity.points.length
-    ? selectivity.points[selectivity.points.length - 1].x
-    : 1;
-  const selectivityDigits =
-    Math.max(0, Math.ceil(-Math.log10(Math.max(selectivityTop, 1e-9) / 10))) + 1;
-  const selectivityValue = (value: number) =>
-    value.toLocaleString("pt-BR", { maximumFractionDigits: selectivityDigits });
+  const selectivityAxis = curveAxis(selectivity);
 
   const suggestedName =
     saved.find((entry) => entry.id === presetId)?.name ??
@@ -130,8 +127,6 @@ export function Config({
     <div className="rail-layout">
       <div className="rail-layout-main">
         <h1>Configurar comparação</h1>
-
-        {error && <div className="error-banner">{error}</div>}
 
         <div className="panel">
           <h2>Configurações gerais</h2>
@@ -173,23 +168,8 @@ export function Config({
                 onChange={(e) => setRuns(Number(e.target.value))}
               />
             </div>
-          </div>
-
-          <div className="field-row">
             <div className="field">
-              <label>Jubilamento</label>
-              <input
-                type="number"
-                min={1}
-                max={40}
-                value={config.max_residence}
-                onChange={(e) => patch({ max_residence: Number(e.target.value) })}
-              />
-            </div>
-            <div className="field">
-              <label>
-                Seed da primeira simulação
-              </label>
+              <label>Seed da primeira simulação</label>
               <input
                 type="number"
                 min={0}
@@ -198,24 +178,9 @@ export function Config({
                 onChange={(e) => patch({ first_seed: Number(e.target.value) })}
               />
             </div>
-            <div className="field">
-              <label>
-                Carga de optativas para concluir (W<sub>opt</sub>)
-              </label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                className={electiveTooLarge ? "invalid" : undefined}
-                value={config.elective_hours}
-                onChange={(e) => patch({ elective_hours: Number(e.target.value) })}
-              />
-              {electiveTooLarge && (
-                <span className="field-hint invalid-text">
-                  O catálogo oferta {electiveOffer} h em optativas.
-                </span>
-              )}
-            </div>
+          </div>
+
+          <div className="field-row">
             <div className="field">
               <label>Ingressantes por turma de entrada</label>
               <input
@@ -241,6 +206,37 @@ export function Config({
                 value={config.class_size}
                 onChange={(e) => patch({ class_size: Number(e.target.value) })}
               />
+            </div>
+          </div>
+
+          <div className="field-row">
+            <div className="field">
+              <label>Jubilamento</label>
+              <input
+                type="number"
+                min={1}
+                max={40}
+                value={config.max_residence}
+                onChange={(e) => patch({ max_residence: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>
+                Carga de optativas para concluir (W<sub>opt</sub>)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                className={electiveTooLarge ? "invalid" : undefined}
+                value={config.elective_hours}
+                onChange={(e) => patch({ elective_hours: Number(e.target.value) })}
+              />
+              {electiveTooLarge && (
+                <span className="field-hint invalid-text">
+                  O catálogo oferta {electiveOffer} h em optativas.
+                </span>
+              )}
             </div>
           </div>
 
@@ -289,240 +285,25 @@ export function Config({
         </div>
 
         <div className="panel">
-          <h2>Interesse</h2>
-          <div className="config-split">
-            <div>
-              <div className="field-row">
-                <div className="field">
-                  <label>Média da log-normal</label>
-                  {/* Sem `min`: μ é ℝ inteiro, e não mexe em alocação — some
-                      na normalização. Serve à prévia ao lado. */}
-                  <input
-                    type="number"
-                    step={0.1}
-                    value={config.interest_mean}
-                    onChange={(e) => patch({ interest_mean: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Desvio da log-normal</label>
-                  <input
-                    type="number"
-                    min={0.05}
-                    step={0.05}
-                    value={config.interest_sigma}
-                    onChange={(e) => patch({ interest_sigma: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Estabilidade entre períodos</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    value={config.interest_stability}
-                    onChange={(e) => patch({ interest_stability: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Estabilidade entre turmas</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    value={config.schedule_sigma}
-                    onChange={(e) => patch({ schedule_sigma: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="config-preview">
-              <DensityChart
-                id="curva-interesse"
-                title="Log-normal fonte do interesse"
-                points={interest.points}
-                domain={[0, interestTop]}
-                footer={<>mais provável: {interestValue(interest.mode)}</>}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="panel">
-          <h2>Seletividade</h2>
-          <div className="config-split">
-            <div>
-              <div className="field-row">
-                <div className="field">
-                  <label>Mediana</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.0005}
-                    value={config.selectivity_median}
-                    onChange={(e) =>
-                      patch({ selectivity_median: Number(e.target.value) })
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label>Desvio (σ)</label>
-                  <input
-                    type="number"
-                    min={0.05}
-                    step={0.05}
-                    value={config.selectivity_sigma}
-                    onChange={(e) =>
-                      patch({ selectivity_sigma: Number(e.target.value) })
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label>Nível basilar</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={config.interest_stability}
-                    onChange={(e) =>
-                      patch({ interest_stability: Number(e.target.value) })
-                    }
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="config-preview">
-              <DensityChart
-                id="curva-seletividade"
-                title="Log-normal fonte da seletividade"
-                points={selectivity.points}
-                domain={[0, selectivityTop]}
-                footer={<>mais provável: {selectivityValue(selectivity.mode)}</>}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="panel">
-          <h2>Disponibilidade</h2>
-          <div className="config-split">
-            <div>
-              {/* W_a fica aqui porque é o teto que a fração recorta: o perfil
-                  diz que parte dele o aluno cursa, e os dois só se leem
-                  juntos. */}
-              <div className="field-row">
-                <div className="field">
-                  <label>
-                    Carga horária máxima (W<sub>a</sub>)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    className={entryTooHeavy ? "invalid" : undefined}
-                    value={config.max_hours}
-                    onChange={(e) => patch({ max_hours: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
-
-              {entryTooHeavy && (
-                <p className="invalid-text">
-                  As {entryCourses.length} disciplinas de entrada somam {entryHours} h e não cabem
-                  em W<sub>a</sub>.
-                </p>
-              )}
-
-              <div className="field-row">
-                <div className="field">
-                  <label>Carga mais provável</label>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={config.availability.mode_hours}
-                    onChange={(e) =>
-                      patch({
-                        availability: {
-                          ...config.availability,
-                          mode_hours: Number(e.target.value),
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label>Chance de alcançar a CH máx</label>
-                  <input
-                    type="number"
-                    min={0.001}
-                    max={0.999}
-                    step={0.001}
-                    value={config.availability.full_load_rate}
-                    onChange={(e) =>
-                      patch({
-                        availability: {
-                          ...config.availability,
-                          full_load_rate: Number(e.target.value),
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label>Nível basilar</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={config.availability_stability}
-                    onChange={(e) =>
-                      patch({ availability_stability: Number(e.target.value) })
-                    }
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="config-preview">
-              <DensityChart
-                id="curva-disponibilidade"
-                title="Disponibilidade"
-                points={availabilities?.points ?? []}
-                   /** O eixo **passa de W_a** de propósito: a massa à direita da carga máxima é justamente a chance de alcançá-la */
-                domain={[0, availabilities?.top ?? config.max_hours]}
-                format={(value) => `${Math.round(value)} h`}
-                split={{
-                  at: fullLoadThreshold(config.max_hours),
-                  below: STATUS.critical,
-                  above: STATUS.good,
-                  labels: ["não usa toda a CH máx", "usa toda a CH máx"],
-                }}
-                footer={
-                  availabilities ? (
-                    <>
-                      mais provável: {Math.round(availabilities.mode)} h · enche
-                      a carga: {percent(availabilities.fullLoad)}
-                    </>
-                  ) : (
-                    <>a moda precisa ficar abaixo de W<sub>a</sub></>
-                  )
-                }
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="panel">
           <h2>Notas</h2>
           <div className="config-split">
             <div>
+              <div className="field-row">
+                <div className="field">
+                  <label>
+                    Nota mínima de aprovação (n<sub>apr</sub>)
+                  </label>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={10}
+                    step={0.1}
+                    value={config.min_grade}
+                    onChange={(e) => patch({ min_grade: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
               <div className="field-row">
                 <div className="field">
                   <label>
@@ -540,7 +321,7 @@ export function Config({
                   />
                 </div>
                 <div className="field">
-                  <label>Desvio das notas (σ)</label>
+                  <label>Desvio padrão</label>
                   <input
                     type="number"
                     min={0.1}
@@ -549,6 +330,9 @@ export function Config({
                     onChange={(e) => patch({ grade_sd: Number(e.target.value) })}
                   />
                 </div>
+              </div>
+
+              <div className="field-row">
                 <div className="field">
                   <label>Ganho por repetição (ω)</label>
                   <input
@@ -559,22 +343,6 @@ export function Config({
                     onChange={(e) =>
                       patch({ repetition_gain: Number(e.target.value) })
                     }
-                  />
-                </div>
-              </div>
-
-              <div className="field-row">
-                <div className="field">
-                  <label>
-                    Nota mínima de aprovação (n<sub>min</sub>)
-                  </label>
-                  <input
-                    type="number"
-                    min={0.1}
-                    max={10}
-                    step={0.1}
-                    value={config.min_grade}
-                    onChange={(e) => patch({ min_grade: Number(e.target.value) })}
                   />
                 </div>
               </div>
@@ -625,24 +393,288 @@ export function Config({
           </div>
         </div>
 
-        {/* O eixo de estratégia. Sem prévia: o número é uma regra de
-            decisão, não uma distribuição que a tela precise desenhar. */}
         <div className="panel">
-          <h2>Horários</h2>
-          <div className="field-row">
-            <div className="field">
-              <label>Horários</label>
-              <input
-                type="number"
-                min={minSlots(config)}
-                max={48}
-                step={1}
-                value={config.slots}
-                onChange={(e) => patch({ slots: Number(e.target.value) })}
+          <h2>Disponibilidade</h2>
+          <div className="config-split">
+            <div>
+              <div className="field-row">
+                <div className="field">
+                  <label>
+                    Carga horária máxima (W<sub>a</sub>)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className={entryTooHeavy ? "invalid" : undefined}
+                    value={config.max_hours}
+                    onChange={(e) => patch({ max_hours: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
+              {entryTooHeavy && (
+                <p className="invalid-text">
+                  As {entryCourses.length} disciplinas de entrada somam {entryHours} h e não cabem
+                  em W<sub>a</sub>.
+                </p>
+              )}
+
+              <div className="field-row">
+                <div className="field">
+                  <label>Desvio padrão</label>
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={config.availability.hours_sd}
+                    onChange={(e) =>
+                      patch({
+                        availability: {
+                          ...config.availability,
+                          hours_sd: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Chance de alcançar a CH máx</label>
+                  <input
+                    type="number"
+                    min={0.001}
+                    max={0.999}
+                    step={0.001}
+                    value={config.availability.full_load_rate}
+                    onChange={(e) =>
+                      patch({
+                        availability: {
+                          ...config.availability,
+                          full_load_rate: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>Flutuação</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.05}
+                    value={config.availability_fluctuation}
+                    onChange={(e) =>
+                      patch({ availability_fluctuation: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="config-preview">
+              <DensityChart
+                id="curva-disponibilidade"
+                title="Disponibilidade"
+                points={availabilities?.points ?? []}
+                domain={[0, config.max_hours]}
+                format={(value) => `${Math.round(value)} h`}
+                footer={
+                  availabilities ? (
+                    <>
+                      média: {Math.round(availabilities.mean)} h · enche a
+                      carga: {percent(availabilities.fullLoad)}
+                    </>
+                  ) : (
+                    <>desvio ou chance fora da faixa válida</>
+                  )
+                }
               />
             </div>
           </div>
-          <p className="note">{scheduleLoad(config)}</p>
+        </div>
+
+        <div className="panel">
+          <h2>Seletividade</h2>
+          <div className="config-split">
+            <div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Média</label>
+                  <input
+                    type="number"
+                    step={0.1}
+                    value={config.selectivity_mean}
+                    onChange={(e) =>
+                      patch({ selectivity_mean: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Desvio padrão</label>
+                  <input
+                    type="number"
+                    min={0.05}
+                    step={0.05}
+                    value={config.selectivity_sigma}
+                    onChange={(e) =>
+                      patch({ selectivity_sigma: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>Flutuação</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.05}
+                    value={config.selectivity_fluctuation}
+                    onChange={(e) =>
+                      patch({ selectivity_fluctuation: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="config-preview">
+              <DensityChart
+                id="curva-seletividade"
+                title="Seletividade"
+                points={selectivity.points}
+                domain={[0, selectivityAxis.top]}
+                footer={<>mais provável: {selectivityAxis.value(selectivity.mode)}</>}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="panel">
+          <h2>Interesse em horários</h2>
+          <div className="config-split">
+            <div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Média</label>
+                  <input
+                    type="number"
+                    step={0.1}
+                    value={config.schedule_mean}
+                    onChange={(e) => patch({ schedule_mean: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Desvio padrão</label>
+                  <input
+                    type="number"
+                    min={0.05}
+                    step={0.05}
+                    value={config.schedule_sigma}
+                    onChange={(e) => patch({ schedule_sigma: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>Flutuação</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.05}
+                    value={config.schedule_fluctuation}
+                    onChange={(e) =>
+                      patch({ schedule_fluctuation: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>Horários</label>
+                  <input
+                    type="number"
+                    min={minSlots(config)}
+                    max={48}
+                    step={1}
+                    value={config.slots}
+                    onChange={(e) => patch({ slots: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+              <p className="note">{scheduleLoad(config)}</p>
+            </div>
+
+            <div className="config-preview">
+              <DensityChart
+                id="curva-horario"
+                title="Interesse em horários"
+                points={schedule.points}
+                domain={[0, scheduleAxis.top]}
+                footer={<>mais provável: {scheduleAxis.value(schedule.mode)}</>}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="panel">
+          <h2>Interesse em disciplinas</h2>
+          <div className="config-split">
+            <div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Média</label>
+                  <input
+                    type="number"
+                    step={0.1}
+                    value={config.interest_mean}
+                    onChange={(e) => patch({ interest_mean: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Desvio padrão</label>
+                  <input
+                    type="number"
+                    min={0.05}
+                    step={0.05}
+                    value={config.interest_sigma}
+                    onChange={(e) => patch({ interest_sigma: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>Flutuação</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.05}
+                    value={config.interest_fluctuation}
+                    onChange={(e) =>
+                      patch({ interest_fluctuation: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="config-preview">
+              <DensityChart
+                id="curva-interesse"
+                title="Interesse em disciplinas"
+                points={interest.points}
+                domain={[0, interestAxis.top]}
+                footer={<>mais provável: {interestAxis.value(interest.mode)}</>}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="actions sticky-actions">

@@ -9,6 +9,7 @@ from ._normal import (
 from .admitted_set import admitted_set
 from .attempt_approval import attempt_approval
 from .attendance import attendance
+from .availability_hours import availability_hours
 from .availability_shape import availability_shape
 from .available_goods import available_goods
 from .class_schedule import (
@@ -59,7 +60,7 @@ from .value_band import (
     value_band_names,
 )
 from .period_return import period_return
-from .reflected_anchor import reflect, reflect_array, reflected_anchor, shock_scale
+from .reflected_anchor import reflect, reflect_array, reflected_anchor
 from .remaining_budget import remaining_budget
 from .remaining_capacity import remaining_capacity
 from .remaining_seats import remaining_seats
@@ -87,6 +88,7 @@ __all__ = [
     "admitted_set",
     "attempt_approval",
     "attendance",
+    "availability_hours",
     "availability_shape",
     "class_schedules",
     "schedule_cliques",
@@ -131,8 +133,6 @@ __all__ = [
     "period_return",
     "reflect",
     "reflect_array",
-    "reflect_array",
-    "shock_scale",
     "reflected_anchor",
     "remaining_budget",
     "remaining_capacity",

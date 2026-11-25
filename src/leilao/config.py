@@ -42,13 +42,13 @@ RESERVE_DOMAIN = (0.0, 1.0)
 class AvailabilityShape:
     """A distribuição de disponibilidade da população — **uma só**."""
 
-    mode_hours: float = 306.0
+    hours_sd: float = 1.2
     full_load_rate: float = 0.10
 
     def shape(self, max_hours: float) -> tuple[float, float]:
-        """(média logarítmica, desvio logarítmico) da log-normal."""
+        """(média, desvio padrão) da normal das horas."""
         return availability_shape(
-            mode_hours=self.mode_hours,
+            hours_sd=self.hours_sd,
             full_load_rate=self.full_load_rate,
             max_hours=max_hours,
         )
@@ -60,7 +60,7 @@ DEFAULT_MAX_HOURS = 24
 def default_availability(max_hours: float) -> AvailabilityShape:
     """A distribuição de disponibilidade, dimensionada para um W_a."""
     return AvailabilityShape(
-        mode_hours=round(max_hours * 0.85), full_load_rate=0.10
+        hours_sd=max(0.1, round(max_hours * 0.10, 1)), full_load_rate=0.10
     )
 
 
@@ -78,7 +78,7 @@ class Discipline:
     unlocks: tuple[str, ...] = ()
     entry: bool = False
     elective: bool = False
-    stability: float | None = None
+    fluctuation: float | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -87,9 +87,9 @@ class Discipline:
             raise ValueError(f"disciplina {self.name!r}: vagas (q_x) deve ser >= 0")
         if self.hours <= 0:
             raise ValueError(f"disciplina {self.name!r}: carga horária (w_x) deve ser > 0")
-        if self.stability is not None and not 0.0 <= self.stability <= 1.0:
+        if self.fluctuation is not None and self.fluctuation < 0.0:
             raise ValueError(
-                f"disciplina {self.name!r}: a estabilidade deve estar em [0, 1]"
+                f"disciplina {self.name!r}: a flutuação deve ser >= 0"
             )
         if self.name in self.unlocks:
             raise ValueError(f"disciplina {self.name!r} é sucessora de si mesma")
@@ -121,17 +121,20 @@ class SimulationConfig:
     grade_sd: float = 2.0
     repetition_gain: float = 1.0
     availability: AvailabilityShape | None = None
-    availability_stability: float = 0.5
+    availability_fluctuation: float = 0.5
+    schedule_mean: float = 0.0
     schedule_sigma: float = 0.6
-    selectivity_median: float = 2.0
+    schedule_fluctuation: float = 0.25
+    selectivity_mean: float = 0.7
     selectivity_sigma: float = 0.6
+    selectivity_fluctuation: float = 0.0
     grade_cuts: tuple[float, ...] = (5.0, 7.0)
     reserve_cuts: tuple[float, ...] = (0.01, 0.03)
     slots: int = 11
     first_seed: int = 1
-    interest_stability: float = 0.5
     interest_mean: float = 1.0
     interest_sigma: float = 1.0
+    interest_fluctuation: float = 0.25
     max_hours: int = DEFAULT_MAX_HOURS
     rounds: int = 1
     min_grade: float = 5.0
@@ -217,17 +220,18 @@ class SimulationConfig:
             self.availability_shape()
         except ValueError as erro:
             raise ValueError(f"distribuição de disponibilidade: {erro}") from erro
-        if self.selectivity_median < 0:
-            raise ValueError("a mediana da seletividade deve ser >= 0")
         if self.selectivity_sigma <= 0:
             raise ValueError("o desvio da seletividade deve ser > 0")
         for nome, valor in (
-            ("disponibilidade", self.availability_stability),
+            ("do interesse por disciplinas", self.interest_fluctuation),
+            ("do interesse por horários", self.schedule_fluctuation),
+            ("da disponibilidade", self.availability_fluctuation),
+            ("da seletividade", self.selectivity_fluctuation),
         ):
-            if not 0.0 <= valor <= 1.0:
-                raise ValueError(f"o nível basilar de {nome} deve estar em [0, 1]")
-        if not 0.0 <= self.interest_stability <= 1.0:
-            raise ValueError("a estabilidade entre períodos deve estar em [0, 1]")
+            if valor < 0.0:
+                raise ValueError(f"a flutuação {nome} deve ser >= 0")
+        if self.schedule_sigma < 0.0:
+            raise ValueError("o desvio do interesse por horário deve ser >= 0")
         if not 0 <= self.warmup_periods < self.periods:
             raise ValueError(
                 "a pré-população tem de caber no horizonte e deixar ao menos um "
@@ -413,8 +417,23 @@ class SimulationConfig:
         """|A| — uma coorte do mesmo tamanho em cada período."""
         return self.students_per_period * self.entry_span
 
+    @property
+    def measured_cohort(self) -> int | None:
+        """A coorte medida: a que ingressa no último período de aquecimento."""
+        return self.warmup_periods or None
+
+    @property
+    def first_measured_period(self) -> int:
+        """O primeiro período medido: o **de ingresso** da coorte medida.
+
+        O período de ingresso entra na medição apesar de a matrícula ali ser
+        garantida, e portanto igual nos dois mecanismos. Sem aquecimento não há
+        coorte medida, e aí mede-se do começo.
+        """
+        return self.warmup_periods or 1
+
     def availability_shape(self) -> tuple[float, float]:
-        """(média logarítmica, desvio logarítmico) da log-normal, com o W_a"""
+        """(média, desvio padrão) da normal das horas, com o W_a do cenário."""
         shape = self.availability or default_availability(self.max_hours)
         return shape.shape(self.max_hours)
 

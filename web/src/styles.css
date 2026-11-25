@@ -222,9 +222,27 @@ input, select {
   border-radius: 8px;
   margin-bottom: 16px;
   white-space: pre-wrap;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
 }
 
-.empty-state {
+.error-banner button {
+  color: var(--danger);
+  flex: none;
+}
+
+/* O nome do eixo X da dispersão, sob o gráfico: o do Y é o título do cartão. */
+.chart-axis {
+  color: var(--muted);
+  font-size: 10px;
+  margin: 2px 0 0;
+  text-align: center;
+}
+
+.empty-state,
+.loading {
   color: var(--muted);
   font-size: 13px;
   padding: 8px 0;
@@ -380,6 +398,11 @@ input.invalid {
   border-radius: 3px;
   display: inline-block;
   flex: none;
+}
+
+/* Na dispersão a marca é o próprio ponto, e o ponto é redondo. */
+.swatch.round {
+  border-radius: 50%;
 }
 
 .chart-section {
@@ -1638,18 +1661,6 @@ td.failed {
 }
 .trace-profiles .chip {
   cursor: default;
-}
-
-/* "Carregar resultado": o rótulo é o botão, e o input fica fora de vista — o
-   seletor de arquivo nativo não aceita estilo, e um botão falso ao lado dele
-   daria dois alvos para a mesma ação. */
-.file-item {
-  cursor: pointer;
-  display: block;
-}
-
-.file-item input[type="file"] {
-  display: none;
 }
 
 /* O eixo X colapsado: uma caixa por modelo, sobre as seeds. Mesmo cartão dos

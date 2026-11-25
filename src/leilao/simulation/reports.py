@@ -77,6 +77,25 @@ class DisciplineSnapshot:
 
 
 @dataclass(frozen=True)
+class StudentPeriodPoint:
+    """O que um aluno medido realizou num período: a linha crua dos gráficos.
+
+    `grade_average` e `reserve` são o estado do aluno no instante, de que saem
+    as faixas; as demais são as grandezas que a faixa agrega. `won` é o peso de
+    `mean_round`, porque r̄ do recorte é a média das rodadas por vaga concedida.
+    """
+
+    period: int
+    grade_average: float
+    reserve: float
+    satisfaction: float
+    attendance: float | None
+    progress: float
+    mean_round: float | None
+    won: int
+
+
+@dataclass(frozen=True)
 class PeriodReport:
     period: int
     rounds: list[RoundReport]
@@ -84,6 +103,7 @@ class PeriodReport:
     disciplines: list[DisciplineSnapshot]
     graduated_now: int
     dismissed_now: int
+    points: list[StudentPeriodPoint] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -143,6 +163,11 @@ class StudentSummary:
     enrollments: int
     approvals: int
     mean_satisfaction: float
+    mean_reserve: float
+    mean_attendance: float | None
+    mean_round: float | None
+    progress: float
+    measured_periods: int
     graduated_at: int | None
     dismissed_at: int | None
 
@@ -158,8 +183,14 @@ class SimulationResult:
     interest_distribution: list[float] = field(default_factory=list)
     grade_distribution: list[float] = field(default_factory=list)
     warmup_periods: int = 0
+    measured_cohort: int | None = None
+
+    @property
+    def first_measured(self) -> int:
+        """O primeiro período medido — ver `SimulationConfig.first_measured_period`."""
+        return self.warmup_periods or 1
 
     @property
     def observed(self) -> list[PeriodReport]:
-        """Os períodos **medidos** — os de depois da pré-população."""
-        return [p for p in self.periods if p.period > self.warmup_periods]
+        """Os períodos **medidos** — do ingresso da coorte medida em diante."""
+        return [p for p in self.periods if p.period >= self.first_measured]

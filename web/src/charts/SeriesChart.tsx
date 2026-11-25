@@ -81,6 +81,8 @@ export function SeriesChart({
   zeroLine = false,
   runs,
   xLabel = (x) => String(x),
+  axisLabel,
+  showCount = false,
   foot = "mediana · intervalo interquartil",
 }: {
   title: string;
@@ -96,6 +98,10 @@ export function SeriesChart({
    /** Quantas simulações cada modelo tem */
   runs: number;
   xLabel?: (x: number) => string;
+   /** O nome do eixo X, escrito sob o gráfico. O eixo Y é o título do cartão */
+  axisLabel?: string;
+   /** Mostra sempre quantas observações cada ponto tem, e não só quando são menos que as seeds */
+  showCount?: boolean;
   foot?: string;
 }) {
   const dark = usePrefersDark();
@@ -241,6 +247,7 @@ export function SeriesChart({
                 showGroup={groups.length > 1}
                 format={format}
                 runs={runs}
+                showCount={showCount}
                 dark={dark}
                 xLabel={xLabel}
                 foot={foot}
@@ -275,6 +282,8 @@ export function SeriesChart({
           ))}
         </ComposedChart>
       </ResponsiveContainer>
+
+      {axisLabel && <p className="chart-axis">{axisLabel}</p>}
     </figure>
   );
 }
@@ -292,6 +301,7 @@ function PeriodTip({
   showGroup,
   format,
   runs,
+  showCount,
   dark,
   xLabel,
   foot,
@@ -307,6 +317,7 @@ function PeriodTip({
   showGroup: boolean;
   format: (value: number) => string;
   runs: number;
+  showCount: boolean;
   dark: boolean;
   xLabel: (x: number) => string;
   foot: string;
@@ -335,7 +346,7 @@ function PeriodTip({
             {format(point.median)}
             <span className="tooltip-aside">
               {span ? ` ${format(span[0])}–${format(span[1])}` : ""}
-              {point.n < runs ? ` · n=${point.n}` : ""}
+              {showCount || point.n < runs ? ` · n=${point.n}` : ""}
             </span>
           </span>
         </div>

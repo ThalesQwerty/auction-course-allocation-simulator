@@ -1,8 +1,10 @@
 """Ponte FastAPI entre o motor Python e a interface web."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
@@ -12,7 +14,7 @@ from ..entities import Agent, Good, MutualExclusion
 from ..playground import PlaygroundClass, PlaygroundStudent, run_playground
 from ..simulation import run_simulation
 from .service import build_config, compare_scenario
-from .storage import save_result
+from .storage import delete_result, list_results, read_result, save_result
 from .schemas import (
     CompareRequest,
     CompareResponse,
@@ -24,6 +26,7 @@ from .schemas import (
     PlaygroundRoundStudentOut,
     RunRequest,
     RunResponse,
+    SavedResultOut,
     TracePeriodOut,
     TraceRequest,
     TraceResponse,
@@ -84,8 +87,40 @@ def compare(req: CompareRequest) -> CompareResponse:
             status_code=422, detail=f"falha ao comparar os mecanismos: {exc}"
         ) from exc
 
-    response.saved_to = save_result(kind="comparison", config=req, result=response)
+    saved = save_result(kind="comparison", config=req, result=response)
+    response.saved_to = saved
+    response.saved_as = Path(saved).stem if saved else None
     return response
+
+
+@app.get("/results", response_model=list[SavedResultOut])
+def results() -> list[SavedResultOut]:
+    """O que há gravado em disco, do mais recente para o mais antigo."""
+    return [SavedResultOut(**row) for row in list_results()]
+
+
+@app.get("/results/{name}")
+def result(name: str) -> dict:
+    """Uma execução gravada, inteira."""
+    try:
+        payload = read_result(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"não há resultado {name!r}")
+    return payload
+
+
+@app.delete("/results/{name}", status_code=204)
+def discard(name: str) -> Response:
+    """Apaga uma execução gravada."""
+    try:
+        existed = delete_result(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not existed:
+        raise HTTPException(status_code=404, detail=f"não há resultado {name!r}")
+    return Response(status_code=204)
 
 
 @app.post("/trace", response_model=TraceResponse)

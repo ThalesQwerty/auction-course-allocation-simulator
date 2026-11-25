@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { compare } from "./api";
+import { compare, deleteResult, listResults, readResult } from "./api";
 import { Comparison } from "./Comparison";
 import { Config } from "./Config";
 import { choosePreset, editConfig, initialChoice, PresetChoice } from "./presets";
@@ -9,27 +9,23 @@ import {
   upsertSavedPreset,
 } from "./savedPresets";
 import {
+  entryFromListing,
   formatRunDate,
   HistoryEntry,
-  loadHistory,
-  MAX_RUNS,
-  entryFromFile,
-  newComparison,
-  saveHistory,
+  runFromStored,
 } from "./history";
 import type { ComparisonRun } from "./history";
 import { GradeGraph } from "./GradeGraph";
 import { createPlaygroundDraft, Playground, PlaygroundDraft } from "./Playground";
 import { Sidebar, View } from "./Sidebar";
 import { COMPARISON_ARMS } from "./types";
-import type { CompareRequest } from "./types";
 
 export default function App() {
   const [choice, setChoice] = useState<PresetChoice>(initialChoice);
   const [saved, setSaved] = useState(loadSavedPresets);
   const config = choice.config;
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [opened, setOpened] = useState<ComparisonRun | null>(null);
   const [view, setView] = useState<View>({ kind: "config" });
   const [playground, setPlayground] = useState<PlaygroundDraft | null>(null);
   const [runs, setRuns] = useState(20);
@@ -40,10 +36,8 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
-    loadHistory().then((stored) => {
-      if (!alive) return;
-      setHistory((current) => [...current, ...stored].slice(0, MAX_RUNS));
-      setLoaded(true);
+    refreshHistory().catch((e) => {
+      if (alive) setError((e as Error).message);
     });
     return () => {
       alive = false;
@@ -51,27 +45,30 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (view.kind !== "run" || opened?.id === view.id) return;
+    const name = view.id;
     let alive = true;
-    saveHistory(history).then((kept) => {
-      if (alive && kept.length !== history.length) setHistory(kept);
-    });
+    setOpened(null);
+    readResult(name)
+      .then((stored) => {
+        if (alive) setOpened(runFromStored(name, stored));
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setError((e as Error).message);
+        navigate({ kind: "config" });
+      });
     return () => {
       alive = false;
     };
-  }, [history, loaded]);
+  }, [view, opened?.id]);
 
-   /** Carrega um resultado gravado em disco e o abre */
-  async function handleLoadFile(file: File) {
-    setError(null);
-    try {
-      const entry = entryFromFile(await file.text());
-      setHistory((current) => [entry, ...current].slice(0, MAX_RUNS));
-      navigate({ kind: "run", id: entry.id });
-    } catch (e) {
-      setError(`não foi possível ler ${file.name}: ${(e as Error).message}`);
-      navigate({ kind: "config" });
-    }
+  async function refreshHistory(): Promise<HistoryEntry[]> {
+    const listed = (await listResults())
+      .filter((row) => row.kind === "comparison" && row.config)
+      .map(entryFromListing);
+    setHistory(listed);
+    return listed;
   }
 
   function navigate(next: View) {
@@ -86,9 +83,21 @@ export default function App() {
     try {
       const { seed: _seed, ...scenario } = config;
       const request = { ...scenario, runs, arms };
-      const entry = newComparison(request, await compare(request));
-      setHistory((current) => [entry, ...current].slice(0, MAX_RUNS));
-      navigate({ kind: "run", id: entry.id });
+      const result = await compare(request);
+      if (!result.saved_as) {
+        throw new Error(
+          "a execução rodou mas não pôde ser gravada em resultados/"
+        );
+      }
+      setOpened({
+        kind: "comparison",
+        id: result.saved_as,
+        at: new Date().toISOString(),
+        config: request,
+        result,
+      });
+      navigate({ kind: "run", id: result.saved_as });
+      await refreshHistory();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -96,35 +105,45 @@ export default function App() {
     }
   }
 
-   /** Roda de novo a mesma execução com outros pontos de corte */
-  async function handleRecut(entry: ComparisonRun, cuts: Partial<CompareRequest>) {
-    setRunning(true);
-    setError(null);
-    try {
-      const request = { ...entry.config, ...cuts };
-      const next = newComparison(request, await compare(request));
-      setHistory((current) => [next, ...current].slice(0, MAX_RUNS));
-      navigate({ kind: "run", id: next.id });
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  function handleDelete(id: string) {
+  async function handleDelete(id: string) {
     const entry = history.find((e) => e.id === id);
     if (!entry) return;
-    if (!confirm(`Apagar a execução de ${formatRunDate(entry.at)}? A ação não pode ser desfeita.`))
+    if (
+      !confirm(
+        `Apagar a execução de ${formatRunDate(entry.at)}? Ela sai do disco, e a ação não pode ser desfeita.`
+      )
+    )
       return;
-    setHistory((current) => current.filter((e) => e.id !== id));
-    if (view.kind === "run" && view.id === id) navigate({ kind: "config" });
+    await discard([id]);
   }
 
-  function handleClear() {
-    if (!confirm("Apagar todas as execuções guardadas? A ação não pode ser desfeita.")) return;
-    setHistory([]);
-    navigate({ kind: "config" });
+  async function handleClear() {
+    if (
+      !confirm(
+        "Apagar todas as execuções? Elas saem do disco, e a ação não pode ser desfeita."
+      )
+    )
+      return;
+    await discard(history.map((entry) => entry.id));
+  }
+
+   /** Apaga do disco e refaz a lista. Uma falha não impede as demais */
+  async function discard(names: string[]) {
+    setError(null);
+    const done = await Promise.allSettled(names.map(deleteResult));
+    const failed = done.filter((entry) => entry.status === "rejected");
+    if (failed.length) {
+      setError(
+        `${failed.length} de ${names.length} não foram apagadas: ${
+          (failed[0] as PromiseRejectedResult).reason?.message
+        }`
+      );
+    }
+    await refreshHistory().catch((e) => setError((e as Error).message));
+    if (view.kind === "run" && names.includes(view.id)) {
+      setOpened(null);
+      navigate({ kind: "config" });
+    }
   }
 
    /** Volta ao formulário com o cenário de uma execução carregado */
@@ -138,8 +157,8 @@ export default function App() {
   }
 
 
-  const current = view.kind === "run" ? history.find((entry) => entry.id === view.id) : undefined;
-  const showConfig = view.kind === "config" || (view.kind === "run" && !current);
+  const current = view.kind === "run" && opened?.id === view.id ? opened : undefined;
+  const showConfig = view.kind === "config";
 
   return (
     <div className={`shell ${menuOpen ? "menu-open" : ""}`}>
@@ -153,10 +172,17 @@ export default function App() {
         onNavigate={navigate}
         onDelete={handleDelete}
         onClear={handleClear}
-        onLoadFile={handleLoadFile}
       />
 
       <main className="main wide">
+        {error && (
+          <div className="error-banner" role="alert">
+            {error}
+            <button type="button" className="ghost" onClick={() => setError(null)}>
+              Fechar
+            </button>
+          </div>
+        )}
         {showConfig && (
           <Config
             config={config}
@@ -166,7 +192,6 @@ export default function App() {
             arms={arms}
             setArms={setArms}
             running={running}
-            error={error}
             onRun={handleRun}
             presetId={choice.presetId}
             hasCustom={choice.custom !== null}
@@ -197,13 +222,14 @@ export default function App() {
             setDraft={setPlayground}
           />
         )}
+        {view.kind === "run" && !current && (
+          <p className="loading">Carregando…</p>
+        )}
         {current && (
           <Comparison
             key={current.id}
             run={current}
             onReuseConfig={() => reuseConfig(current)}
-            onRecut={(cuts) => handleRecut(current, cuts)}
-            recutting={running}
           />
         )}
       </main>

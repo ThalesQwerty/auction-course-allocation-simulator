@@ -19,7 +19,7 @@ class Draws:
 
     students: list[Student]
     grade_quantiles: dict[tuple[str, str, int], float]
-    selectivity: dict[str, float]
+    selectivity: dict[tuple[str, int], float]
     grade_means: GradeMeans
     availability: dict[tuple[str, int], float]
     schedule_rows: InterestMatrix
@@ -52,6 +52,7 @@ def prepare(config: SimulationConfig) -> Draws:
         students, config.disciplines, config, rng
     )
     availability = draw_availability(students, config, rng)
+    selectivity = draw_selectivity(students, config, rng)
     interest_rows = draw_interest(students, config, rng)
     schedule_rows = draw_schedule_interest(students, config, rng)
 
@@ -65,7 +66,7 @@ def prepare(config: SimulationConfig) -> Draws:
     return Draws(
         students=students,
         grade_quantiles=grade_quantiles,
-        selectivity=draw_selectivity(students, config),
+        selectivity=selectivity,
         grade_means=GradeMeans(),
         availability=availability,
         interest_rows=interest_rows,

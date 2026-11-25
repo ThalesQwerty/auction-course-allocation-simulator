@@ -12,14 +12,12 @@ export function Sidebar({
   onNavigate,
   onDelete,
   onClear,
-  onLoadFile,
 }: {
   view: View;
   history: HistoryEntry[];
   onNavigate: (view: View) => void;
   onDelete: (id: string) => void;
   onClear: () => void;
-  onLoadFile: (file: File) => void;
 }) {
   const key = (v: View) => (v.kind === "run" ? `run:${v.id}` : v.kind);
   const selected = (target: View) => key(view) === key(target);
@@ -80,20 +78,8 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-footer">
-        <label className="nav-item file-item">
-          Carregar resultado
-          <input
-            type="file"
-            accept="application/json,.json"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) onLoadFile(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
         <button className="nav-item danger" onClick={onClear} disabled={history.length === 0}>
-          Limpar histórico
+          Apagar execuções
         </button>
       </div>
     </nav>

@@ -1,6 +1,6 @@
 /** Uma fórmula por arquivo, uma função pura por fórmula */
 export { amplitude } from "./amplitude";
-export { availabilityShape, fullLoadThreshold } from "./availabilityShape";
+export { availabilityShape } from "./availabilityShape";
 export { boxStats } from "./boxStats";
 export { schedulePressure } from "./classSchedule";
 export { cohortSize } from "./cohort";
@@ -13,6 +13,14 @@ export { gradeMean } from "./gradeMean";
 export { attemptApproval } from "./attemptApproval";
 export { approvalAbove, normalDensity } from "./normalDensity";
 export { induct } from "./induct";
+export { jainIndex } from "./jainIndex";
+export {
+  WHOLE,
+  orderedCuts,
+  valueBand,
+  valueBandName,
+  valueBandNames,
+} from "./valueBand";
 export { lognormalDensity } from "./lognormalDensity";
 export { lognormalQuantile } from "./lognormalQuantile";
 export { niceScale } from "./niceScale";

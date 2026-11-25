@@ -15,7 +15,6 @@ from .equations import (
     concave_bids,
     eligible_interest,
     reflect_array,
-    shock_scale,
     standard_normal_quantiles,
     reserve_threshold,
     utility,
@@ -43,13 +42,11 @@ __all__ = [
 ]
 
 
-def _shock_by_discipline(config: SimulationConfig) -> np.ndarray:
-    """A estabilidade de cada disciplina, com o valor do cenário como padrão."""
+def _fluctuation_by_discipline(config: SimulationConfig) -> np.ndarray:
+    """A flutuação de cada disciplina, com a do cenário como padrão."""
     return np.array(
         [
-            shock_scale(
-                config.interest_stability if d.stability is None else d.stability
-            )
+            config.interest_fluctuation if d.fluctuation is None else d.fluctuation
             for d in config.disciplines
         ],
         dtype=float,
@@ -98,7 +95,7 @@ def draw_interest(
     groups = [d.name for d in config.disciplines]
     shape = (len(students), config.periods, len(groups))
     anchors = rng.random(size=(len(students), 1, len(groups)))
-    shocks = rng.normal(0.0, 1.0, size=shape) * _shock_by_discipline(config)
+    shocks = rng.normal(0.0, 1.0, size=shape) * _fluctuation_by_discipline(config)
     quantiles = reflect_array(anchors + shocks)
     log = config.interest_sigma * standard_normal_quantiles(quantiles)
     log = log + config.interest_mean
@@ -123,11 +120,11 @@ def draw_schedule_interest(
         )
     shape = (len(students), config.periods, len(slots))
     anchors = rng.random(size=(len(students), 1, len(slots)))
-    shocks = rng.normal(0.0, 1.0, size=shape) * shock_scale(
-        config.interest_stability
-    )
+    shocks = rng.normal(0.0, config.schedule_fluctuation, size=shape)
     quantiles = reflect_array(anchors + shocks)
-    log = config.schedule_sigma * standard_normal_quantiles(quantiles)
+    log = config.schedule_mean + config.schedule_sigma * standard_normal_quantiles(
+        quantiles
+    )
     return InterestMatrix(
         values=np.maximum(np.exp(log), UNDERFLOW_GUARD),
         columns=tuple(slots),

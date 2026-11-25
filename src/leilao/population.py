@@ -37,7 +37,7 @@ class Student:
         return set(self.attempts)
 
     def approved(self, min_grade: float) -> set[str]:
-        """H̃_a = { x ∈ H_a : n_{a,x} ≥ n_min }."""
+        """H^[apr]_a = { X ∈ H_a : n^[max]_{a,X} ≥ n_apr }."""
         return {name for name, grade in self.grades.items() if grade >= min_grade}
 
     def approved_hours(self, hours: dict[str, int], min_grade: float) -> int:

@@ -29,6 +29,19 @@ CELL_SEP = "|"
 OUTSIDE = "\x00fora"
 
 
+def measured_students(
+    *, config: SimulationConfig, students: list[Student], period: int
+) -> list[Student]:
+    """Quem entra nas médias de um período: só a coorte medida.
+
+    Sem aquecimento não há coorte medida, e aí entra todo mundo menos o calouro.
+    """
+    cohort = config.measured_cohort
+    if cohort is not None:
+        return [s for s in students if s.entry_period == cohort]
+    return [s for s in students if s.entry_period != period]
+
+
 @dataclass(frozen=True)
 class Axis:
     """Como rotular cada aluno e em que ordem as séries saem."""
@@ -343,9 +356,10 @@ def snapshot_groups(
 ) -> tuple[GroupSnapshot, dict[str, list[GroupSnapshot]]]:
     """O agregado da universidade e o recorte de cada eixo, no mesmo instante."""
 
+    cohort = config.measured_cohort
+
     def measured_of(students_: list[Student]) -> list[Student]:
-        """O calouro do período sai de toda média: ele não disputou nada."""
-        return [s for s in students_ if s.entry_period != period]
+        return measured_students(config=config, students=students_, period=period)
 
     def take(
         group: str | None,
@@ -366,7 +380,11 @@ def snapshot_groups(
             uses_credits=config.uses_credits,
         )
 
-    entered = [s for s in students if s.entry_period <= period]
+    entered = (
+        [s for s in students if s.entry_period == cohort]
+        if cohort is not None
+        else [s for s in students if s.entry_period <= period]
+    )
     overall = take(
         None,
         active,

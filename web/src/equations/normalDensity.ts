@@ -1,18 +1,19 @@
-/** A densidade da normal das notas, amostrada sobre a escala de 0 a 10 */
+/** A densidade da normal, amostrada sobre uma escala de 0 a `top` */
 const POINTS = 241;
-const STEP = 10 / (POINTS - 1);
 const ROOT_TWO_PI = Math.sqrt(2 * Math.PI);
 
 export function normalDensity(
   mean: number,
-  sd: number
+  sd: number,
+  top: number
 ): { xs: number[]; ys: number[] } {
   const xs: number[] = [];
   const ys: number[] = [];
+  const step = top / (POINTS - 1);
   for (let i = 0; i < POINTS; i++) {
-    const grade = i * STEP;
-    const z = (grade - mean) / sd;
-    xs.push(grade);
+    const value = i * step;
+    const z = (value - mean) / sd;
+    xs.push(value);
     ys.push(Math.exp(-0.5 * z * z) / (sd * ROOT_TWO_PI));
   }
   return { xs, ys };

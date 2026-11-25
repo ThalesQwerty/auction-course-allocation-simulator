@@ -29,7 +29,6 @@ from .config import (
 from .metrics import Metrics
 from .population import generate_students
 from .simulation import (
-    CELL_SEP,
     DisciplineSnapshot,
     GroupSnapshot,
     SimulationResult,
@@ -79,7 +78,7 @@ class RulerSeries:
     x: list[int]
     students: list[float]
     graduation_rate: list[float]
-    efficiency: list[float]
+    satisfaction: list[float]
     attendance: list[float | None]
     mean_round: list[float | None]
     progress: list[float]
@@ -102,7 +101,7 @@ class GroupSeries:
     series: RulerSeries
 
 
-RULERS: tuple[str, ...] = ("period", "age", "cohort")
+RULERS: tuple[str, ...] = ("period",)
 
 CUT_AXES: tuple[str, ...] = (
     "grade_average",
@@ -168,9 +167,8 @@ class ClassPriceBands:
 
 @dataclass(frozen=True)
 class AxisBands:
-    """Os grupos de um recorte sob uma régua, na ordem em que o cenário os"""
+    """Os grupos de um recorte, na ordem em que o cenário os declara."""
 
-    ruler: str
     axis: str
     groups: list[GroupBands]
 
@@ -181,10 +179,11 @@ class RunSummary:
 
     seed: int
     periods: int
+    capped_periods: int
     graduates: int
     dismissed: int
     population: int
-    efficiency: float
+    satisfaction: float
     attendance: float | None
     mean_round: float | None
     progress: float
@@ -199,6 +198,41 @@ class RunSummary:
     class_prices: list[ClassPriceSeries]
     by_period: RulerSeries
     by_group: dict[str, dict[str, list[GroupSeries]]]
+    points: list["StudentPoint"] = field(default_factory=list, compare=False)
+    observations: "Observations | None" = field(default=None, compare=False)
+
+
+@dataclass(frozen=True)
+class Observations:
+    """As linhas cruas de uma simulação, em colunas paralelas.
+
+    Uma posição por (aluno medido, período medido). É o que a interface recorta
+    em faixas: as faixas não entram na medição, e mudá-las não exige simular
+    de novo. `period` dá o eixo X, `grade_average` e `reserve` dão o rótulo da
+    faixa, e as demais são as grandezas que ela agrega.
+    """
+
+    period: list[int]
+    grade_average: list[float]
+    reserve: list[float]
+    satisfaction: list[float]
+    attendance: list[float | None]
+    progress: list[float]
+    mean_round: list[float | None]
+    won: list[int]
+
+
+@dataclass(frozen=True)
+class StudentPoint:
+    """Um aluno medido, com as grandezas de vida inteira dele."""
+
+    grade_average: float
+    reserve: float
+    satisfaction: float
+    attendance: float | None
+    progress: float
+    mean_round: float | None
+    graduated: bool
 
 
 @dataclass(frozen=True)
@@ -208,6 +242,7 @@ class ArmResult:
     key: str
     mechanism: Mechanism
     runs: list[RunSummary]
+    points: list[StudentPoint] = field(default_factory=list)
     series: list[AxisBands] = field(default_factory=list)
     allocation_seconds: list[list[float]] = field(default_factory=list, compare=False)
     class_prices: list[ClassPriceBands] = field(default_factory=list)
@@ -225,7 +260,7 @@ class ComparisonResult:
 
 def _within_window(result: SimulationResult, period: int | None) -> bool:
     """O evento caiu na janela medida?"""
-    return period is not None and period > result.warmup_periods
+    return period is not None and period >= result.first_measured
 
 
 def _active_in_window(result: SimulationResult) -> int:
@@ -458,7 +493,7 @@ def _period_series(
             snapshot.graduated / snapshot.population if snapshot.population else 0.0
             for _, snapshot, _ in measured
         ],
-        efficiency=series(lambda m: m.efficiency),
+        satisfaction=series(lambda m: m.satisfaction),
         attendance=series_optional(lambda m: m.attendance),
         mean_round=[rounds_mean(by_round) for _, _, by_round in measured],
         progress=series(lambda m: m.progress),
@@ -481,187 +516,12 @@ def _cut(report, axis: str) -> list[GroupSnapshot]:
     return report.by_profile.get(axis, [])
 
 
-def _cells(report, axis: str) -> list[GroupSnapshot]:
-    """As células de um recorte espacial num instante — ver `Axis.crossed`."""
-    return report.by_cohort if axis == "overall" else report.by_cell.get(axis, [])
-
-
-def _cell_key(axis: str, group: str) -> tuple[str, int]:
-    """`(grupo espacial, coorte)` de uma célula."""
-    if axis == "overall":
-        return "overall", int(group)
-    spatial, _, cohort = group.rpartition(CELL_SEP)
-    return spatial, int(cohort)
-
-
-Instant = tuple[int, int, GroupSnapshot, list[GroupSnapshot | None]]
-
-
-def _cell_instants(
-    result: SimulationResult, axis: str
-) -> tuple[list[str], dict[str, list[Instant]]]:
-    """As células de um recorte, período a período."""
-    order: list[str] = []
-    out: dict[str, list[Instant]] = defaultdict(list)
-    for period in result.observed:
-        by_round = [
-            {s.group: s for s in _cells(report, axis) if s.group is not None}
-            for report in period.rounds
-        ]
-        for snapshot in _cells(period.aggregate, axis):
-            if snapshot.group is None:
-                continue
-            group, cohort = _cell_key(axis, snapshot.group)
-            if group not in order:
-                order.append(group)
-            out[group].append(
-                (
-                    cohort,
-                    period.period,
-                    snapshot,
-                    [found.get(snapshot.group) for found in by_round],
-                )
-            )
-    return order, out
-
-
-def _regroup(
-    instants: list[tuple[int, Instant]], *, ruler: str, rounds: int
-) -> RulerSeries:
-    """Reagrupa as células de um grupo numa série por ponto da régua."""
-    buckets: dict[int, list[Instant]] = defaultdict(list)
-    for point, instant in sorted(instants, key=lambda item: item[1][1]):
-        buckets[point].append(instant)
-    points = sorted(buckets)
-    bags = {
-        point: _period_series(
-            [(period, snapshot, by_round) for _, period, snapshot, by_round in bag],
-            rounds,
-        )
-        for point, bag in buckets.items()
-    }
-    points = [point for point in points if bags[point].x]
-
-    def weighed(point: int, of) -> float:
-        bag = bags[point]
-        return weighted_mean(list(zip(of(bag), bag.students))) or 0.0
-
-    def optional(point: int, of) -> float | None:
-        """A mesma média ponderada, para grandeza que pode não existir."""
-        bag = bags[point]
-        pairs = [
-            (value, weight)
-            for value, weight in zip(of(bag), bag.students)
-            if value is not None
-        ]
-        return weighted_mean(pairs) if pairs else None
-
-    def graduation(point: int) -> float:
-        bag = bags[point]
-        if ruler != "cohort":
-            return weighed(point, lambda s: s.graduation_rate)
-        return bag.graduation_rate[-1]
-
-    def states(point: int) -> RequestStates:
-        bag = bags[point]
-        return _mean_states(list(zip(bag.request_states, bag.students)))
-
-    def saturation(point: int) -> list[float | None]:
-        bag = bags[point]
-        row: list[float | None] = []
-        for index in range(rounds):
-            pairs = [
-                (values[index], weight)
-                for values, weight in zip(bag.allocations_per_round, bag.students)
-                if index < len(values) and values[index] is not None
-            ]
-            row.append(weighted_mean(pairs) if pairs else None)
-        return row
-
-    return RulerSeries(
-        x=points,
-        students=[sum(bags[point].students) for point in points],
-        graduation_rate=[graduation(point) for point in points],
-        efficiency=[weighed(point, lambda s: s.efficiency) for point in points],
-        attendance=[optional(point, lambda s: s.attendance) for point in points],
-        mean_round=[optional(point, lambda s: s.mean_round) for point in points],
-        progress=[weighed(point, lambda s: s.progress) for point in points],
-        fidelity=[weighed(point, lambda s: s.fidelity) for point in points],
-        fairness=[weighed(point, lambda s: s.fairness) for point in points],
-        grade_average=[weighed(point, lambda s: s.grade_average) for point in points],
-        exclusion_rate=[weighed(point, lambda s: s.exclusion_rate) for point in points],
-        credits_supply=[optional(point, lambda s: s.credits_supply) for point in points],
-        credits_spent=[optional(point, lambda s: s.credits_spent) for point in points],
-        credits_returned=[
-            optional(point, lambda s: s.credits_returned) for point in points
-        ],
-        request_states=[states(point) for point in points],
-        allocations_per_round=[saturation(point) for point in points],
-    )
-
-
 def group_series(
     result: SimulationResult, *, by_period: RulerSeries
 ) -> dict[str, dict[str, list[GroupSeries]]]:
     """As séries de cada grupo de cada recorte, régua a régua —"""
-    rounds = max((len(period.rounds) for period in result.observed), default=0)
     out: dict[str, dict[str, list[GroupSeries]]] = {ruler: {} for ruler in RULERS}
     out["period"]["overall"] = [GroupSeries(group="overall", series=by_period)]
-
-    for axis in CUT_AXES:
-        order: list[str] = []
-        for period in result.observed:
-            for snapshot in _cut(period.aggregate, axis):
-                if snapshot.group is not None and snapshot.group not in order:
-                    order.append(snapshot.group)
-
-        if not order:
-            continue
-
-        def find(report, group: str, axis: str = axis) -> GroupSnapshot | None:
-            return next((s for s in _cut(report, axis) if s.group == group), None)
-
-        out["period"][axis] = [
-            GroupSeries(
-                group=group,
-                series=_period_series(
-                    [
-                        (
-                            period.period,
-                            find(period.aggregate, group),
-                            [find(report, group) for report in period.rounds],
-                        )
-                        for period in result.observed
-                    ],
-                    rounds,
-                ),
-            )
-            for group in order
-        ]
-
-    for axis in ("overall", *CUT_AXES):
-        order, instants = _cell_instants(result, axis)
-        if not order:
-            continue
-        for ruler in ("age", "cohort"):
-            out[ruler][axis] = [
-                GroupSeries(
-                    group=group,
-                    series=_regroup(
-                        [
-                            (
-                                cohort if ruler == "cohort" else period - cohort,
-                                instant,
-                            )
-                            for instant in instants[group]
-                            for cohort, period, _, _ in [instant]
-                        ],
-                        ruler=ruler,
-                        rounds=rounds,
-                    ),
-                )
-                for group in order
-            ]
     return out
 
 
@@ -688,7 +548,7 @@ def _quantities(series: RulerSeries, index: int) -> dict[str, float | None]:
     values: dict[str, float | None] = {
         "students": float(series.students[index]),
         "graduation_rate": series.graduation_rate[index],
-        "efficiency": series.efficiency[index],
+        "satisfaction": series.satisfaction[index],
         "attendance": series.attendance[index],
         "mean_round": series.mean_round[index],
         "progress": series.progress[index],
@@ -741,27 +601,70 @@ def _group_bands(group: str, samples: list[RulerSeries]) -> GroupBands:
 
 
 def bands(runs: list[RunSummary]) -> list[AxisBands]:
-    """As séries de um braço reduzidas entre as seeds, régua por recorte."""
+    """A série do braço reduzida entre as seeds.
+
+    Só o agregado da coorte: é o que não sai das linhas cruas, porque conclusão
+    e jubilamento são do conjunto e não do aluno. As faixas a interface recorta.
+    """
     out: list[AxisBands] = []
-    for ruler in RULERS:
-        for axis in ("overall", *CUT_AXES):
-            order: list[str] = []
-            samples: dict[str, list[RulerSeries]] = defaultdict(list)
-            for run in runs:
-                for entry in run.by_group.get(ruler, {}).get(axis, []):
-                    if entry.group not in order:
-                        order.append(entry.group)
-                    samples[entry.group].append(entry.series)
-            if not order:
-                continue
-            out.append(
-                AxisBands(
-                    ruler=ruler,
-                    axis=axis,
-                    groups=[_group_bands(group, samples[group]) for group in order],
-                )
+    for axis in ("overall",):
+        order: list[str] = []
+        samples: dict[str, list[RulerSeries]] = defaultdict(list)
+        for run in runs:
+            for entry in run.by_group.get("period", {}).get(axis, []):
+                if entry.group not in order:
+                    order.append(entry.group)
+                samples[entry.group].append(entry.series)
+        if not order:
+            continue
+        out.append(
+            AxisBands(
+                axis=axis,
+                groups=[_group_bands(group, samples[group]) for group in order],
             )
+        )
     return out
+
+
+def observations_of(result: SimulationResult) -> Observations:
+    """As linhas cruas da simulação, período a período, em colunas."""
+    rows = [point for period in result.observed for point in period.points]
+
+    def column(pick: Callable[[object], float | None]) -> list[float | None]:
+        return [
+            None if (value := pick(row)) is None else round(float(value), 4)
+            for row in rows
+        ]
+
+    return Observations(
+        period=[row.period for row in rows],
+        grade_average=column(lambda row: row.grade_average),
+        reserve=column(lambda row: row.reserve),
+        satisfaction=column(lambda row: row.satisfaction),
+        attendance=column(lambda row: row.attendance),
+        progress=column(lambda row: row.progress),
+        mean_round=column(lambda row: row.mean_round),
+        won=[row.won for row in rows],
+    )
+
+
+def student_points(result: SimulationResult) -> list[StudentPoint]:
+    """Um ponto por aluno medido: as grandezas de vida inteira dele."""
+    cohort = result.measured_cohort
+    return [
+        StudentPoint(
+            grade_average=s.grade_average,
+            reserve=s.mean_reserve,
+            satisfaction=s.mean_satisfaction,
+            attendance=s.mean_attendance,
+            progress=s.progress,
+            mean_round=s.mean_round,
+            graduated=s.graduated_at is not None,
+        )
+        for s in result.students
+        if cohort is None or s.entry_period == cohort
+        if s.measured_periods > 0
+    ]
 
 
 def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
@@ -795,10 +698,15 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
     return RunSummary(
         seed=seed,
         periods=len(result.observed),
+        capped_periods=sum(
+            1
+            for row in by_period.allocations_per_round
+            if len(row) >= max(1, rounds)
+        ),
         graduates=graduates,
         dismissed=dismissed,
         population=_active_in_window(result),
-        efficiency=mean(by_period.efficiency),
+        satisfaction=mean(by_period.satisfaction),
         attendance=mean([v for v in by_period.attendance if v is not None]),
         mean_round=mean([v for v in by_period.mean_round if v is not None]),
         progress=mean(by_period.progress),
@@ -813,6 +721,8 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         class_prices=class_prices(result),
         by_period=by_period,
         by_group=group_series(result, by_period=by_period),
+        points=student_points(result),
+        observations=observations_of(result),
     )
 
 
@@ -917,7 +827,8 @@ def run_comparison(
             ArmResult(
                 key=arm.key,
                 mechanism=arm.mechanism,
-                        runs=summaries,
+                runs=summaries,
+                points=[point for run in summaries for point in run.points],
                 series=bands(summaries),
                 allocation_seconds=mean_allocation_seconds(summaries),
                 class_prices=class_price_bands(summaries),

@@ -49,7 +49,7 @@ export function GradeGraph({
       else byClasses.set(discipline.classes, [discipline]);
     }
     return [...byClasses.entries()]
-      .sort(([a], [b]) => b - a)
+      .sort(([a], [b]) => a - b)
       .map(([classes, cards]) => ({ seats: classes * classSize, cards }));
   }, [electives, classSize]);
 
@@ -167,9 +167,9 @@ export function GradeGraph({
         {discipline.classes * classSize} vagas · {discipline.hours} h
         {discipline.entry && <em>entrada</em>}
       </p>
-      <p className="grade-traits">
-        {discipline.classes > 1 && <>{discipline.classes} turmas · </>}
-      </p>
+      {discipline.classes > 1 && (
+        <p className="grade-traits">{discipline.classes} turmas</p>
+      )}
     </article>
   );
 

@@ -197,7 +197,7 @@ def test_approving_a_prerequisite_unlocks_the_next_discipline():
 
 
 def test_a_failed_prerequisite_does_not_unlock_anything():
-    """Cursar não basta: a eq. (42) exige aprovação — n_{a,x} >= n_min."""
+    """Cursar não basta: a eq. (42) exige aprovação — n_{a,x} >= n_apr."""
     config = make_config()
     row = draw_interest([student()], config, np.random.default_rng(7))[("a1", 1)]
     failed = student(grades={"D1": 4.9}, attempts={"D1": 1})

@@ -5,9 +5,8 @@ import numpy as np
 
 from .config import SimulationConfig
 from .equations import (
-    lognormal_quantile,
+    availability_hours,
     reflect,
-    shock_scale,
     standard_normal_quantile,
 )
 from .population import Student
@@ -21,18 +20,19 @@ def draw_availability(
     rng: np.random.Generator,
 ) -> dict[tuple[str, int], float]:
     """δ_{a,t} — as horas disponíveis de cada par (aluno, período)."""
-    mean_log, sigma = config.availability_shape()
+    mean, sd = config.availability_shape()
     anchors = np.array([student.availability_anchor for student in students])
     shocks = rng.normal(
         0.0,
-        shock_scale(config.availability_stability),
+        config.availability_fluctuation,
         size=(len(students), config.periods),
     )
     return {
-        (student.id, period + 1): lognormal_quantile(
+        (student.id, period + 1): availability_hours(
             quantile=reflect(float(anchors[i] + shocks[i, period])),
-            log_mean=mean_log,
-            log_sd=sigma,
+            hours_mean=mean,
+            hours_sd=sd,
+            max_hours=config.max_hours,
         )
         for i, student in enumerate(students)
         for period in range(config.periods)
@@ -40,19 +40,27 @@ def draw_availability(
 
 
 def draw_selectivity(
-    students: list[Student], config: SimulationConfig
-) -> dict[str, float]:
-    """S_a — a seletividade, uma por aluno e constante no curso inteiro."""
-    if config.selectivity_median <= 0.0:
-        return {student.id: 0.0 for student in students}
-    log_median = float(np.log(config.selectivity_median))
+    students: list[Student],
+    config: SimulationConfig,
+    rng: np.random.Generator,
+) -> dict[tuple[str, int], float]:
+    """S_{a,t} — a seletividade de cada par (aluno, período)."""
+    anchors = np.array([student.selectivity_anchor for student in students])
+    shocks = rng.normal(
+        0.0,
+        config.selectivity_fluctuation,
+        size=(len(students), config.periods),
+    )
     return {
-        student.id: float(
+        (student.id, period + 1): float(
             np.exp(
-                log_median
+                config.selectivity_mean
                 + config.selectivity_sigma
-                * standard_normal_quantile(student.selectivity_anchor)
+                * standard_normal_quantile(
+                    reflect(float(anchors[i] + shocks[i, period]))
+                )
             )
         )
-        for student in students
+        for i, student in enumerate(students)
+        for period in range(config.periods)
     }

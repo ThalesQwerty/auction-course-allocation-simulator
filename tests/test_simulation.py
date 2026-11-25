@@ -139,7 +139,7 @@ def test_metrics_stay_within_their_theoretical_ranges():
         for report in [*period.rounds, period.aggregate]:
             groups = [report.overall, *report.by_cohort]
             for metrics in [g.metrics for g in groups if g.metrics]:
-                assert 0 <= metrics.efficiency <= 1
+                assert 0 <= metrics.satisfaction <= 1
                 assert 0 <= metrics.fairness <= 1
                 assert metrics.scarcity >= 0
                 assert metrics.contention >= 0
@@ -898,12 +898,52 @@ def test_the_population_is_constant_once_the_residence_is_full():
         assert ativos[period] == coorte * residence, period
 
 
-def test_the_warmup_is_simulated_but_not_measured():
-    """A pré-população roda inteira — o motor não joga nada fora —, e quem a"""
+def test_the_measurement_starts_when_the_cohort_enters():
+    """A pré-população roda inteira — o motor não joga nada fora — e a medição
+    começa no **ingresso** da coorte medida, que é o último período dela."""
     config = make_config(periods=8, warmup_periods=3)
     result = run_simulation(config)
     assert len(result.periods) == 8
-    assert [p.period for p in result.observed] == [4, 5, 6, 7, 8]
+    assert config.measured_cohort == 3
+    assert [p.period for p in result.observed] == [3, 4, 5, 6, 7, 8]
+
+
+def test_only_the_measured_cohort_enters_the_averages():
+    """Duas fases, uma coorte: quem entra fora de t = j roda, disputa e conta"""
+    config = make_config(periods=8, warmup_periods=3)
+    assert config.measured_cohort == 3
+    result = run_simulation(config)
+
+    def ativos(period: int, da_coorte: bool) -> int:
+        return sum(
+            1
+            for s in result.students
+            if s.entry_period <= period
+            if (s.graduated_at or s.dismissed_at or period) >= period
+            if (s.entry_period == 3) == da_coorte
+        )
+
+    for period in result.observed:
+        snapshot = period.aggregate.overall
+        assert snapshot.metrics is not None, period.period
+        assert snapshot.metrics.students == ativos(period.period, True), period.period
+        assert ativos(period.period, False) > 0, period.period
+        assert snapshot.active > snapshot.metrics.students, period.period
+
+
+def test_without_a_warmup_everybody_but_the_freshman_is_measured():
+    """Sem pré-população não há coorte a eleger, e o recorte volta a ser o"""
+    config = make_config(periods=4)
+    assert config.measured_cohort is None
+    result = run_simulation(config)
+    for period in result.observed:
+        snapshot = period.aggregate.overall
+        if snapshot.metrics is None:
+            continue
+        calouros = sum(
+            1 for s in result.students if s.entry_period == period.period
+        )
+        assert snapshot.metrics.students == snapshot.active - calouros
 
 
 def test_a_warmup_that_eats_the_horizon_is_refused():
@@ -1214,4 +1254,4 @@ def test_the_horizon_is_the_warmup_plus_the_observation():
     assert horizon_for_window(max_residence=5) == 9
     config = make_config(periods=8, max_residence=5, warmup_periods=5)
     result = run_simulation(config)
-    assert [p.period for p in result.observed] == [6, 7, 8]
+    assert [p.period for p in result.observed] == [5, 6, 7, 8]

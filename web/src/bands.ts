@@ -1,4 +1,4 @@
-/** As séries da comparação, régua por recorte: de onde vêm e com que cor saem */
+/** As séries da comparação, recorte a recorte: de onde vêm e com que cor saem */
 import type { SeriesGroupStyle } from "./charts";
 import { boxStats, requestFunnel } from "./equations";
 import { bandColor } from "./profileColors";
@@ -8,35 +8,46 @@ import type {
   Band,
   CutAxis,
   GroupBands,
-  Ruler,
   RunSummary,
+  StudentPoint,
 } from "./types";
 
-/** O eixo X **colapsado**: uma caixa por modelo, sobre as seeds, em vez de uma linha ao longo do tempo */
-export const AGGREGATE = "aggregate";
+/** Como o eixo X da série por período se lê */
+export const PERIOD_POINT = (x: number) => `Período ${x}`;
 
-export type RulerChoice = Ruler | typeof AGGREGATE;
-
-/** As réguas na ordem do seletor, com o rótulo e como o eixo X se lê */
-export const RULERS: {
-  ruler: Ruler;
+/** As grandezas de vida inteira que podem ir ao eixo X da dispersão */
+export const SCATTER_AXES: {
+  key: "grade_average" | "reserve";
   label: string;
-  point: (x: number) => string;
-  weight: string;
+  bounds: [number, number];
+  of: (point: StudentPoint) => number;
+   /** Como o valor do eixo se escreve no tooltip */
+  format: (value: number) => string;
 }[] = [
   {
-    ruler: "period",
-    label: "Período global",
-    point: (x) => `Período ${x}`,
-    weight: "Alunos medidos",
+    key: "grade_average",
+    label: "CR final",
+    bounds: [0, 10],
+    of: (point) => point.grade_average,
+    format: (value) => value.toLocaleString("pt-BR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }),
   },
   {
-    ruler: "age",
-    label: "Período local",
-    point: (x) => `${x}º período do aluno`,
-    weight: "Alunos que chegaram à idade",
+    key: "reserve",
+    label: "Utilidade de reserva",
+    bounds: [0, 1],
+    of: (point) => point.reserve,
+    format: (value) => value.toLocaleString("pt-BR", {
+      minimumFractionDigits: 3,
+      maximumFractionDigits: 3,
+    }),
   },
 ];
+
+/** O eixo X de uma métrica: o período, uma grandeza do aluno, ou o agregado */
+export type AxisChoice = "period" | "aggregate" | "grade_average" | "reserve";
 
 /** O que o seletor de linhas oferece */
 export type CutChoice = CutAxis;
@@ -74,6 +85,18 @@ export function cutDomain(axis: CutChoice): [number, number] | null {
   return CUTS.find((option) => option.axis === axis)?.domain ?? null;
 }
 
+/** Os cortes de um eixo valem se caem dentro do domínio e são distintos */
+export function validCuts(axis: CutChoice, values: number[]): boolean {
+  const domain = cutDomain(axis);
+  if (!domain) return true;
+  const [low, high] = domain;
+  return (
+    values.every(
+      (value) => Number.isFinite(value) && value > low && value < high
+    ) && new Set(values).size === values.length
+  );
+}
+
 const STATE_KEYS = [
   "not_eligible",
   "not_requested",
@@ -87,8 +110,6 @@ const STATE_KEYS = [
 export const pointsOf = (group: GroupBands): number[] =>
   group.x ?? group.period ?? [];
 
-export const rulerOf = (axis: AxisBands): Ruler => axis.ruler ?? "period";
-
 /** O recorte "Geral" de uma comparação antiga, refeito a partir da série por período de cada simulação — a mesma redução que a API faz hoje */
 function legacyBands(runs: RunSummary[]): AxisBands[] {
   const rows = new Map<number, Record<string, number | null>[]>();
@@ -98,7 +119,7 @@ function legacyBands(runs: RunSummary[]): AxisBands[] {
     series.period.forEach((period, i) => {
       const row: Record<string, number | null> = {
         students: series.students[i],
-        efficiency: series.efficiency[i],
+        satisfaction: series.satisfaction[i],
         attendance: series.attendance?.[i] ?? null,
         mean_round: series.mean_round?.[i] ?? null,
         fidelity: series.fidelity[i],
@@ -139,7 +160,7 @@ function legacyBands(runs: RunSummary[]): AxisBands[] {
     n: periods.map((p) => rows.get(p)!.length),
     values: Object.fromEntries(keys.map((key) => [key, periods.map((p) => band(p, key))])),
   };
-  return [{ ruler: "period", axis: "overall", groups: [overall] }];
+  return [{ axis: "overall", groups: [overall] }];
 }
 
 export const seriesOf = (arm: ArmResult | undefined): AxisBands[] =>

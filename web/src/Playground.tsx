@@ -203,7 +203,7 @@ export function Playground({
           </div>
           <div className="field">
             <label>
-              Nota mínima (n<sub>min</sub>)
+              Nota mínima (n<sub>apr</sub>)
             </label>
             <input
               type="number"

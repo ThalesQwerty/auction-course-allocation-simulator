@@ -287,7 +287,7 @@ def test_every_generation_has_the_same_size():
     assert sizes == {entry: 8 for entry in range(1, 7)}
 
 
-def _rows(stability, periods=8, **overrides):
+def _rows(fluctuation, periods=8, **overrides):
     disciplines = [
         Discipline(f"D{i}", seats=50, hours=60, entry=True) for i in range(1, 21)
     ]
@@ -295,7 +295,7 @@ def _rows(stability, periods=8, **overrides):
         disciplines=disciplines,
         periods=periods,
         max_hours=20 * 60,
-        interest_stability=stability,
+        interest_fluctuation=fluctuation,
         slots=20,
         **single_axis(20 * 60),
         **overrides,
@@ -304,36 +304,36 @@ def _rows(stability, periods=8, **overrides):
     return config, draw_interest(students, config, np.random.default_rng(3))
 
 
-def test_stability_does_not_touch_the_dispersion_of_a_period():
-    """A divisão preserva a variância: cada período continua com a dispersão de"""
+def test_the_fluctuation_does_not_touch_the_dispersion_of_a_period():
+    """A reflexão preserva a marginal: cada período continua com a dispersão"""
     spreads = []
-    for stability in (0.0, 0.5, 0.9):
-        _, rows = _rows(stability)
+    for fluctuation in (0.0, 0.5, 2.0):
+        _, rows = _rows(fluctuation)
         logs = [np.log(v) for row in rows.values() for v in row.values()]
         spreads.append(float(np.std(logs)))
     assert max(spreads) - min(spreads) < 0.05
 
 
-def test_a_fully_stable_preference_never_changes():
-    _, rows = _rows(1.0, periods=4)
+def test_without_fluctuation_the_preference_never_changes():
+    _, rows = _rows(0.0, periods=4)
     for sid in sorted({s for s, _ in rows}):
         assert rows[(sid, 1)] == rows[(sid, 4)]
 
 
-def test_a_discipline_can_carry_its_own_stability():
+def test_a_discipline_can_carry_its_own_fluctuation():
     """Declarar por disciplina é o que sincroniza a persistência entre"""
     disciplines = [
-        Discipline(f"FIXA{i}", seats=50, hours=60, entry=True, stability=1.0)
+        Discipline(f"FIXA{i}", seats=50, hours=60, entry=True, fluctuation=0.0)
         for i in range(10)
     ] + [
-        Discipline(f"SOLTA{i}", seats=50, hours=60, entry=True, stability=0.0)
+        Discipline(f"SOLTA{i}", seats=50, hours=60, entry=True, fluctuation=2.0)
         for i in range(10)
     ]
     config = SimulationConfig(
         disciplines=disciplines,
         periods=4,
         max_hours=20 * 60,
-        interest_stability=0.0,
+        interest_fluctuation=2.0,
         slots=20,
         **single_axis(20 * 60),
     )

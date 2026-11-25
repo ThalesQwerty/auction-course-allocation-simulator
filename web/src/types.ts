@@ -9,8 +9,8 @@ export interface DisciplineInput {
   entry: boolean;
    /** Optativa: não desbloqueia nada, não é de entrada, e concluir não exige aprovar em cada uma — exige somar `elective_hours` entre as aprovadas */
   elective?: boolean;
-   /** Quanto do gosto por esta disciplina é permanente, de 0 a 1 */
-  stability?: number;
+  /** Flutuação própria do gosto por esta disciplina; ausente cai na do cenário */
+  fluctuation?: number;
 }
 
 /** Nome de uma coorte: o grupo que ingressou naquele período (coorte 3 = quem entrou no período 3, esteja ele hoje em que semestre estiver) */
@@ -19,7 +19,8 @@ export const cohortLabel = (entryPeriod: number): string =>
 
 /** A distribuição de **disponibilidade** da população, uma só */
 export interface AvailabilityShape {
-  mode_hours: number; // > 0, abaixo de W_a
+  /** σ das horas; a média sai dele e da chance de alcançar W_a */
+  hours_sd: number;
   full_load_rate: number; // em (0, 1)
 }
 
@@ -34,18 +35,23 @@ export interface Scenario {
    /** ω — o ganho por repetição */
   repetition_gain: number;
   availability: AvailabilityShape;
-  availability_stability: number;
-  selectivity_median: number;
+  /** Desvio do abalo que o quantil da disponibilidade sofre a cada período */
+  availability_fluctuation: number;
+  selectivity_mean: number;
   selectivity_sigma: number;
-   /** σ do interesse por **horário**, a segunda metade do produto que forma o interesse por turma */
+  selectivity_fluctuation: number;
+  /** A log-normal do interesse por **horário**, a segunda metade do produto que forma o interesse por turma */
+  schedule_mean: number;
   schedule_sigma: number;
+  schedule_fluctuation: number;
    /** Os pontos de corte das faixas, um eixo por grandeza */
   grade_cuts: number[];
   reserve_cuts: number[];
-  interest_stability: number;
   slots: number;
+  /** A log-normal do interesse por **disciplina** */
   interest_mean: number;
   interest_sigma: number; // > 0
+  interest_fluctuation: number;
   max_hours: number;
    /** R — períodos para concluir */
   max_residence: number;
@@ -54,7 +60,7 @@ export interface Scenario {
    /** Quantos ingressantes entram em **cada turma de disciplina de entrada**, no máximo `class_size` */
   students_per_entry_class: number;
   rounds: number; // |R|
-  min_grade: number; // n_min
+  min_grade: number; // n_apr
    /** X — carga horária optativa exigida para concluir, somada entre as optativas aprovadas */
   elective_hours: number;
   min_credits: number; // C_min — orçamento mínimo do período
@@ -128,7 +134,7 @@ export const MAX_COMPARISON_RUNS = 100;
 export interface PeriodSeries {
   period: number[];
   students: number[];
-  efficiency: number[];
+  satisfaction: number[];
    /** θ — a carga cursada sobre a obtida; `null` onde ninguém do recorte obteve vaga, porque sem denominador não há razão */
   attendance: (number | null)[];
   mean_round: (number | null)[];
@@ -152,11 +158,13 @@ export interface RunSummary {
   seed: number;
    /** Períodos efetivamente publicados; menor que |T| se a população se esvaziou antes do horizonte */
   periods: number;
+  /** Quantos desses períodos usaram todas as |R| rodadas — a censura de r̄ */
+  capped_periods?: number;
    /** Concluintes da simulação */
   graduates: number;
   dismissed: number;
   population: number;
-  efficiency: number; // ψ̄ — eq. (53)
+  satisfaction: number; // ψ̄ — eq. (53)
    /** Ocupação (θ): carga horária obtida ÷ W_a */
   attendance: number | null;
   mean_round: number | null;
@@ -178,6 +186,24 @@ export interface RunSummary {
   allocations_per_round: (number | null)[];
    /** A série por período desta simulação */
   by_period?: PeriodSeries;
+   /** As linhas cruas desta simulação, em colunas paralelas */
+  observations?: Observations;
+}
+
+/** As linhas cruas de uma simulação: uma posição por (aluno medido, período medido).
+
+    É daqui que a interface recorta as faixas. `grade_average` e `reserve` dão o
+    rótulo da faixa; `won` é o peso de `mean_round`, porque r̄ do recorte é a média
+    das rodadas **por vaga concedida**. */
+export interface Observations {
+  period: number[];
+  grade_average: number[];
+  reserve: number[];
+  satisfaction: number[];
+  attendance: (number | null)[];
+  progress: number[];
+  mean_round: (number | null)[];
+  won: number[];
 }
 
 /** Um dos modelos comparados e as suas N simulações */
@@ -185,24 +211,11 @@ export interface ArmResult {
   key: string;
   mechanism: Mechanism;
   runs: RunSummary[];
-   /** As séries reduzidas entre as seeds: cada régua do eixo X cruzada com o agregado e com cada recorte */
+  /** Um ponto por aluno medido, de todas as seeds juntas */
+  points?: StudentPoint[];
+  /** O agregado da coorte por período, reduzido entre as seeds. Só o recorte "Geral": as faixas a interface recorta de `RunSummary.observations` */
   series?: AxisBands[];
-   /** Segundos médios do alocador em cada (período, rodada), entre as seeds: `allocation_seconds[p][r]` é a rodada r+1 do período p+1 */
-  allocation_seconds?: number[][];
-   /** O preço médio da turma por recorte da **oferta** */
-  class_prices?: ClassPriceBands[];
 }
-
-/** Um recorte da oferta e os grupos dele, já reduzidos entre as seeds */
-export interface ClassPriceBands {
-  axis: ClassCut;
-  groups: GroupBands[];
-}
-
-export type ClassCut =
-  | "classes"
-  | "hours"
-  | "curriculum_period";
 
 /** Os recortes **espaciais** da tela de comparação — as cores das linhas */
 export type CutAxis =
@@ -211,9 +224,6 @@ export type CutAxis =
   | "reserve"
    /** Só existe no leilão: no `ranking` o braço não produz o eixo, e a série dele não vem na resposta */
   | "credits";
-
-/** As réguas do eixo X — `leilao.comparison.RULERS` */
-export type Ruler = "period" | "age" | "cohort";
 
 export type Band = [number, number, number];
 
@@ -227,15 +237,44 @@ export interface GroupBands {
   values: Record<string, (Band | null)[]>;
 }
 
-/** Os grupos de um recorte espacial sob uma régua */
+/** Um ponto da dispersão: um aluno medido, de ponta a ponta do curso */
+export interface StudentPoint {
+  grade_average: number;
+  reserve: number;
+  satisfaction: number;
+  attendance: number | null;
+  progress: number;
+  mean_round: number | null;
+  graduated: boolean;
+}
+
+/** Os grupos de um recorte espacial */
 export interface AxisBands {
-  ruler?: Ruler;
   axis: CutAxis;
   groups: GroupBands[];
 }
 
+/** Uma execução gravada em `resultados/`, como a lista da API a devolve */
+export interface SavedResult {
+  name: string;
+  kind: string;
+  at: string;
+  bytes: number;
+  config: CompareRequest;
+}
+
+/** Uma execução gravada, inteira */
+export interface StoredRun {
+  kind: string;
+  at: string;
+  config: CompareRequest;
+  result: CompareResponse;
+}
+
 export interface CompareResponse {
   saved_to: string | null;
+   /** O nome com que a execução ficou gravada, que endereça `/results/{nome}` */
+  saved_as?: string | null;
   runs: number;
   arms: ArmResult[];
    /** As duas distribuições de entrada do cenário */
@@ -259,7 +298,7 @@ export interface Metrics {
   allocated: number;
   allocations_per_student: number;
    /** ψ̄ — eq */
-  efficiency: number;
+  satisfaction: number;
    /** Ocupação (θ) — carga horária obtida no período ÷ W_a, média dos alunos medidos */
    /** θ — carga cursada ÷ carga obtida, média de quem obteve alguma vaga */
   attendance: number | null;
@@ -364,7 +403,7 @@ export interface StudentSummary {
   id: string;
   name: string;
   entry_period: number; // t_a — eq. (31)
-   /** Os níveis basilares dele nos três eixos, na normal padrão */
+  /** As âncoras dele, como quantis em (0, 1) */
   availability_anchor: number;
   selectivity_anchor: number;
   grade_average: number; // N_a — eq. (49)

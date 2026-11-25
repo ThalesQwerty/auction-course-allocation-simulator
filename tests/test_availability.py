@@ -9,7 +9,7 @@ import pytest
 from profiles import always_available
 from disciplines import disciplines_from_predecessors
 
-from leilao.availability import draw_availability
+from leilao.availability import draw_availability, draw_selectivity
 from leilao.config import (
     Discipline,
     DEFAULT_AVAILABILITY,
@@ -45,7 +45,7 @@ def make_config(**overrides) -> SimulationConfig:
         periods=6,
         max_residence=4,
         students_per_entry_class=18,
-        selectivity_median=2.0,
+        selectivity_mean=0.7,
         rounds=2,
         max_hours=240,
         seed=7,
@@ -53,12 +53,12 @@ def make_config(**overrides) -> SimulationConfig:
     return SimulationConfig(**{**base, **overrides})
 
 
-def test_the_effective_load_rounds_to_the_nearest_hour():
+def test_the_effective_load_floors_to_the_whole_hour():
     """A disponibilidade já vem em horas: a carga efetiva só arredonda."""
     assert effective_load(availability=360.0) == 360
     assert effective_load(availability=180.4) == 180
     assert effective_load(availability=0.0) == 0
-    assert effective_load(availability=319.5) == 320
+    assert effective_load(availability=319.5) == 319
 
 
 def test_the_effective_load_has_no_ceiling():
@@ -254,7 +254,6 @@ def test_one_band_is_the_whole_university():
 
 
 def test_the_marginal_of_the_quantile_stays_uniform():
-    """O nível basilar reparte a variância, não a muda: a calibragem da nota"""
     config = make_config(students_per_entry_class=150)
     students = generate_students(config, np.random.default_rng(0))
     valores = list(
@@ -279,7 +278,7 @@ def test_availability_is_drawn_once_per_student_and_period():
 
     assert len(drawn) == len(students) * config.periods
     assert all(value > 0.0 for value in drawn.values())
-    assert any(value > config.max_hours for value in drawn.values())
+    assert any(value == config.max_hours for value in drawn.values())
     reduced = min(students, key=lambda s: s.availability_anchor)
     row = [drawn[(reduced.id, t)] for t in range(1, config.periods + 1)]
     assert len(set(row)) == len(row)
@@ -344,3 +343,34 @@ def test_a_full_availability_scenario_never_excludes():
         for record in history.periods:
             assert record.retained_hours == record.enrolled_hours
             assert not any(r.excluded for r in record.requests)
+
+
+def _selectivities(fluctuation: float, periods: int = 6):
+    config = make_config(periods=periods, selectivity_fluctuation=fluctuation)
+    students = generate_students(config, np.random.default_rng(0))
+    return config, students, draw_selectivity(students, config, np.random.default_rng(4))
+
+
+def test_without_fluctuation_the_selectivity_holds_for_the_whole_course():
+    _config, students, valores = _selectivities(0.0)
+    for student in students:
+        primeiro = valores[(student.id, 1)]
+        assert all(valores[(student.id, t)] == primeiro for t in range(2, 7))
+
+
+def test_with_fluctuation_the_selectivity_moves_and_keeps_its_median():
+    config, students, valores = _selectivities(0.5)
+    movidos = [
+        s for s in students if valores[(s.id, 1)] != valores[(s.id, 2)]
+    ]
+    assert len(movidos) > len(students) * 0.9
+    assert float(np.median(list(valores.values()))) == pytest.approx(
+        math.exp(config.selectivity_mean), rel=0.1
+    )
+
+
+def test_a_tiny_mean_turns_every_student_into_a_speculator():
+    config = make_config(selectivity_mean=-50.0, selectivity_fluctuation=0.5)
+    students = generate_students(config, np.random.default_rng(0))
+    valores = draw_selectivity(students, config, np.random.default_rng(4))
+    assert all(valor < 1e-15 for valor in valores.values())

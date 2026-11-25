@@ -33,7 +33,7 @@ class Metrics:
     students: int
     allocated: int
     allocations_per_student: float
-    efficiency: float
+    satisfaction: float
     fairness: float
     progress: float
     attendance: float | None
@@ -69,7 +69,7 @@ def compute_metrics(
         students=len(satisfactions),
         allocated=allocated,
         allocations_per_student=allocated / len(satisfactions) if satisfactions else 0.0,
-        efficiency=mean_satisfaction(satisfactions),
+        satisfaction=mean_satisfaction(satisfactions),
         fairness=jain_index(satisfactions),
         progress=mean(progresses),
         attendance=(mean(kept) if attendances is not None and kept else None),

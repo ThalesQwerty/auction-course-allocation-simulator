@@ -408,11 +408,12 @@ def test_the_newcomer_without_electives_marks_exactly_one():
     assert any(psi < 1.0 - 1e-6 for psi in outros)
 
 
-def _interest(stability: float, schedule_sigma: float = 0.6, periods: int = 3):
+def _interest(fluctuation: float, schedule_sigma: float = 0.6, periods: int = 3):
     config = make_config(
         classes=4,
         periods=periods,
-        interest_stability=stability,
+        interest_fluctuation=fluctuation,
+        schedule_fluctuation=fluctuation,
         schedule_sigma=schedule_sigma,
     )
     students = generate_students(config, np.random.default_rng(0))
@@ -445,15 +446,31 @@ def test_the_schedule_taste_is_shared_across_disciplines():
     assert all(len(valores) == 1 for valores in por_horario.values())
 
 
-def test_period_stability_at_one_freezes_the_interest_even_with_classes():
-    """Se a estabilidade entre períodos vale 1, o interesse de cada turma é o"""
-    _config, students, rows, schedules = _interest(1.0, 0.3, periods=4)
+def test_zero_fluctuation_freezes_the_interest_even_with_classes():
+    """Sem flutuação, o interesse de cada turma é o mesmo em todo período."""
+    _config, students, rows, schedules = _interest(0.0, 0.3, periods=4)
     student = students[0].id
     primeira = rows[(student, 1)]
     primeiro_horario = schedules[(student, 1)]
     for period in (2, 3, 4):
         assert rows[(student, period)] == pytest.approx(primeira)
         assert schedules[(student, period)] == pytest.approx(primeiro_horario)
+
+
+def test_the_two_interests_fluctuate_independently():
+    """Cada fator tem flutuação própria: congelar a disciplina não congela o"""
+    config = make_config(
+        classes=4,
+        periods=4,
+        interest_fluctuation=0.0,
+        schedule_fluctuation=2.0,
+    )
+    students = generate_students(config, np.random.default_rng(0))
+    rows = draw_interest(students, config, np.random.default_rng(5))
+    schedules = draw_schedule_interest(students, config, np.random.default_rng(7))
+    student = students[0].id
+    assert rows[(student, 4)] == pytest.approx(rows[(student, 1)])
+    assert schedules[(student, 4)] != pytest.approx(schedules[(student, 1)])
 
 
 def test_the_record_stays_on_the_discipline():

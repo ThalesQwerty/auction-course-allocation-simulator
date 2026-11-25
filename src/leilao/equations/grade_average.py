@@ -1,4 +1,4 @@
-"""Coeficiente de rendimento do aluno — anteprojeto, eq. (49)."""
+"""N_a = Σ_{X ∈ H_a} w_X · n^[max]_{a,X} / Σ_{X ∈ H_a} w_X."""
 from __future__ import annotations
 
 from collections.abc import Set

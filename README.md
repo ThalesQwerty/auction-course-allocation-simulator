@@ -65,10 +65,9 @@ python -m leilao.cli --scenario <arquivo>.json --runs 20 --workers 3
 ```
 
 `SCENARIO` é um JSON: um resultado já gravado (de que se lê o `config`) ou um
-cenário solto. Ela imprime cada simulação quando termina, grava em
-`resultados/` no mesmo formato de sempre, e o arquivo entra na interface por
-**Carregar resultado**. Quem monta a resposta é `api/service.py`, o mesmo
-módulo que a rota usa.
+cenário solto. Ela imprime cada simulação quando termina e grava em
+`resultados/`, de onde a interface a lista como qualquer outra. Quem monta a
+resposta é `api/service.py`, o mesmo módulo que a rota usa.
 
 `--workers` é quantas simulações correm ao mesmo tempo, e o teto é a **memória
 livre, não o número de núcleos**: cada worker pede o pico do processo Python e
@@ -96,22 +95,32 @@ segundo preço, consumo. Não sabem o que é aluno, nota ou grade.
 
 ### API e interface
 
-`api/main.py` tem quatro rotas; `api/service.py` é o miolo delas sem HTTP
-(`build_config`, `compare_scenario`), compartilhado com `cli.py`. Cada
-requisição carrega o cenário inteiro, e o estado vive no navegador.
+`api/service.py` é o miolo das rotas sem HTTP (`build_config`,
+`compare_scenario`), compartilhado com `cli.py`. Cada requisição carrega o
+cenário inteiro.
 
 - `/run` — um leilão de uma rodada
 - `/compare` — os braços da comparação, a rota mais cara; grava em
   `resultados/` (git-ignored, caminho em `LEILAO_RESULTS_DIR`) e devolve
-  `saved_to`. Nenhuma rota lê de lá: quem carrega o arquivo é a interface.
+  `saved_to` e `saved_as`
 - `/trace` — refaz um par braço + seed e devolve o pedido de cada aluno
 - `/playground` — alocação isolada
+- `GET /results` — o que há gravado, sem o resultado
+- `GET /results/{nome}` — uma execução inteira
+- `DELETE /results/{nome}` — apaga uma execução
+
+O histórico é o disco: a interface não guarda execução nenhuma, lista pela API
+e abre uma sob demanda. Apagar `resultados/` apaga o histórico.
+
+A resposta é bruta. O motor publica uma linha por (aluno medido, período
+medido) e, de série pronta, só o agregado da coorte; o recorte em faixas de CR
+e de reserva é conta de navegador (`web/src/cutBands.ts`), e por isso mudar um
+corte não refaz simulação.
 
 `web/src/` é React + Vite + Recharts. `types.ts` **espelha** `api/schemas.py`:
-mudou um, mude o outro. `App.tsx` guarda o histórico de execuções no
-`localStorage`; `presets.ts` traz a grade e o cenário padrão; `equations/`
-repete em TS as contas que a tela precisa fazer sozinha, com a mesma regra de
-função pura; `charts/` embrulha o Recharts.
+mudou um, mude o outro. `presets.ts` traz a grade e o cenário padrão;
+`equations/` repete em TS as contas que a tela precisa fazer sozinha, com a
+mesma regra de função pura; `charts/` embrulha o Recharts.
 
 ### Usando a interface
 

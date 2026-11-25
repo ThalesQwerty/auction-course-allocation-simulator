@@ -1,27 +1,17 @@
-"""Os parâmetros da log-normal da disponibilidade, a partir de moda e chance."""
+"""Os parâmetros da normal da disponibilidade, a partir do desvio e da chance."""
 from __future__ import annotations
 
-import math
-from statistics import NormalDist
-
-_STANDARD = NormalDist()
+from ._normal import standard_normal_quantile
 
 
 def availability_shape(
-    *, mode_hours: float, full_load_rate: float, max_hours: float
+    *, hours_sd: float, full_load_rate: float, max_hours: float
 ) -> tuple[float, float]:
-    if mode_hours <= 0.0:
-        raise ValueError("a moda da disponibilidade deve ser > 0")
+    """μ = W_a + σ · Φ⁻¹(P(W ≥ W_a)), pela mesma inversão da média da nota."""
+    if hours_sd <= 0.0:
+        raise ValueError("o desvio da disponibilidade deve ser > 0")
     if not 0.0 < full_load_rate < 1.0:
         raise ValueError("a chance de alcançar a carga máxima deve estar em (0, 1)")
     if max_hours <= 0.0:
         raise ValueError("a carga horária máxima deve ser > 0")
-    threshold = max_hours - 0.5
-    if mode_hours >= threshold:
-        raise ValueError(
-            "a moda da disponibilidade deve ficar abaixo da carga horária máxima"
-        )
-    span = math.log(threshold / mode_hours)
-    z = _STANDARD.inv_cdf(1.0 - full_load_rate)
-    sigma = 0.5 * (-z + math.sqrt(z * z + 4.0 * span))
-    return math.log(mode_hours) + sigma * sigma, sigma
+    return max_hours + hours_sd * standard_normal_quantile(full_load_rate), hours_sd

@@ -79,13 +79,12 @@ class DisciplineIn(BaseModel):
         default=False,
         description="matrícula garantida de quem ingressa; não pode ter pré-requisito",
     )
-    stability: float | None = Field(
+    fluctuation: float | None = Field(
         default=None,
         ge=0,
-        le=1,
         description=(
-            "quanto do gosto por esta disciplina é permanente; nulo cai no valor "
-            "do cenário. Declarar por disciplina sincroniza a persistência entre "
+            "flutuação própria do gosto por esta disciplina; nula cai na do "
+            "cenário. Declarar por disciplina sincroniza a persistência entre "
             "concorrentes, que é o que trava a fila"
         ),
     )
@@ -104,12 +103,21 @@ class AvailabilityIn(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    mode_hours: float = Field(default=306.0, gt=0)
-    full_load_rate: float = Field(default=0.10, gt=0, lt=1)
+    hours_sd: float = Field(
+        default=1.2,
+        gt=0,
+        description="desvio padrão das horas disponíveis; a média sai dele e da chance",
+    )
+    full_load_rate: float = Field(
+        default=0.10,
+        gt=0,
+        lt=1,
+        description="P(W^[pos] >= W_a) — a chance de o aluno alcançar a carga máxima",
+    )
 
     def to_shape(self) -> AvailabilityShape:
         return AvailabilityShape(
-            mode_hours=self.mode_hours, full_load_rate=self.full_load_rate
+            hours_sd=self.hours_sd, full_load_rate=self.full_load_rate
         )
 
 
@@ -125,7 +133,7 @@ class ScenarioIn(BaseModel):
         gt=0,
         lt=1,
         description=(
-            "P_apr — a probabilidade de a nota alcançar n_min. Parâmetro global: "
+            "P_apr — a probabilidade de a nota alcançar n_apr. Parâmetro global: "
             "não há heterogeneidade de desempenho, e o quantil da nota é sorteado "
             "de novo a cada tentativa"
         ),
@@ -144,6 +152,15 @@ class ScenarioIn(BaseModel):
             "unidade ao denominador do expoente"
         ),
     )
+    schedule_mean: float = Field(
+        default=0.0,
+        allow_inf_nan=False,
+        description=(
+            "μ do logaritmo do interesse por horário. Não mexe em alocação "
+            "nenhuma: o fator de horário é h tomado sobre o melhor horário do "
+            "aluno, e a razão cancela e^μ. Existe para a prévia da curva"
+        ),
+    )
     schedule_sigma: float = Field(
         default=0.6,
         ge=0,
@@ -152,6 +169,11 @@ class ScenarioIn(BaseModel):
             "interesse por turma. Em 0 todas as turmas de uma disciplina valem "
             "igual"
         ),
+    )
+    schedule_fluctuation: float = Field(
+        default=0.25,
+        ge=0,
+        description="desvio do abalo do quantil do interesse por horário",
     )
     first_seed: int = Field(
         default=1,
@@ -168,26 +190,27 @@ class ScenarioIn(BaseModel):
             "que o aluno tem para o período, sorteada a cada período"
         ),
     )
-    availability_stability: float = Field(
+    availability_fluctuation: float = Field(
         default=0.5,
         ge=0,
-        le=1,
-        description=(
-            "quanto da disponibilidade é permanente — a correlação entre dois "
-            "períodos do mesmo aluno"
-        ),
+        description="desvio do abalo do quantil da disponibilidade",
     )
-    selectivity_median: float = Field(
-        default=0.0035,
-        ge=0,
+    selectivity_mean: float = Field(
+        default=0.7,
+        allow_inf_nan=False,
         description=(
-            "a mediana da seletividade, na **escala do interesse**: quanto "
-            "vale, para o aluno, não estudar. A reserva dele é `S / (S + ΣI)` "
-            "sobre o interesse das elegíveis. 0 é o especulador"
+            "μ do logaritmo da seletividade, na **escala do interesse**: "
+            "quanto vale, para o aluno, não estudar. A reserva dele é "
+            "`S / (S + ΣI)` sobre o interesse das elegíveis"
         ),
     )
     selectivity_sigma: float = Field(
-        default=0.6, gt=0, description="desvio em log da seletividade"
+        default=0.6, gt=0, description="σ do logaritmo da seletividade"
+    )
+    selectivity_fluctuation: float = Field(
+        default=0.0,
+        ge=0,
+        description="desvio do abalo do quantil da seletividade",
     )
     grade_cuts: list[float] = Field(
         default=[5.0, 7.0],
@@ -210,7 +233,7 @@ class ScenarioIn(BaseModel):
         ),
     )
     slots: int = Field(
-        default=12,
+        default=11,
         ge=1,
         le=48,
         description=(
@@ -219,33 +242,33 @@ class ScenarioIn(BaseModel):
             "circularmente. O piso é o maior número de turmas de uma disciplina"
         ),
     )
-    interest_stability: float = Field(
-        default=0.5,
+    interest_fluctuation: float = Field(
+        default=0.25,
         ge=0,
-        le=1,
         description=(
-            "quanto do interesse do aluno é permanente, de 0 a 1. 0 resorteia o "
-            "interesse inteiro a cada período; 1 congela. Ortogonal ao sigma: "
-            "a divisão preserva a dispersão de cada período"
+            "desvio do abalo do quantil do interesse por disciplina. Em 0 a "
+            "âncora do aluno vale em todo período; grande o bastante, a posição "
+            "dele recomeça. A reflexão preserva a marginal declarada em "
+            "qualquer valor"
         ),
     )
     interest_mean: float = Field(
         default=1.0,
         allow_inf_nan=False,
         description=(
-            "μ — média do logaritmo da log-normal de onde sai o interesse. Não "
-            "mexe em alocação nenhuma: multiplica a linha por e^μ, e a "
-            "normalização desfaz o fator. Existe para a prévia da log-normal "
-            "fonte se ler em escala confortável. A atratividade soma-se a ela."
+            "μ — média do logaritmo da log-normal de onde sai o interesse por "
+            "disciplina. Não mexe na utilidade, que normaliza a linha, mas "
+            "escala ΣI e com ela a utilidade de reserva: em escala, ele e a "
+            "mediana da seletividade se calibram juntos"
         ),
     )
     interest_sigma: float = Field(
         default=1.0,
         gt=0,
         description=(
-            "σ — desvio do logaritmo da log-normal de onde sai o interesse — o "
-            "sorteio que, normalizado sobre a grade e visto pelo histórico do "
-            "aluno, vira a utilidade. Controla o quanto o aluno diferencia as "
+            "σ — desvio do logaritmo da log-normal de onde sai o interesse por "
+            "disciplina — o sorteio que, normalizado sobre a grade e visto pelo "
+            "histórico, vira a utilidade. Controla o quanto o aluno diferencia as "
             "disciplinas: **grande concentra** (quer uma ou duas e despreza o "
             "resto), pequeno achata. A faixa útil cabe entre ~0,25 e ~3."
         ),
@@ -275,7 +298,7 @@ class ScenarioIn(BaseModel):
         """|T|, derivado — ver `config.horizon_for_window`."""
         return horizon_for_window(max_residence=self.max_residence)
     rounds: int = Field(default=1, ge=1, le=10, description="|R| — rodadas por período")
-    min_grade: float = Field(default=5.0, gt=0, le=10, description="n_min")
+    min_grade: float = Field(default=5.0, gt=0, le=10, description="n_apr")
     elective_hours: int = Field(
         default=0,
         ge=0,
@@ -332,9 +355,41 @@ class AxisBandsOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    ruler: str
     axis: str
     groups: list[GroupBandsOut]
+
+
+class ObservationsOut(BaseModel):
+    """As linhas cruas de uma simulação, em colunas paralelas.
+
+    Uma posição por (aluno medido, período medido). É daqui que a interface
+    recorta as faixas, e por isso mudar um corte não refaz a simulação.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    period: list[int]
+    grade_average: list[float]
+    reserve: list[float]
+    satisfaction: list[float]
+    attendance: list[float | None]
+    progress: list[float]
+    mean_round: list[float | None]
+    won: list[int]
+
+
+class StudentPointOut(BaseModel):
+    """Um ponto da dispersão: um aluno medido, de ponta a ponta do curso."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    grade_average: float
+    reserve: float
+    satisfaction: float
+    attendance: float | None
+    progress: float
+    mean_round: float | None
+    graduated: bool
 
 
 class RunSummaryOut(BaseModel):
@@ -344,10 +399,11 @@ class RunSummaryOut(BaseModel):
 
     seed: int
     periods: int
+    capped_periods: int = 0
     graduates: int
     dismissed: int
     population: int
-    efficiency: float
+    satisfaction: float
     attendance: float | None
     mean_round: float | None
     progress: float
@@ -358,6 +414,7 @@ class RunSummaryOut(BaseModel):
     request_states: RequestStatesOut
     time_to_graduate: float | None
     allocations_per_round: list[float | None]
+    observations: ObservationsOut | None = None
 
 
 class ClassPriceBandsOut(BaseModel):
@@ -377,13 +434,13 @@ class ArmResultOut(BaseModel):
     key: str
     mechanism: Mechanism
     runs: list[RunSummaryOut]
+    points: list[StudentPointOut] = []
     series: list[AxisBandsOut]
-    allocation_seconds: list[list[float]] = []
-    class_prices: list[ClassPriceBandsOut] = []
 
 
 class CompareResponse(BaseModel):
     saved_to: str | None = None
+    saved_as: str | None = None
     """As amostras dos três braços, pareadas pela seed: o i-ésimo elemento de
     cada lista é a mesma população sob regras diferentes."""
 
@@ -412,7 +469,7 @@ class MetricsOut(BaseModel):
     students: int
     allocated: int
     allocations_per_student: float
-    efficiency: float
+    satisfaction: float
     attendance: float | None
     attendance_students: int | None
     progress: float
@@ -647,3 +704,13 @@ class PlaygroundResponse(BaseModel):
     rounds: list[PlaygroundRoundOut]
     closing: list[PlaygroundClosingOut]
     grades: list[PlaygroundGradeOut]
+
+
+class SavedResultOut(BaseModel):
+    """Um resultado gravado em disco, sem o resultado: o que a lista mostra."""
+
+    name: str
+    kind: str
+    at: str
+    bytes: int
+    config: dict | None = None

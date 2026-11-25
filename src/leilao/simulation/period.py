@@ -7,6 +7,7 @@ from ..behavior import interest_total, utility_matrix
 from ..config import SimulationConfig
 from ..equations import (
     Behavior,
+    attendance,
     demand_per_seat,
     entry_class,
     mean_price,
@@ -25,7 +26,8 @@ from .reports import (
 )
 from .rounds import RoundOutcome, run_round
 from .setup import Draws
-from .snapshots import Axis, measure, snapshot_groups
+from .observations import period_points
+from .snapshots import Axis, Measurements, measure, snapshot_groups
 from .state import PeriodState
 
 CELL_AXIS = "cell:"
@@ -36,6 +38,9 @@ class PeriodOutcome:
     report: PeriodReport
     records: dict[str, StudentPeriodRecord]
     satisfaction: dict[str, float]
+    reserve: dict[str, float]
+    attendance: dict[str, float | None]
+    won_rounds: dict[str, list[int]]
     first_grades: list[float]
 
 
@@ -150,24 +155,21 @@ class _Reporter:
             name: Axis.crossed(axis, self.axis) for name, axis in self.profiles.items()
         }
 
-    def at(
+    def measurements(
         self,
         *,
-        round_number: int,
         satisfactions: dict[str, float],
         won: dict[str, set[str]],
         credits: dict[str, int],
         bids: dict[str, int],
-        prices: PriceStats | None,
-        allocation_seconds: float,
         ages: dict[str, int],
         credit_returns: dict[str, int] | None,
         allocated_satisfactions: dict[str, float] | None = None,
         retained: dict[str, set[str]] | None = None,
         excluded: dict[str, list[str]] | None = None,
-    ) -> RoundReport:
+    ) -> Measurements:
         requested = {s.id: self.state.requested(s.id) for s in self.active}
-        values = measure(
+        return measure(
             config=self.config,
             active=self.active,
             satisfactions=satisfactions,
@@ -185,7 +187,8 @@ class _Reporter:
             discipline_hours=self.draws.discipline_hours,
             credit_returns=credit_returns,
             selectivities={
-                s.id: self.draws.selectivity[s.id] for s in self.active
+                s.id: self.draws.selectivity[(s.id, self.period)]
+                for s in self.active
             },
             reserves=self.reserves,
             allocated_satisfactions=allocated_satisfactions,
@@ -193,6 +196,15 @@ class _Reporter:
             excluded=excluded,
             requested=requested,
         )
+
+    def report(
+        self,
+        *,
+        values: Measurements,
+        round_number: int,
+        prices: PriceStats | None,
+        allocation_seconds: float,
+    ) -> RoundReport:
         cells = {f"{CELL_AXIS}{name}": axis for name, axis in self.cells.items()}
         overall, groups = snapshot_groups(
             config=self.config,
@@ -329,7 +341,7 @@ def run_period(
     """Roda o período. `None` quando não há ninguém a medir — e aí a"""
     for student in active:
         student.behavior = Behavior(
-            selectivity=draws.selectivity[student.id]
+            selectivity=draws.selectivity[(student.id, period)]
         )
 
     utilities = {
@@ -356,7 +368,7 @@ def run_period(
     grade_averages = {s.id: s.grade_average(draws.discipline_hours) for s in active}
     reserves = {
         s.id: reserve_threshold(
-            selectivity=draws.selectivity[s.id], interest=interests[s.id]
+            selectivity=draws.selectivity[(s.id, period)], interest=interests[s.id]
         )
         for s in active
     }
@@ -382,19 +394,23 @@ def run_period(
             uses_credits=config.uses_credits,
         )
 
-    outcomes = [
-        run_round(
-            config=config,
-            draws=draws,
-            active=active,
-            utilities=utilities,
-            interests=interests,
-            grade_averages=grade_averages,
-            state=state,
-            round_number=number,
+    outcomes = []
+    for number in range(1, config.rounds + 1):
+        granted_before = sum(len(won) for won in state.won.values())
+        outcomes.append(
+            run_round(
+                config=config,
+                draws=draws,
+                active=active,
+                utilities=utilities,
+                interests=interests,
+                grade_averages=grade_averages,
+                state=state,
+                round_number=number,
+            )
         )
-        for number in range(1, config.rounds + 1)
-    ]
+        if sum(len(won) for won in state.won.values()) == granted_before:
+            break
 
     contentions, demand = _contentions(active=active, state=state)
     reporter = _Reporter(
@@ -414,16 +430,18 @@ def run_period(
 
     during = reporter.ages(closed=False)
     round_reports = [
-        reporter.at(
+        reporter.report(
+            values=reporter.measurements(
+                satisfactions=outcome.satisfaction,
+                won=outcome.won,
+                credits=outcome.budget,
+                bids=outcome.bids,
+                ages=during,
+                credit_returns=None,
+            ),
             round_number=outcome.number,
-            satisfactions=outcome.satisfaction,
-            won=outcome.won,
-            credits=outcome.budget,
-            bids=outcome.bids,
             prices=outcome.prices,
             allocation_seconds=outcome.allocation_seconds,
-            ages=during,
-            credit_returns=None,
         )
         for outcome in outcomes
     ]
@@ -450,21 +468,43 @@ def run_period(
         )
         for s in active
     }
+    period_attendance = {
+        s.id: attendance(
+            won=sorted(state.won[s.id]),
+            attended=sorted(closing.retained[s.id]),
+            hours=draws.hours,
+        )
+        for s in active
+    }
+    won_rounds = {
+        s.id: [
+            # A vaga garantida não passou por rodada nenhuma, e conta como a
+            # primeira: é o que a série do período já faz, porque a rodada 1
+            # acumula as concessões que vieram antes dela.
+            max(1, state.won_round[(s.id, name)])
+            for name in sorted(state.won[s.id])
+            if (s.id, name) in state.won_round
+        ]
+        for s in active
+    }
     prices = _period_prices(config=config, state=state)
 
-    aggregate = reporter.at(
-        round_number=0,
+    closing_values = reporter.measurements(
         satisfactions=period_satisfaction,
         won=state.won,
         credits=state.budget,
         bids=state.bid_total,
-        prices=PriceStats.of(list(prices.values())),
-        allocation_seconds=sum(o.allocation_seconds for o in outcomes),
         ages=reporter.ages(closed=True),
         credit_returns=closing.credits_returned,
         allocated_satisfactions=allocated_satisfaction,
         retained=closing.retained,
         excluded=closing.excluded,
+    )
+    aggregate = reporter.report(
+        values=closing_values,
+        round_number=0,
+        prices=PriceStats.of(list(prices.values())),
+        allocation_seconds=sum(o.allocation_seconds for o in outcomes),
     )
 
     return PeriodOutcome(
@@ -482,7 +522,17 @@ def run_period(
             ),
             graduated_now=closing.graduated_now,
             dismissed_now=closing.dismissed_now,
+            points=period_points(
+                config=config,
+                active=active,
+                period=period,
+                values=closing_values,
+                won_rounds=won_rounds,
+            ),
         ),
+        reserve=dict(reserves),
+        attendance=period_attendance,
+        won_rounds=won_rounds,
         records=(
             _student_records(
                 config=config,

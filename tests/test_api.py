@@ -5,6 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from leilao.api.main import app
+from leilao.api.schemas import CompareRequest
+from leilao.api.service import build_config
+from leilao.comparison import ARMS, run_comparison
 
 
 @pytest.fixture(autouse=True)
@@ -106,8 +109,8 @@ COMPARE_SCENARIO = {
     "class_size": 2,
     "performance": {"mode_grade": 8.0, "zero_rate": 0.005, "max_rate": 0.008},
     "max_hours": 360,
-    "availability": {"mode_hours": 350.0, "full_load_rate": 0.9},
-    "selectivity_median": 0.0,
+    "availability": {"hours_sd": 17.5, "full_load_rate": 0.9},
+    "selectivity_mean": -50.0,
     "grade_cuts": [],
     "reserve_cuts": [],
     "credit_cuts": [],
@@ -117,11 +120,66 @@ COMPARE_SCENARIO = {
     "seed": 5,
 }
 
+def test_the_saved_runs_are_listed_read_and_deleted_through_the_api(client):
+    """O histórico é o disco: a interface lista, abre e apaga pela API."""
+    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 1}).json()
+    name = payload["saved_as"]
+    assert name
+
+    listing = client.get("/results").json()
+    assert [row["name"] for row in listing] == [name]
+    row = listing[0]
+    assert row["kind"] == "comparison"
+    assert row["bytes"] > 0
+    assert row["config"]["runs"] == 1
+
+    inteiro = client.get(f"/results/{name}").json()
+    assert inteiro["config"]["runs"] == 1
+    assert inteiro["result"]["arms"][0]["runs"][0]["observations"]["period"]
+
+    assert client.delete(f"/results/{name}").status_code == 204
+    assert client.get("/results").json() == []
+    assert client.get(f"/results/{name}").status_code == 404
+    assert client.delete(f"/results/{name}").status_code == 404
+
+
+def test_a_result_name_cannot_escape_the_results_folder(client):
+    """O nome vem da URL, e é só o que a pasta de resultados contém."""
+    for nome in ("..", ".oculto", "sub%2Fdir"):
+        assert client.get(f"/results/{nome}").status_code in (400, 404)
+        assert client.delete(f"/results/{nome}").status_code in (400, 404)
+
+
+def test_the_raw_rows_travel_in_the_response(client):
+    """O recorte em faixas é conta de interface, e por isso as linhas cruas vão
+    na resposta e o motor publica só o agregado da coorte."""
+    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
+
+    for arm in payload["arms"]:
+        assert [axis["axis"] for axis in arm["series"]] == ["overall"]
+        for run in arm["runs"]:
+            rows = run["observations"]
+            tamanhos = {len(values) for values in rows.values()}
+            assert len(tamanhos) == 1, "as colunas saíram de tamanhos diferentes"
+            assert all(1 <= p for p in rows["period"])
+            assert all(0 <= value <= 10 for value in rows["grade_average"])
+            assert all(0 <= value <= 1 for value in rows["reserve"])
+            assert all(won >= 0 for won in rows["won"])
+
+
+def _engine_comparison(runs: int = 2):
+    """A comparação pelo motor, para o que a resposta da API já não carrega."""
+    request = CompareRequest(**{**COMPARE_SCENARIO, "runs": runs})
+    return run_comparison(
+        build_config(request), runs=runs, arms=ARMS, workers=1
+    )
+
+
 POPULATION = {
     "performance": {"mode_grade": 4.0, "zero_rate": 0.05, "max_rate": 0.002},
     "interest_sigma": 1,
     "max_hours": 120,
-    "availability": {"mode_hours": 110.0, "full_load_rate": 0.4},
+    "availability": {"hours_sd": 5.5, "full_load_rate": 0.4},
 }
 
 def test_compare_returns_one_summary_per_seed_in_every_arm(client):
@@ -218,13 +276,7 @@ def test_compare_ignores_the_scenario_seed(client):
     ).json()
 
     assert first.pop("saved_to") != second.pop("saved_to")
-
-    shapes = [
-        [[len(period) for period in arm.pop("allocation_seconds")] for arm in payload["arms"]]
-        for payload in (first, second)
-    ]
-    assert shapes[0] == shapes[1]
-    assert all(rounds > 0 for shape in shapes for arm in shape for rounds in arm)
+    assert first.pop("saved_as") != second.pop("saved_as")
 
     assert first == second
 
@@ -236,7 +288,7 @@ def test_credit_quantities_exist_only_where_there_is_currency(client):
 
     for arm in payload["arms"]:
         eixo = next(
-            a for a in arm["series"] if a["ruler"] == "period" and a["axis"] == "overall"
+            a for a in arm["series"] if a["axis"] == "overall"
         )
         valores = eixo["groups"][0]["values"]
         for chave in chaves:
@@ -247,38 +299,44 @@ def test_credit_quantities_exist_only_where_there_is_currency(client):
                 assert all(f is None for f in faixas), f"{arm['key']}/{chave} tem moeda"
 
 
-def test_the_price_cuts_split_the_offer_and_only_exist_in_the_auction(client):
-    """O preço recorta **turmas**, não alunos — a única família assim."""
-    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
+def test_the_price_cuts_split_the_offer_and_only_exist_in_the_auction():
+    """O preço recorta **turmas**, não alunos — a única família assim.
 
-    for arm in payload["arms"]:
-        cortes = arm["class_prices"]
-        if arm["mechanism"] != "credits":
-            assert cortes == [], f"{arm['key']} tem preço sem ter moeda"
+    Fica no motor e não na resposta: a interface não desenha preço.
+    """
+    result = _engine_comparison()
+
+    for arm in result.arms:
+        cortes = arm.class_prices
+        if arm.mechanism != "credits":
+            assert cortes == [], f"{arm.key} tem preço sem ter moeda"
             continue
-        assert {cut["axis"] for cut in cortes} == {
+        assert {cut.axis for cut in cortes} == {
             "classes",
             "hours",
             "curriculum_period",
         }
         for cut in cortes:
-            assert cut["groups"], f"recorte {cut['axis']} sem grupo"
-            for group in cut["groups"]:
-                faixas = group["values"]["mean_price"]
-                assert len(faixas) == len(group["x"]) == len(group["n"])
+            assert cut.groups, f"recorte {cut.axis} sem grupo"
+            for group in cut.groups:
+                faixas = group.values["mean_price"]
+                assert len(faixas) == len(group.x) == len(group.n)
                 assert any(f is not None for f in faixas)
                 assert all(f is None or f[0] >= 1 for f in faixas)
 
 
-def test_compare_reports_the_allocation_time_of_every_round(client):
-    """O custo de rodar o mecanismo sai por braço, um ponto por (período, rodada)."""
-    payload = client.post("/compare", json={**COMPARE_SCENARIO, "runs": 2}).json()
+def test_compare_reports_the_allocation_time_of_every_round():
+    """O custo de rodar o mecanismo sai por braço, um ponto por (período, rodada).
 
-    for arm in payload["arms"]:
-        series = arm["allocation_seconds"]
-        assert series, f"braço {arm['key']} saiu sem tempo de alocação"
+    Fica no motor e não na resposta, pelo mesmo motivo do preço.
+    """
+    result = _engine_comparison()
+
+    for arm in result.arms:
+        series = arm.allocation_seconds
+        assert series, f"braço {arm.key} saiu sem tempo de alocação"
         for period in series:
-            assert len(period) == COMPARE_SCENARIO["rounds"]
+            assert 1 <= len(period) <= COMPARE_SCENARIO["rounds"]
             assert all(value >= 0 for value in period)
 
 

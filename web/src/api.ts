@@ -3,6 +3,8 @@ import type {
   CompareResponse,
   PlaygroundRequest,
   PlaygroundResponse,
+  SavedResult,
+  StoredRun,
   TraceRequest,
   TraceResponse,
 } from "./types";
@@ -24,23 +26,45 @@ export async function playground(request: PlaygroundRequest): Promise<Playground
   return post("/playground", request);
 }
 
+/** O que há gravado em `resultados/`, do mais recente para o mais antigo */
+export async function listResults(): Promise<SavedResult[]> {
+  return request("/results");
+}
+
+/** Uma execução gravada, inteira */
+export async function readResult(name: string): Promise<StoredRun> {
+  return request(`/results/${encodeURIComponent(name)}`);
+}
+
+export async function deleteResult(name: string): Promise<void> {
+  await request(`/results/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${BASE_URL}${path}`, init);
+  if (!response.ok) throw new Error(await detailOf(response));
+  return response.status === 204
+    ? (undefined as T)
+    : (response.json() as Promise<T>);
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const payload = await response.json();
-      detail =
-        typeof payload.detail === "string"
-          ? payload.detail
-          : JSON.stringify(payload.detail);
-    } catch {
-    }
-    throw new Error(detail);
-  }
+  if (!response.ok) throw new Error(await detailOf(response));
   return response.json() as Promise<T>;
+}
+
+async function detailOf(response: Response): Promise<string> {
+  try {
+    const payload = await response.json();
+    return typeof payload.detail === "string"
+      ? payload.detail
+      : JSON.stringify(payload.detail);
+  } catch {
+    return response.statusText;
+  }
 }

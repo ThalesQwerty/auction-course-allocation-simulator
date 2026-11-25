@@ -1,45 +1,43 @@
 import { entryClasses, withUnlocks } from "./curriculum";
 import { cohortSize } from "./equations";
 import { defaultScenario } from "./presets";
-import { readEntries, requestPersistence, writeEntries } from "./historyStore";
 import { COMPARISON_ARMS, horizonFor } from "./types";
-import type { CompareRequest, CompareResponse, Scenario } from "./types";
+import type {
+  CompareRequest,
+  CompareResponse,
+  SavedResult,
+  Scenario,
+  StoredRun,
+} from "./types";
 
-export interface ComparisonRun {
+/** Uma execução da lista: o que a API devolve sem o resultado, que é o que a barra lateral precisa */
+export interface HistoryEntry {
   kind: "comparison";
+   /** O nome em disco, que endereça `/results/{id}` */
   id: string;
   at: string; // ISO 8601
   config: CompareRequest;
+  bytes?: number;
+}
+
+/** Uma execução aberta: a da lista, com o resultado */
+export interface ComparisonRun extends HistoryEntry {
   result: CompareResponse;
 }
 
-export type HistoryEntry = ComparisonRun;
-
-/** A versão faz parte da chave porque o formato do resultado mudou com o modelo: a v1 guardava recortes por curso (`by_course`) e um `overall` que era só as métricas */
-const STORAGE_KEY = "leilao.historico.v6";
-const STORE_KEY = "historico.v6";
-
-/** Teto de execuções guardadas */
-export const MAX_RUNS = 20;
-
-const stamp = () => ({
-  id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  at: new Date().toISOString(),
-});
-
-export function newComparison(
-  config: CompareRequest,
-  result: CompareResponse
-): ComparisonRun {
-  return { kind: "comparison", ...stamp(), config, result };
-}
-
-/** Os nomes de antes de 04/11/2026, quando "utilidade" se partiu em duas palavras: **interesse** é o sorteio normalizado, que σ e a estabilidade governam e que o histograma retrata; **utilidade** é ele visto pelo histórico do aluno */
+/** Os nomes de antes de 04/11/2026, quando "utilidade" se partiu em duas palavras: **interesse** é o sorteio que σ e a flutuação governam e que o histograma retrata; **utilidade** é ele visto pelo histórico do aluno */
 const INTEREST_RENAMES = [
   ["utility_sigma", "interest_sigma"],
-  ["utility_stability", "interest_stability"],
   ["utility_distribution", "interest_distribution"],
 ] as const;
+
+/** Chaves que saíram do cenário. A estabilidade não se converte em flutuação: uma era o quanto da âncora permanecia, a outra é o desvio do abalo */
+const RETIRED_KEYS = [
+  "selectivity_median",
+  "utility_stability",
+  "interest_stability",
+  "availability_stability",
+];
 
 /** Troca as chaves antigas pelas de `INTEREST_RENAMES` */
 export function withInterestNames<T extends object>(record: T): T {
@@ -56,6 +54,7 @@ export function withInterestNames<T extends object>(record: T): T {
 export function migrateInterest<T extends object>(config: T): T {
   const migrated = withInterestNames(config) as Record<string, unknown>;
   if (typeof migrated.interest_mean !== "number") migrated.interest_mean = 0;
+  for (const key of RETIRED_KEYS) delete migrated[key];
   return migrated as T;
 }
 
@@ -92,96 +91,57 @@ function migrateScenario<T extends Record<string, unknown>>(config: T): T {
   return migrated;
 }
 
-/** Grade legada ainda pode trazer `prerequisites` no lugar de `unlocks`; o resto do cenário legado passa por `migrateScenario` */
-const migrateEntry = <T extends HistoryEntry>(entry: T): T =>
-  ({
-    ...entry,
-    config: migrateScenario({
-      ...entry.config,
-      disciplines: withUnlocks(entry.config.disciplines ?? []),
-    }),
-    result: withInterestNames(entry.result),
-  }) as T;
-
-/** O histórico do `localStorage`, de antes do IndexedDB */
-function readLegacy(): HistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as HistoryEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function dropLegacy(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-  }
-}
-
-/** Lê o histórico */
-let loading: Promise<HistoryEntry[]> | null = null;
-
-export function loadHistory(): Promise<HistoryEntry[]> {
-  loading ??= readHistory().finally(() => (loading = null));
-  return loading;
-}
-
-async function readHistory(): Promise<HistoryEntry[]> {
-  requestPersistence();
-  try {
-    const stored = await readEntries<HistoryEntry>(STORE_KEY);
-    if (stored !== undefined) return stored.map(migrateEntry);
-    const legacy = readLegacy().slice(0, MAX_RUNS);
-    await writeEntries(STORE_KEY, legacy);
-    dropLegacy();
-    return legacy.map(migrateEntry);
-  } catch {
-    return readLegacy().map(migrateEntry);
-  }
-}
-
-/** Grava o histórico, podado a `MAX_RUNS` */
-export async function saveHistory(entries: HistoryEntry[]): Promise<HistoryEntry[]> {
-  let kept = entries.slice(0, MAX_RUNS);
-  while (true) {
-    try {
-      await writeEntries(STORE_KEY, kept);
-      return kept;
-    } catch (error) {
-      const quota = (error as DOMException | null)?.name === "QuotaExceededError";
-      if (!quota || kept.length === 0) return kept;
-      kept = kept.slice(0, kept.length - 1);
-    }
-  }
-}
-
-/** Uma execução gravada em disco pela API, de volta para a lista */
-export function entryFromFile(text: string): HistoryEntry {
-  const parsed = JSON.parse(text);
-  if (parsed?.kind !== "comparison") {
-    throw new Error("arquivo não é uma comparação do simulador");
-  }
-  if (!parsed.config || !parsed.result) {
-    throw new Error("arquivo sem cenário ou sem resultado");
-  }
-  if (!Array.isArray(parsed.config.selectivity_profiles)) {
-    throw new Error(
-      "arquivo de antes dos eixos de estratégia e das turmas — não há como convertê-lo"
-    );
-  }
+/** Uma linha da lista da API, traduzida para a barra lateral */
+export function entryFromListing(row: SavedResult): HistoryEntry {
   return {
-    ...parsed,
-    ...stamp(),
-    at: typeof parsed.at === "string" ? parsed.at : new Date().toISOString(),
-    config: migrateScenario({
-      ...parsed.config,
-      disciplines: withUnlocks(parsed.config.disciplines ?? []),
-    }),
-    result: withInterestNames(parsed.result),
-  } as HistoryEntry;
+    kind: "comparison",
+    id: row.name,
+    at: row.at,
+    bytes: row.bytes,
+    config: migrateConfig(row.config),
+  };
+}
+
+/** Uma execução gravada, traduzida para a tela de resultados */
+export function runFromStored(name: string, stored: StoredRun): ComparisonRun {
+  return {
+    kind: "comparison",
+    id: name,
+    at: stored.at,
+    config: migrateConfig(stored.config),
+    result: migrateResult(withInterestNames(stored.result)),
+  };
+}
+
+/** A chave de ψ̄ antes de 25/11/2026, quando ela ainda se chamava pela eq. (53) do anteprojeto e não pelo que mede */
+const SATISFACTION_WAS = "efficiency";
+
+/** Troca a chave de ψ̄ onde ela estiver: ela aparece no resumo de cada simulação, nos valores de cada faixa e em cada ponto da dispersão */
+function migrateResult(result: CompareResponse): CompareResponse {
+  const probe = result.arms?.[0]?.runs?.[0] as unknown as
+    | Record<string, unknown>
+    | undefined;
+  if (!probe || !(SATISFACTION_WAS in probe)) return result;
+  return renameDeep(result) as CompareResponse;
+}
+
+function renameDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(renameDeep);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, inner]) => [
+      key === SATISFACTION_WAS ? "satisfaction" : key,
+      renameDeep(inner),
+    ])
+  );
+}
+
+/** O cenário gravado, nos campos de hoje */
+function migrateConfig(config: CompareRequest): CompareRequest {
+  return migrateScenario({
+    ...config,
+    disciplines: withUnlocks(config.disciplines ?? []),
+  });
 }
 
 export function formatRunDate(at: string): string {
@@ -195,41 +155,52 @@ export function formatRunDate(at: string): string {
   });
 }
 
+const numero = (value: number) => value.toLocaleString("pt-BR");
+
+/** Escreve a parte só se o cenário gravado trouxer o campo: execução antiga não tem todos, e inventar número seria relatar o que não rodou */
+const se = (
+  value: number | undefined,
+  write: (value: number) => string
+): string | null => (typeof value === "number" ? write(value) : null);
+
 function describeScenario(config: Scenario | CompareRequest): string {
   const { rounds, disciplines } = config;
-  const periods = horizonFor(config.max_residence);
-  const students =
-    cohortSize(config.students_per_entry_class, entryClasses(disciplines)) *
-    config.max_residence;
-  const rodadas = rounds === 1 ? "1 rodada" : `${rounds} rodadas`;
-  const horizonte =
-    config.max_residence > 0
-      ? `${periods} períodos (${config.max_residence} de pré-população, ${config.max_residence} medidos)`
-      : `${periods} períodos`;
-  const numero = (value: number) => value.toLocaleString("pt-BR");
+  const partes = [
+    se(config.max_residence, (residencia) =>
+      residencia > 0
+        ? `${horizonFor(residencia)} períodos (${residencia} de pré-população, ${residencia} medidos)`
+        : `${horizonFor(residencia)} períodos`
+    ),
+    se(rounds, (value) => (value === 1 ? "1 rodada" : `${value} rodadas`)),
+  ].filter((parte): parte is string => parte !== null);
+
   const populacao = [
-    `aprova ${numero(Math.round(config.approval_rate * 100))}%`,
-    `carga ${numero(config.availability.mode_hours)} h`,
-    `seletividade ${config.selectivity_median.toLocaleString("pt-BR", {
-      maximumFractionDigits: 5,
-    })}`,
-    `interesse σ ${numero(config.interest_sigma)}`,
-    `CR em ${config.grade_cuts.length + 1}, reserva em ${
-      config.reserve_cuts.length + 1
-    }`,
-  ];
-  return (
-    `${horizonte} × ${rodadas} · ${disciplines.length} disciplinas · ${students} alunos` +
-    ` · ${populacao.join(", ")}`
-  );
+    `${disciplines?.length ?? 0} disciplinas`,
+    se(
+      config.students_per_entry_class !== undefined && config.max_residence
+        ? cohortSize(config.students_per_entry_class, entryClasses(disciplines)) *
+            config.max_residence
+        : undefined,
+      (value) => `${value} alunos`
+    ),
+    se(config.approval_rate, (value) => `aprova ${numero(Math.round(value * 100))}%`),
+    se(config.availability?.hours_sd, (value) => `carga σ ${numero(value)} h`),
+    se(
+      config.selectivity_mean,
+      (value) =>
+        `seletividade ${value.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}`
+    ),
+    se(config.interest_sigma, (value) => `interesse σ ${numero(value)}`),
+  ].filter((parte): parte is string => parte !== null);
+
+  return `${partes.join(" × ")} · ${populacao.join(" · ")}`;
 }
 
-export function describeComparison(run: ComparisonRun): string {
+export function describeComparison(run: HistoryEntry): string {
   const arms = run.config.arms?.length ?? COMPARISON_ARMS.length;
   return `${run.config.runs} seeds × ${arms} ${
     arms === 1 ? "modelo" : "modelos"
   } · ${describeScenario(run.config)}`;
 }
 
-export const describeEntry = (entry: HistoryEntry): string =>
-  describeComparison(entry);
+export const describeEntry = describeComparison;
