@@ -1,8 +1,14 @@
-"""A mochila 0-1 sobre a carga horária, com grafo de conflito opcional."""
+"""A mochila 0-1, com grafo de conflito opcional, no ótimo provado."""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from math import gcd
+
+import numpy as np
+from scipy.optimize import Bounds, LinearConstraint, milp
+
+
+class KnapsackNotSolvedError(RuntimeError):
+    """O solver não provou o ótimo. Como no WDP, a factível não serve."""
 
 
 def knapsack(
@@ -13,69 +19,50 @@ def knapsack(
     capacity: int,
     conflicts: Mapping[str, Sequence[str]] | None = None,
 ) -> list[str]:
-    """O subconjunto, devolvido **na ordem de `items`**."""
+    """max Σ u·z, s.a. Σ w·z ≤ W e Σ_{x ∈ clique} z ≤ 1, z binário.
+
+    Sem `conflicts` é a mochila 0-1 clássica; com, é o *knapsack problem with
+    conflict graph*, fortemente NP-difícil e sem recorrência pseudo-polinomial
+    sobre a capacidade no caso geral (Pferschy e Schauer, 2009). Resolve por
+    PLI, no HiGHS. Devolve **na ordem de `items`**.
+    """
     if capacity < 0:
         raise ValueError("a capacidade da mochila não pode ser negativa")
 
-    bit_of_clique: dict[str, int] = {}
-    cliques: dict[str, int] = {}
-    for name in items:
-        mask = 0
-        for clique in (conflicts or {}).get(name, ()):
-            mask |= bit_of_clique.setdefault(clique, 1 << len(bit_of_clique))
-        cliques[name] = mask
-
-    taken = 0
-    kept: set[str] = set()
-    for name in items:
-        if weights[name] <= 0 and not taken & cliques[name]:
-            kept.add(name)
-            taken |= cliques[name]
-
-    pool = [name for name in items if 0 < weights[name] <= capacity]
-    crowded = taken
-    for name in pool:
-        if crowded & cliques[name]:
-            break
-        crowded |= cliques[name]
-    else:
-        if sum(weights[name] for name in pool) <= capacity:
-            kept.update(pool)
-            return [name for name in items if name in kept]
-
-    unit = 0
-    for name in pool:
-        unit = gcd(unit, weights[name])
-    scaled = {name: weights[name] // unit for name in pool}
-    room = capacity // unit
-
-    dp: list[tuple[float, tuple[int, ...], int]] = [
-        (0.0, (), taken) for _ in range(room + 1)
+    pool = [
+        name
+        for name in items
+        if weights[name] <= capacity and values.get(name, 0.0) > 0.0
     ]
+    if not pool:
+        return []
+
+    members_of: dict[str, list[int]] = {}
     for index, name in enumerate(pool):
-        weight, value, clique = scaled[name], values.get(name, 0.0), cliques[name]
-        for c in range(room, weight - 1, -1):
-            carried, chosen, occupied = dp[c - weight]
-            if occupied & clique:
-                continue
-            candidate = (carried + value, chosen + (index,), occupied | clique)
-            if _wins(candidate, dp[c]):
-                dp[c] = candidate
+        for clique in (conflicts or {}).get(name, ()):
+            members_of.setdefault(clique, []).append(index)
+    disputed = [members for members in members_of.values() if len(members) > 1]
 
-    best = dp[0]
-    for cell in dp[1:]:
-        if _wins(cell, best):
-            best = cell
+    if not disputed and sum(weights[name] for name in pool) <= capacity:
+        return [name for name in items if name in set(pool)]
 
-    kept.update(pool[index] for index in best[1])
-    return [name for name in items if name in kept]
+    rows = np.zeros((len(disputed) + 1, len(pool)))
+    for row, members in enumerate(disputed):
+        rows[row, members] = 1.0
+    rows[-1] = [weights[name] for name in pool]
+    limits = [1.0] * len(disputed) + [float(capacity)]
 
-
-def _wins(
-    candidate: tuple[float, tuple[int, ...], int],
-    current: tuple[float, tuple[int, ...], int],
-) -> bool:
-    """Mais utilidade vence; empatada, vence o índice mais baixo."""
-    return candidate[0] > current[0] or (
-        candidate[0] == current[0] and candidate[1] < current[1]
+    answer = milp(
+        c=[-values[name] for name in pool],
+        constraints=LinearConstraint(rows, -np.inf, limits),
+        integrality=np.ones(len(pool)),
+        bounds=Bounds(0, 1),
+        options={"mip_rel_gap": 0.0},
     )
+    if answer.status != 0:
+        raise KnapsackNotSolvedError(
+            f"mochila de {len(pool)} itens não resolvida: {answer.message}"
+        )
+
+    taken = {name for name, z in zip(pool, answer.x) if z > 0.5}
+    return [name for name in items if name in taken]

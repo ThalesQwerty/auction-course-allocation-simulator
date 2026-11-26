@@ -293,6 +293,67 @@ def test_the_greedy_split_matches_an_exhaustive_search():
         assert _harmonic_value(bids, utilities) == pytest.approx(best)
 
 
+def test_the_greedy_split_with_a_reserve_matches_an_exhaustive_search():
+    """Com piso, o guloso resolve `max Σ u·H(c) − s·Σ c`: o crédito vale o que
+    rende menos o que a opção externa pagaria por ele.
+    """
+    utilities = {"D1": 0.44, "D2": 0.31, "D3": 0.17, "D4": 0.08}
+    names = list(utilities)
+    perfil = Behavior(selectivity=0.3)
+    reserve = 0.3 / (0.3 + 1.0)
+    for budget in range(1, 10):
+        bids = compute_bids(
+            utilities=utilities,
+            available=names,
+            budget=budget,
+            behavior=perfil,
+            interest=1.0,
+        )
+        best = max(
+            _harmonic_value(dict(zip(names, split)), utilities) - reserve * sum(split)
+            for spent in range(budget + 1)
+            for split in _splits(spent, len(names))
+        )
+        liquido = _harmonic_value(bids, utilities) - reserve * sum(bids.values())
+        assert liquido == pytest.approx(best)
+
+
+def test_the_reserve_cuts_the_class_inside_the_discipline():
+    """O piso vale nos dois níveis: a turma abaixo da reserva não recebe crédito
+    mesmo com a disciplina dela admitida, e o que sobra fica poupado.
+    """
+    classes = {"D": ("D T1", "D T2")}
+    utilities = {"D T1": 0.6, "D T2": 0.4}
+    comum = dict(utilities=utilities, available=list(utilities), classes=classes)
+
+    assert compute_bids(
+        **comum, budget=3, behavior=Behavior(selectivity=0.5), interest=0.5
+    ) == {"D T1": 1}
+    assert compute_bids(**comum, budget=3) == {"D T1": 2, "D T2": 1}
+
+
+def test_the_first_level_gain_is_the_best_available_class():
+    """O ganho da disciplina é a melhor turma **obtenível**: a turma sem vaga
+    não pontua por ela, senão o primeiro nível destinaria crédito que o segundo
+    não teria onde gastar.
+    """
+    classes = {"D": ("D T1", "D T2"), "E": ("E T1",)}
+    utilities = {"D T1": 0.9, "D T2": 0.2, "E T1": 0.5}
+
+    assert compute_bids(
+        utilities=utilities,
+        available=["D T2", "E T1"],
+        budget=1,
+        classes=classes,
+    ) == {"E T1": 1}
+    assert compute_bids(
+        utilities=utilities,
+        available=list(utilities),
+        budget=1,
+        classes=classes,
+    ) == {"D T1": 1}
+
+
 def test_a_tie_goes_to_the_discipline_listed_first():
     """Empate de utilidade é resolvido pela ordem global de desempate: a ordem"""
     tied = {"D1": 0.25, "D2": 0.25, "D3": 0.25, "D4": 0.25}

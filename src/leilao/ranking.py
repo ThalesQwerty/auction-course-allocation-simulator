@@ -24,8 +24,12 @@ def request_set(
     interest: float = 0.0,
 ) -> list[str]:
     """D_a^(t,r) — ver `equations.request_set`."""
-    groups, scores, _reserve = decide(
-        utilities=utilities, behavior=behavior, classes=classes, interest=interest
+    groups, scores, reserve = decide(
+        utilities=utilities,
+        behavior=behavior,
+        classes=classes,
+        interest=interest,
+        available=available,
     )
     if not classes:
         return rank_requests(
@@ -36,7 +40,12 @@ def request_set(
             conflicts=conflicts,
         )
 
-    admitted = {name for discipline in groups for name in classes[discipline]}
+    admitted = {
+        name
+        for discipline in groups
+        for name in classes[discipline]
+        if scores.get(name, 0.0) >= reserve
+    }
     return rank_requests(
         utilities=scores,
         available=[name for name in available if name in admitted],

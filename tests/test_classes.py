@@ -275,7 +275,7 @@ def test_the_ranking_request_comes_out_without_a_clash():
         "B T1": ("Baixa", "Diurno 1"),
         "B T2": ("Baixa", "Diurno 2"),
     }
-    utilities = {"A T1": 0.5, "A T2": 0.2, "B T1": 0.4, "B T2": 0.1}
+    utilities = {"A T1": 0.55, "A T2": 0.2, "B T1": 0.4, "B T2": 0.1}
     pool = [name for names in classes.values() for name in names]
 
     pedido = request_set(
@@ -332,22 +332,32 @@ def test_nobody_takes_two_classes_in_the_same_schedule(mechanism):
             assert len(horarios) == len(set(horarios)), (history.student_id, horarios)
 
 
-def test_selectivity_cuts_disciplines_not_classes():
-    """O corte é sobre `max_t`, com a média tomada entre disciplinas: é ela"""
-    classes = {"Querida": ("Q T1", "Q T2"), "Morna": ("M T1", "M T2")}
-    utilities = {"Q T1": 0.6, "Q T2": 0.5, "M T1": 0.4, "M T2": 0.1}
-    pool = [name for names in classes.values() for name in names]
-
-    pedido = request_set(
+def test_selectivity_cuts_classes_below_the_reserve():
+    """O piso vale nos dois níveis: a disciplina entra pela melhor turma que o
+    aluno pode obter, e a turma abaixo da reserva fica fora mesmo com a
+    disciplina admitida. Sem o corte, o ótimo seria o par que usa a turma ruim.
+    """
+    classes = {"Alta": ("A T1", "A T2"), "Baixa": ("B T1",)}
+    conflicts = {
+        "A T1": ("Alta", "Diurno 1"),
+        "A T2": ("Alta", "Diurno 2"),
+        "B T1": ("Baixa", "Diurno 1"),
+    }
+    utilities = {"A T1": 0.6, "A T2": 0.4, "B T1": 0.55}
+    pool = list(utilities)
+    comum = dict(
         utilities=utilities,
         available=pool,
         hours=dict.fromkeys(pool, 60),
         capacity=WORKLOAD,
-        behavior=Behavior(selectivity=0.8),
         classes=classes,
-        interest=0.8,
+        conflicts=conflicts,
     )
-    assert pedido == ["Q T1"]
+
+    assert request_set(
+        **comum, behavior=Behavior(selectivity=0.5), interest=0.5
+    ) == ["A T1"]
+    assert request_set(**comum) == ["B T1", "A T2"]
 
 
 def test_the_best_class_of_each_discipline_sums_to_one():

@@ -92,19 +92,18 @@ def test_the_knapsack_keeps_everything_when_the_load_fits():
     ) == ["A", "B"]
 
 
-def test_the_knapsack_breaks_ties_toward_the_discipline_listed_first():
-    """Mesma regra do resto do motor: utilidades empatadas resolvem pela ordem"""
+def test_the_knapsack_keeps_one_of_the_tied_classes():
+    """Empatadas, qual das duas fica é indiferente: só uma cabe, e é o valor
+    ótimo que se exige, não a ordem.
+    """
     utilities = {"primeira": 0.2, "segunda": 0.2}
     hours = {"primeira": 60, "segunda": 60}
-    assert retained_set(
-        utilities=utilities, hours=hours, obtained=utilities, load=60
-    ) == ["primeira"]
-    assert retained_set(
-        utilities={"segunda": 0.2, "primeira": 0.2},
-        hours=hours,
-        obtained=utilities,
-        load=60,
-    ) == ["segunda"]
+    for ordem in (utilities, {"segunda": 0.2, "primeira": 0.2}):
+        kept = retained_set(
+            utilities=ordem, hours=hours, obtained=utilities, load=60
+        )
+        assert len(kept) == 1
+        assert kept[0] in utilities
 
 
 def test_the_knapsack_returns_nothing_when_the_load_is_zero():

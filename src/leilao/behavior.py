@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -176,19 +176,30 @@ def decide(
     behavior: Behavior = NEUTRAL,
     classes: dict[str, tuple[str, ...]] | None = None,
     interest: float = 0.0,
+    available: Iterable[str] | None = None,
 ) -> tuple[dict[str, float], dict[str, float], float]:
-    """A mensagem do aluno, antes de o mecanismo lê-la."""
+    """A mensagem do aluno, antes de o mecanismo lê-la. O ganho da disciplina é
+    a melhor turma dela que o aluno ainda pode obter.
+    """
     scores = {name: value for name, value in utilities.items() if value > 0.0}
+    if available is None:
+        obtainable = scores
+    else:
+        reachable = set(available)
+        obtainable = {
+            name: value for name, value in scores.items() if name in reachable
+        }
     if classes:
         groups = {
             discipline: max(
-                (scores[name] for name in names if name in scores), default=0.0
+                (obtainable[name] for name in names if name in obtainable),
+                default=0.0,
             )
             for discipline, names in classes.items()
         }
         groups = {name: value for name, value in groups.items() if value > 0.0}
     else:
-        groups = scores
+        groups = obtainable
     reserve = reserve_threshold(
         selectivity=behavior.selectivity, interest=interest
     )
@@ -206,7 +217,11 @@ def compute_bids(
 ) -> dict[str, int]:
     """c_{a,·}^(t,r): a estratégia do aluno no leilão."""
     groups, scores, reserve = decide(
-        utilities=utilities, behavior=behavior, classes=classes, interest=interest
+        utilities=utilities,
+        behavior=behavior,
+        classes=classes,
+        interest=interest,
+        available=available,
     )
     if not classes:
         return concave_bids(
@@ -228,7 +243,10 @@ def compute_bids(
     for discipline, credits in per_group.items():
         bids.update(
             concave_bids(
-                scores=scores, available=open_classes[discipline], budget=credits
+                scores=scores,
+                available=open_classes[discipline],
+                budget=credits,
+                reserve=reserve,
             )
         )
     return bids

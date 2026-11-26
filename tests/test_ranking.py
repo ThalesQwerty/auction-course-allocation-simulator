@@ -84,11 +84,16 @@ def test_the_request_covers_only_what_is_available_and_wanted():
     assert ask({"D1": 0.5}, available=[]) == []
 
 
-def test_a_tie_in_the_request_goes_to_the_discipline_listed_first():
-    """Empate sai na ordem da grade, a mesma que desempata o lance — e não na"""
+def test_a_tie_in_the_request_fills_the_workload():
+    """Empatadas as utilidades, qual trinca sai é indiferente e o solver escolhe
+    uma delas. O que se exige é o valor ótimo, que aqui é encher a carga.
+    """
     tied = {"D2": 0.25, "D1": 0.25, "D5": 0.25, "D3": 0.25}
-    assert ask(tied) == ["D2", "D1", "D5"]
-    assert ask(tied, available=["D5", "D3", "D1", "D2"]) == ["D2", "D1", "D5"]
+    pedido = ask(tied)
+    assert len(pedido) == 3
+    assert set(pedido) <= set(tied)
+    assert sum(HOURS[name] for name in pedido) == WORKLOAD
+    assert ask(tied) == pedido
 
 
 def test_the_higher_grade_average_takes_the_last_seat():
