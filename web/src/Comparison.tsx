@@ -17,7 +17,7 @@ import {
 } from "./bands";
 import type { AxisChoice, CutChoice } from "./bands";
 import { comparisonCurve, comparisonSeries } from "./api";
-import { describeComparison, formatRunDate, ComparisonRun } from "./history";
+import { formatRunDate, formatRunSpan, ComparisonRun } from "./history";
 import { RunProgress, RunProgressCard } from "./RunProgress";
 import { Trace } from "./Trace";
 import { COMPARISON_ARMS } from "./types";
@@ -335,10 +335,9 @@ export function Comparison({
         <div>
           <h1>Comparação de {formatRunDate(run.at)}</h1>
           <p className="note">
-            {describeComparison(run)} · {run.seeds * run.arms.length}{" "}
-            simulações
-            {run.timedOut > 0 &&
-              ` · ${run.timedOut} descartadas por tempo, e com elas a seed nos dois braços`}
+            {run.seeds * run.arms.length} simulações
+            {run.durationMs != null ? ` · ${formatRunSpan(run.durationMs)}` : null}
+            {run.failed ? ` · ${run.failed} estouraram / falharam` : null}
           </p>
         </div>
         <button className="secondary" onClick={onReuseConfig}>

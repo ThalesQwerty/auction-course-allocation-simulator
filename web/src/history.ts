@@ -29,8 +29,8 @@ export interface ComparisonRun extends HistoryEntry {
   seeds: number;
    /** Os braços que esta comparação de fato rodou */
   arms: string[];
-   /** Quantas simulações estouraram o teto de tempo da alocação */
-  timedOut: number;
+   /** O relógio da comparação inteira, somados os trechos entre pausas; nulo enquanto não fecha */
+  durationMs: number | null;
 }
 
 /** Os nomes de antes de 04/11/2026, quando "utilidade" se partiu em duas palavras: **interesse** é o sorteio que σ e a flutuação governam e que o histograma retrata; **utilidade** é ele visto pelo histórico do aluno */
@@ -120,7 +120,7 @@ export function runFromComparison(head: ComparisonHead): ComparisonRun {
     ...entryFromComparison(head),
     seeds: head.seeds,
     arms: head.bracos,
-    timedOut: head.estouros,
+    durationMs: head.duracao_ms,
   };
 }
 
@@ -141,6 +141,18 @@ export function formatRunDate(at: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** `##:## min`, ou `#h ##:## min` a partir de uma hora */
+export function formatRunSpan(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1_000));
+  const hours = Math.floor(total / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  const seconds = total % 60;
+  const relogio = `${String(minutes).padStart(2, "0")}:${String(
+    seconds
+  ).padStart(2, "0")} min`;
+  return hours > 0 ? `${hours}h ${relogio}` : relogio;
 }
 
 const numero = (value: number) => value.toLocaleString("pt-BR");
