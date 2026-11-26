@@ -23,6 +23,7 @@ __all__ = [
     "progress_of",
     "requeue_stale",
     "resume_comparison",
+    "timeout_simulation",
 ]
 
 DETAIL_TABLES = (
@@ -59,10 +60,17 @@ class Progress:
     rodando: int = 0
     concluida: int = 0
     falhou: int = 0
+    estourou: int = 0
 
     @property
     def total(self) -> int:
-        return self.pendente + self.rodando + self.concluida + self.falhou
+        return (
+            self.pendente
+            + self.rodando
+            + self.concluida
+            + self.falhou
+            + self.estourou
+        )
 
     @property
     def done(self) -> bool:
@@ -246,13 +254,38 @@ def fail_simulation(
     A retomada não tenta de novo: uma exceção determinística se repetiria igual
     na mesma seed, e tentar viraria laço.
     """
+    _stop(connection, simulation_id, "falhou", error, duration_ms)
+
+
+def timeout_simulation(
+    connection: sqlite3.Connection,
+    *,
+    simulation_id: int,
+    error: str,
+    duration_ms: int | None = None,
+) -> None:
+    """Marca o tempo esgotado, que não é falha: a instância era resolvível.
+
+    A retomada também não tenta de novo, e a seed sai do resultado nos dois
+    braços — quem a tira é a view `simulacao_valida`, na leitura.
+    """
+    _stop(connection, simulation_id, "estourou", error, duration_ms)
+
+
+def _stop(
+    connection: sqlite3.Connection,
+    simulation_id: int,
+    state: str,
+    error: str,
+    duration_ms: int | None,
+) -> None:
     with transaction(connection):
         connection.execute(
             "UPDATE simulacao"
-            " SET estado = 'falhou', dono = NULL, terminada_em = ?,"
+            " SET estado = ?, dono = NULL, terminada_em = ?,"
             "     duracao_ms = ?, erro = ?"
             " WHERE id = ?",
-            (now(), duration_ms, error, simulation_id),
+            (state, now(), duration_ms, error, simulation_id),
         )
 
 

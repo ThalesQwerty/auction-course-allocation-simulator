@@ -429,3 +429,47 @@ def test_the_trace_comes_from_the_bank_and_not_from_a_rerun(ready):
 
     with pytest.raises(SemSimulacao):
         trace_script(connection, arm=ARMS[0], seed=99)
+
+
+def test_a_timed_out_allocation_marks_the_simulation_and_the_queue_goes_on(
+    ready, monkeypatch
+):
+    """O ponto do teto é a simulação travada não segurar a fila: ela fica com
+    estado próprio, a fila continua, e a seed sai do resultado nos dois braços.
+    """
+    from leilao import auction
+    from leilao.wdp_solver import AllocationTimeout
+
+    connection, _, config, bank = ready
+
+    def estoura(problem, **kwargs):
+        raise AllocationTimeout("alocação não resolvida em 900 s")
+
+    monkeypatch.setattr(auction, "solve_wdp", estoura)
+
+    andamento = run_into_store(connection, config=config, bank=bank)
+
+    assert andamento.estourou == 2
+    assert andamento.concluida == 2
+    assert andamento.falhou == 0
+    assert andamento.done
+
+    estados = {
+        (row["braco"], row["seed"]): row["estado"]
+        for row in connection.execute("SELECT braco, seed, estado FROM simulacao")
+    }
+    assert estados[("credits_return", 1)] == "estourou"
+    assert estados[("credits_return", 2)] == "estourou"
+    assert estados[("ranking_greedy", 1)] == "concluida"
+
+    erro = connection.execute(
+        "SELECT erro FROM simulacao WHERE braco = 'credits_return' AND seed = 1"
+    ).fetchone()
+    assert "900 s" in erro["erro"]
+
+    assert connection.execute("SELECT estado FROM comparacao").fetchone()[
+        "estado"
+    ] == "concluida"
+    assert connection.execute(
+        "SELECT COUNT(*) AS quantas FROM simulacao_valida"
+    ).fetchone()["quantas"] == 0

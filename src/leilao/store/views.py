@@ -229,9 +229,8 @@ WITH {reservas}medidas AS (
          SUM(CASE WHEN ap.rodada_media IS NOT NULL THEN ap.vagas ELSE 0 END)
                                             AS vagas_peso
     FROM aluno_periodo ap
-    JOIN simulacao m ON m.id = ap.simulacao_id
+    JOIN simulacao_valida m ON m.id = ap.simulacao_id
          {juncao}
-   WHERE m.estado = 'concluida'
    GROUP BY m.braco, m.seed, ap.periodo, faixa
 ),
 coorte AS (
@@ -280,9 +279,8 @@ WITH alunos AS (
                  / SUM(CASE WHEN ap.rodada_media IS NOT NULL THEN ap.vagas ELSE 0 END)
          END AS rodada_media
     FROM aluno_periodo ap
-    JOIN simulacao m ON m.id = ap.simulacao_id
+    JOIN simulacao_valida m ON m.id = ap.simulacao_id
     JOIN aluno a ON a.simulacao_id = ap.simulacao_id AND a.aluno = ap.aluno
-   WHERE m.estado = 'concluida'
    GROUP BY m.braco, m.seed, ap.aluno
 ),
 -- O NTILE corre sobre os dois braços juntos: é o que faz as bordas serem as

@@ -102,6 +102,7 @@ def _run_credit_round(
             bids=bids,
             epsilon=draws.epsilon,
             seed=config.seed,
+            time_limit=config.allocation_time_limit,
         ),
     )
     for (student_id, name), allocated in result.allocation.items():

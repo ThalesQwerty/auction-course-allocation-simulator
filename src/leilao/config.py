@@ -142,6 +142,7 @@ class SimulationConfig:
     min_credits: int = 12
     max_credits: int | None = 30
     mechanism: Mechanism = "credits"
+    allocation_time_limit: float | None = None
     seed: int = 0
 
     @property
@@ -195,6 +196,8 @@ class SimulationConfig:
                 "orçamento máximo (C_max) não pode ser menor que o mínimo "
                 f"(C_min = {self.min_credits})"
             )
+        if self.allocation_time_limit is not None and self.allocation_time_limit <= 0:
+            raise ValueError("limite de tempo da alocação deve ser > 0 s")
         if self.max_hours < 1:
             raise ValueError("carga horária máxima (W_a) deve ser >= 1")
         if self.max_residence is not None and self.max_residence < 1:

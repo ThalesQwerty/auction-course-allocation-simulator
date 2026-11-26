@@ -29,6 +29,8 @@ export interface ComparisonRun extends HistoryEntry {
   seeds: number;
    /** Os braços que esta comparação de fato rodou */
   arms: string[];
+   /** Quantas simulações estouraram o teto de tempo da alocação */
+  timedOut: number;
 }
 
 /** Os nomes de antes de 04/11/2026, quando "utilidade" se partiu em duas palavras: **interesse** é o sorteio que σ e a flutuação governam e que o histograma retrata; **utilidade** é ele visto pelo histórico do aluno */
@@ -107,7 +109,7 @@ export function entryFromComparison(head: ComparisonHead): HistoryEntry {
     config: migrateConfig(JSON.parse(head.cenario)),
     state: head.estado,
     done: head.concluidas,
-    failed: head.falhas,
+    failed: head.falhas + head.estouros,
     pending: head.pendentes + head.rodando,
   };
 }
@@ -118,6 +120,7 @@ export function runFromComparison(head: ComparisonHead): ComparisonRun {
     ...entryFromComparison(head),
     seeds: head.seeds,
     arms: head.bracos,
+    timedOut: head.estouros,
   };
 }
 

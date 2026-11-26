@@ -42,7 +42,7 @@ CREATE TABLE simulacao (
   braco          TEXT    NOT NULL,
   seed           INTEGER NOT NULL,
   estado         TEXT    NOT NULL
-    CHECK (estado IN ('pendente','rodando','concluida','falhou')),
+    CHECK (estado IN ('pendente','rodando','concluida','falhou','estourou')),
   dono           TEXT,
   tentativas     INTEGER NOT NULL DEFAULT 0,
   iniciada_em    TEXT,
@@ -151,6 +151,18 @@ CREATE TABLE turma_periodo (
   preco_medio  REAL,               -- NULL no braço por CR
   PRIMARY KEY (simulacao_id, periodo, turma)
 );
+
+-- A simulação que entra em resultado. Não basta estar concluída: a seed tem de
+-- estar íntegra em todos os braços, porque uma seed que falhou ou estourou o
+-- tempo de um lado deixaria os braços reduzidos sobre conjuntos de seeds
+-- diferentes, e as caixas são pareadas contra a linha de base.
+CREATE VIEW simulacao_valida AS
+SELECT * FROM simulacao m
+ WHERE m.estado = 'concluida'
+   AND NOT EXISTS (
+     SELECT 1 FROM simulacao o
+      WHERE o.seed = m.seed AND o.estado IN ('falhou', 'estourou')
+   );
 
 CREATE INDEX ix_turma_periodo   ON turma_periodo(simulacao_id, periodo);
 CREATE INDEX ix_simulacao_fila  ON simulacao(estado);

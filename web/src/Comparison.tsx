@@ -337,6 +337,8 @@ export function Comparison({
           <p className="note">
             {describeComparison(run)} · {run.seeds * run.arms.length}{" "}
             simulações
+            {run.timedOut > 0 &&
+              ` · ${run.timedOut} descartadas por tempo, e com elas a seed nos dois braços`}
           </p>
         </div>
         <button className="secondary" onClick={onReuseConfig}>

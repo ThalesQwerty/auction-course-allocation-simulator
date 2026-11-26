@@ -11,6 +11,7 @@ from pathlib import Path
 from ..config import SimulationConfig
 from ..simulation import run_simulation
 from ..steps import Position, StepTracker, steps_per_simulation
+from ..wdp_solver import AllocationTimeout
 from .connection import owner_token
 from .lifecycle import (
     Claim,
@@ -23,6 +24,7 @@ from .lifecycle import (
     progress_of,
     requeue_stale,
     resume_comparison,
+    timeout_simulation,
 )
 from .sink import PeriodSink
 
@@ -125,6 +127,8 @@ def _one_at_a_time(connection, config, owner, bank, on_done) -> None:
                 claim.simulation_id,
                 queue.position(claim),
             )
+        except AllocationTimeout as erro:
+            _timed_out(connection, claim, erro)
         except Exception as erro:
             _failed(connection, claim, erro)
         else:
@@ -166,6 +170,8 @@ def _in_parallel(connection, config, owner, bank, workers, on_done) -> None:
             claim = em_voo.pop(pronto := _wait_any(em_voo))
             try:
                 periods, steps, duration = pronto.result()
+            except AllocationTimeout as erro:
+                _timed_out(connection, claim, erro)
             except Exception as erro:
                 _failed(connection, claim, erro)
             else:
@@ -222,6 +228,15 @@ def _failed(connection, claim: Claim, erro: BaseException) -> None:
         connection,
         simulation_id=claim.simulation_id,
         error=f"{type(erro).__name__}: {erro}",
+    )
+
+
+def _timed_out(connection, claim: Claim, erro: BaseException) -> None:
+    """A fila continua: o ponto do teto é a simulação travada não segurar o resto."""
+    timeout_simulation(
+        connection,
+        simulation_id=claim.simulation_id,
+        error=str(erro),
     )
 
 

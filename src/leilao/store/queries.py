@@ -52,6 +52,7 @@ class ComparisonHead:
     rodando: int
     concluidas: int
     falhas: int
+    estouros: int
 
 
 @dataclass(frozen=True)
@@ -166,8 +167,7 @@ def period_points(
                                               AS vagas_peso,
                  SUM(ap.vagas)                AS vagas
             FROM aluno_periodo ap
-            JOIN simulacao m ON m.id = ap.simulacao_id
-           WHERE m.estado = 'concluida'
+            JOIN simulacao_valida m ON m.id = ap.simulacao_id
            GROUP BY m.braco, m.seed, ap.periodo
         ),
         descartes AS (
@@ -250,9 +250,8 @@ def student_points(
                SUM(CASE WHEN ap.rodada_media IS NOT NULL THEN ap.vagas ELSE 0 END)
                                       AS vagas_peso
           FROM aluno_periodo ap
-          JOIN simulacao m ON m.id = ap.simulacao_id
+          JOIN simulacao_valida m ON m.id = ap.simulacao_id
           JOIN aluno a ON a.simulacao_id = ap.simulacao_id AND a.aluno = ap.aluno
-         WHERE m.estado = 'concluida'
          GROUP BY m.braco, m.seed, ap.aluno
          ORDER BY m.braco, m.seed, ap.aluno
         """,
@@ -290,8 +289,7 @@ def observation_columns(
         SELECT m.braco, m.seed, ap.periodo, ap.cr, ap.reserva, ap.satisfacao,
                ap.aproveitamento, ap.progresso, ap.rodada_media, ap.vagas
           FROM aluno_periodo ap
-          JOIN simulacao m ON m.id = ap.simulacao_id
-         WHERE m.estado = 'concluida'
+          JOIN simulacao_valida m ON m.id = ap.simulacao_id
          ORDER BY m.braco, m.seed, ap.periodo, ap.aluno
         """,
     )
@@ -555,6 +553,7 @@ SELECT c.*,
        SUM(m.estado = 'rodando')   AS rodando,
        SUM(m.estado = 'concluida') AS concluidas,
        SUM(m.estado = 'falhou')    AS falhas,
+       SUM(m.estado = 'estourou')  AS estouros,
        SUM(m.etapas)               AS etapas
   FROM comparacao c LEFT JOIN simulacao m
 """
@@ -580,6 +579,7 @@ def _head(row: sqlite3.Row) -> ComparisonHead:
         rodando=row["rodando"] or 0,
         concluidas=row["concluidas"] or 0,
         falhas=row["falhas"] or 0,
+        estouros=row["estouros"] or 0,
     )
 
 

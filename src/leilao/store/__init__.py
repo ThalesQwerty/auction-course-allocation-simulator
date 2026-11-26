@@ -33,6 +33,7 @@ from .lifecycle import (
     progress_of,
     requeue_stale,
     resume_comparison,
+    timeout_simulation,
 )
 from .runner import run_into_store
 
@@ -55,5 +56,6 @@ __all__ = [
     "run_into_store",
     "schema_version",
     "store",
+    "timeout_simulation",
     "transaction",
 ]

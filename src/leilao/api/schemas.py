@@ -312,6 +312,15 @@ class ScenarioIn(BaseModel):
         ge=1,
         description="C_max — orçamento máximo do período; nulo desliga o teto",
     )
+    allocation_time_limit_min: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Teto de tempo de uma alocação, em minutos; nulo desliga. A "
+            "simulação que estourar o teto é descartada, e com ela a seed "
+            "inteira, nos dois braços."
+        ),
+    )
 
 
 class CompareRequest(ScenarioIn):

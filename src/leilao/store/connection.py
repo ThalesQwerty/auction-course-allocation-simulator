@@ -16,7 +16,7 @@ __all__ = [
     "transaction",
 ]
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 """Mora no cabeçalho do arquivo, nos bytes 60 a 63, e o SQLite não o interpreta."""
 
 MIGRATIONS: dict[int, tuple[str, ...]] = {
@@ -25,9 +25,20 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "ALTER TABLE simulacao ADD COLUMN etapas INTEGER NOT NULL DEFAULT 0",
     ),
     3: ("ALTER TABLE aluno ADD COLUMN nome TEXT",),
+    4: (
+        "CREATE VIEW simulacao_valida AS"
+        " SELECT * FROM simulacao m"
+        "  WHERE m.estado = 'concluida'"
+        "    AND NOT EXISTS ("
+        "      SELECT 1 FROM simulacao o"
+        "       WHERE o.seed = m.seed AND o.estado IN ('falhou', 'estourou'))",
+    ),
 }
 """O que leva um banco da versão da chave para a seguinte. A comparação antiga
-fica sem teto de passos, e a tela cai na contagem de simulações."""
+fica sem teto de passos, e a tela cai na contagem de simulações. O banco subido
+à 5 mantém o `CHECK` sem `estourou`: refazer a tabela arrastaria seis tabelas
+filhas, e comparação antiga não tem teto de tempo no cenário, então nunca
+produz o estado."""
 
 SCHEMA = Path(__file__).with_name("schema.sql")
 

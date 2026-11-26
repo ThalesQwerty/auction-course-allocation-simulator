@@ -131,7 +131,7 @@ export default function App() {
       const state = await comparisonState(name);
       setProgress((atual) => ({
         name,
-        done: state.concluidas + state.falhas,
+        done: state.concluidas + state.falhas + state.estouros,
         total: state.simulacoes.length,
         share: state.etapas_total ? state.etapas / state.etapas_total : null,
         startedAt: atual?.startedAt ?? Date.now(),

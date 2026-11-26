@@ -65,6 +65,8 @@ export interface Scenario {
   elective_hours: number;
   min_credits: number; // C_min — orçamento mínimo do período
   max_credits: number | null; // C_max — orçamento máximo do período
+   /** Teto de tempo de uma alocação, em minutos; nulo desliga. A simulação que o estourar é descartada, e com ela a seed nos dois braços */
+  allocation_time_limit_min?: number | null;
   seed: number;
 }
 
@@ -341,6 +343,7 @@ export interface ComparisonHead {
   rodando: number;
   concluidas: number;
   falhas: number;
+  estouros: number;
 }
 
 /** O cabeçalho com o estado de cada simulação: o que a tela consulta para acompanhar */
@@ -349,7 +352,7 @@ export interface ComparisonState extends ComparisonHead {
     id: number;
     braco: string;
     seed: number;
-    estado: "pendente" | "rodando" | "concluida" | "falhou";
+    estado: "pendente" | "rodando" | "concluida" | "falhou" | "estourou";
     tentativas: number;
     iniciada_em: string | null;
     terminada_em: string | null;

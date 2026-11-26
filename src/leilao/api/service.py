@@ -66,6 +66,11 @@ def build_config(req: ScenarioIn, *, seed: int = 0) -> SimulationConfig:
         elective_hours=req.elective_hours,
         min_credits=req.min_credits,
         max_credits=req.max_credits,
+        allocation_time_limit=(
+            None
+            if req.allocation_time_limit_min is None
+            else req.allocation_time_limit_min * 60
+        ),
         seed=seed,
     )
 

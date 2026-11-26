@@ -182,6 +182,20 @@ export function Config({
                 onChange={(e) => patch({ first_seed: Number(e.target.value) })}
               />
             </div>
+            <div className="field">
+              <label>Teto por alocação (min)</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={config.allocation_time_limit_min ?? 0}
+                onChange={(e) =>
+                  patch({
+                    allocation_time_limit_min: Number(e.target.value) || null,
+                  })
+                }
+              />
+            </div>
           </div>
 
           <div className="field-row">

@@ -40,6 +40,7 @@ class AuctionInput:
     conflicts: dict[str, tuple[str, ...]] = field(default_factory=dict)
     epsilon: dict[tuple[str, str], float] | None = None
     seed: int = 0
+    time_limit: float | None = None
 
     def __post_init__(self) -> None:
         missing = {a.id for a in self.agents} - self.budgets.keys()
@@ -99,7 +100,7 @@ def run_auction(auction_input: AuctionInput) -> AuctionResult:
         exclusions=auction_input.exclusions,
     )
     started = perf_counter()
-    allocation = solve_wdp(problem)
+    allocation = solve_wdp(problem, time_limit=auction_input.time_limit)
     solver_seconds = perf_counter() - started
 
     prices = market_prices(

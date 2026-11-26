@@ -1,5 +1,9 @@
+import random
+
+import pytest
+
 from leilao.entities import Agent, Demand, Good, MutualExclusion, Problem
-from leilao.wdp_solver import solve_wdp
+from leilao.wdp_solver import AllocationTimeout, solve_wdp
 
 
 def test_single_agent_single_good_within_capacity():
@@ -120,3 +124,42 @@ def test_the_tiebreak_never_buys_preference():
     assert granted == 6.0
     assert allocation[("a1", "x1")] == 1
     assert allocation[("a2", "x1")] == 0
+
+
+def _knapsack(agents=40, goods=24) -> Problem:
+    """Uma instância em que provar o ótimo custa: preferência e peso quase
+    proporcionais, que é o que deixa o limite linear longe do inteiro."""
+    rng = random.Random(7)
+    pesos = {f"x{j}": rng.randint(40, 70) for j in range(goods)}
+    return Problem(
+        agents=[Agent(f"a{i}", capacity=180) for i in range(agents)],
+        goods=[Good(name, quantity=3, weight=peso) for name, peso in pesos.items()],
+        demands=[
+            Demand(f"a{i}", name, preference=peso + rng.random())
+            for i in range(agents)
+            for name, peso in pesos.items()
+        ],
+    )
+
+
+def test_a_tight_time_limit_raises_instead_of_taking_the_feasible_solution():
+    """Com `timeLimit` o pulp ainda devolve `Optimal` e a melhor solução que
+    achou. Aproveitá-la daria alocação subótima sem ninguém notar."""
+    with pytest.raises(AllocationTimeout):
+        solve_wdp(_knapsack(), time_limit=0.01)
+
+
+def test_a_generous_time_limit_does_not_change_the_allocation():
+    """O teto muda quando o CBC para, não como ele busca: a simulação que não
+    estoura sai idêntica à de um cenário sem teto."""
+    problem = Problem(
+        agents=[Agent("a1", 10), Agent("a2", 10)],
+        goods=[Good("x1", 1, 4), Good("x2", 1, 4)],
+        demands=[
+            Demand("a1", "x1", preference=5),
+            Demand("a1", "x2", preference=3),
+            Demand("a2", "x1", preference=7),
+            Demand("a2", "x2", preference=2),
+        ],
+    )
+    assert solve_wdp(problem, time_limit=600) == solve_wdp(problem)

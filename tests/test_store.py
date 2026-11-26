@@ -25,6 +25,7 @@ from leilao.store import (
     requeue_stale,
     resume_comparison,
     schema_version,
+    timeout_simulation,
 )
 from leilao.store.lifecycle import DETAIL_TABLES
 
@@ -98,6 +99,7 @@ def test_a_bank_from_the_previous_version_gains_the_new_columns(tmp_path):
         connection.execute("ALTER TABLE comparacao DROP COLUMN etapas_total")
         connection.execute("ALTER TABLE simulacao DROP COLUMN etapas")
         connection.execute("ALTER TABLE aluno DROP COLUMN nome")
+        connection.execute("DROP VIEW simulacao_valida")
         connection.execute("PRAGMA user_version = 2")
 
     with open_store(caminho) as connection:
@@ -109,9 +111,16 @@ def test_a_bank_from_the_previous_version_gains_the_new_columns(tmp_path):
         colunas = {
             row["name"] for row in connection.execute("PRAGMA table_info(aluno)")
         }
+        visoes = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'view'"
+            )
+        }
     assert linha["etapas_total"] == steps_per_simulation(config)
     assert linha["etapas"] == 0
     assert "nome" in colunas
+    assert "simulacao_valida" in visoes
 
 
 def test_tables_without_a_version_mean_an_interrupted_creation(tmp_path):
@@ -366,3 +375,38 @@ def test_a_comparison_needs_a_seed_and_an_arm(store):
         )
     with pytest.raises(ValueError, match="um braço"):
         create_comparison(store, config=config, scenario="{}", seeds=1, arms=())
+
+
+def test_a_timed_out_seed_leaves_the_result_in_both_arms(store):
+    """O descarte é pareado: a seed que estourou de um lado sai dos dois, senão
+    os braços seriam reduzidos sobre conjuntos de seeds diferentes."""
+    start(store, seeds=2)
+    store.execute(
+        "UPDATE simulacao SET estado = 'concluida' WHERE seed IN (1, 2)"
+    )
+    store.execute(
+        "UPDATE simulacao SET estado = 'estourou'"
+        " WHERE seed = 1 AND braco = 'credits_return'"
+    )
+    sobraram = {
+        (row["braco"], row["seed"])
+        for row in store.execute("SELECT braco, seed FROM simulacao_valida")
+    }
+    assert sobraram == {("credits_return", 2), ("ranking_greedy", 2)}
+
+
+def test_the_timeout_is_a_state_of_its_own_in_the_progress(store):
+    _, _ = start(store, seeds=1)
+    claim = claim_simulation(store, owner=owner_token())
+    timeout_simulation(
+        store, simulation_id=claim.simulation_id, error="alocação não resolvida em 900 s"
+    )
+    andamento = progress_of(store)
+    assert andamento.estourou == 1
+    assert andamento.falhou == 0
+    assert andamento.total == 2
+    linha = store.execute(
+        "SELECT estado, erro FROM simulacao WHERE id = ?", (claim.simulation_id,)
+    ).fetchone()
+    assert linha["estado"] == "estourou"
+    assert "900 s" in linha["erro"]
