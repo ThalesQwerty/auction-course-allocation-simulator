@@ -32,7 +32,7 @@ const POPULATION: Pick<
   schedule_mean: 0,
   schedule_sigma: 0.6,
   schedule_fluctuation: 0.25,
-  grade_cuts: [5, 7],
+  grade_cuts: [5, 6, 7],
   reserve_cuts: [0.01, 0.03],
   interest_mean: 1,
   interest_sigma: 1,

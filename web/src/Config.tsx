@@ -8,6 +8,7 @@ import {
   scheduleCurve,
   selectivityCurve,
 } from "./distributions";
+import { RunProgress, shareOf } from "./RunProgress";
 import type { Curve } from "./distributions";
 import { cohortSize, schedulePressure } from "./equations";
 import { PresetList } from "./PresetList";
@@ -49,6 +50,7 @@ export function Config({
   arms,
   setArms,
   running,
+  progress,
   onRun,
   presetId,
   hasCustom,
@@ -64,6 +66,8 @@ export function Config({
   arms: string[];
   setArms: (arms: string[]) => void;
   running: boolean;
+   /** Quantas simulações já fecharam, enquanto roda */
+  progress: RunProgress | null;
   onRun: () => void;
   presetId: string | null;
   hasCustom: boolean;
@@ -680,7 +684,11 @@ export function Config({
         <div className="actions sticky-actions">
           <button className="primary" disabled={running} onClick={onRun}>
             {running
-              ? `Comparando — ${runs * arms.length} simulações...`
+              ? `Comparando — ${
+                  progress ? `${Math.floor(shareOf(progress) * 100)}%, ` : ""
+                }${progress ? progress.done : 0} de ${
+                  progress ? progress.total : runs * arms.length
+                } simulações`
               : arms.length === 1
                 ? "Rodar modelo"
                 : `Comparar ${arms.length} modelos`}

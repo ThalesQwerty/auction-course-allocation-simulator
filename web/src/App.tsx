@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { compare, deleteResult, listResults, readResult } from "./api";
+import {
+  comparisonResult,
+  comparisonState,
+  createComparison,
+  deleteComparison,
+  listComparisons,
+  runComparison,
+} from "./api";
 import { Comparison } from "./Comparison";
 import { Config } from "./Config";
 import { choosePreset, editConfig, initialChoice, PresetChoice } from "./presets";
@@ -9,16 +16,21 @@ import {
   upsertSavedPreset,
 } from "./savedPresets";
 import {
-  entryFromListing,
+  entryFromComparison,
   formatRunDate,
   HistoryEntry,
-  runFromStored,
+  runFromComparison,
 } from "./history";
 import type { ComparisonRun } from "./history";
 import { GradeGraph } from "./GradeGraph";
 import { createPlaygroundDraft, Playground, PlaygroundDraft } from "./Playground";
+import { RunProgress, RunningSimulation } from "./RunProgress";
 import { Sidebar, View } from "./Sidebar";
 import { COMPARISON_ARMS } from "./types";
+import type { ComparisonState } from "./types";
+
+/** De quanto em quanto se pergunta à API como vai a comparação */
+const POLL_MS = 5_000;
 
 export default function App() {
   const [choice, setChoice] = useState<PresetChoice>(initialChoice);
@@ -31,6 +43,8 @@ export default function App() {
   const [runs, setRuns] = useState(20);
   const [arms, setArms] = useState<string[]>(() => COMPARISON_ARMS.map((arm) => arm.key));
   const [running, setRunning] = useState(false);
+   /** Como vai a comparação em curso: o que a API respondeu na última consulta */
+  const [progress, setProgress] = useState<RunProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -49,9 +63,9 @@ export default function App() {
     const name = view.id;
     let alive = true;
     setOpened(null);
-    readResult(name)
-      .then((stored) => {
-        if (alive) setOpened(runFromStored(name, stored));
+    comparisonResult(name)
+      .then((head) => {
+        if (alive) setOpened(runFromComparison(head));
       })
       .catch((e) => {
         if (!alive) return;
@@ -64,9 +78,7 @@ export default function App() {
   }, [view, opened?.id]);
 
   async function refreshHistory(): Promise<HistoryEntry[]> {
-    const listed = (await listResults())
-      .filter((row) => row.kind === "comparison" && row.config)
-      .map(entryFromListing);
+    const listed = (await listComparisons()).map(entryFromComparison);
     setHistory(listed);
     return listed;
   }
@@ -76,33 +88,74 @@ export default function App() {
     setMenuOpen(false);
   }
 
-   /** Roda a comparação e abre o resultado */
+   /** Roda a comparação e **abre o resultado na hora**: o card de andamento é
+    * que acompanha, e os gráficos se preenchem quando a fila esvazia */
   async function handleRun() {
     setRunning(true);
     setError(null);
     try {
       const { seed: _seed, ...scenario } = config;
       const request = { ...scenario, runs, arms };
-      const result = await compare(request);
-      if (!result.saved_as) {
+      const criada = await createComparison(request);
+      await refreshHistory();
+      await runComparison(criada.nome);
+      setProgress({
+        name: criada.nome,
+        done: 0,
+        total: runs * arms.length,
+        share: 0,
+        startedAt: Date.now(),
+        current: null,
+      });
+      navigate({ kind: "run", id: criada.nome });
+      const pronta = await waitFor(criada.nome);
+      await refreshHistory();
+      if (pronta.falhas && pronta.falhas === pronta.simulacoes.length) {
         throw new Error(
-          "a execução rodou mas não pôde ser gravada em resultados/"
+          `as ${pronta.falhas} simulações falharam: ${
+            pronta.simulacoes.find((s) => s.erro)?.erro ?? "sem detalhe"
+          }`
         );
       }
-      setOpened({
-        kind: "comparison",
-        id: result.saved_as,
-        at: new Date().toISOString(),
-        config: request,
-        result,
-      });
-      navigate({ kind: "run", id: result.saved_as });
-      await refreshHistory();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setRunning(false);
+      setProgress(null);
     }
+  }
+
+   /** Acompanha até a fila esvaziar. O WAL deixa a API ler enquanto o laço grava */
+  async function waitFor(name: string) {
+    while (true) {
+      const state = await comparisonState(name);
+      setProgress((atual) => ({
+        name,
+        done: state.concluidas + state.falhas,
+        total: state.simulacoes.length,
+        share: state.etapas_total ? state.etapas / state.etapas_total : null,
+        startedAt: atual?.startedAt ?? Date.now(),
+        current: simulationNow(state),
+      }));
+      if (state.pendentes + state.rodando === 0) return state;
+      if (state.estado === "falhou") {
+        throw new Error(state.erro ?? "a comparação falhou");
+      }
+      await new Promise((wake) => setTimeout(wake, POLL_MS));
+    }
+  }
+
+   /** A simulação em curso. Com um worker é uma só; com vários, a primeira delas */
+  function simulationNow(state: ComparisonState): RunningSimulation | null {
+    const now = state.simulacoes.find((s) => s.estado === "rodando");
+    if (!now || !state.etapas_total) return null;
+    const ceiling = state.etapas_total / state.simulacoes.length;
+    return {
+      arm: now.braco,
+      seed: now.seed,
+      seeds: state.seeds,
+      share: ceiling ? Math.min(1, now.etapas / ceiling) : 0,
+    };
   }
 
   async function handleDelete(id: string) {
@@ -130,7 +183,7 @@ export default function App() {
    /** Apaga do disco e refaz a lista. Uma falha não impede as demais */
   async function discard(names: string[]) {
     setError(null);
-    const done = await Promise.allSettled(names.map(deleteResult));
+    const done = await Promise.allSettled(names.map(deleteComparison));
     const failed = done.filter((entry) => entry.status === "rejected");
     if (failed.length) {
       setError(
@@ -192,6 +245,7 @@ export default function App() {
             arms={arms}
             setArms={setArms}
             running={running}
+            progress={progress}
             onRun={handleRun}
             presetId={choice.presetId}
             hasCustom={choice.custom !== null}
@@ -227,8 +281,9 @@ export default function App() {
         )}
         {current && (
           <Comparison
-            key={current.id}
+            key={`${current.id}-${progress?.name === current.id ? "rodando" : "pronta"}`}
             run={current}
+            progress={progress?.name === current.id ? progress : null}
             onReuseConfig={() => reuseConfig(current)}
           />
         )}

@@ -44,15 +44,16 @@ RunDone = Callable[["Arm", int], None]
 
 @dataclass(frozen=True)
 class Arm:
-    """Um dos dois modelos comparados."""
+    """Um dos dois modelos comparados. `short` é como o log do terminal o chama."""
 
     key: str
     mechanism: Mechanism
+    short: str
 
 
 ARMS: tuple[Arm, ...] = (
-    Arm("ranking_greedy", "ranking"),
-    Arm("credits_return", "credits"),
+    Arm("ranking_greedy", "ranking", "CR"),
+    Arm("credits_return", "credits", "Leilao"),
 )
 
 
@@ -82,7 +83,6 @@ class RulerSeries:
     attendance: list[float | None]
     mean_round: list[float | None]
     progress: list[float]
-    fidelity: list[float]
     fairness: list[float]
     grade_average: list[float]
     exclusion_rate: list[float]
@@ -187,7 +187,6 @@ class RunSummary:
     attendance: float | None
     mean_round: float | None
     progress: float
-    fidelity: float
     fairness: float
     grade_average: float
     exclusion_rate: float
@@ -497,7 +496,6 @@ def _period_series(
         attendance=series_optional(lambda m: m.attendance),
         mean_round=[rounds_mean(by_round) for _, _, by_round in measured],
         progress=series(lambda m: m.progress),
-        fidelity=series(lambda m: m.fidelity),
         fairness=series(lambda m: m.fairness),
         grade_average=series(lambda m: m.mean_grade_average),
         exclusion_rate=series(lambda m: m.exclusion_rate or 0.0),
@@ -552,7 +550,6 @@ def _quantities(series: RulerSeries, index: int) -> dict[str, float | None]:
         "attendance": series.attendance[index],
         "mean_round": series.mean_round[index],
         "progress": series.progress[index],
-        "fidelity": series.fidelity[index],
         "fairness": series.fairness[index],
         "grade_average": series.grade_average[index],
         "exclusion_rate": series.exclusion_rate[index],
@@ -710,7 +707,6 @@ def summarize(result: SimulationResult, *, seed: int) -> RunSummary:
         attendance=mean([v for v in by_period.attendance if v is not None]),
         mean_round=mean([v for v in by_period.mean_round if v is not None]),
         progress=mean(by_period.progress),
-        fidelity=mean(by_period.fidelity),
         fairness=mean(by_period.fairness),
         grade_average=mean(by_period.grade_average),
         exclusion_rate=mean(by_period.exclusion_rate),
@@ -764,7 +760,7 @@ def arm_config(config: SimulationConfig, *, arm: Arm, seed: int) -> SimulationCo
 
 def _run_one(config: SimulationConfig, arm: Arm, seed: int) -> RunSummary:
     return summarize(
-        run_simulation(arm_config(config, arm=arm, seed=seed), keep_histories=False),
+        run_simulation(arm_config(config, arm=arm, seed=seed), histories="nenhum"),
         seed=seed,
     )
 

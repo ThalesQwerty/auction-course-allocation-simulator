@@ -15,6 +15,7 @@ from ..equations import (
     satisfaction,
 )
 from ..population import Student
+from ..steps import PeriodSteps
 from .closing import PeriodClosing, close_period
 from .reports import (
     DisciplineSnapshot,
@@ -336,9 +337,11 @@ def run_period(
     period: int,
     active: list[Student],
     enrollments: dict[str, int],
-    keep_records: bool = True,
+    recorded: set[str] | None = None,
+    steps: PeriodSteps | None = None,
 ) -> PeriodOutcome | None:
     """Roda o período. `None` quando não há ninguém a medir — e aí a"""
+    steps = steps if steps is not None else PeriodSteps(None, period=period)
     for student in active:
         student.behavior = Behavior(
             selectivity=draws.selectivity[(student.id, period)]
@@ -407,6 +410,7 @@ def run_period(
                 grade_averages=grade_averages,
                 state=state,
                 round_number=number,
+                steps=steps,
             )
         )
         if sum(len(won) for won in state.won.values()) == granted_before:
@@ -446,6 +450,7 @@ def run_period(
         for outcome in outcomes
     ]
 
+    steps.closing()
     closing = close_period(
         config=config,
         draws=draws,
@@ -537,7 +542,7 @@ def run_period(
             _student_records(
                 config=config,
                 draws=draws,
-                active=active,
+                active=[s for s in active if s.id in recorded],
                 state=state,
                 closing=closing,
                 period=period,
@@ -545,7 +550,7 @@ def run_period(
                 grade_averages=grade_averages,
                 satisfactions=period_satisfaction,
             )
-            if keep_records
+            if recorded
             else {}
         ),
         satisfaction=period_satisfaction,

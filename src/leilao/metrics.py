@@ -41,7 +41,6 @@ class Metrics:
     excluded: int | None
     exclusion_rate: float | None
     request_states: RequestStates | None
-    fidelity: float
     scarcity: float
     contention: float
     mean_grade_average: float
@@ -52,7 +51,6 @@ def compute_metrics(
     *,
     satisfactions: list[float],
     progresses: list[float],
-    fidelities: list[float],
     grade_averages: list[float],
     semestralizations: list[float],
     scarcities: list[float],
@@ -81,7 +79,6 @@ def compute_metrics(
             else None
         ),
         request_states=RequestStates.average(states) if states is not None else None,
-        fidelity=mean(fidelities),
         scarcity=mean(scarcities),
         contention=mean(contentions),
         mean_grade_average=mean_grade_average(grade_averages),

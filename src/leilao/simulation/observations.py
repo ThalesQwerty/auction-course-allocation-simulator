@@ -23,6 +23,7 @@ def period_points(
         return []
     return [
         StudentPeriodPoint(
+            student_id=student.id,
             period=period,
             grade_average=values.grade_averages[student.id],
             reserve=values.reserves[student.id],

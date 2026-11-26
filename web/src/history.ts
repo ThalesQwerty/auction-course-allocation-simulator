@@ -4,25 +4,31 @@ import { defaultScenario } from "./presets";
 import { COMPARISON_ARMS, horizonFor } from "./types";
 import type {
   CompareRequest,
-  CompareResponse,
-  SavedResult,
+  ComparisonHead,
   Scenario,
-  StoredRun,
 } from "./types";
 
 /** Uma execução da lista: o que a API devolve sem o resultado, que é o que a barra lateral precisa */
 export interface HistoryEntry {
   kind: "comparison";
-   /** O nome em disco, que endereça `/results/{id}` */
+   /** O nome do arquivo, que endereça `/comparacoes/{nome}` */
   id: string;
   at: string; // ISO 8601
   config: CompareRequest;
   bytes?: number;
+   /** O estado da comparação em banco. Ausente nas gravadas em JSON */
+  state?: ComparisonHead["estado"];
+  done?: number;
+  failed?: number;
+  pending?: number;
 }
 
-/** Uma execução aberta: a da lista, com o resultado */
+/** Uma comparação aberta: a da lista, com o que o cabeçalho do banco acrescenta */
 export interface ComparisonRun extends HistoryEntry {
-  result: CompareResponse;
+   /** Quantas seeds cada braço rodou */
+  seeds: number;
+   /** Os braços que esta comparação de fato rodou */
+  arms: string[];
 }
 
 /** Os nomes de antes de 04/11/2026, quando "utilidade" se partiu em duas palavras: **interesse** é o sorteio que σ e a flutuação governam e que o histograma retrata; **utilidade** é ele visto pelo histórico do aluno */
@@ -91,49 +97,28 @@ function migrateScenario<T extends Record<string, unknown>>(config: T): T {
   return migrated;
 }
 
-/** Uma linha da lista da API, traduzida para a barra lateral */
-export function entryFromListing(row: SavedResult): HistoryEntry {
+/** Uma comparação em banco, traduzida para a barra lateral */
+export function entryFromComparison(head: ComparisonHead): HistoryEntry {
   return {
     kind: "comparison",
-    id: row.name,
-    at: row.at,
-    bytes: row.bytes,
-    config: migrateConfig(row.config),
+    id: head.nome,
+    bytes: head.bytes,
+    at: head.criada_em,
+    config: migrateConfig(JSON.parse(head.cenario)),
+    state: head.estado,
+    done: head.concluidas,
+    failed: head.falhas,
+    pending: head.pendentes + head.rodando,
   };
 }
 
-/** Uma execução gravada, traduzida para a tela de resultados */
-export function runFromStored(name: string, stored: StoredRun): ComparisonRun {
+/** Uma comparação em banco, traduzida para a tela de resultados */
+export function runFromComparison(head: ComparisonHead): ComparisonRun {
   return {
-    kind: "comparison",
-    id: name,
-    at: stored.at,
-    config: migrateConfig(stored.config),
-    result: migrateResult(withInterestNames(stored.result)),
+    ...entryFromComparison(head),
+    seeds: head.seeds,
+    arms: head.bracos,
   };
-}
-
-/** A chave de ψ̄ antes de 25/11/2026, quando ela ainda se chamava pela eq. (53) do anteprojeto e não pelo que mede */
-const SATISFACTION_WAS = "efficiency";
-
-/** Troca a chave de ψ̄ onde ela estiver: ela aparece no resumo de cada simulação, nos valores de cada faixa e em cada ponto da dispersão */
-function migrateResult(result: CompareResponse): CompareResponse {
-  const probe = result.arms?.[0]?.runs?.[0] as unknown as
-    | Record<string, unknown>
-    | undefined;
-  if (!probe || !(SATISFACTION_WAS in probe)) return result;
-  return renameDeep(result) as CompareResponse;
-}
-
-function renameDeep(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(renameDeep);
-  if (value === null || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, inner]) => [
-      key === SATISFACTION_WAS ? "satisfaction" : key,
-      renameDeep(inner),
-    ])
-  );
 }
 
 /** O cenário gravado, nos campos de hoje */

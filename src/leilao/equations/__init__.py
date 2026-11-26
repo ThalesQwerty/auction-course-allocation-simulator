@@ -50,7 +50,6 @@ from .mean_grade_average import mean_grade_average
 from .mean_price import mean_price
 from .mean_round import mean_round
 from .mean_satisfaction import mean_satisfaction
-from .message_fidelity import message_fidelity
 from .next_budget import next_budget
 from .progress import progress
 from .value_band import (
@@ -126,7 +125,6 @@ __all__ = [
     "mean_price",
     "mean_round",
     "mean_satisfaction",
-    "message_fidelity",
     "next_budget",
     "progress",
     "ordered_cuts",

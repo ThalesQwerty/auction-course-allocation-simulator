@@ -5,6 +5,7 @@ export const PALETTE = {
   gray: "#8a8984",
   red: STATUS.critical,
   orange: "#eb6834",
+  lime: "#7fb000",
   yellow: STATUS.warning,
   green: STATUS.good,
   teal: "#1a9e8f",
@@ -19,8 +20,8 @@ const RAMPS: Record<number, string[]> = {
   1: [PALETTE.blue],
   2: [PALETTE.green, PALETTE.red],
   3: [PALETTE.green, PALETTE.yellow, PALETTE.red],
-  4: [PALETTE.blue, PALETTE.green, PALETTE.yellow, PALETTE.red],
-  5: [PALETTE.violet, PALETTE.blue, PALETTE.green, PALETTE.yellow, PALETTE.red],
+  4: [PALETTE.green, PALETTE.yellow, PALETTE.orange, PALETTE.red],
+  5: [PALETTE.green, PALETTE.lime, PALETTE.yellow, PALETTE.orange, PALETTE.red],
 };
 
 export const MAX_BANDS = 5;

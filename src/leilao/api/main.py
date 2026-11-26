@@ -1,10 +1,12 @@
 """Ponte FastAPI entre o motor Python e a interface web."""
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
@@ -13,6 +15,7 @@ from ..comparison import ARM_BY_KEY, arm_config
 from ..entities import Agent, Good, MutualExclusion
 from ..playground import PlaygroundClass, PlaygroundStudent, run_playground
 from ..simulation import run_simulation
+from . import comparisons
 from .service import build_config, compare_scenario
 from .storage import delete_result, list_results, read_result, save_result
 from .schemas import (
@@ -37,6 +40,26 @@ app = FastAPI(
     description="Ponte entre o motor de simulação (Python) e a interface de configuração/simulação (TypeScript).",
     version="0.1.0",
 )
+
+POLLED = re.compile(r"^/comparacoes/[^/]+$")
+
+
+class QuietPolling(logging.Filter):
+    """Tira do access log a consulta de acompanhamento.
+
+    A tela a repete a cada segundo enquanto uma comparação roda, e uma linha
+    por segundo afogaria no terminal o progresso que o motor imprime. As outras
+    requisições continuam aparecendo, inclusive as que falham.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 3:
+            return True
+        return not (args[1] == "GET" and POLLED.match(str(args[2])))
+
+
+logging.getLogger("uvicorn.access").addFilter(QuietPolling())
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
@@ -121,6 +144,111 @@ def discard(name: str) -> Response:
     if not existed:
         raise HTTPException(status_code=404, detail=f"não há resultado {name!r}")
     return Response(status_code=204)
+
+
+@app.get("/comparacoes")
+def comparison_list() -> list[dict]:
+    """Todas as comparações, da mais recente para a mais antiga."""
+    return comparisons.listing()
+
+
+@app.post("/comparacoes", status_code=201)
+def comparison_create(req: CompareRequest, rotulo: str | None = None) -> dict:
+    """Cria a comparação e a fila de simulações. **Não roda nada.**"""
+    try:
+        return comparisons.create(req, label=rotulo)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/comparacoes/{name}")
+def comparison_state(name: str) -> dict:
+    """Cabeçalho, estado de cada simulação e progresso. Serve para acompanhar."""
+    return _bank(comparisons.read_state, name)
+
+
+@app.get("/comparacoes/{name}/resultado")
+def comparison_result(name: str) -> dict:
+    """O cenário e o cabeçalho. As visualizações têm rota própria."""
+    return _bank(comparisons.read_result, name)
+
+
+@app.get("/comparacoes/{name}/series")
+def comparison_series(
+    name: str, eixo: str = "overall", cortes: str = ""
+) -> dict:
+    """A série por período, recortada em faixas e reduzida entre as seeds.
+
+    O SQL agrupa e tira a média sobre os milhões de linhas de `aluno_periodo`;
+    o Python só dobra as seeds em mediana e interquartil, porque o SQLite não
+    tem `PERCENTILE` e ali já são poucas linhas.
+    """
+    return _bank(comparisons.read_series, name, axis=eixo, cuts=cortes)
+
+
+@app.get("/comparacoes/{name}/curva")
+def comparison_curve(name: str, eixo: str, pontos: int = 40) -> dict:
+    """A métrica sobre CR final ou utilidade de reserva, em faixas de quantil."""
+    return _bank(comparisons.read_curve, name, axis=eixo, bins=pontos)
+
+
+@app.get("/comparacoes/{name}/caixas")
+def comparison_boxes(name: str, base: str = "ranking_greedy") -> dict:
+    """Uma caixa por (braço, métrica) sobre as seeds: o eixo X colapsado."""
+    return _bank(comparisons.read_boxes, name, baseline=base)
+
+
+@app.get("/comparacoes/{name}/traco", response_model=TraceResponse)
+def comparison_trace(name: str, braco: str, seed: int = 1) -> dict:
+    """Uma simulação inteira, aluno a aluno, direto do banco."""
+    return _bank(comparisons.read_trace, name, arm=braco, seed=seed)
+
+
+@app.get("/comparacoes/{name}/alunos/{simulation_id}/{student}")
+def comparison_student(name: str, simulation_id: int, student: str) -> dict:
+    """Tudo que um aluno fez: período a período, turma a turma."""
+    return _bank(comparisons.read_student, name, simulation_id, student)
+
+
+@app.post("/comparacoes/{name}/rodar", status_code=202)
+def comparison_run(
+    name: str, tasks: BackgroundTasks, workers: int = 1
+) -> dict:
+    """Roda o que falta, em segundo plano. Serve de começo e de retomada."""
+    state = _bank(comparisons.read_state, name)
+    tasks.add_task(comparisons.run, name, workers=workers)
+    return state
+
+
+@app.post("/comparacoes/{name}/pausar")
+def comparison_pause(name: str) -> dict:
+    """Pede a pausa. O laço para na próxima fronteira, não na hora."""
+    return _bank(comparisons.pause, name)
+
+
+@app.delete("/comparacoes/{name}", status_code=204)
+def comparison_delete(name: str) -> Response:
+    """Apaga a comparação e, em cascata, as oito tabelas de detalhe."""
+    _bank(comparisons.delete, name)
+    return Response(status_code=204)
+
+
+def _bank(action, *args, **kwargs):
+    """Traduz o que as funções de banco levantam para o que o HTTP diz."""
+    try:
+        return action(*args, **kwargs)
+    except comparisons.Running as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except comparisons.Missing as exc:
+        raise HTTPException(
+            status_code=404, detail=f"não há comparação {exc}"
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="não há banco de comparações") from exc
 
 
 @app.post("/trace", response_model=TraceResponse)

@@ -93,29 +93,55 @@ segundo preço, consumo. Não sabem o que é aluno, nota ou grade.
 `period`/`rounds`/`closing` rodam, `snapshots`/`reports` recortam.
 `comparison.py` roda o mesmo cenário em cada braço de `ARMS`, N vezes.
 
+**`store/`** — o banco de uma comparação. O motor não sabe que ele existe:
+`run_simulation` aceita um `on_period` e entrega cada período fechado, e quem
+grava é o `store`. Assim nada se acumula no worker, que era o teto de memória
+do `--workers`.
+
+**`steps.py`** — o andamento. `run_simulation` aceita também um `on_step` e
+anuncia cada fase; o `StepTracker` conta, imprime uma linha por fase no terminal
+e grava quantos passos a simulação já deu, que é a porcentagem que a tela
+mostra. O teto, que a criação da comparação já sabe, é
+`simulações × períodos × (rodadas × 2 + 1)`.
+
 ### API e interface
 
-`api/service.py` é o miolo das rotas sem HTTP (`build_config`,
-`compare_scenario`), compartilhado com `cli.py`. Cada requisição carrega o
-cenário inteiro.
+Cada comparação é um **banco SQLite** em `resultados/comparacao-<carimbo>.db`
+(git-ignored, pasta em `LEILAO_RESULTS_DIR`), endereçado pelo nome do arquivo.
+Apagar é `unlink`. Como há uma comparação por arquivo, a tabela `comparacao`
+não tem identidade e nada carrega `comparacao_id`.
 
-- `/run` — um leilão de uma rodada
-- `/compare` — os braços da comparação, a rota mais cara; grava em
-  `resultados/` (git-ignored, caminho em `LEILAO_RESULTS_DIR`) e devolve
-  `saved_to` e `saved_as`
-- `/trace` — refaz um par braço + seed e devolve o pedido de cada aluno
-- `/playground` — alocação isolada
-- `GET /results` — o que há gravado, sem o resultado
-- `GET /results/{nome}` — uma execução inteira
-- `DELETE /results/{nome}` — apaga uma execução
+- `GET /comparacoes` — a lista, com o progresso de cada uma
+- `POST /comparacoes` — cria o banco e a fila de simulações, **sem rodar**
+- `GET /comparacoes/{nome}` — o estado de cada simulação
+- `GET /comparacoes/{nome}/resultado` — o cabeçalho com que a tela abre
+- `POST /comparacoes/{nome}/rodar` — roda em segundo plano; serve de retomada
+- `POST /comparacoes/{nome}/pausar` — para na próxima fronteira, não na hora
+- `DELETE /comparacoes/{nome}` — apaga o arquivo
+- `/run`, `/compare`, `/trace`, `/playground` e `/results` continuam, e a
+  interface não as usa mais
 
-O histórico é o disco: a interface não guarda execução nenhuma, lista pela API
-e abre uma sob demanda. Apagar `resultados/` apaga o histórico.
+**A tela só desenha.** Cada visualização é uma consulta que já devolve o
+resultado pronto, e não há transformação de dado no navegador:
 
-A resposta é bruta. O motor publica uma linha por (aluno medido, período
-medido) e, de série pronta, só o agregado da coorte; o recorte em faixas de CR
-e de reserva é conta de navegador (`web/src/cutBands.ts`), e por isso mudar um
-corte não refaz simulação.
+- `GET /comparacoes/{nome}/series?eixo=&cortes=` — a série por período,
+  recortada em faixas pelo SQL, com mediana e interquartil por braço
+- `GET /comparacoes/{nome}/curva?eixo=&pontos=` — a métrica sobre CR final ou
+  utilidade de reserva, em faixas de quantil com bordas comuns aos dois braços
+- `GET /comparacoes/{nome}/caixas` — os cinco números de cada caixa, o
+  pareamento contra a linha de base e uma linha por seed
+- `GET /comparacoes/{nome}/alunos/{simulacao}/{aluno}` — tudo que um aluno fez
+
+A unidade de recuperação é a **simulação**, o par (braço, seed): como ela é
+determinística, perder uma custa só o tempo dela, e por isso não há checkpoint
+dentro de uma. O worker grava no fechamento de cada período, de modo que a
+memória não cresce com o horizonte; `rodando` num processo que não está mais
+vivo é a interrupção, e a retomada apaga essas linhas e refaz.
+
+O que se guarda é o que o **mecanismo decidiu**. O que saiu da seed — população,
+interesse, disponibilidade, seletividade, quantis de nota — volta chamando
+`simulation.setup.prepare()` sozinho, em 5,6 s contra 51 s de simulação, e por
+isso não ocupa o banco.
 
 `web/src/` é React + Vite + Recharts. `types.ts` **espelha** `api/schemas.py`:
 mudou um, mude o outro. `presets.ts` traz a grade e o cenário padrão;

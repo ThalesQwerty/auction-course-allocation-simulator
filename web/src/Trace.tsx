@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { trace } from "./api";
+import { comparisonTrace } from "./api";
 import { formatRatio } from "./charts";
 import type { ComparisonRun } from "./history";
-import { COMPARISON_ARMS, GUARANTEED_ROUND, armLabel, cohortLabel } from "./types";
+import { COMPARISON_ARMS, GUARANTEED_ROUND, cohortLabel } from "./types";
 import type {
   DisciplineSnapshot,
   RequestRecord,
@@ -42,8 +42,6 @@ function outcomeOf(record: RequestRecord, round: number): Outcome | null {
   return { label: "não solicitada", tone: "idle", guaranteed: false };
 }
 
-const isLive = (outcome: Outcome) => outcome.tone !== "idle";
-
 /** A âncora é um quantil em (0, 1): 0,5 é a mediana da população, e o número se lê como "este aluno está no percentil tal" */
 const quantil = (value: number) =>
   `${Math.round(value * 100)}%`;
@@ -57,16 +55,15 @@ const bidCell = (credits: number, usesCredits: boolean) =>
   usesCredits ? (credits || "—") : credits > 0 ? "pedida" : "—";
 
 export function Trace({ run }: { run: ComparisonRun }) {
-  const result = run.result;
    /** Só os braços que esta comparação de fato rodou: uma gravada antes de um braço existir não o traz, e pedir o traço dele não encontraria simulação */
   const arms = useMemo(
-    () => COMPARISON_ARMS.filter((arm) => result.arms.some((a) => a.key === arm.key)),
-    [result.arms]
+    () => COMPARISON_ARMS.filter((arm) => run.arms.includes(arm.key)),
+    [run.arms]
   );
 
   const [armKey, setArmKey] = useState(arms[arms.length - 1]?.key ?? COMPARISON_ARMS[0].key);
   const [seed, setSeed] = useState(1);
-   /** O traço custa uma simulação completa no servidor, então ele não vem sozinho: a seção abre com o botão, e dali em diante trocar de modelo ou de simulação já refaz */
+   /** O traço é a simulação inteira em JSON, então ele não vem sozinho: a seção abre com o botão, e dali em diante trocar de modelo ou de simulação já busca de novo */
   const [started, setStarted] = useState(false);
    /** Contador de tentativas: é o que dá ao botão "tentar de novo" o que mudar quando o par (braço, seed) continua o mesmo */
   const [attempt, setAttempt] = useState(0);
@@ -77,15 +74,13 @@ export function Trace({ run }: { run: ComparisonRun }) {
   const [kind, setKind] = useState<"student" | "discipline">("student");
   const [studentId, setStudentId] = useState<string | null>(null);
   const [discipline, setDiscipline] = useState<string | null>(null);
-  const [showIdle, setShowIdle] = useState(true);
 
   useEffect(() => {
     if (!started) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const { runs: _runs, ...scenario } = run.config;
-    trace({ ...scenario, arm: armKey, seed })
+    comparisonTrace(run.id, armKey, seed)
       .then((payload) => {
         if (!cancelled) setData(payload);
       })
@@ -101,10 +96,12 @@ export function Trace({ run }: { run: ComparisonRun }) {
     return () => {
       cancelled = true;
     };
-  }, [started, attempt, armKey, seed, run.config]);
+  }, [started, attempt, armKey, seed, run.id]);
 
    /** O mecanismo do braço **carregado**, e não o do seletor: as colunas de crédito descrevem o que está na tela, e trocar de modelo só as troca quando o traço novo chega */
-  const loadedArm = data ? result.arms.find((arm) => arm.key === data.arm) : undefined;
+  const loadedArm = data
+    ? COMPARISON_ARMS.find((arm) => arm.key === data.arm)
+    : undefined;
   const usesCredits = loadedArm ? loadedArm.mechanism === "credits" : true;
   const hasReturn = usesCredits;
   const rounds = run.config.rounds;
@@ -119,13 +116,6 @@ export function Trace({ run }: { run: ComparisonRun }) {
     <section className="chart-section">
       <header className="chart-section-head">
         <h2>Histórico de um aluno ou de uma disciplina</h2>
-        <p>
-          O caso individual por trás dos agregados: uma simulação, período a período e
-          rodada a rodada. O par (modelo, simulação) endereça uma das linhas das tabelas, e
-          a simulação é refeita no servidor — determinística, então é a mesma de que o
-          ponto saiu. A vista por aluno lista todas as disciplinas elegíveis dele, inclusive
-          as que não pediu; a por disciplina lista quem a pediu naquela rodada.
-        </p>
       </header>
 
       <div className="panel trace-controls">
@@ -151,7 +141,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
               value={seed}
               onChange={(event) => setSeed(Number(event.target.value))}
             >
-              {Array.from({ length: result.runs }, (_, i) => i + 1).map((value) => (
+              {Array.from({ length: run.seeds }, (_, i) => i + 1).map((value) => (
                 <option key={value} value={value}>
                   {value}
                 </option>
@@ -226,16 +216,6 @@ export function Trace({ run }: { run: ComparisonRun }) {
                 </div>
               )}
 
-              {kind === "student" && (
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={showIdle}
-                    onChange={(event) => setShowIdle(event.target.checked)}
-                  />
-                  mostrar não solicitadas
-                </label>
-              )}
             </>
           )}
 
@@ -270,11 +250,7 @@ export function Trace({ run }: { run: ComparisonRun }) {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
-      {loading && (
-        <p className="empty-state">
-          Refazendo a simulação {seed} de {armLabel(armKey)} — é uma simulação completa.
-        </p>
-      )}
+      {loading && <p className="empty-state">Carregando…</p>}
 
       {data && !loading && kind === "student" && student && (
         <StudentTrace
@@ -283,7 +259,6 @@ export function Trace({ run }: { run: ComparisonRun }) {
           rounds={rounds}
           usesCredits={usesCredits}
           hasReturn={hasReturn}
-          showIdle={showIdle}
         />
       )}
       {data && !loading && kind === "discipline" && chosen && (
@@ -339,14 +314,12 @@ function StudentTrace({
   rounds,
   usesCredits,
   hasReturn,
-  showIdle,
 }: {
   data: TraceResponse;
   student: StudentSummary;
   rounds: number;
   usesCredits: boolean;
   hasReturn: boolean;
-  showIdle: boolean;
 }) {
   const history: StudentHistory | undefined = useMemo(
     () => data.histories.find((entry) => entry.student_id === student.id),
@@ -435,7 +408,6 @@ function StudentTrace({
             rounds={rounds}
             usesCredits={usesCredits}
             hasReturn={hasReturn}
-            showIdle={showIdle}
           />
         ))
       )}
@@ -448,13 +420,11 @@ function StudentPeriod({
   rounds,
   usesCredits,
   hasReturn,
-  showIdle,
 }: {
   record: StudentPeriodRecord;
   rounds: number;
   usesCredits: boolean;
   hasReturn: boolean;
-  showIdle: boolean;
 }) {
   const won = record.requests.filter((request) => request.won_round !== null).length;
   const asked = record.requests.filter((request) => request.bids.some((c) => c > 0)).length;
@@ -484,8 +454,7 @@ function StudentPeriod({
           .flatMap((request) => {
             const outcome = outcomeOf(request, round);
             return outcome ? [{ request, outcome }] : [];
-          })
-          .filter((row) => showIdle || isLive(row.outcome));
+          });
         return (
           <div className="round-block" key={round}>
             <h4 className="round-head">

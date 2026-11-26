@@ -213,7 +213,7 @@ class ScenarioIn(BaseModel):
         description="desvio do abalo do quantil da seletividade",
     )
     grade_cuts: list[float] = Field(
-        default=[5.0, 7.0],
+        default=[5.0, 6.0, 7.0],
         max_length=MAX_CUTS,
         description="pontos de corte do recorte por CR, em [0, 10]",
     )
@@ -407,7 +407,6 @@ class RunSummaryOut(BaseModel):
     attendance: float | None
     mean_round: float | None
     progress: float
-    fidelity: float
     fairness: float
     exclusion_rate: float
     grade_average: float = 0.0
@@ -473,7 +472,6 @@ class MetricsOut(BaseModel):
     attendance: float | None
     attendance_students: int | None
     progress: float
-    fidelity: float
     fairness: float
     excluded: int | None
     exclusion_rate: float | None

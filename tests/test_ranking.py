@@ -263,7 +263,6 @@ def test_the_series_by_period_is_the_material_of_the_weighted_mean():
         len(series.students),
         len(series.satisfaction),
         len(series.attendance),
-        len(series.fidelity),
         len(series.fairness),
         len(series.mean_round),
     }
@@ -297,7 +296,7 @@ def test_each_cut_partitions_the_aggregate_period_by_period(axis):
         assert groups
         medidos += 1
         assert sum(g.metrics.students for g in groups) == overall.metrics.students
-        for name in ("satisfaction", "progress", "fidelity"):
+        for name in ("satisfaction", "progress"):
             recomposed = weighted_mean(
                 [(getattr(g.metrics, name), g.metrics.students) for g in groups]
             )

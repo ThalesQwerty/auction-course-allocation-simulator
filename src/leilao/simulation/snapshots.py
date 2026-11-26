@@ -9,7 +9,6 @@ from ..config import SimulationConfig
 from ..equations import (
     RequestStates,
     credits_per_seat,
-    message_fidelity,
     progress,
     request_states,
     semestralization,
@@ -122,7 +121,6 @@ class Measurements:
 
     satisfactions: dict[str, float]
     progresses: dict[str, float]
-    fidelities: dict[str, float]
     grade_averages: dict[str, float]
     semestralizations: dict[str, float]
     scarcities: dict[str, float]
@@ -191,12 +189,6 @@ def measure(
                 approved_elective_hours=approved_elective_hours[s.id],
                 required_hours=required_hours,
                 elective_hours_needed=config.elective_hours,
-            )
-            for s in active
-        },
-        fidelities={
-            s.id: message_fidelity(
-                utilities=utilities[s.id], message=messages.get(s.id, {})
             )
             for s in active
         },
@@ -295,7 +287,6 @@ def snapshot(
             satisfactions=pick(values.satisfactions),
 
             progresses=pick(values.progresses),
-            fidelities=pick(values.fidelities),
             grade_averages=pick(values.grade_averages),
             semestralizations=pick(values.semestralizations),
             scarcities=pick(values.scarcities),

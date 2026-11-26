@@ -81,6 +81,8 @@ export function SeriesChart({
   zeroLine = false,
   runs,
   xLabel = (x) => String(x),
+  xBounds,
+  xFormat,
   axisLabel,
   showCount = false,
   foot = "mediana · intervalo interquartil",
@@ -98,6 +100,9 @@ export function SeriesChart({
    /** Quantas simulações cada modelo tem */
   runs: number;
   xLabel?: (x: number) => string;
+   /** O contradomínio do eixo X. Sem ele o eixo é inteiro e se ajusta ao dado, que é o que o eixo do período quer; com ele o eixo é fracionário e fixo, de modo que a mesma grandeza ocupe sempre a mesma largura */
+  xBounds?: [number, number];
+  xFormat?: (value: number) => string;
    /** O nome do eixo X, escrito sob o gráfico. O eixo Y é o título do cartão */
   axisLabel?: string;
    /** Mostra sempre quantas observações cada ponto tem, e não só quando são menos que as seeds */
@@ -216,8 +221,9 @@ export function SeriesChart({
           <XAxis
             dataKey="x"
             type="number"
-            domain={["dataMin", "dataMax"]}
-            allowDecimals={false}
+            domain={xBounds ?? ["dataMin", "dataMax"]}
+            allowDecimals={xBounds !== undefined}
+            tickFormatter={xFormat}
             tick={{ fill: ink.muted, fontSize: 10 }}
             tickLine={false}
             stroke={ink.axis}

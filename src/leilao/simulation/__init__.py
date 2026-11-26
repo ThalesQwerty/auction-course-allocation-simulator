@@ -1,14 +1,19 @@
 """Simulação multi-período da matrícula universitária (Seção 7.2)."""
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Literal
+
 from ..config import SimulationConfig
+from ..population import Student
+from ..steps import OnStep, PeriodSteps
 from ..equations import (
     grade_histogram,
     interest_histogram,
     progress,
 )
 from ..equations._mean import mean
-from .period import run_period
+from .period import PeriodOutcome, run_period
 from .reports import (
     GUARANTEED_ROUND,
     DisciplineSnapshot,
@@ -48,20 +53,47 @@ def _approved_hours(
     student, config: SimulationConfig, draws, *, elective: bool
 ) -> int:
     """As horas aprovadas de um lado só da exigência."""
-    eletivas = {d.name for d in config.disciplines if d.elective}
+    optativas = {d.name for d in config.disciplines if d.elective}
     return sum(
         draws.discipline_hours[name]
         for name in student.approved(config.min_grade)
-        if (name in eletivas) == elective
+        if (name in optativas) == elective
     )
 
 
+Histories = Literal["nenhum", "medidos", "todos"]
+"""De quem se guarda o roteiro período a período. O roteiro da coorte medida é
+30 MB por simulação no cenário cheio, e o de todo mundo é 902 MB."""
+
+
+def recorded_students(
+    config: SimulationConfig, students: list[Student], histories: "Histories"
+) -> set[str]:
+    if histories == "nenhum":
+        return set()
+    cohort = config.measured_cohort
+    if histories == "medidos" and cohort is not None:
+        return {s.id for s in students if s.entry_period == cohort}
+    return {s.id for s in students}
+
+
 def run_simulation(
-    config: SimulationConfig, *, keep_histories: bool = True
+    config: SimulationConfig,
+    *,
+    histories: "Histories" = "todos",
+    on_period: Callable[[PeriodOutcome], None] | None = None,
+    on_step: OnStep | None = None,
 ) -> SimulationResult:
-    """Roda a simulação inteira. Determinística: mesma config, mesmo resultado."""
+    """Roda a simulação inteira. Determinística: mesma config, mesmo resultado.
+
+    Com `on_period`, cada período é entregue no fechamento e **não fica**: nem o
+    relatório nem os registros dele são acumulados, de modo que a memória do
+    processo não cresce com o horizonte. O resultado sai então sem `periods` e
+    sem `histories`, e quem os tem é quem recebeu os períodos.
+    """
     draws = prepare(config)
     students = draws.students
+    recorded = recorded_students(config, students, histories)
 
     periods: list[PeriodReport] = []
     history: dict[str, list[StudentPeriodRecord]] = {s.id: [] for s in students}
@@ -79,18 +111,25 @@ def run_simulation(
         if not active:
             break
 
+        steps = PeriodSteps(on_step, period=period)
+        steps.started()
         outcome = run_period(
             config=config,
             draws=draws,
             period=period,
             active=active,
             enrollments=enrollments,
-            keep_records=keep_histories,
+            recorded=recorded,
+            steps=steps,
         )
         if outcome is None:
             break
+        steps.closed()
 
-        periods.append(outcome.report)
+        if on_period is None:
+            periods.append(outcome.report)
+        else:
+            on_period(outcome)
         first_grades.extend(outcome.first_grades)
         for student_id, value in outcome.satisfaction.items():
             satisfactions[student_id].append(value)
@@ -102,8 +141,9 @@ def run_simulation(
                     attendances[student_id].append(taken)
             for student_id, rounds in outcome.won_rounds.items():
                 won_rounds[student_id].extend(rounds)
-        for student_id, record in outcome.records.items():
-            history[student_id].append(record)
+        if on_period is None:
+            for student_id, record in outcome.records.items():
+                history[student_id].append(record)
 
     return SimulationResult(
         periods=periods,
@@ -152,9 +192,13 @@ def run_simulation(
             for s in students
         ],
         histories=(
-            [StudentHistory(student_id=s.id, periods=history[s.id]) for s in students]
-            if keep_histories
-            else []
+            []
+            if on_period is not None
+            else [
+                StudentHistory(student_id=s.id, periods=history[s.id])
+                for s in students
+                if s.id in recorded
+            ]
         ),
         disciplines=list(draws.seats),
         classes=dict(draws.discipline_of),

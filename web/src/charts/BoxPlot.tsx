@@ -1,12 +1,21 @@
 /** O eixo X colapsado: uma caixa por modelo, sobre as **seeds** */
-import { boxStats } from "../equations";
 import { inkFor, usePrefersDark } from "./theme";
+
+/** Uma caixa já reduzida. A API a devolve pronta: a tela desenha, não calcula */
+export interface Box {
+  min: number;
+  q1: number;
+  median: number;
+  q3: number;
+  max: number;
+  n: number;
+}
 
 export interface BoxRow {
   key: string;
   label: string;
   color: string;
-  values: number[];
+  box: Box | null;
 }
 
 const HEIGHT = 34;
@@ -25,10 +34,12 @@ export function BoxPlot({
 }) {
   const dark = usePrefersDark();
   const ink = inkFor(dark);
-  const stats = rows.map((row) => ({ row, box: boxStats(row.values) }));
+  const stats = rows.map((row) => ({ row, box: row.box }));
   const present = stats.filter((entry) => entry.box !== null);
 
-  const values = present.flatMap((entry) => entry.row.values);
+  const values = present.flatMap((entry) =>
+    entry.box ? [entry.box.min, entry.box.max] : []
+  );
   const low = Math.min(bounds[0], ...values);
   const high = Math.max(bounds[1], ...values);
   const span = high - low || 1;
@@ -48,8 +59,7 @@ export function BoxPlot({
         {present.map(({ row, box }, index) => {
           const stat = box!;
           const y = index * HEIGHT + HEIGHT / 2;
-          const min = Math.min(...row.values);
-          const max = Math.max(...row.values);
+          const { min, max } = stat;
           return (
             <g key={row.key}>
               <line

@@ -51,10 +51,10 @@ def test_same_seed_produces_the_same_simulation():
 
 @pytest.mark.parametrize("mechanism", ["credits", "ranking"])
 def test_dropping_the_history_changes_nothing_but_the_history(mechanism):
-    """`keep_histories=False` é economia de memória, não outro cenário."""
+    """`histories="nenhum"` é economia de memória, não outro cenário."""
     config = make_config(mechanism=mechanism)
     full = run_simulation(config)
-    lean = run_simulation(config, keep_histories=False)
+    lean = run_simulation(config, histories="nenhum")
 
     assert lean.histories == []
     assert full.histories != []

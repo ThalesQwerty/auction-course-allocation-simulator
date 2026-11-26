@@ -85,6 +85,7 @@ class StudentPeriodPoint:
     `mean_round`, porque r̄ do recorte é a média das rodadas por vaga concedida.
     """
 
+    student_id: str
     period: int
     grade_average: float
     reserve: float

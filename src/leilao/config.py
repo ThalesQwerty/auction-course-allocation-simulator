@@ -128,7 +128,7 @@ class SimulationConfig:
     selectivity_mean: float = 0.7
     selectivity_sigma: float = 0.6
     selectivity_fluctuation: float = 0.0
-    grade_cuts: tuple[float, ...] = (5.0, 7.0)
+    grade_cuts: tuple[float, ...] = (5.0, 6.0, 7.0)
     reserve_cuts: tuple[float, ...] = (0.01, 0.03)
     slots: int = 11
     first_seed: int = 1

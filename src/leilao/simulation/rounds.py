@@ -64,6 +64,7 @@ def _run_credit_round(
     available: dict[str, list[str]],
     round_number: int,
     won_now: dict[str, list[str]],
+    steps: PeriodSteps,
 ) -> tuple[dict[str, int], float]:
     """O leilão: lances, PLI (ou varredura), preço e consumo."""
     bids: list[Bid] = []
@@ -81,6 +82,7 @@ def _run_credit_round(
         state.bid_total[student.id] += sum(posted.values())
         bids.extend(Bid(student.id, name, credits) for name, credits in posted.items())
 
+    steps.bids_ready(round_number, count=len(bids))
     prices = {
         name: PRICE_FLOOR for name in draws.seats if state.seats[name] > 0
     }
@@ -126,6 +128,7 @@ def _run_ranking_round(
     available: dict[str, list[str]],
     round_number: int,
     won_now: dict[str, list[str]],
+    steps: PeriodSteps,
 ) -> float:
     """A linha de base: o aluno resolve a carga (eq. 4) em casa, numa mochila"""
     requests: list[tuple[str, str]] = []
@@ -143,6 +146,7 @@ def _run_ranking_round(
             state.record_bid(student.id, name, round_number, 1)
             requests.append((student.id, name))
 
+    steps.bids_ready(round_number, count=len(requests))
     priority = {s.id: grade_averages[s.id] for s in active}
     tiebreak = draws.student_epsilon
     allocate = allocate_by_ilp if config.uses_credits else allocate_by_ranking
@@ -173,7 +177,10 @@ def run_round(
     grade_averages: dict[str, float],
     state: PeriodState,
     round_number: int,
+    steps: PeriodSteps | None = None,
 ) -> RoundOutcome:
+    steps = steps if steps is not None else PeriodSteps(None, period=0)
+    steps.round_started(round_number)
     available = _available(
         active=active,
         utilities=utilities,
@@ -197,6 +204,7 @@ def run_round(
             available=available,
             round_number=round_number,
             won_now=won_now,
+            steps=steps,
         )
     else:
         allocation_seconds = _run_ranking_round(
@@ -210,7 +218,11 @@ def run_round(
             available=available,
             round_number=round_number,
             won_now=won_now,
+            steps=steps,
         )
+    steps.allocated(
+        round_number, granted=sum(len(names) for names in won_now.values())
+    )
 
     if prices is not None:
         for name, price in prices.items():

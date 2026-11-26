@@ -568,38 +568,6 @@ input.invalid {
   font-weight: 600;
 }
 
-/* O cabeçalho dos resultados carrega os alternadores: a contagem de execuções
-   à esquerda, as duas trocas de recorte à direita. Fica acima das seções de
-   gráfico porque governa todas elas. */
-.panel-switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-/* As duas trocas lado a lado — régua do eixo X e recorte das linhas —, cada
-   uma com o nome da dimensão que ela governa. */
-.switch-set {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.switch-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.panel-switch h2 {
-  margin-bottom: 0;
-}
-
 /* Os quartis ao lado da mediana no tooltip da série: leitura secundária, e
    por isso menor e mais apagada que o número que se compara. */
 .tooltip-aside {
@@ -1006,6 +974,62 @@ td, th {
   margin: 0;
   overflow-y: auto;
   padding: 6px;
+}
+
+/* O corpo da barra de visualização. A barra tem largura fixa, de modo que
+   abrir as faixas de um recorte a faz crescer para baixo sem mover os
+   gráficos; passando da altura da tela, rola dentro de si. */
+.rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.rail-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rail-label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rail-field select,
+.rail-field input[type="number"] {
+  font-size: 12px;
+}
+
+.rail-field > input[type="number"] {
+  width: 90px;
+}
+
+.radio-set {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.radio {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.radio input {
+  width: auto;
+}
+
+.radio:has(input:checked) {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .rail-empty {
@@ -1715,15 +1739,57 @@ td.failed {
 /* O editor de cortes: uma linha de campos numéricos, do corte mais alto para o
    mais baixo — a mesma ordem em que a legenda lista as faixas. Os dois botões
    acrescentam e tiram um corte, que é acrescentar e tirar uma faixa. */
-.cut-list {
+/* As faixas do recorte, empilhadas da mais alta para a mais baixa: cor, sinal
+   e o corte que abre a faixa. O último campo é só leitura porque a faixa de
+   baixo não tem corte próprio: ela termina onde a de cima abre. */
+.cut-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cut-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
 }
 
-.cut-list input[type="number"] {
+.cut-row input[type="color"] {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  padding: 1px;
+  cursor: pointer;
+}
+
+.cut-sign {
+  width: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cut-row input[type="number"] {
   width: 76px;
+}
+
+.cut-row .ghost {
+  padding: 4px 8px;
+}
+
+.cut-row input[type="number"]:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.cut-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
 }
 
 .ghost {
@@ -1755,30 +1821,46 @@ td.failed {
   margin: 0;
 }
 
-/* As cores das faixas, ao lado do seletor de linhas: um poço de cor por faixa,
-   com o nome dela do lado para que a escolha não dependa de distinguir
-   amostras pequenas de cor. */
-.band-colors {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+
+/* O andamento de uma comparação em curso, acima dos gráficos ainda vazios. A
+   barra é da simulação que roda agora; os tempos, da comparação inteira. */
+.run-progress {
+  display: grid;
+  gap: 8px;
 }
 
-.band-colors label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.progress-now {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-now span {
   color: var(--muted);
-  font-size: 11px;
 }
 
-.band-colors input[type="color"] {
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  padding: 1px;
-  cursor: pointer;
+.progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.progress-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }

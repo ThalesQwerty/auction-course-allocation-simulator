@@ -75,6 +75,8 @@ export type Mechanism = "credits" | "ranking";
 interface ArmDescription {
   key: string;
   label: string;
+   /** Qual miolo de rodada este braço usa — o que decide se há lance e saldo a mostrar */
+  mechanism: Mechanism;
    /** Rótulo curto: em espaço apertado cabe pouco, e o nome inteiro fica na legenda */
   short: string;
    /** `strokeDasharray` do traçado — a dimensão que separa os modelos em todo gráfico, já que a cor pertence ao recorte */
@@ -87,6 +89,7 @@ export const COMPARISON_ARMS: ArmDescription[] = [
   {
     key: "ranking_greedy",
     label: "Ordenação por CR",
+    mechanism: "ranking",
     short: "CR",
     dash: "1 3",
     hint: "a linha de base: matrícula por histórico. Os alunos entram em ordem decrescente de CR e cada um leva o que quer, na própria ordem de preferência, enquanto houver vaga e carga — eqs. (49)-(50). Ordinal: a alocação usa só a ordem, nunca a magnitude. Excluir não custa nada aqui — não há moeda a perder",
@@ -94,6 +97,7 @@ export const COMPARISON_ARMS: ArmDescription[] = [
   {
     key: "credits_return",
     label: "Leilão com PLI",
+    mechanism: "credits",
     short: "Leilão",
     dash: "",
     hint: "o modelo proposto (Seção 7.1): o aluno reparte um orçamento de créditos em lances por disciplina, um PLI resolve a alocação e o segundo preço cobra. O saldo atravessa o período (eq. 36) e o f_γ da eq. (34) o alimenta — round(nota/10 · k · preço) do que pagou, de modo que a vaga só rende mais do que custou com nota bem acima da de corte. É a única fonte de mérito do leilão, e quem exclui não recupera nada",
@@ -105,6 +109,7 @@ export const ABLATION_ARMS: ArmDescription[] = [
   {
     key: "credits_greedy",
     label: "Bidding points",
+    mechanism: "credits",
     short: "Bidding points",
     dash: "1 3",
     hint: "o mecanismo de pontos das business schools (Sönmez & Ünver 2010): lances repartidos de um orçamento, atendidos em ordem decrescente. Ordinal como o CR — o que muda é só a mensagem, que passa a ser um número por disciplina em vez de um por aluno",
@@ -112,6 +117,7 @@ export const ABLATION_ARMS: ArmDescription[] = [
   {
     key: "credits_ilp",
     label: "Leilão igualitário",
+    mechanism: "credits",
     short: "Igualitário",
     dash: "7 4",
     hint: "o mesmo leilão, com o orçamento fixo: todo aluno abre todo período com C_min, nada atravessa o período e o f_γ da eq. (34) fica desligado (k = 0). Separa o que a moeda compra do que o acúmulo compra. Saiu do padrão em 19/11/2026, quando o trabalho passou a comparar dois modelos",
@@ -120,6 +126,9 @@ export const ABLATION_ARMS: ArmDescription[] = [
 
 export const armLabel = (key: string): string =>
   [...COMPARISON_ARMS, ...ABLATION_ARMS].find((arm) => arm.key === key)?.label ?? key;
+
+export const armShort = (key: string): string =>
+  [...COMPARISON_ARMS, ...ABLATION_ARMS].find((arm) => arm.key === key)?.short ?? key;
 
 /** Uma comparação: o mesmo cenário rodado em cada modelo, N vezes */
 export interface CompareRequest extends Omit<Scenario, "seed"> {
@@ -138,7 +147,9 @@ export interface PeriodSeries {
    /** θ — a carga cursada sobre a obtida; `null` onde ninguém do recorte obteve vaga, porque sem denominador não há razão */
   attendance: (number | null)[];
   mean_round: (number | null)[];
-  fidelity: number[];
+   /** Progresso e fração de concluintes: a resposta montada do banco os traz; a gravada em JSON, não */
+  progress?: number[];
+  graduation_rate?: number[];
   fairness: number[];
    /** N̄ — o CR médio do recorte */
   grade_average?: number[];
@@ -147,10 +158,9 @@ export interface PeriodSeries {
   credits_spent?: (number | null)[];
   credits_returned?: (number | null)[];
   exclusion_rate: number[];
-   /** A série da seção "Solicitações de disciplinas": seis linhas **não empilhadas**, em média por aluno, uma posição por período medido */
-  request_states: RequestStates[];
-   /** A saturação do período, rodada a rodada: `allocations_per_round[i][r]` é o que foi ganho por aluno na rodada r+1 do período `period[i]` */
-  allocations_per_round: (number | null)[][];
+   /** Os seis estados e a saturação: só nas execuções gravadas em JSON */
+  request_states?: RequestStates[];
+  allocations_per_round?: (number | null)[][];
 }
 
 /** Uma simulação reduzida a um ponto por métrica — o que vira um valor dentro das tabelas */
@@ -170,8 +180,6 @@ export interface RunSummary {
   mean_round: number | null;
    /** Progresso: carga aprovada ÷ carga que conclui o curso, na média ponderada dos períodos */
   progress: number;
-   /** Fidelidade da mensagem: quanto da preferência sobrevive à tradução para o que o mecanismo de fato recebe */
-  fidelity: number;
   fairness: number; // φ — eq. (55)
    /** N̄ — o CR médio */
   grade_average: number;
@@ -254,6 +262,105 @@ export interface AxisBands {
   groups: GroupBands[];
 }
 
+/** As visualizações, prontas para desenhar: a API já fez a transformação.
+
+    `series` é a série por período recortada em faixas, com mediana e interquartil
+    **entre as seeds**; `curve` é a métrica sobre uma grandeza de vida inteira em
+    faixas de quantil, com o interquartil **entre alunos**; `boxes` é o eixo X
+    colapsado numa caixa por (braço, métrica) sobre as seeds. A tela não calcula
+    nada disso. */
+export interface SeriesPayload {
+  axis: CutAxis;
+   /** Os nomes das faixas, na ordem da legenda */
+  groups: string[];
+  arms: Record<string, GroupBands[]>;
+}
+
+export interface CurvePoint {
+  x: number;
+  q1: number;
+  median: number;
+  q3: number;
+  n: number;
+}
+
+export interface CurvePayload {
+  axis: "grade_average" | "reserve";
+  bins: number;
+   /** braço → métrica → os pontos da curva */
+  arms: Record<string, Record<string, CurvePoint[]>>;
+}
+
+export interface BoxStats {
+   /** Em quantas seeds este braço ficou acima da linha de base, par a par */
+  paired?: { up: number; comparable: number } | null;
+  min: number;
+  q1: number;
+  median: number;
+  q3: number;
+  max: number;
+  n: number;
+}
+
+export interface SeedRow {
+  arm: string;
+  seed: number;
+  periods: number;
+  graduates: number;
+  [metric: string]: number | string | null;
+}
+
+export interface BoxesPayload {
+  baseline: string;
+   /** Uma linha por (braço, seed), para a tabela do rodapé */
+  seeds: SeedRow[];
+   /** braço → métrica → a caixa */
+  arms: Record<string, Record<string, BoxStats>>;
+}
+
+/** Uma comparação em banco, como `/comparacoes` a devolve. O `cenario` vem como JSON em texto, do jeito que está gravado */
+export interface ComparisonHead {
+  nome: string;
+  bytes: number;
+  rotulo: string | null;
+  criada_em: string;
+  iniciada_em: string | null;
+  terminada_em: string | null;
+  duracao_ms: number | null;
+  estado: "pendente" | "rodando" | "pausada" | "concluida" | "falhou";
+  cenario: string;
+  seeds: number;
+  bracos: string[];
+  coorte_medida: number | null;
+  rodadas_teto: number;
+   /** Passos já dados e o teto deles. O teto é nulo nas comparações criadas antes da conta existir */
+  etapas: number;
+  etapas_total: number | null;
+  erro: string | null;
+  pendentes: number;
+  rodando: number;
+  concluidas: number;
+  falhas: number;
+}
+
+/** O cabeçalho com o estado de cada simulação: o que a tela consulta para acompanhar */
+export interface ComparisonState extends ComparisonHead {
+  simulacoes: {
+    id: number;
+    braco: string;
+    seed: number;
+    estado: "pendente" | "rodando" | "concluida" | "falhou";
+    tentativas: number;
+    iniciada_em: string | null;
+    terminada_em: string | null;
+    duracao_ms: number | null;
+    periodos: number | null;
+    etapas: number;
+    erro: string | null;
+    periodos_gravados: number;
+  }[];
+}
+
 /** Uma execução gravada em `resultados/`, como a lista da API a devolve */
 export interface SavedResult {
   name: string;
@@ -306,7 +413,6 @@ export interface Metrics {
    /** Progresso — carga aprovada do histórico ÷ carga mínima para concluir (as obrigatórias inteiras mais a exigência optativa) */
   progress: number;
    /** Fidelidade da mensagem — o cosseno entre o vetor de lances normalizado e o de utilidades, sobre o elegível */
-  fidelity: number;
   fairness: number; // φ — Jain, eq. (55)
    /** Vagas que o recorte obteve e largou */
   excluded: number | null;
