@@ -647,7 +647,6 @@ def observations_of(result: SimulationResult) -> Observations:
 
 def student_points(result: SimulationResult) -> list[StudentPoint]:
     """Um ponto por aluno medido: as grandezas de vida inteira dele."""
-    cohort = result.measured_cohort
     return [
         StudentPoint(
             grade_average=s.grade_average,
@@ -659,7 +658,7 @@ def student_points(result: SimulationResult) -> list[StudentPoint]:
             graduated=s.graduated_at is not None,
         )
         for s in result.students
-        if cohort is None or s.entry_period == cohort
+        if not result.measured_cohorts or result.measures(s.entry_period)
         if s.measured_periods > 0
     ]
 

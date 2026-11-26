@@ -77,7 +77,7 @@ def band_series(
     for row in rows:
         grupo = names[row["faixa"]]
         por_braco.setdefault(row["braco"], {}).setdefault(grupo, {}).setdefault(
-            row["periodo_da_coorte"], []
+            row["periodo_local"], []
         ).append(_measures(row))
 
     return {
@@ -217,7 +217,8 @@ def _paired(
 
 _AGGREGATE = """
 WITH {reservas}medidas AS (
-  SELECT m.braco, m.seed, ap.simulacao_id, ap.periodo,
+  SELECT m.braco, m.seed, ap.simulacao_id,
+         ap.periodo - a.ingresso + 1        AS periodo_local,
          {faixa}                            AS faixa,
          COUNT(*)                           AS alunos,
          AVG(ap.satisfacao)                 AS satisfacao,
@@ -230,31 +231,36 @@ WITH {reservas}medidas AS (
                                             AS vagas_peso
     FROM aluno_periodo ap
     JOIN simulacao_valida m ON m.id = ap.simulacao_id
+    JOIN aluno a ON a.simulacao_id = ap.simulacao_id AND a.aluno = ap.aluno
          {juncao}
-   GROUP BY m.braco, m.seed, ap.periodo, faixa
+   GROUP BY m.braco, m.seed, periodo_local, faixa
 ),
 coorte AS (
   SELECT simulacao_id, COUNT(*) AS tamanho FROM aluno
    WHERE medido = 1 GROUP BY simulacao_id
 ),
+-- As abscissas que a agregacao produziu. Sai de `medidas`, que ja esta
+-- agrupada, e nao de outra varredura de `aluno_periodo`.
+locais AS (
+  SELECT DISTINCT simulacao_id, periodo_local FROM medidas
+),
 formados AS (
-  SELECT a.simulacao_id, p.periodo,
-         SUM(CASE WHEN a.concluiu_em IS NOT NULL AND a.concluiu_em <= p.periodo
+  SELECT l.simulacao_id, l.periodo_local,
+         SUM(CASE WHEN a.concluiu_em IS NOT NULL
+                   AND a.concluiu_em - a.ingresso + 1 <= l.periodo_local
                   THEN 1 ELSE 0 END) AS concluiram_ate
-    FROM aluno a JOIN periodo p ON p.simulacao_id = a.simulacao_id
-   WHERE a.medido = 1
-   GROUP BY a.simulacao_id, p.periodo
+    FROM locais l
+    JOIN aluno a ON a.simulacao_id = l.simulacao_id AND a.medido = 1
+   GROUP BY l.simulacao_id, l.periodo_local
 )
--- O eixo conta os periodos da COORTE: o de ingresso dela e o primeiro, e o
--- aquecimento nao aparece. O periodo absoluto fica, porque e por ele que as
--- juncoes casam.
-SELECT medidas.*, formados.concluiram_ate, coorte.tamanho,
-       medidas.periodo - (SELECT MIN(periodo) FROM periodo WHERE medido = 1) + 1
-         AS periodo_da_coorte
+-- O eixo conta o periodo LOCAL do aluno: o ingresso da coorte dele e o
+-- primeiro. E o que empilha as coortes observadas no mesmo eixo, e o que
+-- deixa o aquecimento fora do grafico.
+SELECT medidas.*, formados.concluiram_ate, coorte.tamanho
   FROM medidas
-  LEFT JOIN formados USING (simulacao_id, periodo)
+  LEFT JOIN formados USING (simulacao_id, periodo_local)
   LEFT JOIN coorte   USING (simulacao_id)
- ORDER BY medidas.faixa, medidas.periodo, medidas.braco, medidas.seed
+ ORDER BY medidas.faixa, medidas.periodo_local, medidas.braco, medidas.seed
 """
 
 _RESERVAS_CTE = """reservas AS (

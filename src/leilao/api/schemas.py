@@ -9,6 +9,7 @@ from ..config import (
     AvailabilityShape,
     Mechanism,
     MAX_CUTS,
+    default_warmup,
     horizon_for_window,
 )
 
@@ -288,15 +289,43 @@ class ScenarioIn(BaseModel):
         ),
     )
 
+    warmup_periods: int | None = Field(
+        default=None,
+        ge=0,
+        le=200,
+        description=(
+            "w — períodos de aquecimento, que rodam inteiros e ficam fora da "
+            "medição. Nulo usa o piso, que é o prazo de jubilamento menos um, e "
+            "põe a primeira coorte observada no primeiro período de população "
+            "estável"
+        ),
+    )
+    measured_cohorts: int = Field(
+        default=1,
+        ge=1,
+        le=50,
+        description=(
+            "c — quantas coortes consecutivas são observadas, a partir do "
+            "período seguinte ao aquecimento. As séries empilham-se pelo período "
+            "local do aluno"
+        ),
+    )
+
     @property
-    def warmup_periods(self) -> int:
-        """A pré-população — **é** o prazo de jubilamento."""
-        return self.max_residence
+    def warmup(self) -> int:
+        """w, com o piso aplicado quando o cenário não o declara."""
+        if self.warmup_periods is None:
+            return default_warmup(max_residence=self.max_residence)
+        return self.warmup_periods
 
     @property
     def periods(self) -> int:
-        """|T|, derivado — ver `config.horizon_for_window`."""
-        return horizon_for_window(max_residence=self.max_residence)
+        """|L|, derivado — ver `config.horizon_for_window`."""
+        return horizon_for_window(
+            max_residence=self.max_residence,
+            warmup_periods=self.warmup,
+            measured_cohorts=self.measured_cohorts,
+        )
     rounds: int = Field(default=1, ge=1, le=10, description="|R| — rodadas por período")
     min_grade: float = Field(default=5.0, gt=0, le=10, description="n_apr")
     elective_hours: int = Field(
@@ -321,6 +350,17 @@ class ScenarioIn(BaseModel):
             "inteira, nos dois braços."
         ),
     )
+
+    @model_validator(mode="after")
+    def _warmup_reaches_steady_state(self) -> "ScenarioIn":
+        piso = default_warmup(max_residence=self.max_residence)
+        if self.warmup_periods is not None and self.warmup_periods < piso:
+            raise ValueError(
+                f"o aquecimento precisa de ao menos {piso} períodos para a "
+                "universidade encher: com menos, a primeira coorte observada "
+                "ingressa numa população que ainda está crescendo"
+            )
+        return self
 
 
 class CompareRequest(ScenarioIn):

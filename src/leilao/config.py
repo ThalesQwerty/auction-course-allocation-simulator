@@ -114,6 +114,7 @@ class SimulationConfig:
     disciplines: list[Discipline] = field(default_factory=list)
     periods: int = 1
     warmup_periods: int = 0
+    measured_cohorts: int = 0
     students_per_entry_class: int = 8
     max_residence: int | None = None
 
@@ -237,8 +238,15 @@ class SimulationConfig:
             raise ValueError("o desvio do interesse por horário deve ser >= 0")
         if not 0 <= self.warmup_periods < self.periods:
             raise ValueError(
-                "a pré-população tem de caber no horizonte e deixar ao menos um "
+                "o aquecimento tem de caber no horizonte e deixar ao menos um "
                 "período medido"
+            )
+        if self.measured_cohorts < 0:
+            raise ValueError("o número de coortes observadas deve ser >= 0")
+        if self.warmup_periods + self.measured_cohorts > self.periods:
+            raise ValueError(
+                "o horizonte tem de comportar o aquecimento e o ingresso de "
+                "todas as coortes observadas"
             )
         if self.slots < 1:
             raise ValueError("é preciso ao menos um horário")
@@ -422,18 +430,32 @@ class SimulationConfig:
 
     @property
     def measured_cohort(self) -> int | None:
-        """A coorte medida: a que ingressa no último período de aquecimento."""
-        return self.warmup_periods or None
+        """A primeira coorte medida: a que ingressa logo após o aquecimento."""
+        return self.warmup_periods + 1 if self.measured_cohorts else None
+
+    @property
+    def last_measured_cohort(self) -> int | None:
+        """A última coorte medida."""
+        if not self.measured_cohorts:
+            return None
+        return self.warmup_periods + self.measured_cohorts
+
+    def measures(self, entry_period: int) -> bool:
+        """Se quem ingressou em `entry_period` pertence a uma coorte medida."""
+        return (
+            self.measured_cohorts > 0
+            and self.warmup_periods < entry_period <= self.warmup_periods + self.measured_cohorts
+        )
 
     @property
     def first_measured_period(self) -> int:
-        """O primeiro período medido: o **de ingresso** da coorte medida.
+        """O primeiro período medido: o **de ingresso** da primeira coorte.
 
         O período de ingresso entra na medição apesar de a matrícula ali ser
-        garantida, e portanto igual nos dois mecanismos. Sem aquecimento não há
-        coorte medida, e aí mede-se do começo.
+        garantida, e portanto igual nos dois mecanismos. Sem coorte medida
+        mede-se do começo.
         """
-        return self.warmup_periods or 1
+        return self.warmup_periods + 1 if self.measured_cohorts else 1
 
     def availability_shape(self) -> tuple[float, float]:
         """(média, desvio padrão) da normal das horas, com o W_a do cenário."""
@@ -603,6 +625,13 @@ class SimulationConfig:
         return max(by_hours, by_chain)
 
 
-def horizon_for_window(*, max_residence: int) -> int:
-    """|T| — o horizonte, com uma coorte medida."""
-    return 2 * max_residence - 1
+def horizon_for_window(
+    *, max_residence: int, warmup_periods: int, measured_cohorts: int
+) -> int:
+    """|L| = w + c + j − 1, o horizonte que leva a última coorte medida ao fim."""
+    return warmup_periods + measured_cohorts + max_residence - 1
+
+
+def default_warmup(*, max_residence: int) -> int:
+    """O piso do aquecimento: w = j − 1 põe a primeira coorte medida em t = j."""
+    return max(max_residence - 1, 0)

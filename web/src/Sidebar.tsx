@@ -11,13 +11,11 @@ export function Sidebar({
   history,
   onNavigate,
   onDelete,
-  onClear,
 }: {
   view: View;
   history: HistoryEntry[];
   onNavigate: (view: View) => void;
   onDelete: (id: string) => void;
-  onClear: () => void;
 }) {
   const key = (v: View) => (v.kind === "run" ? `run:${v.id}` : v.kind);
   const selected = (target: View) => key(view) === key(target);
@@ -48,7 +46,7 @@ export function Sidebar({
       </ul>
 
       <div className="sidebar-section">
-        <h2>Execuções</h2>
+        <h2>Resultados</h2>
         {history.length === 0 ? (
           <p className="sidebar-empty">Nada executado ainda.</p>
         ) : (
@@ -75,12 +73,6 @@ export function Sidebar({
             ))}
           </ul>
         )}
-      </div>
-
-      <div className="sidebar-footer">
-        <button className="nav-item danger" onClick={onClear} disabled={history.length === 0}>
-          Apagar execuções
-        </button>
       </div>
     </nav>
   );

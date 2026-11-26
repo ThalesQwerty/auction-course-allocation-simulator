@@ -33,7 +33,8 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=7,
-        warmup_periods=4,
+        warmup_periods=3,
+        measured_cohorts=1,
         max_residence=4,
         students_per_entry_class=3,
         rounds=2,
@@ -382,6 +383,51 @@ def test_the_series_counts_the_periods_of_the_cohort(ready):
             # coorte se esvazia antes dele. O que se afere é a origem.
             assert grupo["x"] == list(range(1, len(grupo["x"]) + 1))
             assert 1 < len(grupo["x"]) <= medidos
+
+
+def test_the_cohorts_observed_stack_on_the_same_axis(tmp_path):
+    """Com mais de uma coorte observada, o eixo continua sendo o período local:
+    todas as coortes contribuem para o ponto 1, qualquer que seja o ingresso."""
+    from leilao.store.views import band_series
+
+    config = make_config(periods=8, warmup_periods=3, measured_cohorts=2)
+    bank = tmp_path / "duas.db"
+    connection = open_store(bank)
+    create_comparison(
+        connection,
+        config=config,
+        scenario=json.dumps({"runs": 1}),
+        seeds=1,
+        arms=ARMS,
+    )
+    run_into_store(connection, config=config, bank=bank)
+
+    ingressos = {
+        linha["ingresso"]
+        for linha in connection.execute(
+            "SELECT DISTINCT ingresso FROM aluno WHERE medido = 1"
+        )
+    }
+    assert ingressos == {4, 5}
+
+    por_braco = {
+        linha["braco"]: linha["alunos"]
+        for linha in connection.execute(
+            "SELECT m.braco, COUNT(*) AS alunos"
+            "  FROM aluno a JOIN simulacao m ON m.id = a.simulacao_id"
+            " WHERE a.medido = 1 GROUP BY m.braco"
+        )
+    }
+
+    serie = band_series(connection)
+    assert serie["arms"]
+    for braco, grupos in serie["arms"].items():
+        for grupo in grupos:
+            assert grupo["x"][0] == 1
+            assert grupo["values"]["students"][0][1] == por_braco[braco], (
+                "no período local 1 estão as duas coortes inteiras"
+            )
+    connection.close()
 
 
 def test_the_trace_comes_from_the_bank_and_not_from_a_rerun(ready):

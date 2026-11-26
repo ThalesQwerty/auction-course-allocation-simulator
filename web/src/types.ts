@@ -55,6 +55,10 @@ export interface Scenario {
   max_hours: number;
    /** R — períodos para concluir */
   max_residence: number;
+   /** w — períodos de aquecimento, fora da medição; ausente usa o piso `max_residence − 1` */
+  warmup_periods?: number | null;
+   /** c — coortes consecutivas observadas a partir do período seguinte ao aquecimento */
+  measured_cohorts?: number;
    /** A seed da primeira simulação da comparação; as seguintes contam de 1 em 1 a partir dela */
   first_seed: number;
    /** Quantos ingressantes entram em **cada turma de disciplina de entrada**, no máximo `class_size` */
@@ -644,6 +648,26 @@ export interface PlaygroundResponse {
   grades: { student_id: string; name: string; grade: number }[];
 }
 
-/** |T| — o horizonte da janela estacionária */
-export const horizonFor = (maxResidence: number): number =>
-  2 * maxResidence - 1;
+/** O piso do aquecimento: põe a primeira coorte observada no primeiro período de população estável */
+export const defaultWarmup = (maxResidence: number): number =>
+  Math.max(maxResidence - 1, 0);
+
+/** w, com o piso aplicado quando o cenário não o declara */
+export const warmupOf = (config: HorizonLike): number =>
+  typeof config.warmup_periods === "number"
+    ? config.warmup_periods
+    : defaultWarmup(config.max_residence);
+
+/** c, com o padrão de uma coorte quando o cenário não o declara */
+export const cohortsOf = (config: HorizonLike): number =>
+  config.measured_cohorts ?? 1;
+
+interface HorizonLike {
+  max_residence: number;
+  warmup_periods?: number | null;
+  measured_cohorts?: number;
+}
+
+/** |L| = w + c + j − 1 */
+export const horizonFor = (config: HorizonLike): number =>
+  warmupOf(config) + cohortsOf(config) + config.max_residence - 1;

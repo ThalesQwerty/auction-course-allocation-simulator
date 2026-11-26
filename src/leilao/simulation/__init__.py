@@ -71,9 +71,8 @@ def recorded_students(
 ) -> set[str]:
     if histories == "nenhum":
         return set()
-    cohort = config.measured_cohort
-    if histories == "medidos" and cohort is not None:
-        return {s.id for s in students if s.entry_period == cohort}
+    if histories == "medidos" and config.measured_cohorts:
+        return {s.id for s in students if config.measures(s.entry_period)}
     return {s.id for s in students}
 
 
@@ -206,5 +205,6 @@ def run_simulation(
         interest_distribution=interest_histogram(draws.interest_rows.values()),
         grade_distribution=grade_histogram(first_grades),
         measured_cohort=config.measured_cohort,
+        measured_cohorts=config.measured_cohorts,
         warmup_periods=config.warmup_periods,
     )

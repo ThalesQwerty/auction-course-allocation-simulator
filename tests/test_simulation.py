@@ -899,9 +899,9 @@ def test_the_population_is_constant_once_the_residence_is_full():
 
 
 def test_the_measurement_starts_when_the_cohort_enters():
-    """A pré-população roda inteira — o motor não joga nada fora — e a medição
-    começa no **ingresso** da coorte medida, que é o último período dela."""
-    config = make_config(periods=8, warmup_periods=3)
+    """O aquecimento roda inteiro — o motor não joga nada fora — e a medição
+    começa no **ingresso** da primeira coorte observada."""
+    config = make_config(periods=8, warmup_periods=2, measured_cohorts=1)
     result = run_simulation(config)
     assert len(result.periods) == 8
     assert config.measured_cohort == 3
@@ -910,7 +910,7 @@ def test_the_measurement_starts_when_the_cohort_enters():
 
 def test_only_the_measured_cohort_enters_the_averages():
     """Duas fases, uma coorte: quem entra fora de t = j roda, disputa e conta"""
-    config = make_config(periods=8, warmup_periods=3)
+    config = make_config(periods=8, warmup_periods=2, measured_cohorts=1)
     assert config.measured_cohort == 3
     result = run_simulation(config)
 
@@ -947,7 +947,7 @@ def test_without_a_warmup_everybody_but_the_freshman_is_measured():
 
 
 def test_a_warmup_that_eats_the_horizon_is_refused():
-    with pytest.raises(ValueError, match="pré-população"):
+    with pytest.raises(ValueError, match="aquecimento"):
         make_config(periods=3, warmup_periods=3)
 
 
@@ -1251,7 +1251,40 @@ def test_without_max_residence_nobody_is_dismissed():
 
 def test_the_horizon_is_the_warmup_plus_the_observation():
     """|T| derivado: a pré-população é o prazo de jubilamento, e depois dela"""
-    assert horizon_for_window(max_residence=5) == 9
-    config = make_config(periods=8, max_residence=5, warmup_periods=5)
+    assert (
+        horizon_for_window(max_residence=5, warmup_periods=4, measured_cohorts=1) == 9
+    )
+    config = make_config(
+        periods=8, max_residence=5, warmup_periods=4, measured_cohorts=1
+    )
     result = run_simulation(config)
     assert [p.period for p in result.observed] == [5, 6, 7, 8]
+
+
+def test_several_cohorts_can_be_observed_at_once():
+    """Cada coorte observada a mais custa um período de horizonte, e todas
+    entram nas médias a partir do próprio ingresso."""
+    assert (
+        horizon_for_window(max_residence=5, warmup_periods=4, measured_cohorts=3) == 11
+    )
+    config = make_config(
+        periods=11, max_residence=5, warmup_periods=4, measured_cohorts=3
+    )
+    assert config.measured_cohort == 5
+    assert config.last_measured_cohort == 7
+    assert [t for t in range(1, 12) if config.measures(t)] == [5, 6, 7]
+
+    result = run_simulation(config)
+    assert [p.period for p in result.observed] == [5, 6, 7, 8, 9, 10, 11]
+
+    for period in result.observed:
+        da_coorte = sum(
+            1
+            for s in result.students
+            if config.measures(s.entry_period)
+            if s.entry_period <= period.period
+            if (s.graduated_at or s.dismissed_at or period.period) >= period.period
+        )
+        snapshot = period.aggregate.overall
+        assert snapshot.metrics is not None, period.period
+        assert snapshot.metrics.students == da_coorte, period.period

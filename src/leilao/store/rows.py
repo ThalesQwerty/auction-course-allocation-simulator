@@ -143,13 +143,14 @@ def student_rows(
 ) -> list[tuple]:
     """Todo aluno, com a flag da coorte medida: é com o fundo que se audita o
     estado estacionário."""
-    cohort = config.measured_cohort
     return [
         (
             simulation_id,
             student.id,
             student.entry_period,
-            int(cohort is None or student.entry_period == cohort),
+            int(
+                not config.measured_cohorts or config.measures(student.entry_period)
+            ),
             student.availability_anchor,
             student.selectivity_anchor,
             student.graduated_at,

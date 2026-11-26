@@ -718,10 +718,6 @@ td, th {
   vertical-align: 1px;
 }
 
-.nav-item.danger {
-  color: var(--danger);
-}
-
 /* Cada execução no histórico carrega um botão de apagar que só aparece ao
    passar o mouse (ou ao receber foco pelo teclado). */
 .nav-row {
@@ -787,12 +783,6 @@ td, th {
   font-size: 12px;
   margin: 0;
   padding: 2px 10px 0;
-}
-
-.sidebar-footer {
-  margin-top: auto;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
 }
 
 .menu-toggle {

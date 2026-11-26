@@ -170,16 +170,6 @@ export default function App() {
     await discard([id]);
   }
 
-  async function handleClear() {
-    if (
-      !confirm(
-        "Apagar todas as execuções? Elas saem do disco, e a ação não pode ser desfeita."
-      )
-    )
-      return;
-    await discard(history.map((entry) => entry.id));
-  }
-
    /** Apaga do disco e refaz a lista. Uma falha não impede as demais */
   async function discard(names: string[]) {
     setError(null);
@@ -224,7 +214,6 @@ export default function App() {
         history={history}
         onNavigate={navigate}
         onDelete={handleDelete}
-        onClear={handleClear}
       />
 
       <main className="main wide">

@@ -1,7 +1,7 @@
 import { entryClasses, withUnlocks } from "./curriculum";
 import { cohortSize } from "./equations";
 import { defaultScenario } from "./presets";
-import { COMPARISON_ARMS, horizonFor } from "./types";
+import { COMPARISON_ARMS, cohortsOf, horizonFor, warmupOf } from "./types";
 import type {
   CompareRequest,
   ComparisonHead,
@@ -166,11 +166,15 @@ const se = (
 function describeScenario(config: Scenario | CompareRequest): string {
   const { rounds, disciplines } = config;
   const partes = [
-    se(config.max_residence, (residencia) =>
-      residencia > 0
-        ? `${horizonFor(residencia)} períodos (${residencia} de pré-população, ${residencia} medidos)`
-        : `${horizonFor(residencia)} períodos`
-    ),
+    se(config.max_residence, (residencia) => {
+      const periodos = `${horizonFor(config)} períodos`;
+      if (residencia <= 0) return periodos;
+      const coortes = cohortsOf(config);
+      return (
+        `${periodos} (${warmupOf(config)} de aquecimento, ` +
+        `${coortes === 1 ? "1 coorte" : `${coortes} coortes`})`
+      );
+    }),
     se(rounds, (value) => (value === 1 ? "1 rodada" : `${value} rodadas`)),
   ].filter((parte): parte is string => parte !== null);
 

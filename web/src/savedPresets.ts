@@ -97,7 +97,7 @@ export const describeSaved = (preset: SavedPreset): string => {
     entryClasses(GRADE)
   );
   const students = cohort * preset.config.max_residence;
-  const periods = horizonFor(preset.config.max_residence);
+  const periods = horizonFor(preset.config);
   return (
     `${students} alunos · ${periods} períodos · ` +
     `salvo em ${formatSavedDate(preset.at)}`

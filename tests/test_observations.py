@@ -32,7 +32,8 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=7,
-        warmup_periods=4,
+        warmup_periods=3,
+        measured_cohorts=1,
         max_residence=4,
         students_per_entry_class=3,
         rounds=3,
@@ -58,7 +59,7 @@ def band_of(row, axis: str, cuts, decimals: int, low: float, high: float) -> str
 def test_the_rows_are_the_measured_cohort_in_the_measured_periods():
     config = make_config()
     result = run_simulation(config)
-    medida = {s.id for s in result.students if s.entry_period == config.warmup_periods}
+    medida = {s.id for s in result.students if s.entry_period == config.measured_cohort}
 
     assert all(
         not period.points

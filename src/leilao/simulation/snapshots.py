@@ -31,13 +31,12 @@ OUTSIDE = "\x00fora"
 def measured_students(
     *, config: SimulationConfig, students: list[Student], period: int
 ) -> list[Student]:
-    """Quem entra nas médias de um período: só a coorte medida.
+    """Quem entra nas médias de um período: só as coortes observadas.
 
-    Sem aquecimento não há coorte medida, e aí entra todo mundo menos o calouro.
+    Sem coorte observada entra todo mundo menos o calouro.
     """
-    cohort = config.measured_cohort
-    if cohort is not None:
-        return [s for s in students if s.entry_period == cohort]
+    if config.measured_cohorts:
+        return [s for s in students if config.measures(s.entry_period)]
     return [s for s in students if s.entry_period != period]
 
 
@@ -347,8 +346,6 @@ def snapshot_groups(
 ) -> tuple[GroupSnapshot, dict[str, list[GroupSnapshot]]]:
     """O agregado da universidade e o recorte de cada eixo, no mesmo instante."""
 
-    cohort = config.measured_cohort
-
     def measured_of(students_: list[Student]) -> list[Student]:
         return measured_students(config=config, students=students_, period=period)
 
@@ -372,8 +369,8 @@ def snapshot_groups(
         )
 
     entered = (
-        [s for s in students if s.entry_period == cohort]
-        if cohort is not None
+        [s for s in students if config.measures(s.entry_period)]
+        if config.measured_cohorts
         else [s for s in students if s.entry_period <= period]
     )
     overall = take(

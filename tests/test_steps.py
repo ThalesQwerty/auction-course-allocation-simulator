@@ -30,7 +30,8 @@ def make_config(**overrides) -> SimulationConfig:
     base = dict(
         disciplines=GRADE,
         periods=7,
-        warmup_periods=4,
+        warmup_periods=3,
+        measured_cohorts=1,
         max_residence=4,
         students_per_entry_class=3,
         rounds=2,

@@ -185,13 +185,21 @@ class SimulationResult:
     grade_distribution: list[float] = field(default_factory=list)
     warmup_periods: int = 0
     measured_cohort: int | None = None
+    measured_cohorts: int = 0
 
     @property
     def first_measured(self) -> int:
         """O primeiro período medido — ver `SimulationConfig.first_measured_period`."""
-        return self.warmup_periods or 1
+        return self.warmup_periods + 1 if self.measured_cohorts else 1
+
+    def measures(self, entry_period: int) -> bool:
+        """Se quem ingressou em `entry_period` pertence a uma coorte medida."""
+        return (
+            self.measured_cohorts > 0
+            and self.warmup_periods < entry_period <= self.warmup_periods + self.measured_cohorts
+        )
 
     @property
     def observed(self) -> list[PeriodReport]:
-        """Os períodos **medidos** — do ingresso da coorte medida em diante."""
+        """Os períodos **medidos** — do ingresso da primeira coorte em diante."""
         return [p for p in self.periods if p.period >= self.first_measured]

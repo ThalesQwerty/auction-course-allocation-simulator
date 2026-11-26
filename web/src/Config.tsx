@@ -15,7 +15,13 @@ import { PresetList } from "./PresetList";
 import { nameExists } from "./savedPresets";
 import type { SavedPreset } from "./savedPresets";
 import { SaveScenario } from "./SaveScenario";
-import { COMPARISON_ARMS, MAX_COMPARISON_RUNS } from "./types";
+import {
+  COMPARISON_ARMS,
+  MAX_COMPARISON_RUNS,
+  cohortsOf,
+  defaultWarmup,
+  warmupOf,
+} from "./types";
 import type { Scenario } from "./types";
 
 /** Quantas turmas caem em cada horário, lido como faixa */
@@ -84,6 +90,9 @@ export function Config({
   const entryCourses = entryDisciplines(config.disciplines);
   const entryHours = entryCourses.reduce((sum, d) => sum + d.hours, 0);
   const entryTooLarge = config.students_per_entry_class > config.class_size;
+  const warmupFloor = defaultWarmup(config.max_residence);
+  const warmup = warmupOf(config);
+  const warmupTooShort = warmup < warmupFloor;
   const entryTooHeavy = entryHours > config.max_hours;
 
   const percent = (share: number) =>
@@ -195,6 +204,52 @@ export function Config({
 
           <div className="field-row">
             <div className="field">
+              <label>Períodos de aquecimento</label>
+              <input
+                type="number"
+                min={warmupFloor}
+                step={1}
+                className={warmupTooShort ? "invalid" : undefined}
+                value={warmup}
+                onChange={(e) => patch({ warmup_periods: Number(e.target.value) })}
+              />
+              {warmupTooShort && (
+                <span className="field-hint invalid-text">
+                  A universidade só enche em {warmupFloor} períodos.
+                </span>
+              )}
+            </div>
+            <div className="field">
+              <label>Coortes observadas</label>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                step={1}
+                value={cohortsOf(config)}
+                onChange={(e) => patch({ measured_cohorts: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Jubilamento</label>
+              <input
+                type="number"
+                min={1}
+                max={40}
+                value={config.max_residence}
+                onChange={(e) => {
+                  const max_residence = Number(e.target.value);
+                  patch({
+                    max_residence,
+                    warmup_periods: Math.max(warmup, defaultWarmup(max_residence)),
+                  });
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="field-row">
+            <div className="field">
               <label>Ingressantes por turma de entrada</label>
               <input
                 type="number"
@@ -223,16 +278,6 @@ export function Config({
           </div>
 
           <div className="field-row">
-            <div className="field">
-              <label>Jubilamento</label>
-              <input
-                type="number"
-                min={1}
-                max={40}
-                value={config.max_residence}
-                onChange={(e) => patch({ max_residence: Number(e.target.value) })}
-              />
-            </div>
             <div className="field">
               <label>
                 Carga de optativas para concluir (W<sub>opt</sub>)
@@ -507,7 +552,7 @@ export function Config({
             <div>
               <div className="field-row">
                 <div className="field">
-                  <label>Média</label>
+                  <label>Média do logaritmo</label>
                   <input
                     type="number"
                     step={0.1}
@@ -518,7 +563,7 @@ export function Config({
                   />
                 </div>
                 <div className="field">
-                  <label>Desvio padrão</label>
+                  <label>Desvio do logaritmo</label>
                   <input
                     type="number"
                     min={0.05}
@@ -565,7 +610,7 @@ export function Config({
             <div>
               <div className="field-row">
                 <div className="field">
-                  <label>Média</label>
+                  <label>Média do logaritmo</label>
                   <input
                     type="number"
                     step={0.1}
@@ -574,7 +619,7 @@ export function Config({
                   />
                 </div>
                 <div className="field">
-                  <label>Desvio padrão</label>
+                  <label>Desvio do logaritmo</label>
                   <input
                     type="number"
                     min={0.05}
@@ -634,7 +679,7 @@ export function Config({
             <div>
               <div className="field-row">
                 <div className="field">
-                  <label>Média</label>
+                  <label>Média do logaritmo</label>
                   <input
                     type="number"
                     step={0.1}
@@ -643,7 +688,7 @@ export function Config({
                   />
                 </div>
                 <div className="field">
-                  <label>Desvio padrão</label>
+                  <label>Desvio do logaritmo</label>
                   <input
                     type="number"
                     min={0.05}
