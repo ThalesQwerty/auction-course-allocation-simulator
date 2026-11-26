@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { DensityChart, LineSample, STATUS } from "./charts";
-import { entryClasses, entryDisciplines } from "./curriculum";
+import { entryDisciplines } from "./curriculum";
 import {
   availabilityCurve,
   gradeCurve,
@@ -10,12 +10,12 @@ import {
 } from "./distributions";
 import { RunProgress, shareOf } from "./RunProgress";
 import type { Curve } from "./distributions";
-import { cohortSize, schedulePressure } from "./equations";
+import { schedulePressure } from "./equations";
 import { PresetList } from "./PresetList";
 import { nameExists } from "./savedPresets";
 import type { SavedPreset } from "./savedPresets";
 import { SaveScenario } from "./SaveScenario";
-import { COMPARISON_ARMS, MAX_COMPARISON_RUNS, horizonFor } from "./types";
+import { COMPARISON_ARMS, MAX_COMPARISON_RUNS } from "./types";
 import type { Scenario } from "./types";
 
 /** Quantas turmas caem em cada horário, lido como faixa */
@@ -83,12 +83,7 @@ export function Config({
 
   const entryCourses = entryDisciplines(config.disciplines);
   const entryHours = entryCourses.reduce((sum, d) => sum + d.hours, 0);
-  const cohort = cohortSize(
-    config.students_per_entry_class,
-    entryClasses(config.disciplines)
-  );
   const entryTooLarge = config.students_per_entry_class > config.class_size;
-  const contestedEntrySeats = config.class_size - config.students_per_entry_class;
   const entryTooHeavy = entryHours > config.max_hours;
 
   const percent = (share: number) =>
@@ -292,14 +287,6 @@ export function Config({
               />
             </div>
           </div>
-
-          <p className="note">
-            Coorte de {cohort} · {contestedEntrySeats} vagas em disputa por turma
-            de entrada ·{" "}
-            {horizonFor(config.max_residence)}{" "}
-            períodos, dos quais {config.max_residence} de pré-população ·{" "}
-            {cohort * config.max_residence} alunos em regime
-          </p>
         </div>
 
         <div className="panel">
