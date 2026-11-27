@@ -97,7 +97,7 @@ def run_simulation(
     periods: list[PeriodReport] = []
     history: dict[str, list[StudentPeriodRecord]] = {s.id: [] for s in students}
     satisfactions: dict[str, list[float]] = {s.id: [] for s in students}
-    reserves: dict[str, list[float]] = {s.id: [] for s in students}
+    demands: dict[str, list[float]] = {s.id: [] for s in students}
     attendances: dict[str, list[float]] = {s.id: [] for s in students}
     won_rounds: dict[str, list[int]] = {s.id: [] for s in students}
     enrollments: dict[str, int] = {s.id: 0 for s in students}
@@ -133,8 +133,8 @@ def run_simulation(
         for student_id, value in outcome.satisfaction.items():
             satisfactions[student_id].append(value)
         if period >= config.first_measured_period:
-            for student_id, value in outcome.reserve.items():
-                reserves[student_id].append(value)
+            for student_id, value in outcome.demand.items():
+                demands[student_id].append(value)
             for student_id, taken in outcome.attendance.items():
                 if taken is not None:
                     attendances[student_id].append(taken)
@@ -162,7 +162,7 @@ def run_simulation(
                 enrollments=enrollments[s.id],
                 approvals=len(s.approved(config.min_grade)),
                 mean_satisfaction=mean(satisfactions[s.id]),
-                mean_reserve=mean(reserves[s.id]),
+                mean_demand=mean(demands[s.id]),
                 mean_attendance=(
                     mean(attendances[s.id]) if attendances[s.id] else None
                 ),
@@ -184,7 +184,7 @@ def run_simulation(
                     ),
                     elective_hours_needed=config.elective_hours,
                 ),
-                measured_periods=len(reserves[s.id]),
+                measured_periods=len(demands[s.id]),
                 graduated_at=s.graduated_at,
                 dismissed_at=s.dismissed_at,
             )

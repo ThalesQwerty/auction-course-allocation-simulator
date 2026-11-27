@@ -37,10 +37,13 @@ __all__ = [
     "pause",
     "read_boxes",
     "read_curve",
+    "read_discipline_index",
+    "read_discipline_trace",
     "read_result",
     "read_series",
     "read_state",
-    "read_student",
+    "read_student_index",
+    "read_student_trace",
     "run",
 ]
 
@@ -167,24 +170,56 @@ def read_boxes(name: str, *, baseline: str = "ranking_greedy") -> dict:
         return views.boxes(connection, baseline=baseline)
 
 
-def read_trace(name: str, *, arm: str, seed: int) -> dict:
-    """Uma simulação inteira, aluno a aluno, lida do banco.
+def read_student_index(name: str, *, arm: str, seed: int) -> dict:
+    """O índice da coorte medida de uma simulação: uma linha por aluno.
 
-    Não reconstrói o cenário nem refaz a simulação: o que o traço mostra já foi
-    gravado quando ela rodou, e refazer custaria o mesmo que rodar de novo.
+    Quatro consultas estreitas no lugar de um traço inteiro: o histórico de um
+    aluno não precisa dos outros, e baixar a simulação toda para desenhar uma
+    pessoa custava dezenas de megabytes por visualização.
     """
     with _open(name) as connection:
         _head(connection)
-        return queries.trace_script(connection, arm=arm, seed=seed)
+        simulation = queries.simulation_of(connection, arm=arm, seed=seed)
+        return _addressed(arm, seed, simulation) | queries.student_index(
+            connection, simulation_id=simulation
+        )
 
 
-def read_student(name: str, simulation_id: int, student: str) -> dict:
-    """Tudo que um aluno fez: período a período, turma a turma."""
+def read_discipline_index(name: str, *, arm: str, seed: int) -> dict:
+    """O índice da oferta de uma simulação: uma linha por disciplina."""
     with _open(name) as connection:
         _head(connection)
-        return queries.student_script(
-            connection, simulation_id=simulation_id, student=student
+        simulation = queries.simulation_of(connection, arm=arm, seed=seed)
+        return _addressed(arm, seed, simulation) | queries.discipline_index(
+            connection, simulation_id=simulation
         )
+
+
+def read_student_trace(name: str, student: str, *, arm: str, seed: int) -> dict:
+    """O histórico de um aluno, sem os períodos em que ele não pediu nada."""
+    with _open(name) as connection:
+        _head(connection)
+        return queries.student_trace(
+            connection,
+            simulation_id=queries.simulation_of(connection, arm=arm, seed=seed),
+            student=student,
+        )
+
+
+def read_discipline_trace(name: str, discipline: str, *, arm: str, seed: int) -> dict:
+    """O histórico de uma disciplina: o período, as turmas e quem pediu."""
+    with _open(name) as connection:
+        _head(connection)
+        return queries.discipline_trace(
+            connection,
+            simulation_id=queries.simulation_of(connection, arm=arm, seed=seed),
+            discipline=discipline,
+        )
+
+
+def _addressed(arm: str, seed: int, simulation: int) -> dict:
+    """Quem é a simulação que o índice descreve."""
+    return {"braco": arm, "seed": seed, "simulacao": simulation}
 
 
 def delete(name: str) -> None:
@@ -209,7 +244,7 @@ def delete(name: str) -> None:
             ) from erro
 
 
-_SCALES = {"grade_average": (0.0, 10.0, 1), "reserve": (0.0, 1.0, 3)}
+_SCALES = {"grade_average": (0.0, 10.0, 1), "demand": (0.0, 1.0, 2)}
 """O domínio e a casa decimal com que o rótulo da faixa se escreve."""
 
 

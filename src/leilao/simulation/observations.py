@@ -27,6 +27,8 @@ def period_points(
             period=period,
             grade_average=values.grade_averages[student.id],
             reserve=values.reserves[student.id],
+            eligible_disciplines=values.eligible_disciplines[student.id],
+            requested_disciplines=values.requested_disciplines[student.id],
             satisfaction=values.satisfactions[student.id],
             attendance=(
                 values.attendances[student.id]

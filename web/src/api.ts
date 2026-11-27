@@ -5,7 +5,11 @@ import type {
   CompareRequest,
   CompareResponse,
   CurvePayload,
+  DisciplineIndexPayload,
+  DisciplineTracePayload,
   SeriesPayload,
+  StudentIndexPayload,
+  StudentTracePayload,
   PlaygroundRequest,
   PlaygroundResponse,
   SavedResult,
@@ -87,15 +91,58 @@ export async function comparisonCurve(
   return request(`/comparacoes/${encodeURIComponent(name)}/curva?${query}`);
 }
 
-/** Uma simulação inteira, aluno a aluno, lida do banco — nada é refeito */
-export async function comparisonTrace(
+/** O índice da coorte medida: uma linha por aluno, pronta para a tabela */
+export async function studentIndex(
   name: string,
   arm: string,
   seed: number
-): Promise<TraceResponse> {
-  const query = new URLSearchParams({ braco: arm, seed: String(seed) });
-  return request(`/comparacoes/${encodeURIComponent(name)}/traco?${query}`);
+): Promise<StudentIndexPayload> {
+  return request(
+    `/comparacoes/${encodeURIComponent(name)}/traco/alunos?${address(arm, seed)}`
+  );
 }
+
+/** O índice da oferta: uma linha por disciplina, não por turma */
+export async function disciplineIndex(
+  name: string,
+  arm: string,
+  seed: number
+): Promise<DisciplineIndexPayload> {
+  return request(
+    `/comparacoes/${encodeURIComponent(name)}/traco/disciplinas?${address(arm, seed)}`
+  );
+}
+
+/** O histórico de um aluno, sem os períodos em que ele não pediu nada */
+export async function studentTrace(
+  name: string,
+  student: string,
+  arm: string,
+  seed: number
+): Promise<StudentTracePayload> {
+  return request(
+    `/comparacoes/${encodeURIComponent(name)}/traco/aluno/${encodeURIComponent(
+      student
+    )}?${address(arm, seed)}`
+  );
+}
+
+/** O histórico de uma disciplina: o período, as turmas dela e quem pediu */
+export async function disciplineTrace(
+  name: string,
+  discipline: string,
+  arm: string,
+  seed: number
+): Promise<DisciplineTracePayload> {
+  return request(
+    `/comparacoes/${encodeURIComponent(name)}/traco/disciplina/${encodeURIComponent(
+      discipline
+    )}?${address(arm, seed)}`
+  );
+}
+
+const address = (arm: string, seed: number) =>
+  new URLSearchParams({ braco: arm, seed: String(seed) });
 
 /** O eixo X colapsado: uma caixa por (braço, métrica) sobre as seeds */
 export async function comparisonBoxes(name: string): Promise<BoxesPayload> {

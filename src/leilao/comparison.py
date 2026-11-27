@@ -105,7 +105,7 @@ RULERS: tuple[str, ...] = ("period",)
 
 CUT_AXES: tuple[str, ...] = (
     "grade_average",
-    "reserve",
+    "demand",
 )
 
 
@@ -207,13 +207,13 @@ class Observations:
 
     Uma posição por (aluno medido, período medido). É o que a interface recorta
     em faixas: as faixas não entram na medição, e mudá-las não exige simular
-    de novo. `period` dá o eixo X, `grade_average` e `reserve` dão o rótulo da
+    de novo. `period` dá o eixo X, `grade_average` e `demand` dão o rótulo da
     faixa, e as demais são as grandezas que ela agrega.
     """
 
     period: list[int]
     grade_average: list[float]
-    reserve: list[float]
+    demand: list[float]
     satisfaction: list[float]
     attendance: list[float | None]
     progress: list[float]
@@ -226,7 +226,7 @@ class StudentPoint:
     """Um aluno medido, com as grandezas de vida inteira dele."""
 
     grade_average: float
-    reserve: float
+    demand: float
     satisfaction: float
     attendance: float | None
     progress: float
@@ -636,7 +636,7 @@ def observations_of(result: SimulationResult) -> Observations:
     return Observations(
         period=[row.period for row in rows],
         grade_average=column(lambda row: row.grade_average),
-        reserve=column(lambda row: row.reserve),
+        demand=column(lambda row: row.demand),
         satisfaction=column(lambda row: row.satisfaction),
         attendance=column(lambda row: row.attendance),
         progress=column(lambda row: row.progress),
@@ -650,7 +650,7 @@ def student_points(result: SimulationResult) -> list[StudentPoint]:
     return [
         StudentPoint(
             grade_average=s.grade_average,
-            reserve=s.mean_reserve,
+            demand=s.mean_demand,
             satisfaction=s.mean_satisfaction,
             attendance=s.mean_attendance,
             progress=s.progress,

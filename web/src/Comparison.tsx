@@ -19,7 +19,7 @@ import type { AxisChoice, CutChoice } from "./bands";
 import { comparisonCurve, comparisonSeries } from "./api";
 import { formatRunDate, formatRunSpan, ComparisonRun } from "./history";
 import { RunProgress, RunProgressCard } from "./RunProgress";
-import { Trace } from "./Trace";
+import { Trace } from "./trace/Trace";
 import { COMPARISON_ARMS } from "./types";
 import {
   MAX_CUTS,
@@ -133,7 +133,7 @@ export function Comparison({
   const [cutState, setCutState] = useState(() => {
     const start: Record<string, number[]> = {
       grade_average: [...(run.config.grade_cuts ?? [])],
-      reserve: [...(run.config.reserve_cuts ?? [])],
+      demand: [...(run.config.demand_cuts ?? [])],
     };
     return { typed: start, applied: start };
   });
@@ -158,7 +158,7 @@ export function Comparison({
     [run.arms]
   );
 
-  const scattered = view === "grade_average" || view === "reserve";
+  const scattered = view === "grade_average" || view === "demand";
   const scatterAxis = SCATTER_AXES.find((option) => option.key === view);
   const cuts = CUTS;
   const cut: CutChoice = cuts.some((c) => c.axis === cutChoice)

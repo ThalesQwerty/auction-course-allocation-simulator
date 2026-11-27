@@ -21,5 +21,5 @@ def single_axis(max_hours: int) -> dict:
         "availability": default_availability(max_hours),
         "selectivity_mean": SEM_SELETIVIDADE,
         "grade_cuts": (),
-        "reserve_cuts": (),
+        "demand_cuts": (),
     }

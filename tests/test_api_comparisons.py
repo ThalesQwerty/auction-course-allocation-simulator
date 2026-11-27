@@ -161,20 +161,43 @@ def test_the_curve_shares_its_x_between_the_arms(client):
             assert ponto["n"] >= 1
 
 
-def test_the_trace_is_a_query_and_not_a_rerun(client):
-    """O traço sai do banco. Nada de reconstruir o cenário: um cenário gravado
-    que a validação de hoje recusaria ainda assim tem histórico para mostrar."""
+def test_the_history_is_a_query_and_not_a_rerun(client):
+    """O histórico sai do banco. Nada de reconstruir o cenário: um cenário
+    gravado que a validação de hoje recusaria ainda assim tem o que mostrar.
+
+    São quatro consultas estreitas, e não uma simulação inteira: o índice não
+    carrega roteiro, e o roteiro não carrega os outros alunos.
+    """
     nome = create(client)["nome"]
     client.post(f"/comparacoes/{nome}/rodar")
+    sufixo = "braco=ranking_greedy&seed=1"
 
-    traco = client.get(f"/comparacoes/{nome}/traco?braco=ranking_greedy&seed=1")
-    assert traco.status_code == 200, traco.text[:400]
-    corpo = traco.json()
-    assert corpo["arm"] == "ranking_greedy" and corpo["seed"] == 1
-    assert corpo["students"] and corpo["histories"] and corpo["periods"]
-    assert all(aluno["name"] for aluno in corpo["students"])
+    alunos = client.get(f"/comparacoes/{nome}/traco/alunos?{sufixo}")
+    assert alunos.status_code == 200, alunos.text[:400]
+    indice = alunos.json()
+    assert indice["braco"] == "ranking_greedy" and indice["seed"] == 1
+    assert indice["alunos"] and indice["carga_obrigatoria"] > 0
+    assert all(linha["nome"] for linha in indice["alunos"])
+    assert all(
+        linha["saida"] in ("formado", "jubilado") for linha in indice["alunos"]
+    )
 
-    vazio = client.get(f"/comparacoes/{nome}/traco?braco=ranking_greedy&seed=99")
+    oferta = client.get(f"/comparacoes/{nome}/traco/disciplinas?{sufixo}").json()
+    assert oferta["disciplinas"]
+
+    aluno = indice["alunos"][0]["aluno"]
+    roteiro = client.get(f"/comparacoes/{nome}/traco/aluno/{aluno}?{sufixo}").json()
+    assert roteiro["aluno"]["aluno"] == aluno
+    assert all(periodo["solicitacoes"] for periodo in roteiro["periodos"])
+
+    disciplina = oferta["disciplinas"][0]["disciplina"]
+    historia = client.get(
+        f"/comparacoes/{nome}/traco/disciplina/{disciplina}?{sufixo}"
+    ).json()
+    assert historia["disciplina"]["disciplina"] == disciplina
+    assert all(periodo["solicitacoes"] for periodo in historia["periodos"])
+
+    vazio = client.get(f"/comparacoes/{nome}/traco/alunos?braco=ranking_greedy&seed=99")
     assert vazio.status_code == 404
 
 

@@ -39,8 +39,9 @@ const INTEREST_RENAMES = [
   ["utility_distribution", "interest_distribution"],
 ] as const;
 
-/** Chaves que saíram do cenário. A estabilidade não se converte em flutuação: uma era o quanto da âncora permanecia, a outra é o desvio do abalo */
+/** Chaves que saíram do cenário. A estabilidade não se converte em flutuação (uma era o quanto da âncora permanecia, a outra é o desvio do abalo), nem os cortes da reserva nos da intensidade de demanda: a reserva vivia nos milésimos e a intensidade cobre [0, 1] inteiro */
 const RETIRED_KEYS = [
+  "reserve_cuts",
   "selectivity_median",
   "utility_stability",
   "interest_stability",

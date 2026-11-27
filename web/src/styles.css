@@ -1280,26 +1280,16 @@ td.failed {
   color: var(--danger);
 }
 
-/* Os seletores do traço, numa linha só: o par (modelo, execução) que endereça
-   a simulação, o que ver dentro dela e o filtro das cinzas. */
+/* Os seletores do histórico, numa linha só: o par (modelo, simulação) que
+   endereça a execução e o que ver dentro dela. */
 .trace-controls .field-row {
   align-items: flex-end;
   margin-bottom: 0;
 }
 
-.trace-controls .field select {
+.trace-controls .field select,
+.trace-controls .field input {
   min-width: 150px;
-}
-
-.trace-controls .field.grow select {
-  min-width: 260px;
-}
-
-.trace-legend {
-  border-top: 1px solid var(--border);
-  line-height: 2;
-  margin-top: 14px;
-  padding-top: 10px;
 }
 
 .checkbox {
@@ -1854,4 +1844,72 @@ td.failed {
   font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------- tabela de dados */
+
+.data-table {
+  overflow-x: auto;
+}
+
+.data-table th button.sort {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.data-table th button.sort.on {
+  color: var(--text);
+}
+
+.data-table .sort-mark {
+  color: var(--accent);
+  font-size: 10px;
+  width: 8px;
+}
+
+.data-table .filter-row th {
+  padding: 4px 8px 8px;
+}
+
+.data-table .filter-row input,
+.data-table .filter-row select {
+  font-size: 12px;
+  padding: 2px 4px;
+  min-width: 56px;
+}
+
+.data-table .filter-range {
+  display: flex;
+  gap: 4px;
+}
+
+.data-table tbody tr.clickable {
+  cursor: pointer;
+}
+
+.data-table tbody tr.clickable:hover {
+  background: var(--accent-soft);
+}
+
+.data-table tbody tr.current {
+  background: var(--accent-soft);
+}
+
+.table-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
 }

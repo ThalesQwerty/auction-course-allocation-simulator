@@ -29,15 +29,15 @@ METRICS = (
 )
 """As grandezas que uma série publica, nos nomes que a tela usa."""
 
-BAND_AXES = {"grade_average": "ap.cr", "reserve": "reservas.media"}
+BAND_AXES = {"grade_average": "ap.cr", "demand": "demandas.media"}
 """Por qual coluna o recorte em faixas corta.
 
-O CR corta no valor corrente; a utilidade de reserva corta na média dos
+O CR corta no valor corrente; a intensidade de demanda corta na média dos
 períodos do aluno, que não depende do período e por isso não o faz trocar de
 faixa ao longo da série.
 """
 
-CURVE_AXES = {"grade_average": "cr_final", "reserve": "reserva_media"}
+CURVE_AXES = {"grade_average": "cr_final", "demand": "demanda_media"}
 """Por qual grandeza de vida inteira a curva ordena os alunos."""
 
 CURVE_METRICS = {
@@ -216,7 +216,7 @@ def _paired(
 # --------------------------------------------------------------------- SQL
 
 _AGGREGATE = """
-WITH {reservas}medidas AS (
+WITH {demandas}medidas AS (
   SELECT m.braco, m.seed, ap.simulacao_id,
          ap.periodo - a.ingresso + 1        AS periodo_local,
          {faixa}                            AS faixa,
@@ -263,20 +263,25 @@ SELECT medidas.*, formados.concluiram_ate, coorte.tamanho
  ORDER BY medidas.faixa, medidas.periodo_local, medidas.braco, medidas.seed
 """
 
-_RESERVAS_CTE = """reservas AS (
-  SELECT simulacao_id, aluno, AVG(reserva) AS media
+_DEMANDAS_CTE = """demandas AS (
+  SELECT simulacao_id, aluno,
+         AVG(CAST(disciplinas_pedidas AS REAL) / disciplinas_elegiveis) AS media
     FROM aluno_periodo
+   WHERE disciplinas_elegiveis > 0
    GROUP BY simulacao_id, aluno
 ),
 """
 
-_RESERVAS_JOIN = """JOIN reservas
-           ON reservas.simulacao_id = ap.simulacao_id
-          AND reservas.aluno = ap.aluno"""
+_DEMANDAS_JOIN = """JOIN demandas
+           ON demandas.simulacao_id = ap.simulacao_id
+          AND demandas.aluno = ap.aluno"""
 
 _CURVE = """
 WITH alunos AS (
-  SELECT m.braco, a.cr_final, AVG(ap.reserva) AS reserva_media,
+  SELECT m.braco, a.cr_final,
+         AVG(CASE WHEN ap.disciplinas_elegiveis > 0
+                  THEN CAST(ap.disciplinas_pedidas AS REAL)
+                     / ap.disciplinas_elegiveis END) AS demanda_media,
          AVG(ap.satisfacao)     AS satisfacao,
          AVG(ap.aproveitamento) AS aproveitamento,
          MAX(ap.progresso)      AS progresso,
@@ -319,13 +324,13 @@ SELECT ordenados.braco, ordenados.faixa, posicoes.x, ordenados.n AS alunos,
 # ---------------------------------------------------------------- Python
 
 def _aggregate(axis: str, cuts: Sequence[float]) -> str:
-    """A agregação, com a média da reserva por aluno só quando ela é o eixo do
+    """A agregação, com a média da demanda por aluno só quando ela é o eixo do
     recorte: é uma varredura a mais sobre `aluno_periodo`."""
-    por_aluno = axis == "reserve" and bool(cuts)
+    por_aluno = axis == "demand" and bool(cuts)
     return _AGGREGATE.format(
         faixa=_band_sql(axis, cuts),
-        reservas=_RESERVAS_CTE if por_aluno else "",
-        juncao=_RESERVAS_JOIN if por_aluno else "",
+        demandas=_DEMANDAS_CTE if por_aluno else "",
+        juncao=_DEMANDAS_JOIN if por_aluno else "",
     )
 
 

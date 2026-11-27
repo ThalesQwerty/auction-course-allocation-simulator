@@ -8,7 +8,7 @@ export const PERIOD_POINT = (x: number) => `Período ${x}`;
 
 /** As grandezas de vida inteira que podem ir ao eixo X da dispersão */
 export const SCATTER_AXES: {
-  key: "grade_average" | "reserve";
+  key: "grade_average" | "demand";
   label: string;
   bounds: [number, number];
    /** Como o valor do eixo se escreve no tooltip */
@@ -25,19 +25,19 @@ export const SCATTER_AXES: {
       }),
   },
   {
-    key: "reserve",
-    label: "Utilidade de reserva",
+    key: "demand",
+    label: "Intensidade de demanda",
     bounds: [0, 1],
     format: (value) =>
       value.toLocaleString("pt-BR", {
-        minimumFractionDigits: 3,
-        maximumFractionDigits: 3,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
       }),
   },
 ];
 
 /** O eixo X de uma métrica: o período ou uma grandeza de vida inteira do aluno */
-export type AxisChoice = "period" | "grade_average" | "reserve";
+export type AxisChoice = "period" | "grade_average" | "demand";
 
 /** O que o seletor de linhas oferece */
 export type CutChoice = CutAxis;
@@ -46,7 +46,7 @@ export type CutChoice = CutAxis;
 export const CUTS: {
   axis: CutChoice;
   label: string;
-  field?: "grade_cuts" | "reserve_cuts";
+  field?: "grade_cuts" | "demand_cuts";
   domain?: [number, number];
   decimals?: number;
   step?: number;
@@ -61,12 +61,12 @@ export const CUTS: {
     step: 0.1,
   },
   {
-    axis: "reserve",
-    label: "Utilidade de reserva",
-    field: "reserve_cuts",
+    axis: "demand",
+    label: "Intensidade de demanda",
+    field: "demand_cuts",
     domain: [0, 1],
-    decimals: 3,
-    step: 0.001,
+    decimals: 2,
+    step: 0.01,
   },
 ];
 

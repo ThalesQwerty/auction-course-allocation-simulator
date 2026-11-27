@@ -247,8 +247,8 @@ def test_the_cut_belongs_to_the_band_it_opens():
 
 
 def test_one_band_is_the_whole_university():
-    config = make_config(grade_cuts=(), reserve_cuts=())
-    axis = Axis.states(config)["reserve"]
+    config = make_config(grade_cuts=(), demand_cuts=())
+    axis = Axis.states(config)["demand"]
     assert axis.order == ["Geral"]
 
 

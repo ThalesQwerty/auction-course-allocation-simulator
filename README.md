@@ -127,10 +127,21 @@ resultado pronto, e não há transformação de dado no navegador:
 - `GET /comparacoes/{nome}/series?eixo=&cortes=` — a série por período,
   recortada em faixas pelo SQL, com mediana e interquartil por braço
 - `GET /comparacoes/{nome}/curva?eixo=&pontos=` — a métrica sobre CR final ou
-  utilidade de reserva, em faixas de quantil com bordas comuns aos dois braços
+  intensidade de demanda, em faixas de quantil com bordas comuns aos dois braços
 - `GET /comparacoes/{nome}/caixas` — os cinco números de cada caixa, o
   pareamento contra a linha de base e uma linha por seed
-- `GET /comparacoes/{nome}/alunos/{simulacao}/{aluno}` — tudo que um aluno fez
+
+A seção de histórico tem quatro consultas estreitas, duas de índice e duas de
+detalhe, e abre pelo índice:
+
+- `GET /comparacoes/{nome}/traco/alunos?braco=&seed=` — uma linha por aluno
+  medido daquela simulação
+- `GET /comparacoes/{nome}/traco/disciplinas?braco=&seed=` — uma linha por
+  disciplina da oferta
+- `GET /comparacoes/{nome}/traco/aluno/{aluno}?braco=&seed=` — o histórico de um
+  aluno, sem os períodos em que ele não pediu nada
+- `GET /comparacoes/{nome}/traco/disciplina/{disciplina}?braco=&seed=` — o
+  histórico de uma disciplina: o período, as turmas dela e quem pediu
 
 A unidade de recuperação é a **simulação**, o par (braço, seed): como ela é
 determinística, perder uma custa só o tempo dela, e por isso não há checkpoint
@@ -146,7 +157,9 @@ isso não ocupa o banco.
 `web/src/` é React + Vite + Recharts. `types.ts` **espelha** `api/schemas.py`:
 mudou um, mude o outro. `presets.ts` traz a grade e o cenário padrão;
 `equations/` repete em TS as contas que a tela precisa fazer sozinha, com a
-mesma regra de função pura; `charts/` embrulha o Recharts.
+mesma regra de função pura; `charts/` embrulha o Recharts; `tables/` tem a
+tabela de dados que ordena, filtra e pagina; `trace/` é a seção de histórico, em
+dois níveis — o índice de alunos ou de disciplinas e o histórico de um sujeito.
 
 ### Usando a interface
 

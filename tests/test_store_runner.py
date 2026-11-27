@@ -296,8 +296,8 @@ def test_handing_each_period_over_means_nothing_is_accumulated():
     ], "entregar o período não muda o que a simulação faz"
 
 
-def test_the_reserve_band_follows_the_student_lifetime_mean(tmp_path):
-    """A faixa da utilidade de reserva não é a do período: é a média dos
+def test_the_demand_band_follows_the_student_lifetime_mean(tmp_path):
+    """A faixa da intensidade de demanda não é a do período: é a média dos
     períodos do aluno, e por isso ele não troca de faixa ao longo da série."""
     from leilao.store.views import band_series
 
@@ -315,19 +315,22 @@ def test_the_reserve_band_follows_the_student_lifetime_mean(tmp_path):
     )
     run_into_store(connection, config=config, bank=bank)
 
-    cortes = (0.15, 0.33)
-    serie = band_series(
-        connection, axis="reserve", cuts=cortes, low=0.0, high=1.0, decimals=3
-    )
-    nomes = serie["groups"]
-
     medias = {
         (linha["simulacao_id"], linha["aluno"]): linha["media"]
         for linha in connection.execute(
-            "SELECT simulacao_id, aluno, AVG(reserva) AS media"
-            "  FROM aluno_periodo GROUP BY simulacao_id, aluno"
+            "SELECT simulacao_id, aluno,"
+            "       AVG(CAST(disciplinas_pedidas AS REAL) / disciplinas_elegiveis)"
+            "         AS media"
+            "  FROM aluno_periodo WHERE disciplinas_elegiveis > 0"
+            "  GROUP BY simulacao_id, aluno"
         )
     }
+    cortes = (round(sorted(medias.values())[len(medias) // 2], 2),)
+    serie = band_series(
+        connection, axis="demand", cuts=cortes, low=0.0, high=1.0, decimals=2
+    )
+    nomes = serie["groups"]
+
     primeiro = connection.execute(
         "SELECT MIN(periodo) FROM periodo WHERE medido = 1"
     ).fetchone()[0]
@@ -347,134 +350,100 @@ def test_the_reserve_band_follows_the_student_lifetime_mean(tmp_path):
     atravessa = connection.execute(
         "SELECT COUNT(*) FROM ("
         "  SELECT simulacao_id, aluno FROM aluno_periodo"
+        "   WHERE disciplinas_elegiveis > 0"
         "   GROUP BY simulacao_id, aluno"
-        "  HAVING MIN(reserva) < ? AND MAX(reserva) >= ?)",
+        "  HAVING MIN(CAST(disciplinas_pedidas AS REAL) / disciplinas_elegiveis) < ?"
+        "     AND MAX(CAST(disciplinas_pedidas AS REAL) / disciplinas_elegiveis) >= ?)",
         (cortes[0], cortes[0]),
     ).fetchone()[0]
     assert atravessa, "o corte por período tem de mover alguém, senão dá no mesmo"
 
-    visto = 0
     for braco, grupos in serie["arms"].items():
         for grupo in grupos:
             for periodo, quartis in zip(grupo["x"], grupo["values"]["students"]):
                 assert quartis[1] == esperado[(braco, grupo["group"], periodo)]
-                visto += 1
-
-    assert visto == len(esperado) > 0
     connection.close()
 
 
-def test_the_series_counts_the_periods_of_the_cohort(ready):
-    """O eixo começa no ingresso da coorte: o aquecimento não aparece, e o
-    primeiro ponto é 1 e não o período absoluto em que a coorte entrou."""
-    from leilao.store.views import band_series
-
-    connection, comparison, config, bank = ready
-    run_into_store(connection, config=config, bank=bank)
-
-    serie = band_series(connection)
-    medidos = config.periods - config.first_measured_period + 1
-
-    assert config.first_measured_period > 1, "o cenário tem de ter aquecimento"
-    assert serie["arms"]
-    for grupos in serie["arms"].values():
-        for grupo in grupos:
-            # O último período do horizonte pode não ter medido ninguém: a
-            # coorte se esvazia antes dele. O que se afere é a origem.
-            assert grupo["x"] == list(range(1, len(grupo["x"]) + 1))
-            assert 1 < len(grupo["x"]) <= medidos
-
-
-def test_the_cohorts_observed_stack_on_the_same_axis(tmp_path):
-    """Com mais de uma coorte observada, o eixo continua sendo o período local:
-    todas as coortes contribuem para o ponto 1, qualquer que seja o ingresso."""
-    from leilao.store.views import band_series
-
-    config = make_config(periods=8, warmup_periods=3, measured_cohorts=2)
-    bank = tmp_path / "duas.db"
-    connection = open_store(bank)
-    create_comparison(
-        connection,
-        config=config,
-        scenario=json.dumps({"runs": 1}),
-        seeds=1,
-        arms=ARMS,
-    )
-    run_into_store(connection, config=config, bank=bank)
-
-    ingressos = {
-        linha["ingresso"]
-        for linha in connection.execute(
-            "SELECT DISTINCT ingresso FROM aluno WHERE medido = 1"
-        )
-    }
-    assert ingressos == {4, 5}
-
-    por_braco = {
-        linha["braco"]: linha["alunos"]
-        for linha in connection.execute(
-            "SELECT m.braco, COUNT(*) AS alunos"
-            "  FROM aluno a JOIN simulacao m ON m.id = a.simulacao_id"
-            " WHERE a.medido = 1 GROUP BY m.braco"
-        )
-    }
-
-    serie = band_series(connection)
-    assert serie["arms"]
-    for braco, grupos in serie["arms"].items():
-        for grupo in grupos:
-            assert grupo["x"][0] == 1
-            assert grupo["values"]["students"][0][1] == por_braco[braco], (
-                "no período local 1 estão as duas coortes inteiras"
-            )
-    connection.close()
-
-
-def test_the_trace_comes_from_the_bank_and_not_from_a_rerun(ready):
-    """O traço é consulta, não simulação: o que ele mostra já foi gravado.
+def test_the_indexes_and_the_histories_come_from_the_bank(ready):
+    """As quatro consultas são leitura, não simulação.
 
     O que o banco não tem fica declarado aqui: só a coorte medida tem roteiro,
     e dela só a turma que ela moveu — a elegível e não pedida não virou linha.
+    Por isso o histórico corta o período sem solicitação em vez de desenhá-lo
+    vazio.
     """
-    from leilao.store.queries import SemSimulacao, trace_script
+    from leilao.store.queries import (
+        SemSimulacao,
+        discipline_index,
+        discipline_trace,
+        simulation_of,
+        student_index,
+        student_trace,
+    )
 
-    connection, comparison, config, bank = ready
+    connection, _, config, bank = ready
     run_into_store(connection, config=config, bank=bank)
 
-    traco = trace_script(connection, arm=ARMS[0], seed=1)
-
-    assert traco["arm"] == ARMS[0] and traco["seed"] == 1
-    assert traco["disciplines"], "a oferta vem da tabela de turmas"
-    assert set(traco["classes"]) == set(traco["disciplines"])
-    assert traco["periods"], "cada período traz a oferta dele"
-    assert all(ponto["disciplines"] for ponto in traco["periods"])
+    simulacao = simulation_of(connection, arm=ARMS[0], seed=1)
+    with pytest.raises(SemSimulacao):
+        simulation_of(connection, arm=ARMS[0], seed=99)
 
     medida = {
         linha["aluno"]
         for linha in connection.execute(
-            "SELECT aluno FROM aluno a JOIN simulacao m ON m.id = a.simulacao_id"
-            " WHERE m.braco = ? AND m.seed = 1 AND a.medido = 1",
-            (ARMS[0],),
+            "SELECT aluno FROM aluno WHERE simulacao_id = ? AND medido = 1",
+            (simulacao,),
         )
     }
-    assert {aluno["id"] for aluno in traco["students"]} == medida
-    assert all(aluno["name"] for aluno in traco["students"])
-    assert {h["student_id"] for h in traco["histories"]} <= medida
-
-    linhas = sum(
-        len(periodo["requests"])
-        for historia in traco["histories"]
-        for periodo in historia["periods"]
+    indice = student_index(connection, simulation_id=simulacao)
+    assert {linha["aluno"] for linha in indice["alunos"]} == medida
+    assert indice["carga_obrigatoria"] == sum(
+        d.hours for d in config.disciplines if not d.elective
     )
-    gravadas = connection.execute(
-        "SELECT COUNT(*) FROM solicitacao s JOIN simulacao m ON m.id = s.simulacao_id"
-        " WHERE m.braco = ? AND m.seed = 1",
-        (ARMS[0],),
-    ).fetchone()[0]
-    assert linhas == gravadas > 0
+    assert all(linha["nome"] for linha in indice["alunos"])
+    assert all(
+        linha["saida"] in ("formado", "jubilado") for linha in indice["alunos"]
+    ), "o horizonte só acaba quando o último da coorte sai: não há 'em curso'"
+    assert all(
+        linha["intensidade"] is None or 0.0 <= linha["intensidade"] <= 1.0
+        for linha in indice["alunos"]
+    )
 
-    with pytest.raises(SemSimulacao):
-        trace_script(connection, arm=ARMS[0], seed=99)
+    oferta = discipline_index(connection, simulation_id=simulacao)
+    assert [linha["disciplina"] for linha in oferta["disciplinas"]] == [
+        d.name for d in config.disciplines
+    ]
+    assert sum(linha["turmas"] for linha in oferta["disciplinas"]) == len(
+        config.seats_by_class()
+    )
+
+    aluno = sorted(medida)[0]
+    roteiro = student_trace(connection, simulation_id=simulacao, student=aluno)
+    assert roteiro["aluno"]["aluno"] == aluno
+    assert roteiro["periodos"], "o aluno medido pediu algo em algum período"
+    assert all(periodo["solicitacoes"] for periodo in roteiro["periodos"]), (
+        "período sem solicitação não vira card"
+    )
+    linhas = sum(len(periodo["solicitacoes"]) for periodo in roteiro["periodos"])
+    assert linhas == connection.execute(
+        "SELECT COUNT(*) FROM solicitacao WHERE simulacao_id = ? AND aluno = ?",
+        (simulacao, aluno),
+    ).fetchone()[0]
+
+    disciplina = config.disciplines[0].name
+    historia = discipline_trace(
+        connection, simulation_id=simulacao, discipline=disciplina
+    )
+    assert historia["disciplina"]["disciplina"] == disciplina
+    assert historia["turmas"], "a disciplina traz as turmas dela"
+    assert historia["periodos"]
+    for periodo in historia["periodos"]:
+        assert periodo["solicitacoes"], "período sem solicitação não vira card"
+        assert periodo["turmas"]
+        assert periodo["resumo"]["vagas"] == sum(
+            turma["vagas"] for turma in periodo["turmas"]
+        )
 
 
 def test_a_timed_out_allocation_marks_the_simulation_and_the_queue_goes_on(

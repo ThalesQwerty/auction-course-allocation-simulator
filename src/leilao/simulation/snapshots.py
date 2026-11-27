@@ -9,6 +9,8 @@ from ..config import SimulationConfig
 from ..equations import (
     RequestStates,
     credits_per_seat,
+    demand_counts,
+    demand_intensity,
     progress,
     request_states,
     semestralization,
@@ -80,8 +82,8 @@ class Axis:
             "grade_average": _state_axis(
                 config, "grade_average", lambda v: v.grade_averages, decimals=1
             ),
-            "reserve": _state_axis(
-                config, "reserve", lambda v: v.reserves, decimals=3
+            "demand": _state_axis(
+                config, "demand", lambda v: v.demands, decimals=2
             ),
         }
         return axes
@@ -130,6 +132,9 @@ class Measurements:
     attendances: dict[str, float | None] | None
     selectivities: dict[str, float]
     reserves: dict[str, float]
+    eligible_disciplines: dict[str, int]
+    requested_disciplines: dict[str, int]
+    demands: dict[str, float]
     request_states: dict[str, RequestStates] | None
     credits: dict[str, int]
     supply: dict[str, int]
@@ -179,6 +184,16 @@ def measure(
         discipline_hours[name] for name in config.required_disciplines()
     )
     discipline_of = config.discipline_by_class()
+    seats_of = config.seats_by_class()
+    counts = {
+        s.id: demand_counts(
+            eligible=utilities[s.id],
+            requested=requested[s.id] if requested is not None else (),
+            groups=discipline_of,
+            seats=seats_of,
+        )
+        for s in active
+    }
     return Measurements(
         satisfactions=satisfactions,
         progresses={
@@ -233,6 +248,15 @@ def measure(
         ),
         selectivities=selectivities or {s.id: 0.0 for s in active},
         reserves=reserves or {s.id: 0.0 for s in active},
+        eligible_disciplines={s.id: counts[s.id][0] for s in active},
+        requested_disciplines={s.id: counts[s.id][1] for s in active},
+        demands={
+            s.id: demand_intensity(
+                eligible=counts[s.id][0], requested=counts[s.id][1]
+            )
+            or 0.0
+            for s in active
+        },
         credits=credits,
         supply=supply,
         bids=bids,

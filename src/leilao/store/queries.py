@@ -18,12 +18,15 @@ __all__ = [
     "SimulationHead",
     "StudentPoint",
     "comparison_head",
+    "discipline_index",
+    "discipline_trace",
     "observation_columns",
     "period_points",
     "simulation_heads",
+    "simulation_of",
+    "student_index",
     "student_points",
-    "student_script",
-    "trace_script",
+    "student_trace",
 ]
 
 
@@ -102,7 +105,7 @@ class StudentPoint:
     seed: int
     aluno: str
     cr_final: float
-    reserva: float
+    demanda: float | None
     satisfacao: float
     aproveitamento: float | None
     progresso: float
@@ -242,7 +245,9 @@ def student_points(
         """
         SELECT m.braco, m.seed, ap.aluno,
                a.cr_final, a.concluiu_em,
-               AVG(ap.reserva)        AS reserva,
+               AVG(CASE WHEN ap.disciplinas_elegiveis > 0
+                    THEN CAST(ap.disciplinas_pedidas AS REAL)
+                       / ap.disciplinas_elegiveis END) AS demanda,
                AVG(ap.satisfacao)     AS satisfacao,
                AVG(ap.aproveitamento) AS aproveitamento,
                MAX(ap.progresso)      AS progresso,
@@ -262,7 +267,7 @@ def student_points(
             seed=row["seed"],
             aluno=row["aluno"],
             cr_final=row["cr_final"],
-            reserva=row["reserva"],
+            demanda=row["demanda"],
             satisfacao=row["satisfacao"],
             aproveitamento=row["aproveitamento"],
             progresso=row["progresso"],
@@ -286,14 +291,17 @@ def observation_columns(
     """
     rows = connection.execute(
         """
-        SELECT m.braco, m.seed, ap.periodo, ap.cr, ap.reserva, ap.satisfacao,
+        SELECT m.braco, m.seed, ap.periodo, ap.cr,
+               CASE WHEN ap.disciplinas_elegiveis > 0
+                    THEN CAST(ap.disciplinas_pedidas AS REAL)
+                       / ap.disciplinas_elegiveis END AS demanda, ap.satisfacao,
                ap.aproveitamento, ap.progresso, ap.rodada_media, ap.vagas
           FROM aluno_periodo ap
           JOIN simulacao_valida m ON m.id = ap.simulacao_id
          ORDER BY m.braco, m.seed, ap.periodo, ap.aluno
         """,
     )
-    colunas = ("period", "grade_average", "reserve", "satisfaction",
+    colunas = ("period", "grade_average", "demand", "satisfaction",
                "attendance", "progress", "mean_round", "won")
     out: dict[tuple[str, int], dict[str, list]] = {}
     for row in rows:
@@ -302,7 +310,7 @@ def observation_columns(
         )
         tabela["period"].append(row["periodo"])
         tabela["grade_average"].append(row["cr"])
-        tabela["reserve"].append(row["reserva"])
+        tabela["demand"].append(row["demanda"])
         tabela["satisfaction"].append(row["satisfacao"])
         tabela["attendance"].append(row["aproveitamento"])
         tabela["progress"].append(row["progresso"])
@@ -311,240 +319,423 @@ def observation_columns(
     return out
 
 
-def student_script(
-    connection: sqlite3.Connection, *, simulation_id: int, student: str
-) -> dict:
-    """Tudo que um aluno fez: o período a período e a turma a turma."""
-    periods = connection.execute(
-        "SELECT * FROM aluno_periodo WHERE simulacao_id = ? AND aluno = ?"
-        " ORDER BY periodo",
-        (simulation_id, student),
-    ).fetchall()
-    requests = connection.execute(
-        "SELECT * FROM solicitacao WHERE simulacao_id = ? AND aluno = ?"
-        " ORDER BY periodo, turma",
-        (simulation_id, student),
-    ).fetchall()
-    head = connection.execute(
-        "SELECT * FROM aluno WHERE simulacao_id = ? AND aluno = ?",
-        (simulation_id, student),
-    ).fetchone()
-    return {
-        "aluno": dict(head) if head else None,
-        "periodos": [dict(row) for row in periods],
-        "solicitacoes": [dict(row) for row in requests],
-    }
-
-
 class SemSimulacao(LookupError):
     """O par (braço, seed) não está no banco, ou não terminou."""
 
 
-def trace_script(
-    connection: sqlite3.Connection, *, arm: str, seed: int
-) -> dict:
-    """Uma simulação inteira como o traço a lê, sem refazer nada.
+def simulation_of(connection: sqlite3.Connection, *, arm: str, seed: int) -> int:
+    """A simulação de um par (braço, seed).
 
-    O que o banco não tem é o que o `_acted` de `rows.py` descartou: a turma que
-    o aluno podia cursar e não pediu não virou linha, então a vista por aluno
-    lista o que ele moveu, não tudo que lhe era elegível. E só a coorte medida
-    tem roteiro, de modo que a demanda de fundo aparece nos totais da turma e
-    não na tabela de quem pediu.
+    Exige `concluida` e **não** passa pela vista `simulacao_valida`: ali se
+    olha uma simulação só, e uma seed que falhou do outro lado não torna esta
+    ilegível — o que a vista guarda é a comparação pareada entre braços.
     """
-    simulacao = connection.execute(
-        "SELECT id FROM simulacao WHERE braco = ? AND seed = ? AND estado = 'concluida'",
+    row = connection.execute(
+        "SELECT id FROM simulacao"
+        " WHERE braco = ? AND seed = ? AND estado = 'concluida'",
         (arm, seed),
     ).fetchone()
-    if simulacao is None:
+    if row is None:
         raise SemSimulacao(
             f"não há simulação concluída do modelo {arm!r} na seed {seed}"
         )
-    identificador = simulacao["id"]
-    rodadas = connection.execute(
-        "SELECT rodadas_teto FROM comparacao"
-    ).fetchone()["rodadas_teto"]
+    return int(row["id"])
 
-    turmas = connection.execute(
-        "SELECT * FROM turma"
-        " ORDER BY optativa, COALESCE(periodo_da_grade, 1 << 20), turma"
-    ).fetchall()
+
+def student_index(
+    connection: sqlite3.Connection, *, simulation_id: int
+) -> dict:
+    """O índice da coorte medida: uma linha por aluno, pronta para a tabela."""
     return {
-        "arm": arm,
-        "seed": seed,
-        "disciplines": [turma["turma"] for turma in turmas],
-        "classes": {turma["turma"]: turma["disciplina"] for turma in turmas},
-        "curriculum_periods": {
-            turma["disciplina"]: turma["periodo_da_grade"] or 0 for turma in turmas
-        },
-        "periods": _trace_periods(connection, identificador),
-        "students": _trace_students(connection, identificador, turmas),
-        "histories": _trace_histories(connection, identificador, rodadas),
+        "carga_obrigatoria": _required_hours(connection),
+        "alunos": _student_rows(connection, simulation_id=simulation_id),
     }
 
 
-def _trace_periods(
-    connection: sqlite3.Connection, simulation_id: int
-) -> list[dict]:
-    """A oferta período a período: a turma e o que aconteceu com ela."""
-    por_periodo: dict[int, list[dict]] = {}
+def discipline_index(
+    connection: sqlite3.Connection, *, simulation_id: int
+) -> dict:
+    """O índice da oferta: uma linha por **disciplina**, não por turma."""
+    return {
+        "disciplinas": _discipline_rows(connection, simulation_id=simulation_id)
+    }
+
+
+def student_trace(
+    connection: sqlite3.Connection, *, simulation_id: int, student: str
+) -> dict:
+    """O histórico de um aluno, sem os períodos em que ele não pediu nada."""
+    cabecalho = _student_rows(
+        connection, simulation_id=simulation_id, student=student
+    )
+    if not cabecalho:
+        raise LookupError(f"não há aluno medido {student!r} nesta simulação")
+
+    pedidos: dict[int, list[dict]] = {}
     for row in connection.execute(
         """
-        SELECT tp.*, t.disciplina, t.carga, t.periodo_da_grade
-          FROM turma_periodo tp JOIN turma t USING (turma)
-         WHERE tp.simulacao_id = ?
-         ORDER BY tp.periodo, COALESCE(t.periodo_da_grade, 1 << 20), tp.turma
+        SELECT s.*, t.disciplina, t.horario
+          FROM solicitacao s JOIN turma t USING (turma)
+         WHERE s.simulacao_id = :sim AND s.aluno = :aluno
+         ORDER BY s.periodo, t.disciplina, s.turma
         """,
-        (simulation_id,),
+        {"sim": simulation_id, "aluno": student},
     ):
-        por_periodo.setdefault(row["periodo"], []).append(
+        pedidos.setdefault(row["periodo"], []).append(_request(row))
+
+    periodos = [
+        {
+            **{
+                chave: row[chave]
+                for chave in (
+                    "periodo",
+                    "cr",
+                    "satisfacao",
+                    "aproveitamento",
+                    "progresso",
+                    "rodada_media",
+                    "vagas",
+                    "carga_obtida",
+                    "carga_cursada",
+                    "carga_aprovada",
+                    "carga_efetiva",
+                    "creditos_inicio",
+                    "creditos_gasto",
+                    "creditos_retorno",
+                    "disciplinas_elegiveis",
+                    "disciplinas_pedidas",
+                )
+            },
+            "creditos_fim": _balance(row),
+            "solicitacoes": pedidos.get(row["periodo"], []),
+        }
+        for row in connection.execute(
+            """
+            SELECT ap.* FROM aluno_periodo ap
+             WHERE ap.simulacao_id = :sim AND ap.aluno = :aluno
+               AND EXISTS (
+                 SELECT 1 FROM solicitacao s
+                  WHERE s.simulacao_id = ap.simulacao_id
+                    AND s.aluno = ap.aluno AND s.periodo = ap.periodo
+               )
+             ORDER BY ap.periodo
+            """,
+            {"sim": simulation_id, "aluno": student},
+        )
+    ]
+    return {
+        "aluno": cabecalho[0],
+        "carga_obrigatoria": _required_hours(connection),
+        "periodos": periodos,
+    }
+
+
+def discipline_trace(
+    connection: sqlite3.Connection, *, simulation_id: int, discipline: str
+) -> dict:
+    """O histórico de uma disciplina: o período, as turmas dela e quem pediu."""
+    cabecalho = _discipline_rows(
+        connection, simulation_id=simulation_id, discipline=discipline
+    )
+    if not cabecalho:
+        raise LookupError(f"não há disciplina {discipline!r} nesta oferta")
+
+    turmas: dict[int, list[dict]] = {}
+    for row in connection.execute(
+        """
+        SELECT tp.periodo, tp.turma, t.horario, tp.vagas, tp.preenchidas,
+               tp.concedidas, tp.pedidos, tp.aprovacoes, tp.exclusoes,
+               tp.preco_medio
+          FROM turma_periodo tp JOIN turma t USING (turma)
+         WHERE tp.simulacao_id = :sim AND t.disciplina = :disciplina
+           AND EXISTS (
+             SELECT 1 FROM solicitacao s JOIN turma u USING (turma)
+              WHERE s.simulacao_id = tp.simulacao_id
+                AND s.periodo = tp.periodo AND u.disciplina = t.disciplina
+           )
+         ORDER BY tp.periodo, tp.turma
+        """,
+        {"sim": simulation_id, "disciplina": discipline},
+    ):
+        turmas.setdefault(row["periodo"], []).append(dict(row))
+
+    pedidos: dict[int, list[dict]] = {}
+    for row in connection.execute(
+        """
+        SELECT s.*, t.disciplina, a.nome, a.ingresso, ap.cr
+          FROM solicitacao s
+          JOIN turma t USING (turma)
+          JOIN aluno a ON a.simulacao_id = s.simulacao_id AND a.aluno = s.aluno
+          LEFT JOIN aluno_periodo ap
+            ON ap.simulacao_id = s.simulacao_id
+           AND ap.aluno = s.aluno AND ap.periodo = s.periodo
+         WHERE s.simulacao_id = :sim AND t.disciplina = :disciplina
+         ORDER BY s.periodo, s.turma, s.aluno
+        """,
+        {"sim": simulation_id, "disciplina": discipline},
+    ):
+        pedidos.setdefault(row["periodo"], []).append(
             {
-                "name": row["turma"],
-                "discipline": row["disciplina"],
-                "curriculum_period": row["periodo_da_grade"] or 0,
-                "hours": row["carga"],
-                "seats": row["vagas"],
-                "filled": row["preenchidas"],
-                "granted": row["concedidas"],
-                "requests": row["pedidos"],
-                "mean_price": row["preco_medio"],
-                "approvals": row["aprovacoes"],
-                "exclusions": row["exclusoes"],
+                **_request(row),
+                "aluno": row["aluno"],
+                "nome": row["nome"] or row["aluno"],
+                "ingresso": row["ingresso"],
+                "cr": row["cr"],
             }
         )
-    return [
-        {"period": periodo, "disciplines": turmas}
-        for periodo, turmas in sorted(por_periodo.items())
-    ]
+
+    return {
+        "disciplina": cabecalho[0],
+        "turmas": [
+            dict(row)
+            for row in connection.execute(
+                "SELECT turma, horario, vagas FROM turma"
+                " WHERE disciplina = ? ORDER BY turma",
+                (discipline,),
+            )
+        ],
+        "periodos": [
+            {
+                "periodo": periodo,
+                "resumo": _summary(turmas[periodo]),
+                "turmas": turmas[periodo],
+                "solicitacoes": pedidos.get(periodo, []),
+            }
+            for periodo in sorted(turmas)
+        ],
+    }
 
 
-def _trace_students(
-    connection: sqlite3.Connection, simulation_id: int, turmas: list[sqlite3.Row]
-) -> list[dict]:
-    """A coorte medida, que é quem tem roteiro. O crédito de saída sai do último
-    período, e a carga de conclusão da própria oferta obrigatória."""
-    carga_obrigatoria = sum(
-        {
-            turma["disciplina"]: turma["carga"]
-            for turma in turmas
-            if not turma["optativa"]
-        }.values()
-    )
-    rows = connection.execute(
-        """
-        SELECT a.*,
-               AVG(ap.satisfacao)  AS satisfacao_media,
-               SUM(ap.vagas)       AS matriculas,
-               MAX(ap.periodo)     AS ultimo
-          FROM aluno a LEFT JOIN aluno_periodo ap
-            ON ap.simulacao_id = a.simulacao_id AND ap.aluno = a.aluno
-         WHERE a.simulacao_id = ? AND a.medido = 1
-         GROUP BY a.aluno
-         ORDER BY a.aluno
-        """,
-        (simulation_id,),
-    ).fetchall()
-    aprovacoes = dict(
-        connection.execute(
-            "SELECT aluno, COUNT(*) FROM solicitacao"
-            " WHERE simulacao_id = ? AND aprovada = 1 GROUP BY aluno",
-            (simulation_id,),
-        ).fetchall()
-    )
-    creditos = {
-        row["aluno"]: (row["creditos_inicio"] or 0)
-        - (row["creditos_gasto"] or 0)
-        + (row["creditos_retorno"] or 0)
-        for row in connection.execute(
-            "SELECT ap.* FROM aluno_periodo ap"
-            " WHERE ap.simulacao_id = ? ORDER BY ap.aluno, ap.periodo",
-            (simulation_id,),
+def _request(row: sqlite3.Row) -> dict:
+    """Uma solicitação como a tabela a desenha: o vetor de lances já aberto."""
+    return {
+        "turma": row["turma"],
+        "disciplina": row["disciplina"],
+        "utilidade": row["utilidade"],
+        "lances": json.loads(row["lances"]) if row["lances"] else [],
+        "rodada_ganha": row["rodada_ganha"],
+        "pago": row["pago"],
+        "excluida": bool(row["excluida"]),
+        "tentativa": row["tentativa"],
+        "nota": row["nota"],
+        "aprovada": bool(row["aprovada"]),
+        "retorno": row["retorno"],
+    }
+
+
+def _summary(turmas: list[dict]) -> dict:
+    """A disciplina num período: a soma das turmas dela."""
+    return {
+        chave: sum(turma[chave] for turma in turmas)
+        for chave in (
+            "vagas",
+            "preenchidas",
+            "concedidas",
+            "pedidos",
+            "aprovacoes",
+            "exclusoes",
         )
     }
+
+
+def _balance(row: sqlite3.Row) -> int | None:
+    """O saldo no fim do período. `None` no braço por CR, onde não há crédito."""
+    if row["creditos_inicio"] is None:
+        return None
+    return (
+        row["creditos_inicio"] - (row["creditos_gasto"] or 0)
+        + (row["creditos_retorno"] or 0)
+    )
+
+
+def _required_hours(connection: sqlite3.Connection) -> int:
+    """A carga que conclui o curso pelas obrigatórias, da própria oferta."""
+    row = connection.execute(
+        "SELECT SUM(carga) AS carga FROM ("
+        " SELECT disciplina, MAX(carga) AS carga FROM turma"
+        "  WHERE optativa = 0 GROUP BY disciplina)"
+    ).fetchone()
+    return int(row["carga"] or 0)
+
+
+def _student_rows(
+    connection: sqlite3.Connection,
+    *,
+    simulation_id: int,
+    student: str | None = None,
+) -> list[dict]:
+    """A linha de índice de cada aluno medido, ou de um só."""
+    rows = connection.execute(
+        _STUDENT_INDEX.format(filtro=" AND a.aluno = :aluno" if student else ""),
+        {"sim": simulation_id, "aluno": student},
+    ).fetchall()
     return [
         {
-            "id": row["aluno"],
-            "name": row["nome"] or row["aluno"],
-            "entry_period": row["ingresso"],
-            "availability_anchor": row["ancora_disponibilidade"] or 0.0,
-            "selectivity_anchor": row["ancora_seletividade"] or 0.0,
-            "grade_average": row["cr_final"] or 0.0,
-            "approved_hours": row["carga_aprovada"],
-            "hours_to_graduate": carga_obrigatoria,
-            "credits": creditos.get(row["aluno"], 0),
-            "enrollments": row["matriculas"] or 0,
-            "approvals": aprovacoes.get(row["aluno"], 0),
-            "mean_satisfaction": row["satisfacao_media"] or 0.0,
-            "graduated_at": row["concluiu_em"],
-            "dismissed_at": row["jubilou_em"],
+            "aluno": row["aluno"],
+            "nome": row["nome"] or row["aluno"],
+            "ingresso": row["ingresso"],
+            "periodos": row["periodos"] or 0,
+            "cr": row["cr_final"],
+            "intensidade": row["intensidade"],
+            "carga_aprovada": row["carga_aprovada"],
+            "matriculas": row["matriculas"] or 0,
+            "aprovacoes": row["aprovacoes"] or 0,
+            "satisfacao": row["satisfacao"],
+            "rodada_media": (
+                row["rodadas_peso"] / row["vagas_peso"] if row["vagas_peso"] else None
+            ),
+            "disponibilidade": row["disponibilidade"],
+            "creditos_fim": row["creditos_fim"],
+            "creditos_gasto": row["creditos_gasto"],
+            "saida": "formado" if row["concluiu_em"] is not None else "jubilado",
+            "saida_periodo": (
+                row["concluiu_em"]
+                if row["concluiu_em"] is not None
+                else row["jubilou_em"]
+            ),
         }
         for row in rows
     ]
 
 
-def _trace_histories(
-    connection: sqlite3.Connection, simulation_id: int, rounds: int
+def _discipline_rows(
+    connection: sqlite3.Connection,
+    *,
+    simulation_id: int,
+    discipline: str | None = None,
 ) -> list[dict]:
-    """O período a período de cada aluno medido, com as turmas que ele moveu."""
-    pedidos: dict[tuple[str, int], list[dict]] = {}
-    for row in connection.execute(
-        "SELECT * FROM solicitacao WHERE simulacao_id = ?"
-        " ORDER BY aluno, periodo, turma",
-        (simulation_id,),
-    ):
-        pedidos.setdefault((row["aluno"], row["periodo"]), []).append(
-            {
-                "discipline": row["turma"],
-                "utility": row["utilidade"],
-                "bids": (
-                    json.loads(row["lances"])
-                    if row["lances"]
-                    else [0] * max(1, rounds)
-                ),
-                "won_round": row["rodada_ganha"],
-                "paid": row["pago"],
-                "excluded": bool(row["excluida"]),
-                "attempt": row["tentativa"],
-                "grade": row["nota"],
-                "approved": bool(row["aprovada"]),
-                "returned": row["retorno"],
-            }
-        )
+    """A linha de índice de cada disciplina da oferta, ou de uma só.
 
-    concluiu = dict(
-        connection.execute(
-            "SELECT aluno, concluiu_em FROM aluno WHERE simulacao_id = ?",
-            (simulation_id,),
-        ).fetchall()
-    )
-    por_aluno: dict[str, list[dict]] = {}
-    for row in connection.execute(
-        "SELECT * FROM aluno_periodo WHERE simulacao_id = ? ORDER BY aluno, periodo",
-        (simulation_id,),
-    ):
-        inicio = row["creditos_inicio"] or 0
-        por_aluno.setdefault(row["aluno"], []).append(
-            {
-                "period": row["periodo"],
-                "credits_start": inicio,
-                "credits_spent": row["creditos_gasto"] or 0,
-                "credits_returned": row["creditos_retorno"] or 0,
-                "credits_end": inicio
-                - (row["creditos_gasto"] or 0)
-                + (row["creditos_retorno"] or 0),
-                "satisfaction": row["satisfacao"],
-                "grade_average": row["cr"],
-                "approved_hours": row["carga_aprovada"],
-                "enrolled_hours": row["carga_obtida"],
-                "retained_hours": row["carga_cursada"],
-                "effective_load": row["carga_efetiva"],
-                "requests": pedidos.get((row["aluno"], row["periodo"]), []),
-                "graduated": concluiu.get(row["aluno"]) == row["periodo"],
-            }
-        )
+    As duas fontes não se cruzam numa razão: `turma_periodo` conta todo mundo,
+    medido ou de fundo, e `solicitacao` só a coorte medida.
+    """
+    rows = connection.execute(
+        _DISCIPLINE_INDEX.format(
+            filtro=" WHERE oferta.disciplina = :disciplina" if discipline else ""
+        ),
+        {"sim": simulation_id, "disciplina": discipline},
+    ).fetchall()
     return [
-        {"student_id": aluno, "periods": periodos}
-        for aluno, periodos in sorted(por_aluno.items())
+        {
+            "disciplina": row["disciplina"],
+            "nivel": row["nivel"],
+            "optativa": bool(row["optativa"]),
+            "carga": row["carga"],
+            "turmas": row["turmas"],
+            "vagas": row["vagas"],
+            "pedidos": (
+                row["pedidos"] / row["periodos"]
+                if row["periodos"] and row["pedidos"] is not None
+                else None
+            ),
+            "demanda_por_vaga": (
+                row["pedidos"] / row["periodos"] / row["vagas"]
+                if row["periodos"] and row["vagas"] and row["pedidos"] is not None
+                else None
+            ),
+            "preenchimento": (
+                row["preenchidas"] / row["vagas_ofertadas"]
+                if row["vagas_ofertadas"]
+                else None
+            ),
+            "preco_medio": row["preco_medio"],
+            "nota_media": row["nota_media"],
+            "aprovacoes": row["aprovacoes"] or 0,
+            "exclusoes": row["exclusoes"] or 0,
+        }
+        for row in rows
     ]
+
+
+_STUDENT_INDEX = """
+WITH periodos AS (
+  SELECT ap.aluno,
+         COUNT(*)              AS periodos,
+         SUM(ap.vagas)         AS matriculas,
+         AVG(ap.satisfacao)    AS satisfacao,
+         AVG(ap.carga_efetiva) AS disponibilidade,
+         AVG(CASE WHEN ap.disciplinas_elegiveis > 0
+                  THEN CAST(ap.disciplinas_pedidas AS REAL)
+                     / ap.disciplinas_elegiveis END) AS intensidade,
+         SUM(ap.creditos_gasto) AS creditos_gasto,
+         SUM(ap.rodada_media * ap.vagas) AS rodadas_peso,
+         SUM(CASE WHEN ap.rodada_media IS NOT NULL THEN ap.vagas ELSE 0 END)
+                               AS vagas_peso,
+         MAX(ap.periodo)       AS ultimo
+    FROM aluno_periodo ap
+   WHERE ap.simulacao_id = :sim
+   GROUP BY ap.aluno
+),
+aprovacoes AS (
+  SELECT aluno, COUNT(*) AS aprovacoes FROM solicitacao
+   WHERE simulacao_id = :sim AND aprovada = 1
+   GROUP BY aluno
+),
+-- O saldo de saída é o do último período vivido, e não a soma de nada: o
+-- crédito atravessa o período, então somar os saldos contaria o mesmo duas
+-- vezes.
+saldo AS (
+  SELECT ap.aluno,
+         ap.creditos_inicio - ap.creditos_gasto + ap.creditos_retorno
+           AS creditos_fim
+    FROM aluno_periodo ap
+    JOIN periodos ON periodos.aluno = ap.aluno AND periodos.ultimo = ap.periodo
+   WHERE ap.simulacao_id = :sim
+)
+SELECT a.aluno, a.nome, a.ingresso, a.cr_final, a.carga_aprovada,
+       a.concluiu_em, a.jubilou_em,
+       periodos.periodos, periodos.matriculas, periodos.satisfacao,
+       periodos.disponibilidade, periodos.intensidade, periodos.creditos_gasto,
+       periodos.rodadas_peso, periodos.vagas_peso,
+       aprovacoes.aprovacoes, saldo.creditos_fim
+  FROM aluno a
+  LEFT JOIN periodos   ON periodos.aluno = a.aluno
+  LEFT JOIN aprovacoes ON aprovacoes.aluno = a.aluno
+  LEFT JOIN saldo      ON saldo.aluno = a.aluno
+ WHERE a.simulacao_id = :sim AND a.medido = 1{filtro}
+ ORDER BY a.aluno
+"""
+
+_DISCIPLINE_INDEX = """
+WITH oferta AS (
+  SELECT disciplina,
+         MAX(periodo_da_grade) AS nivel,
+         MAX(optativa)         AS optativa,
+         MAX(carga)            AS carga,
+         COUNT(*)              AS turmas,
+         SUM(vagas)            AS vagas
+    FROM turma GROUP BY disciplina
+),
+mercado AS (
+  SELECT t.disciplina,
+         COUNT(DISTINCT tp.periodo) AS periodos,
+         SUM(tp.pedidos)            AS pedidos,
+         SUM(tp.preenchidas)        AS preenchidas,
+         SUM(tp.vagas)              AS vagas_ofertadas,
+         SUM(tp.aprovacoes)         AS aprovacoes,
+         SUM(tp.exclusoes)          AS exclusoes,
+         AVG(tp.preco_medio)        AS preco_medio
+    FROM turma_periodo tp JOIN turma t USING (turma)
+   WHERE tp.simulacao_id = :sim
+   GROUP BY t.disciplina
+),
+notas AS (
+  SELECT t.disciplina, AVG(s.nota) AS nota_media
+    FROM solicitacao s JOIN turma t USING (turma)
+   WHERE s.simulacao_id = :sim AND s.nota IS NOT NULL
+   GROUP BY t.disciplina
+)
+SELECT oferta.disciplina, oferta.nivel, oferta.optativa, oferta.carga,
+       oferta.turmas, oferta.vagas,
+       mercado.periodos, mercado.pedidos, mercado.preenchidas,
+       mercado.vagas_ofertadas, mercado.aprovacoes, mercado.exclusoes,
+       mercado.preco_medio, notas.nota_media
+  FROM oferta
+  LEFT JOIN mercado USING (disciplina)
+  LEFT JOIN notas   USING (disciplina)
+{filtro}
+ ORDER BY oferta.optativa, COALESCE(oferta.nivel, 1 << 20), oferta.disciplina
+"""
 
 
 _HEAD_SELECT = """

@@ -93,13 +93,23 @@ def test_a_bank_from_another_schema_version_is_refused(tmp_path):
 def test_a_bank_from_the_previous_version_gains_the_new_columns(tmp_path):
     """A comparação antiga continua abrindo: ela sobe de versão em versão. Fica
     sem teto de passos, que a tela trata caindo na contagem, e sem o nome dos
-    alunos que já gravou, que o traço trata caindo na matrícula."""
+    alunos que já gravou, que o índice trata caindo na matrícula. Fica também
+    sem os contadores da intensidade de demanda, que nascem nulos: elegibilidade
+    é estado de simulação, e nada fora de uma execução a recalcula."""
     caminho = tmp_path / "anterior.db"
     with open_store(caminho) as connection:
         connection.execute("ALTER TABLE comparacao DROP COLUMN etapas_total")
         connection.execute("ALTER TABLE simulacao DROP COLUMN etapas")
         connection.execute("ALTER TABLE aluno DROP COLUMN nome")
         connection.execute("DROP VIEW simulacao_valida")
+        connection.execute("DROP INDEX ix_solicitacao_turma")
+        connection.execute("DROP INDEX ix_turma_disciplina")
+        connection.execute(
+            "ALTER TABLE aluno_periodo DROP COLUMN disciplinas_elegiveis"
+        )
+        connection.execute(
+            "ALTER TABLE aluno_periodo DROP COLUMN disciplinas_pedidas"
+        )
         connection.execute("PRAGMA user_version = 2")
 
     with open_store(caminho) as connection:
@@ -117,10 +127,15 @@ def test_a_bank_from_the_previous_version_gains_the_new_columns(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type = 'view'"
             )
         }
+        contadores = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(aluno_periodo)")
+        }
     assert linha["etapas_total"] == steps_per_simulation(config)
     assert linha["etapas"] == 0
     assert "nome" in colunas
     assert "simulacao_valida" in visoes
+    assert {"disciplinas_elegiveis", "disciplinas_pedidas"} <= contadores
 
 
 def test_tables_without_a_version_mean_an_interrupted_creation(tmp_path):

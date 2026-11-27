@@ -24,7 +24,7 @@ WORKLOAD = 180
 
 AXES = (
     ("grade_average", 1, 0.0, 10.0),
-    ("reserve", 3, 0.0, 1.0),
+    ("demand", 2, 0.0, 1.0),
 )
 
 
@@ -41,7 +41,7 @@ def make_config(**overrides) -> SimulationConfig:
         **single_axis(WORKLOAD),
         seed=11,
     )
-    base.update(grade_cuts=(5.0, 7.0), reserve_cuts=(0.01, 0.03))
+    base.update(grade_cuts=(5.0, 7.0), demand_cuts=(0.25, 0.5, 0.75))
     return SimulationConfig(**{**base, **overrides})
 
 

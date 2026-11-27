@@ -188,7 +188,7 @@ def comparison_series(
 
 @app.get("/comparacoes/{name}/curva")
 def comparison_curve(name: str, eixo: str, pontos: int = 40) -> dict:
-    """A métrica sobre CR final ou utilidade de reserva, em faixas de quantil."""
+    """A métrica sobre CR final ou intensidade de demanda, por quantil."""
     return _bank(comparisons.read_curve, name, axis=eixo, bins=pontos)
 
 
@@ -198,16 +198,36 @@ def comparison_boxes(name: str, base: str = "ranking_greedy") -> dict:
     return _bank(comparisons.read_boxes, name, baseline=base)
 
 
-@app.get("/comparacoes/{name}/traco", response_model=TraceResponse)
-def comparison_trace(name: str, braco: str, seed: int = 1) -> dict:
-    """Uma simulação inteira, aluno a aluno, direto do banco."""
-    return _bank(comparisons.read_trace, name, arm=braco, seed=seed)
+@app.get("/comparacoes/{name}/traco/alunos")
+def comparison_student_index(name: str, braco: str, seed: int = 1) -> dict:
+    """O índice da coorte medida: uma linha por aluno, pronta para a tabela."""
+    return _bank(comparisons.read_student_index, name, arm=braco, seed=seed)
 
 
-@app.get("/comparacoes/{name}/alunos/{simulation_id}/{student}")
-def comparison_student(name: str, simulation_id: int, student: str) -> dict:
-    """Tudo que um aluno fez: período a período, turma a turma."""
-    return _bank(comparisons.read_student, name, simulation_id, student)
+@app.get("/comparacoes/{name}/traco/disciplinas")
+def comparison_discipline_index(name: str, braco: str, seed: int = 1) -> dict:
+    """O índice da oferta: uma linha por disciplina, não por turma."""
+    return _bank(comparisons.read_discipline_index, name, arm=braco, seed=seed)
+
+
+@app.get("/comparacoes/{name}/traco/aluno/{student}")
+def comparison_student_trace(
+    name: str, student: str, braco: str, seed: int = 1
+) -> dict:
+    """O histórico de um aluno, sem os períodos em que ele não pediu nada."""
+    return _bank(
+        comparisons.read_student_trace, name, student, arm=braco, seed=seed
+    )
+
+
+@app.get("/comparacoes/{name}/traco/disciplina/{discipline}")
+def comparison_discipline_trace(
+    name: str, discipline: str, braco: str, seed: int = 1
+) -> dict:
+    """O histórico de uma disciplina: o período, as turmas e quem pediu."""
+    return _bank(
+        comparisons.read_discipline_trace, name, discipline, arm=braco, seed=seed
+    )
 
 
 @app.post("/comparacoes/{name}/rodar", status_code=202)

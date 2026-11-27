@@ -115,6 +115,11 @@ CREATE TABLE aluno_periodo (
   creditos_inicio  INTEGER,
   creditos_gasto   INTEGER,
   creditos_retorno INTEGER,
+  -- Os dois contadores de que sai a intensidade de demanda. Nulos nos bancos
+  -- anteriores à versão 6: elegibilidade é estado de simulação, e o `prepare`
+  -- não a refaz, então ali a grandeza não existe.
+  disciplinas_elegiveis INTEGER,
+  disciplinas_pedidas   INTEGER,
   PRIMARY KEY (simulacao_id, aluno, periodo)
 );
 
@@ -169,3 +174,5 @@ CREATE INDEX ix_simulacao_fila  ON simulacao(estado);
 CREATE INDEX ix_aluno_periodo   ON aluno_periodo(simulacao_id, periodo);
 CREATE INDEX ix_aluno_medido    ON aluno(simulacao_id, medido);
 CREATE INDEX ix_solicitacao_var ON solicitacao(simulacao_id, aluno, periodo);
+CREATE INDEX ix_solicitacao_turma ON solicitacao(simulacao_id, turma);
+CREATE INDEX ix_turma_disciplina ON turma(disciplina);

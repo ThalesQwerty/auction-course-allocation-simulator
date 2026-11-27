@@ -31,6 +31,7 @@ from .curriculum_closure import inverse_edges, transitive_closure
 from .curriculum_height import curriculum_heights
 from .curriculum_period import curriculum_periods
 from .curriculum_reach import curriculum_reach
+from .demand_intensity import demand_counts, demand_intensity
 from .demand_per_seat import demand_per_seat
 from .effective_load import effective_load
 from .eligible_interest import eligible_interest
@@ -105,6 +106,8 @@ __all__ = [
     "transitive_closure",
     "curriculum_periods",
     "curriculum_reach",
+    "demand_counts",
+    "demand_intensity",
     "demand_per_seat",
     "effective_load",
     "eligible_interest",

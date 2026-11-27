@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..equations import demand_intensity
 from ..metrics import Metrics
 
 GUARANTEED_ROUND = 0
@@ -80,7 +81,7 @@ class DisciplineSnapshot:
 class StudentPeriodPoint:
     """O que um aluno medido realizou num período: a linha crua dos gráficos.
 
-    `grade_average` e `reserve` são o estado do aluno no instante, de que saem
+    `grade_average` e `demand` são o estado do aluno no instante, de que saem
     as faixas; as demais são as grandezas que a faixa agrega. `won` é o peso de
     `mean_round`, porque r̄ do recorte é a média das rodadas por vaga concedida.
     """
@@ -89,11 +90,23 @@ class StudentPeriodPoint:
     period: int
     grade_average: float
     reserve: float
+    eligible_disciplines: int
+    requested_disciplines: int
     satisfaction: float
     attendance: float | None
     progress: float
     mean_round: float | None
     won: int
+
+    @property
+    def demand(self) -> float:
+        return (
+            demand_intensity(
+                eligible=self.eligible_disciplines,
+                requested=self.requested_disciplines,
+            )
+            or 0.0
+        )
 
 
 @dataclass(frozen=True)
@@ -164,7 +177,7 @@ class StudentSummary:
     enrollments: int
     approvals: int
     mean_satisfaction: float
-    mean_reserve: float
+    mean_demand: float
     mean_attendance: float | None
     mean_round: float | None
     progress: float

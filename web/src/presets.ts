@@ -16,7 +16,7 @@ const POPULATION: Pick<
   | "schedule_sigma"
   | "schedule_fluctuation"
   | "grade_cuts"
-  | "reserve_cuts"
+  | "demand_cuts"
   | "interest_mean"
   | "interest_sigma"
   | "interest_fluctuation"
@@ -33,7 +33,7 @@ const POPULATION: Pick<
   schedule_sigma: 0.6,
   schedule_fluctuation: 0.25,
   grade_cuts: [5, 6, 7],
-  reserve_cuts: [0.01, 0.03],
+  demand_cuts: [0.25, 0.5, 0.75],
   interest_mean: 1,
   interest_sigma: 1,
   interest_fluctuation: 0.25,

@@ -218,10 +218,10 @@ class ScenarioIn(BaseModel):
         max_length=MAX_CUTS,
         description="pontos de corte do recorte por CR, em [0, 10]",
     )
-    reserve_cuts: list[float] = Field(
-        default=[0.01, 0.03],
+    demand_cuts: list[float] = Field(
+        default=[0.25, 0.5, 0.75],
         max_length=MAX_CUTS,
-        description="pontos de corte do recorte por utilidade de reserva, em [0, 1)",
+        description="pontos de corte do recorte por intensidade de demanda, em [0, 1)",
     )
     students_per_entry_class: int = Field(
         default=10,
@@ -419,7 +419,7 @@ class ObservationsOut(BaseModel):
 
     period: list[int]
     grade_average: list[float]
-    reserve: list[float]
+    demand: list[float]
     satisfaction: list[float]
     attendance: list[float | None]
     progress: list[float]
@@ -433,7 +433,7 @@ class StudentPointOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     grade_average: float
-    reserve: float
+    demand: float
     satisfaction: float
     attendance: float | None
     progress: float

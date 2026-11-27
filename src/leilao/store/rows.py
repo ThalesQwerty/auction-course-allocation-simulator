@@ -96,6 +96,8 @@ def student_periods_of(simulation_id: int, outcome) -> list[tuple]:
             record.credits_start,
             record.credits_spent,
             record.credits_returned,
+            point.eligible_disciplines,
+            point.requested_disciplines,
         )
         for point in outcome.report.points
         for record in [_record_of(outcome, point)]

@@ -39,7 +39,7 @@ class PeriodOutcome:
     report: PeriodReport
     records: dict[str, StudentPeriodRecord]
     satisfaction: dict[str, float]
-    reserve: dict[str, float]
+    demand: dict[str, float]
     attendance: dict[str, float | None]
     won_rounds: dict[str, list[int]]
     first_grades: list[float]
@@ -535,7 +535,7 @@ def run_period(
                 won_rounds=won_rounds,
             ),
         ),
-        reserve=dict(reserves),
+        demand=dict(closing_values.demands),
         attendance=period_attendance,
         won_rounds=won_rounds,
         records=(

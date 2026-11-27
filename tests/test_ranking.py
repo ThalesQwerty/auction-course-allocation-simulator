@@ -287,10 +287,10 @@ MIXED = dict(
 )
 
 
-@pytest.mark.parametrize("axis", ["grade_average", "reserve"])
+@pytest.mark.parametrize("axis", ["grade_average", "demand"])
 def test_each_cut_partitions_the_aggregate_period_by_period(axis):
     """Em cada período, os grupos de um recorte somados com o peso deles"""
-    result = run_simulation(make_config(**MIXED, grade_cuts=(5.0,), reserve_cuts=(0.01,)))
+    result = run_simulation(make_config(**MIXED, grade_cuts=(5.0,), demand_cuts=(0.5,)))
 
     medidos = 0
     for period in result.observed:
@@ -311,14 +311,14 @@ def test_each_cut_partitions_the_aggregate_period_by_period(axis):
 
 def test_the_quantile_bands_come_out_from_the_lowest_to_the_highest():
     """As faixas saem sempre na mesma ordem — a da legenda, em qualquer"""
-    config = make_config(**MIXED, grade_cuts=(5.0, 7.0), reserve_cuts=(0.01, 0.03))
+    config = make_config(**MIXED, grade_cuts=(5.0, 7.0), demand_cuts=(0.25, 0.75))
     result = run_simulation(config)
     summary = summarize(result, seed=3)
 
     esperado = {
         "grade_average": value_band_names(cuts=(5.0, 7.0), low=0.0, high=10.0),
-        "reserve": value_band_names(
-            cuts=(0.01, 0.03), low=0.0, high=1.0, decimals=3
+        "demand": value_band_names(
+            cuts=(0.25, 0.75), low=0.0, high=1.0, decimals=2
         ),
     }
     assert "credits" not in summary.by_group["period"]

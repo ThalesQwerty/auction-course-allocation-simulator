@@ -16,7 +16,7 @@ __all__ = [
     "transaction",
 ]
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 """Mora no cabeçalho do arquivo, nos bytes 60 a 63, e o SQLite não o interpreta."""
 
 MIGRATIONS: dict[int, tuple[str, ...]] = {
@@ -33,12 +33,19 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "      SELECT 1 FROM simulacao o"
         "       WHERE o.seed = m.seed AND o.estado IN ('falhou', 'estourou'))",
     ),
+    5: (
+        "ALTER TABLE aluno_periodo ADD COLUMN disciplinas_elegiveis INTEGER",
+        "ALTER TABLE aluno_periodo ADD COLUMN disciplinas_pedidas INTEGER",
+        "CREATE INDEX ix_solicitacao_turma ON solicitacao(simulacao_id, turma)",
+        "CREATE INDEX ix_turma_disciplina ON turma(disciplina)",
+    ),
 }
 """O que leva um banco da versão da chave para a seguinte. A comparação antiga
 fica sem teto de passos, e a tela cai na contagem de simulações. O banco subido
 à 5 mantém o `CHECK` sem `estourou`: refazer a tabela arrastaria seis tabelas
 filhas, e comparação antiga não tem teto de tempo no cenário, então nunca
-produz o estado."""
+produz o estado. Na 6 os dois contadores da intensidade de demanda nascem
+nulos, e ficam: não se recalculam fora de uma execução."""
 
 SCHEMA = Path(__file__).with_name("schema.sql")
 

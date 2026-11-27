@@ -35,7 +35,7 @@ MAX_BANDS = 5
 MAX_CUTS = MAX_BANDS - 1
 
 GRADE_DOMAIN = (0.0, 10.0)
-RESERVE_DOMAIN = (0.0, 1.0)
+DEMAND_DOMAIN = (0.0, 1.0)
 
 
 @dataclass(frozen=True)
@@ -130,7 +130,7 @@ class SimulationConfig:
     selectivity_sigma: float = 0.6
     selectivity_fluctuation: float = 0.0
     grade_cuts: tuple[float, ...] = (5.0, 6.0, 7.0)
-    reserve_cuts: tuple[float, ...] = (0.01, 0.03)
+    demand_cuts: tuple[float, ...] = (0.25, 0.5, 0.75)
     slots: int = 11
     first_seed: int = 1
     interest_mean: float = 1.0
@@ -155,7 +155,7 @@ class SimulationConfig:
         """Os cortes de um eixo de recorte, pelo nome com que a API o chama."""
         cuts = {
             "grade_average": tuple(float(c) for c in self.grade_cuts),
-            "reserve": tuple(float(c) for c in self.reserve_cuts),
+            "demand": tuple(float(c) for c in self.demand_cuts),
         }
         if axis not in cuts:
             raise ValueError(f"eixo de recorte desconhecido: {axis}")
@@ -165,7 +165,7 @@ class SimulationConfig:
         """O domínio de um eixo de recorte — ver `equations.value_band`."""
         domains = {
             "grade_average": GRADE_DOMAIN,
-            "reserve": RESERVE_DOMAIN,
+            "demand": DEMAND_DOMAIN,
         }
         if axis not in domains:
             raise ValueError(f"eixo de recorte desconhecido: {axis}")
@@ -266,7 +266,7 @@ class SimulationConfig:
         """Os cortes de cada eixo: distintos, dentro do domínio, e no teto."""
         for axis, nome in (
             ("grade_average", "do CR"),
-            ("reserve", "da reserva"),
+            ("demand", "da intensidade de demanda"),
         ):
             cuts = self.band_cuts(axis)
             low, high = self.band_domain(axis)

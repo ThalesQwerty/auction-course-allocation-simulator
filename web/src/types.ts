@@ -46,7 +46,7 @@ export interface Scenario {
   schedule_fluctuation: number;
    /** Os pontos de corte das faixas, um eixo por grandeza */
   grade_cuts: number[];
-  reserve_cuts: number[];
+  demand_cuts: number[];
   slots: number;
   /** A log-normal do interesse por **disciplina** */
   interest_mean: number;
@@ -206,13 +206,13 @@ export interface RunSummary {
 
 /** As linhas cruas de uma simulação: uma posição por (aluno medido, período medido).
 
-    É daqui que a interface recorta as faixas. `grade_average` e `reserve` dão o
+    É daqui que a interface recorta as faixas. `grade_average` e `demand` dão o
     rótulo da faixa; `won` é o peso de `mean_round`, porque r̄ do recorte é a média
     das rodadas **por vaga concedida**. */
 export interface Observations {
   period: number[];
   grade_average: number[];
-  reserve: number[];
+  demand: number[];
   satisfaction: number[];
   attendance: (number | null)[];
   progress: number[];
@@ -235,7 +235,7 @@ export interface ArmResult {
 export type CutAxis =
   | "overall"
   | "grade_average"
-  | "reserve"
+  | "demand"
    /** Só existe no leilão: no `ranking` o braço não produz o eixo, e a série dele não vem na resposta */
   | "credits";
 
@@ -254,7 +254,7 @@ export interface GroupBands {
 /** Um ponto da dispersão: um aluno medido, de ponta a ponta do curso */
 export interface StudentPoint {
   grade_average: number;
-  reserve: number;
+  demand: number;
   satisfaction: number;
   attendance: number | null;
   progress: number;
@@ -291,7 +291,7 @@ export interface CurvePoint {
 }
 
 export interface CurvePayload {
-  axis: "grade_average" | "reserve";
+  axis: "grade_average" | "demand";
   bins: number;
    /** braço → métrica → os pontos da curva */
   arms: Record<string, Record<string, CurvePoint[]>>;
@@ -671,3 +671,157 @@ interface HorizonLike {
 /** |L| = w + c + j − 1 */
 export const horizonFor = (config: HorizonLike): number =>
   warmupOf(config) + cohortsOf(config) + config.max_residence - 1;
+
+/** Os seis estados de uma solicitação, na ordem lógica: do que rendeu aula ao que nem estava em jogo. Declarada aqui uma vez, e lida pelo chip e pelo comparador de tabela */
+export const OUTCOMES = [
+  "aprovada",
+  "reprovada",
+  "excluída",
+  "indeferida",
+  "não solicitada",
+  "não elegível",
+] as const;
+
+export type OutcomeLabel = (typeof OUTCOMES)[number];
+
+/** Uma linha do índice de alunos: a coorte medida de uma simulação */
+export interface StudentIndexRow {
+  aluno: string;
+  nome: string;
+  ingresso: number;
+   /** Períodos em que ele participou da matrícula */
+  periodos: number;
+  cr: number | null;
+   /** Intensidade de demanda: disciplinas pedidas ÷ elegíveis com turma aberta, na média dos períodos dele. Nula nos bancos anteriores aos dois contadores */
+  intensidade: number | null;
+  carga_aprovada: number;
+  matriculas: number;
+  aprovacoes: number;
+  satisfacao: number | null;
+  rodada_media: number | null;
+   /** Carga efetiva média, em horas */
+  disponibilidade: number | null;
+   /** Nulos no braço por CR, onde não há crédito */
+  creditos_fim: number | null;
+  creditos_gasto: number | null;
+  saida: "formado" | "jubilado";
+  saida_periodo: number | null;
+}
+
+export interface StudentIndexPayload {
+  braco: string;
+  seed: number;
+  simulacao: number;
+   /** A carga das obrigatórias, que é o denominador das horas aprovadas */
+  carga_obrigatoria: number;
+  alunos: StudentIndexRow[];
+}
+
+/** Uma linha do índice de disciplinas. `pedidos` e `demanda_por_vaga` contam todo mundo, medido ou de fundo; `nota_media` só a coorte medida */
+export interface DisciplineIndexRow {
+  disciplina: string;
+  nivel: number | null;
+  optativa: boolean;
+  carga: number;
+  turmas: number;
+  vagas: number;
+  pedidos: number | null;
+  demanda_por_vaga: number | null;
+  preenchimento: number | null;
+  preco_medio: number | null;
+  nota_media: number | null;
+  aprovacoes: number;
+  exclusoes: number;
+}
+
+export interface DisciplineIndexPayload {
+  braco: string;
+  seed: number;
+  simulacao: number;
+  disciplinas: DisciplineIndexRow[];
+}
+
+/** Uma solicitação gravada: o que aconteceu com uma **turma** que o aluno quis */
+export interface RequestRow {
+  turma: string;
+  disciplina: string;
+  utilidade: number;
+   /** Créditos apostados em cada rodada; vazio onde não houve lance */
+  lances: number[];
+  rodada_ganha: number | null;
+  pago: number;
+  excluida: boolean;
+  tentativa: number | null;
+  nota: number | null;
+  aprovada: boolean;
+  retorno: number;
+}
+
+export interface StudentPeriodRow {
+  periodo: number;
+  cr: number;
+  satisfacao: number;
+  aproveitamento: number | null;
+  progresso: number;
+  rodada_media: number | null;
+  vagas: number;
+  carga_obtida: number;
+  carga_cursada: number;
+  carga_aprovada: number;
+  carga_efetiva: number;
+  creditos_inicio: number | null;
+  creditos_gasto: number | null;
+  creditos_retorno: number | null;
+  creditos_fim: number | null;
+  disciplinas_elegiveis: number | null;
+  disciplinas_pedidas: number | null;
+  solicitacoes: RequestRow[];
+}
+
+/** O histórico de um aluno: só os períodos em que ele pediu algo */
+export interface StudentTracePayload {
+  aluno: StudentIndexRow;
+  carga_obrigatoria: number;
+  periodos: StudentPeriodRow[];
+}
+
+export interface ClassPeriodRow {
+  periodo: number;
+  turma: string;
+  horario: string;
+  vagas: number;
+  preenchidas: number;
+  concedidas: number;
+  pedidos: number;
+  aprovacoes: number;
+  exclusoes: number;
+  preco_medio: number | null;
+}
+
+export interface DisciplineBidRow extends RequestRow {
+  aluno: string;
+  nome: string;
+  ingresso: number;
+  cr: number | null;
+}
+
+export interface DisciplinePeriodRow {
+  periodo: number;
+  resumo: {
+    vagas: number;
+    preenchidas: number;
+    concedidas: number;
+    pedidos: number;
+    aprovacoes: number;
+    exclusoes: number;
+  };
+  turmas: ClassPeriodRow[];
+  solicitacoes: DisciplineBidRow[];
+}
+
+/** O histórico de uma disciplina: só os períodos em que alguém pediu alguma turma dela */
+export interface DisciplineTracePayload {
+  disciplina: DisciplineIndexRow;
+  turmas: { turma: string; horario: string; vagas: number }[];
+  periodos: DisciplinePeriodRow[];
+}

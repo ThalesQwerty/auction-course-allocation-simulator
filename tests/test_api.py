@@ -112,7 +112,7 @@ COMPARE_SCENARIO = {
     "availability": {"hours_sd": 17.5, "full_load_rate": 0.9},
     "selectivity_mean": -50.0,
     "grade_cuts": [],
-    "reserve_cuts": [],
+    "demand_cuts": [],
     "credit_cuts": [],
     "periods": 3,
     "students_per_entry_class": 1,
@@ -163,7 +163,7 @@ def test_the_raw_rows_travel_in_the_response(client):
             assert len(tamanhos) == 1, "as colunas saíram de tamanhos diferentes"
             assert all(1 <= p for p in rows["period"])
             assert all(0 <= value <= 10 for value in rows["grade_average"])
-            assert all(0 <= value <= 1 for value in rows["reserve"])
+            assert all(0 <= value <= 1 for value in rows["demand"])
             assert all(won >= 0 for won in rows["won"])
 
 
